@@ -70,32 +70,31 @@ const alias = {
  * 为什么不顺手开 `isolate: false`（runner 提示能省 ~7.4s）：本仓有 64 个测试文件用
  * `vi.stubGlobal` 改全局状态，共享模块注册表会让它们互相污染 —— 省下的时间不值这个风险。
  */
-const DEFAULT_TEST_WORKERS = 8;
-
 const TEST_WORKERS = (() => {
   const raw = process.env.CELESTEA_TEST_WORKERS;
   if (raw !== undefined && raw.trim() !== "") {
     // An explicit override is honoured as-is: the operator asked for that number.
     const n = Number(raw);
-    return Number.isFinite(n) && n > 0 ? Math.trunc(n) : DEFAULT_TEST_WORKERS;
+    return Number.isFinite(n) && n > 0 ? Math.trunc(n) : undefined;
   }
-  // Default: cap ONLY when that strictly LOWERS vitest's own default.
+  // Default: HALF the cores — and only ever LOWER, never raise.
   //
-  // Both earlier attempts RAISED concurrency on a 4-core runner, and both broke CI:
-  //   v1  `return 8`                    -> 3 became 8;
-  //   v2  `min(8, max(cores-1, 1))`     -> equals the default in theory, yet CI began
-  //                                       failing `main.test.ts`'s SIGTERM case at
-  //                                       that commit (I could not reproduce it: that
-  //                                       suite SKIPS on this Windows dev box).
-  // So the rule is now the only one I can PROVE safe: when the cap is not strictly
-  // below the default, emit nothing — the resulting config is then identical to
-  // having no cap at all, so CI cannot change.
+  // vitest's own default is `max(availableParallelism() - 1, 1)` (NOT the core
+  // count). Two earlier attempts here raised it on a 4-core runner and broke CI:
+  //   v1  `return 8`                 -> 3 became 8;
+  //   v2  `min(8, max(cores-1, 1))`  -> theoretically equal, but CI started failing
+  //                                    `main.test.ts`'s SIGTERM case at that commit
+  //                                    (unreproducible here: that suite SKIPS on Windows).
+  // So: emit a cap ONLY when it is strictly below vitest's default. When it is not,
+  // emit nothing — the config is then identical to having no cap, so CI cannot move.
   //
-  //   32-core dev box -> default 31 > 8  -> cap to 8   (the machine stays usable)
-  //    4-core CI      -> default  3 < 8  -> omit        (byte-identical to before)
+  //   32-core dev box -> default 31, half = 16 -> cap to 16
+  //    8-core laptop  -> default  7, half =  4 -> cap to  4
+  //    4-core CI      -> default  3, half =  2 -> cap to  2 (a LOWER, i.e. safer)
   const cores = availableParallelism();
   const vitestDefault = Math.max(cores - 1, 1);
-  return vitestDefault > DEFAULT_TEST_WORKERS ? DEFAULT_TEST_WORKERS : undefined;
+  const half = Math.max(Math.floor(cores / 2), 1);
+  return half < vitestDefault ? half : undefined;
 })();
 
 const E2E = process.env.CELESTEA_E2E === "1";

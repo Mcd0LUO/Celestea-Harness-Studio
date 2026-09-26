@@ -32,12 +32,12 @@ describe("W9217 · 测试并发上限只在真的降低时才设", () => {
     );
   });
 
-  it("② 必须复刻 vitest 的默认（cores-1），且只在严格更低时才返回数字", () => {
-    expect(CONFIG, "必须算出 vitest 的默认 max(cores-1, 1)").toMatch(
-      /Math\.max\(cores - 1, 1\)/,
-    );
+  it("② 默认取半核，且只在严格低于 vitest 默认时才发出", () => {
+    // vitest 的真实默认是 max(cores-1, 1)（**不是核数**）—— 我连错两次的根因。
+    expect(CONFIG, "必须算出 vitest 的默认 max(cores-1, 1)").toMatch(/Math\.max\(cores - 1, 1\)/);
+    expect(CONFIG, "必须算出半核 floor(cores/2)").toMatch(/Math\.floor\(cores \/ 2\)/);
     expect(CONFIG, "必须「只在严格更低时才设」，否则 undefined").toMatch(
-      /vitestDefault > DEFAULT_TEST_WORKERS \? DEFAULT_TEST_WORKERS : undefined/,
+      /half < vitestDefault \? half : undefined/,
     );
   });
 
