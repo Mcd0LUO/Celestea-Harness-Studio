@@ -37,6 +37,37 @@ const alias = {
  *   run has tests, and the in-file `describe.skipIf` gate is the belt-and-braces backstop
  *   so no code path — probe included — can reach 3777 without the switch.
  */
+/**
+ * 测试 worker 上限（W9217）。
+ *
+ * 为什么需要：vitest 5 的 `maxWorkers` **默认等于 CPU 核数**。本仓有 **399 个测试文件**、
+ * 且 `isolate` 默认为 true（**一个文件一个进程**，每个约 600ms 启动开销）。在 32 核的
+ * 开发机上，`pnpm test` 会同时起 **32 个 node 进程**，整机在跑测试期间不可用。
+ *
+ * 实测代价曲线（本仓 3309 个用例，Windows 32 核）：
+ *   workers   wall clock
+ *   32 (默认)     27 s
+ *   16            33 s
+ *    8            47 s
+ *    4            81 s
+ *    2           149 s
+ *
+ * 默认取 **8**：对「别把机器占满」是真实有效的限制，代价有界。
+ * CI runner 是 4 核，所以 8 这个上限**不改变 CI 的行为**（它本来也用不到 8）。
+ * 单次运行可用环境变量覆盖：
+ *   CELESTEA_TEST_WORKERS=16 pnpm test
+ *   CELESTEA_TEST_WORKERS=32 pnpm test     # 恢复旧行为（最快）
+ *
+ * 为什么不顺手开 `isolate: false`（runner 提示能省 ~7.4s）：本仓有 64 个测试文件用
+ * `vi.stubGlobal` 改全局状态，共享模块注册表会让它们互相污染 —— 省下的时间不值这个风险。
+ */
+const TEST_WORKERS = (() => {
+  const raw = process.env.CELESTEA_TEST_WORKERS;
+  if (raw === undefined || raw.trim() === "") return 8;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 8;
+})();
+
 const E2E = process.env.CELESTEA_E2E === "1";
 const REAL_BACKEND = [
   "tests/archive-panel-real-backend.test.ts",
@@ -48,6 +79,9 @@ const REAL_BACKEND_OFF = ["tests/__real-backend-disabled-until-CELESTEA_E2E__.te
 
 export default defineConfig({
   test: {
+    // W9217: cap the pool (see TEST_WORKERS above). Applies to both projects; the
+    // real-backend project already forces fileParallelism=false.
+    maxWorkers: TEST_WORKERS,
     // W839 (R3 B8 / W818-P2-1): the weak-reference release case needs --expose-gc.
     // Vitest 5 removed poolOptions; execArgv is a top-level (and inherited) option.
     execArgv: ["--expose-gc"],
