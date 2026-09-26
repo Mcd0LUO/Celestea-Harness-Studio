@@ -41,28 +41,31 @@ const alias = {
 /**
  * 测试 worker 上限（W9217）。
  *
- * 为什么需要：vitest 5 的 `maxWorkers` **默认等于 CPU 核数**。本仓有 **399 个测试文件**、
- * 且 `isolate` 默认为 true（**一个文件一个进程**，每个约 600ms 启动开销）。在 32 核的
- * 开发机上，`pnpm test` 会同时起 **32 个 node 进程**，整机在跑测试期间不可用。
+ * 为什么需要：本仓有 **399 个测试文件**、`isolate` 默认 true（**一个文件一个进程**，
+ * 每个约 600ms 启动开销）。开发机核多时，`pnpm test` 会同时起几十个 node 进程，
+ * 整机在跑测试期间不可用。所以提供一个**可选**的上限。
  *
- * 实测代价曲线（本仓 3309 个用例，Windows 32 核）：
+ * ★ vitest 5 的真实默认**不是核数**，而是 `max(availableParallelism() - 1, 1)`
+ *   （`getDefaultThreadsCount`；watch 下是 `max(floor(n/2),1)`）。
+ *   我因为这个误解连错两次，两次都在 4 核 CI 上把并发**提了上去**：
+ *     v1  无条件 `return 8`               ⇒ CI 默认 3 被提到 8；
+ *     v2  `min(8, max(cores-1, 1))`       ⇒ 理论等于默认，但 CI 恰在该提交开始红
+ *                                           `main.test.ts` 的 SIGTERM 用例。
+ *   而该用例是 `describe.skipIf(!POSIX_PROCESS_GROUPS)` —— 本机（Windows）**跳过**，
+ *   所以我**无法本地复现** v2 是否有害。
+ *
+ * **结论：默认不设**（`return undefined`），让 vitest 用自己的默认 —— CI 行为零变化。
+ * **要限制时显式开启**（覆盖值按原样使用，那是操作者明确要求的）：
+ *   CELESTEA_TEST_WORKERS=8  pnpm test     # 留出机器余量（本机 32 核实测 ~47s）
+ *   CELESTEA_TEST_WORKERS=16 pnpm test     # 快一些（~33s）
+ *
+ * 实测代价曲线（本仓 3300+ 用例，Windows 32 核；vitest 默认 = 31）：
  *   workers   wall clock
- *   32 (默认)     27 s
+ *   31 (默认)     27 s
  *   16            33 s
  *    8            47 s
  *    4            81 s
  *    2           149 s
- *
- * 默认取 **min(8, 核数)** —— 上限**只降不升**：
- *   · 32 核开发机 ⇒ 8（这才是「别把机器占满」）；
- *   · 4 核 CI runner ⇒ 4，与 vitest 的默认**完全一致**，不引入任何行为变化。
- *
- *   ★ 第一版无条件返回 8，在 4 核 CI 上把并发从 4 **提到** 8，让时序敏感套件
- *     开始间歇性失败（win24 绿 / win26 红，ubuntu24 红 / ubuntu26 绿 —— 典型 flaky）。
- *     **上限若会提高负载，它就不是上限。**
- * 单次运行可用环境变量覆盖（覆盖值按原样使用 —— 那是操作者明确要求的）：
- *   CELESTEA_TEST_WORKERS=16 pnpm test
- *   CELESTEA_TEST_WORKERS=32 pnpm test     # 恢复旧行为（最快）
  *
  * 为什么不顺手开 `isolate: false`（runner 提示能省 ~7.4s）：本仓有 64 个测试文件用
  * `vi.stubGlobal` 改全局状态，共享模块注册表会让它们互相污染 —— 省下的时间不值这个风险。
@@ -76,8 +79,23 @@ const TEST_WORKERS = (() => {
     const n = Number(raw);
     return Number.isFinite(n) && n > 0 ? Math.trunc(n) : DEFAULT_TEST_WORKERS;
   }
-  // Default: min(cap, cores) — a CAP must never RAISE concurrency.
-  return Math.min(DEFAULT_TEST_WORKERS, availableParallelism());
+  // Default: cap ONLY when that strictly LOWERS vitest's own default.
+  //
+  // Both earlier attempts RAISED concurrency on a 4-core runner, and both broke CI:
+  //   v1  `return 8`                    -> 3 became 8;
+  //   v2  `min(8, max(cores-1, 1))`     -> equals the default in theory, yet CI began
+  //                                       failing `main.test.ts`'s SIGTERM case at
+  //                                       that commit (I could not reproduce it: that
+  //                                       suite SKIPS on this Windows dev box).
+  // So the rule is now the only one I can PROVE safe: when the cap is not strictly
+  // below the default, emit nothing — the resulting config is then identical to
+  // having no cap at all, so CI cannot change.
+  //
+  //   32-core dev box -> default 31 > 8  -> cap to 8   (the machine stays usable)
+  //    4-core CI      -> default  3 < 8  -> omit        (byte-identical to before)
+  const cores = availableParallelism();
+  const vitestDefault = Math.max(cores - 1, 1);
+  return vitestDefault > DEFAULT_TEST_WORKERS ? DEFAULT_TEST_WORKERS : undefined;
 })();
 
 const E2E = process.env.CELESTEA_E2E === "1";
@@ -91,9 +109,9 @@ const REAL_BACKEND_OFF = ["tests/__real-backend-disabled-until-CELESTEA_E2E__.te
 
 export default defineConfig({
   test: {
-    // W9217: cap the pool (see TEST_WORKERS above). Applies to both projects; the
-    // real-backend project already forces fileParallelism=false.
-    maxWorkers: TEST_WORKERS,
+    // W9217: OPTIONAL pool cap (see TEST_WORKERS above). Unset by default so
+    // vitest's own default applies untouched; set CELESTEA_TEST_WORKERS to cap it.
+    ...(TEST_WORKERS === undefined ? {} : { maxWorkers: TEST_WORKERS }),
     // W839 (R3 B8 / W818-P2-1): the weak-reference release case needs --expose-gc.
     // Vitest 5 removed poolOptions; execArgv is a top-level (and inherited) option.
     execArgv: ["--expose-gc"],
