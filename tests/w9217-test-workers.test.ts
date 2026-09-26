@@ -24,20 +24,41 @@ describe("W9217 · 测试并发上限", () => {
     expect(CONFIG, "vitest.config.ts 必须设置 maxWorkers").toMatch(/\bmaxWorkers\s*:/);
   });
 
-  it("② 默认上限是一个有界的小数，而不是 CPU 核数", () => {
-    // 取出 TEST_WORKERS 的默认分支（形如 `return 8;`）。
-    const m = /const TEST_WORKERS[\s\S]*?return (\d+);/.exec(CONFIG);
-    expect(m, "TEST_WORKERS 必须有数字默认值").not.toBeNull();
+  it("② 上限常量本身是一个有界的小数（不是核数）", () => {
+    // 默认值由 DEFAULT_TEST_WORKERS 承载，再对核数取 min（见 ④）。
+    const m = /const DEFAULT_TEST_WORKERS = (\d+);/.exec(CONFIG);
+    expect(m, "必须有 DEFAULT_TEST_WORKERS 数字常量").not.toBeNull();
     const def = Number(m?.[1]);
-    expect(Number.isFinite(def) && def > 0, "默认上限必须是正整数").toBe(true);
+    expect(Number.isFinite(def) && def > 0, "上限必须是正整数").toBe(true);
     // 32 核的机器上默认吃满就是这里要防的；给一个明确的上界。
-    expect(def, "默认上限不应超过 16（否则在 32 核机器上仍会吃满）").toBeLessThanOrEqual(16);
+    expect(def, "上限不应超过 16（否则在 32 核机器上仍会吃满）").toBeLessThanOrEqual(16);
   });
 
   it("③ 可用环境变量覆盖（本地/CI 都要能调）", () => {
     expect(CONFIG, "必须支持 CELESTEA_TEST_WORKERS 覆盖").toContain("CELESTEA_TEST_WORKERS");
     expect(CONFIG, "覆盖值必须做有限性/正数校验，避免 NaN 传给 vitest").toMatch(
       /Number\.isFinite\(n\)[\s\S]{0,60}n > 0/,
+    );
+  });
+
+  /**
+   * ★ 上限**只降不升** —— 这条是本文件存在的核心理由。
+   *
+   * 第一版无条件 return 8。在 32 核开发机上那是「限制」，但在 **4 核的 GitHub runner**
+   * 上，vitest 的默认本来就是 4，而 8 把并发**提高了一倍** —— 时序敏感套件随即开始
+   * 间歇性失败（win24 绿 / win26 红，ubuntu24 红 / ubuntu26 绿，典型 flaky）。
+   * **上限若会提高负载，它就不是上限。**
+   *
+   * 判据：默认分支必须对核数取 min，不能是裸字面量。
+   */
+  it("★ ④ 默认上限对核数取 min —— 上限不许提高并发", () => {
+    expect(
+      CONFIG,
+      "默认上限必须 min(上限, 核数)：裸字面量会在小核 CI 上把并发提上去",
+    ).toMatch(/Math\.min\(\s*DEFAULT_TEST_WORKERS\s*,\s*availableParallelism\(\)\s*\)/);
+    // 并且必须真的 import 了 availableParallelism（否则上面那行是假的）。
+    expect(CONFIG, "必须从 node:os 引入 availableParallelism").toMatch(
+      /import\s*\{[^}]*availableParallelism[^}]*\}\s*from\s*"node:os"/,
     );
   });
 });

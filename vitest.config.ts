@@ -1,5 +1,6 @@
-import { defineConfig } from "vitest/config";
+import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
+import { defineConfig } from "vitest/config";
 
 const r = (p: string): string => fileURLToPath(new URL(p, import.meta.url));
 
@@ -52,20 +53,31 @@ const alias = {
  *    4            81 s
  *    2           149 s
  *
- * 默认取 **8**：对「别把机器占满」是真实有效的限制，代价有界。
- * CI runner 是 4 核，所以 8 这个上限**不改变 CI 的行为**（它本来也用不到 8）。
- * 单次运行可用环境变量覆盖：
+ * 默认取 **min(8, 核数)** —— 上限**只降不升**：
+ *   · 32 核开发机 ⇒ 8（这才是「别把机器占满」）；
+ *   · 4 核 CI runner ⇒ 4，与 vitest 的默认**完全一致**，不引入任何行为变化。
+ *
+ *   ★ 第一版无条件返回 8，在 4 核 CI 上把并发从 4 **提到** 8，让时序敏感套件
+ *     开始间歇性失败（win24 绿 / win26 红，ubuntu24 红 / ubuntu26 绿 —— 典型 flaky）。
+ *     **上限若会提高负载，它就不是上限。**
+ * 单次运行可用环境变量覆盖（覆盖值按原样使用 —— 那是操作者明确要求的）：
  *   CELESTEA_TEST_WORKERS=16 pnpm test
  *   CELESTEA_TEST_WORKERS=32 pnpm test     # 恢复旧行为（最快）
  *
  * 为什么不顺手开 `isolate: false`（runner 提示能省 ~7.4s）：本仓有 64 个测试文件用
  * `vi.stubGlobal` 改全局状态，共享模块注册表会让它们互相污染 —— 省下的时间不值这个风险。
  */
+const DEFAULT_TEST_WORKERS = 8;
+
 const TEST_WORKERS = (() => {
   const raw = process.env.CELESTEA_TEST_WORKERS;
-  if (raw === undefined || raw.trim() === "") return 8;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 8;
+  if (raw !== undefined && raw.trim() !== "") {
+    // An explicit override is honoured as-is: the operator asked for that number.
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? Math.trunc(n) : DEFAULT_TEST_WORKERS;
+  }
+  // Default: min(cap, cores) — a CAP must never RAISE concurrency.
+  return Math.min(DEFAULT_TEST_WORKERS, availableParallelism());
 })();
 
 const E2E = process.env.CELESTEA_E2E === "1";
