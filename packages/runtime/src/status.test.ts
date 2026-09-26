@@ -1,6 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   LLM_SERVICE,
@@ -10,25 +7,19 @@ import {
   zeroUsage,
   type ModelRequest,
   type SessionEvent,
-  type ToolSpec,
   type Usage,
 } from "@celestea/core";
 import { agentLoopPlugin, estimateMessagesTokens, estimateTokens } from "@celestea/agent-loop";
-import { deriveMessages, parseSessionJsonl } from "@celestea/session";
 import { agentConfigFromProfile } from "./agent-config.js";
 import { compose } from "./compose.js";
 import {
   ContextPressure,
-  GAP_MS,
-  StatusTracker,
-  activeSpanMs,
   assembledContextOf,
   createStatusTracker,
   estimatedContextChars,
   estimatedContextTokens,
   ratio4,
   statuslineOf,
-  turnRate,
   type StatusView,
 } from "./status.js";
 import { UsageTracker, cacheHitRatioRounded, usageBlock, usageStatus } from "./usage.js";

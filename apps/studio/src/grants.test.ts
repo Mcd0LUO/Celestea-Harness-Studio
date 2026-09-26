@@ -22,7 +22,6 @@ import { createOfflineLlm } from "./runtime/offline-llm.js";
 import { createSessionGrants } from "./runtime/session-grants.js";
 import { makeEngineHarness, waitIdle } from "./runtime/test-util.js";
 import { readGrantsFile, writeGrantsFile, type GrantRecord } from "./store/grants.js";
-import { unsandboxedAvailable } from "./runtime/engine-grants.js";
 import { FILE_MODES_MEANINGFUL } from "@celestea/tools";
 
 const roots: string[] = [];

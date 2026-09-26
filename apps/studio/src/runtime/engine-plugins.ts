@@ -55,7 +55,6 @@ import {
   httpOptions,
   PROCESS_REGISTRY_SERVICE,
   ProcessRegistry,
-  sandboxConfigFromEnv,
   sessionSandboxConfig,
   type AttachmentStore,
   type SessionFsScope,

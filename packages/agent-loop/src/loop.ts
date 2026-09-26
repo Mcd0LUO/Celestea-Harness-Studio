@@ -31,7 +31,6 @@
 import {
   AgentError,
   formatInjection,
-  messageTexts,
   type AgentConfig,
   type AgentLoop,
   type Context,
@@ -52,7 +51,7 @@ import { doneEvent, toolCallEvent, toolResultEvent, turnEndEvent, type EventSink
 import { isPerturbable } from "./perturbation.js";
 import { releaseAfterStream } from "./repetition-cut.js";
 import { CollapseDriver } from "./repetition-driver.js";
-import { createRepetitionGuard, DEEPSEEK_REPETITION_THRESHOLDS, type RepetitionChannel, type RepetitionEvidence, type RepetitionGuard, type RepetitionThresholds } from "./repetition.js";
+import { createRepetitionGuard, DEEPSEEK_REPETITION_THRESHOLDS, type RepetitionChannel, type RepetitionGuard, type RepetitionThresholds } from "./repetition.js";
 import { planRepetition, type RepetitionDiagnostics } from "./repetition-recovery.js";
 import { dispatchCall, resolveSeams, toToolInput, type Seams } from "./seams.js";
 import { absorbDone, emptyStreamOutcome, terminalFromStreamEvent, type GenerateResult, type StepResult, type StreamOutcome } from "./step.js";

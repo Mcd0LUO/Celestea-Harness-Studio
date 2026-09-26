@@ -5,8 +5,7 @@
  * TypeScript matrix lives in `broker-ts.test.ts`).
  */
 
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Sandbox, SessionEvent, Tool, ToolGuard, ToolExecOutcome } from "@celestea/core";
@@ -31,9 +30,6 @@ const dir = h.dir;
 afterAll(async () => {
   await h.cleanup();
 });
-/** W774: `language` is explicit here — TypeScript is the tool's default now. */
-const pythonRun = (tool: Tool, callId: string, args: Record<string, unknown>): Promise<ToolExecOutcome> =>
-  run(tool, callId, { ...args, language: "python" });
 const mount = (registry: ToolRegistryImpl, options: Parameters<BrokerHarness["mount"]>[1] = {}): Tool => h.mount(registry, options);
 const run = (tool: Tool, callId: string, args: unknown): Promise<ToolExecOutcome> =>
   h.run(tool, callId, args) as Promise<ToolExecOutcome>;

@@ -27,7 +27,6 @@ import {
   deriveMessages,
   deriveSseTranscript,
   parseSessionJsonl,
-  projectMessages,
   type ReplayStats,
 } from "@celestea/session";
 import { collectKnownSecrets, createRedactor, type Redactor } from "@celestea/core";

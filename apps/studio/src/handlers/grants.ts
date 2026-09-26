@@ -16,7 +16,7 @@
 import type { Context, Hono } from "hono";
 import type { RouteTable } from "../routes.js";
 import { effectiveGrantsOf, netHostsEffective, unsandboxedAvailable, type EffectiveGrants } from "../runtime/engine-grants.js";
-import { isOfferedGrantCap, MAX_TTL_SEC, emptyGrantsFile, newGrantId, readGrantsFile, writeGrantsFile, type GrantCap, type GrantRecord, type GrantsFile } from "../store/grants.js";
+import { isOfferedGrantCap, MAX_TTL_SEC, emptyGrantsFile, newGrantId, readGrantsFile, writeGrantsFile, type GrantRecord, type GrantsFile } from "../store/grants.js";
 import { CONFIRM_HEADER, CONFIRM_TTL_SEC, GRANT_NONCE_COOKIE, SEC_FETCH_MODE, SEC_FETCH_SITE, ORIGIN_HEADER } from "../store/grants-tokens.js";
 import { cookieValue } from "../auth/token.js";
 import { nowSec, type GrantsServices } from "../store/grants-service.js";

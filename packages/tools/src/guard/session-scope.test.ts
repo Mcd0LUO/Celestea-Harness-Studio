@@ -13,8 +13,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterAll, describe, expect, it } from "vitest";
 
-import type { ToolInput } from "@celestea/core";
-
 import { pathDelimiter } from "../platform/paths.js";
 import { cleanupTempDirs, makeDir, makeTempDir, writeFixture } from "../testing/tmp.test-util.js";
 import { PathGuardPolicy } from "./path-guard.js";
@@ -40,9 +38,6 @@ const env: NodeJS.ProcessEnv = {
   // W891: the list separator is ":" on POSIX and ";" on Windows.
   CELESTEA_TOOL_ROOTS: [wsB, elsewhere].join(pathDelimiter()),
 };
-
-const read = (target: string): ToolInput => ({ call_id: "c1", name: "read_file", args: { path: target } });
-const write = (target: string): ToolInput => ({ call_id: "c2", name: "write_file", args: { path: target } });
 
 describe("sandbox config scope (W768)", () => {
   it("keeps the env posture when there is no session scope", () => {

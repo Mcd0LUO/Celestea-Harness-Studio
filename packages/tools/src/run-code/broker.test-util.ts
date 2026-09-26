@@ -11,7 +11,7 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { Sandbox, SessionEvent, Tool, ToolRegistry, ToolSpec } from "@celestea/core";
+import type { Sandbox, SessionEvent, Tool, ToolSpec } from "@celestea/core";
 
 import { fnTool } from "../fn-tool.js";
 import { userspaceSandboxWith } from "../sandbox/userspace.js";

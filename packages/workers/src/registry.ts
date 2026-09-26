@@ -32,7 +32,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { renameWithRetry, type WorkerEntry, type WorkerStatus } from "@celestea/core";
+import { renameWithRetry, type WorkerEntry } from "@celestea/core";
 import { runDriverLoop, type DriverExit, type WorkerDrivers } from "./driver.js";
 import { executeReceipt, receiptSummary, verdictOf, type ReceiptRequest } from "./receipt.js";
 import { SessionMailbox } from "./mailbox.js";
@@ -49,14 +49,13 @@ import {
   receiptKey,
   receiptToken,
   serializeRegistryTsv,
-  summarize,
   workerAttempt,
   workerRetries,
 } from "./registry-tsv.js";
-import { dropTokens, entryView, isOwn, setToken as setTokenOf, terminalEntry, withProc, withState, withTokens } from "./row.js";
+import { dropTokens, isOwn, setToken as setTokenOf, terminalEntry, withProc, withState, withTokens } from "./row.js";
 import { observeWorkerTable, pidAliveDefault, workerOwner, type WorkerRecoveryOptions, type WorkerRecoveryReport } from "./recovery.js";
 import { hydrateSessions, inheritableRows, statusView } from "./rehydrate.js";
-import { sanitizeExtra, utcNow, workerTitle, type SpawnInfo, type WorkerSession, type WorkerVerdict } from "./types.js";
+import { utcNow, workerTitle, type SpawnInfo, type WorkerSession, type WorkerVerdict } from "./types.js";
 import { PersistFailureLog, type PersistFailure } from "./persist-log.js";
 
 // W787: the pure ROW-FORMAT helpers moved to `row.ts` (§4.1 budget); their public

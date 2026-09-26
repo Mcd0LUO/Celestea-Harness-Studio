@@ -15,12 +15,12 @@
  * 端到端才证明得了「装配真的接到了引擎上」。
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { getJson, jsonRequest, pinPathOnly, type StudioHarness } from "../harness.test-util.js";
+import { getJson, pinPathOnly, type StudioHarness } from "../harness.test-util.js";
 import type { OfflineStep } from "./offline-llm.js";
 import { activate, makeEngineHarness, runTurnWithFrames, type FrameRecord } from "./test-util.js";
 

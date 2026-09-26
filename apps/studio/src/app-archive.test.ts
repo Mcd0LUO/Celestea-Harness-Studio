@@ -50,8 +50,6 @@ async function created(h: StudioHarness, title: string, extra: Record<string, un
   return String(res.body["id"]);
 }
 
-const id = (name: string): string => `sample-ws/${name}-${STAMP}`;
-
 describe("W791 archived session listing (?archived=1)", () => {
   it("lists the archived row with archived:true and keeps the DEFAULT body byte-identical", async () => {
     const h = make();

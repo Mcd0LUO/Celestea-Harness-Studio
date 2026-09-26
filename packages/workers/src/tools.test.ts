@@ -215,7 +215,7 @@ describe("stop_worker", () => {
   });
 
   it("rejects an unknown or already-terminal worker with a lookup failure", async () => {
-    const { registry, tools } = harness();
+    const { tools } = harness();
     await call(tools, "spawn_worker", { wid: "W1", brief: "b1" });
     expect(await call(tools, "stop_worker", { wid: "W9" })).toMatchObject({ ok: false, step: "lookup" });
     await call(tools, "stop_worker", { wid: "W1" });

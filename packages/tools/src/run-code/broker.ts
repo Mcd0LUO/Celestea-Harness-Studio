@@ -38,7 +38,7 @@ import { resolveShellKind, type ShellResolveInput } from "../platform/exec.js";
 import { pythonCandidates, runCodeCommand } from "../platform/quote.js";
 import { whichSync } from "../sandbox/probe.js";
 import { cpuExceededFailure as cpuKillFailure, isCpuSignal } from "./cpu-kill.js";
-import { newRunState, type ChildTermination, type RunBudget, type RunState, type Settled } from "./run-state.js";
+import { newRunState, type ChildTermination, type RunBudget, type RunState } from "./run-state.js";
 import { deriveCpuSecFromWallClock } from "../sandbox/limits.js";
 import { TIMED_OUT, withTimeout } from "../sandbox/async.js";
 import { readCapped, REAP_GRACE_MS } from "../sandbox/launch.js";

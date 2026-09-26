@@ -23,7 +23,7 @@
  */
 
 import { assembledContextOf, statuslineOf, type StatusView } from "@celestea/runtime";
-import { caseOf, timeValue, type BenchCase, type Timing } from "./timing.js";
+import { caseOf, timeValue, type BenchCase } from "./timing.js";
 import { scaleLabel, type Fixture } from "./fixtures.js";
 
 /** Window of the over-budget rows (forces the trim path; `TIGHT_WINDOW`). */

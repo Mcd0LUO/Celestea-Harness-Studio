@@ -10,7 +10,7 @@
  *   6. the child is registered in the session ProcessRegistry (session shutdown).
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";

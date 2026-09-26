@@ -2,7 +2,8 @@
 /**
  * celestea_studio-ts —— 架构规则的机械强制（ESLint flat config）。
  *
- * 这里只放「结构类」规则：文件/函数规模、嵌套深度、参数个数、跨包导入边界。
+ * 这里只放「结构类」规则：文件/函数规模、嵌套深度、参数个数、跨包导入边界、
+ * 未使用绑定（导入/变量/类型）。
  * 与 dependency-cruiser（`pnpm lint:arch`）分工：
  *   - ESLint      = 单文件粒度的静态形状（规模 + 导入字面量）
  *   - dep-cruiser = 仓级依赖图（分层方向、循环、深层导入、不可解析）
@@ -10,6 +11,9 @@
  * 规则正文见 docs/ARCHITECTURE.md §3/§4，例外清单见 §5。
  * 例外只能登记在下方 ARCH_EXCEPTIONS（唯一真源），每条必须有 原因 / 拆分方案 / 移除阶段。
  */
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import tseslint from "typescript-eslint";
 
 /** 单文件规模上限（跳过空行与注释）。W9103：400 → 450（用户裁决）。 */
@@ -126,6 +130,142 @@ function boundaryPatterns({ coreLeaf = false, noApps = false, tier1 = false } = 
   return patterns;
 }
 
+/**
+ * W9214 —— 未使用绑定（导入 / 变量 / 类型 / 接口）棘轮。
+ *
+ * 现状：本仓从未启用过任何 unused-vars 规则，`pnpm lint` 对死导入完全失明。
+ * 真实后果：`apps/studio/src/store/workspaces.ts` 的 `import { renameSync }` 一直没人用，
+ * 直到 W9206-28 靠人眼发现。前端（apps/web）一直由自己的 tsconfig 用
+ * noUnusedLocals/noUnusedParameters 管着；根 tsconfig 没有这两条，
+ * 于是 packages / apps/studio / apps/cli / scripts / tests 是唯一的缺口 —— 本规则补它。
+ *
+ * 规则参数是**实测**选的（无基线裸跑 `npx eslint .` 逐项对比，非照抄示例）：
+ *   · args: "none"         —— 默认 after-used 会多报 15 处「回调签名里的占位参数」，
+ *                             那些参数是接口形状的一部分，删掉会改签名，不是死代码；
+ *   · varsIgnorePattern ^_ —— 沿用 apps/web/tsconfig.json 的 noUnusedLocals 约定，
+ *                             显式命名 `_x` 即声明「我故意不用」；
+ *   · caughtErrors: "none" —— catch 绑定常被刻意保留（将来要读 error 的位置）；
+ *   · ignoreRestSiblings   —— `const { a, ...rest } = o` 里 a 是「取出去丢掉」的惯用法。
+ * 实测口径：不带任何参数 = 111 处（59 文件）；加上上面四条 = 96 处（52 文件）。
+ *
+ * 棘轮为什么按**标识符名**记账，而不是用 ESLint 内建的 suppressions：
+ * 内建机制按**条数**记账，实测存在「调包」漏洞 —— 在一个已冻结的文件里
+ * 删掉一条旧违规、再加一条**全新**的未使用变量，条数不变，`npx eslint .` 仍然 EXIT=0
+ * （W9214 实测复现）。按名字记账后，任何不在表内的标识符都会报错。
+ */
+/**
+ * 冻结清单（棘轮：只许**缩短**，不许加长）。
+ * key = 相对本配置目录的路径（正斜杠）；value = 该文件里已存在的未使用绑定名。
+ * 这 24 处全在 `tests/`（本轮文件边界外，属别的 worker 的领地）：
+ * 本轮把 `packages/` / `apps/studio/src` / `apps/cli/src` / `scripts` 全部清零，未留一条冻结项。
+ * 清理方向：把某个文件清干净后，**同时**删掉它在这里的条目（ARCH_STRICT=1 会因陈旧项报错）。
+ */
+const UNUSED_VARS_FROZEN = {
+  "tests/frontend-batch-b-item3-dom.test.ts": ["el"],
+  "tests/frontend-r3-b6-dom.test.ts": ["Ev"],
+  "tests/h-mention-files.test.ts": ["pane"],
+  "tests/question-card.test.ts": ["info"],
+  "tests/quote-selection.test.ts": ["pane"],
+  "tests/session-gone-real-backend.test.ts": ["all"],
+  "tests/w1467-run-code-wiring.test.ts": ["SESSION_LOG_SERVICE", "SessionLog", "plantSession"],
+  "tests/w1467-scroll-follow.test.ts": ["ROOT"],
+  "tests/w1467-subcall-live-replay.test.ts": ["ROOT"],
+  "tests/w1471-worker-back-to-leader-dom.test.ts": ["OTHER"],
+  "tests/w1517-permission-entry-merge.test.ts": ["src"],
+  "tests/w1536-provider-modalities.test.ts": ["FormMod", "stubSave"],
+  "tests/w1542-toolcard-dup.test.ts": ["fileURLToPath"],
+  "tests/w887-version.test.ts": ["existsSync", "readdirSync"],
+  "tests/w888-inbox-block-dom.test.ts": ["doc"],
+  "tests/w895l-plugin-library.test.ts": ["KEY"],
+  "tests/w9113-frame-budget.test.ts": ["resetHarness"],
+  "tests/w9204-rail-layout.test.ts": ["msgs"],
+  "tests/w9208-config-epoch.test.ts": ["Profile", "makeHarness"],
+};
+
+const UNUSED_VARS_RULE = tseslint.plugin.rules["no-unused-vars"];
+/** 上面实测选出的四条参数（唯一真源，两条规则共用）。 */
+const UNUSED_VARS_OPTIONS = {
+  args: "none",
+  varsIgnorePattern: "^_",
+  caughtErrors: "none",
+  ignoreRestSiblings: true,
+};
+
+/** 冻结表 / 路径口径的基准目录 = 本配置文件所在目录（不依赖 cwd）。 */
+const CONFIG_ROOT = path.dirname(fileURLToPath(import.meta.url));
+
+/** 相对本配置目录的正斜杠路径（冻结表的 key 口径，Windows 上也一致）。 */
+function relPathOf(context) {
+  const filename = String(context.filename ?? context.getFilename());
+  return path.relative(CONFIG_ROOT, filename).split(path.sep).join("/");
+}
+
+/**
+ * 冻结版 no-unused-vars：**同名**命中冻结表的报告被吞掉，其余照报。
+ * 一个名字只放行一次（同名重复违规仍会报）。
+ */
+const frozenUnusedVarsRule = {
+  meta: { ...UNUSED_VARS_RULE.meta },
+  create(context) {
+    const remaining = new Set(UNUSED_VARS_FROZEN[relPathOf(context)] ?? []);
+    const proxy = Object.create(context);
+    Object.defineProperty(proxy, "report", {
+      value(descriptor) {
+        const name = descriptor?.data?.varName;
+        if (name !== undefined && remaining.delete(name)) return;
+        context.report(descriptor);
+      },
+      configurable: true,
+      enumerable: true,
+      writable: true,
+    });
+    return UNUSED_VARS_RULE.create(proxy);
+  },
+};
+
+/**
+ * 冻结表的「陈旧项」检查：某条冻结名已不再违规（被清理了）⇒ 提醒收紧表。
+ * 默认 **warn**（不影响退出码）：本仓是多 worker 共用一个工作树，
+ * 别人清理 tests/ 里的违规是好事，不该让他的成功把门禁搞红 ——
+ * 与 `apps/web/tools/check-module-size.mjs` 对陈旧项的处理同一条理由。
+ * CI 要收紧时置 `ARCH_STRICT=1`，陈旧项即失败。
+ */
+const staleFrozenUnusedVarsRule = {
+  meta: { ...UNUSED_VARS_RULE.meta },
+  create(context) {
+    const frozen = UNUSED_VARS_FROZEN[relPathOf(context)];
+    if (frozen === undefined) return {};
+    const stillUnused = new Set();
+    const proxy = Object.create(context);
+    Object.defineProperty(proxy, "report", {
+      value(descriptor) {
+        const name = descriptor?.data?.varName;
+        if (name !== undefined) stillUnused.add(name);
+      },
+      configurable: true,
+      enumerable: true,
+      writable: true,
+    });
+    const visitors = UNUSED_VARS_RULE.create(proxy);
+    const baseExit = visitors["Program:exit"];
+    return {
+      ...visitors,
+      "Program:exit"(node) {
+        if (Array.isArray(baseExit)) for (const fn of baseExit) fn(node);
+        else if (typeof baseExit === "function") baseExit(node);
+        for (const name of frozen) {
+          if (stillUnused.has(name)) continue;
+          context.report({
+            node,
+            message:
+              `未使用绑定棘轮：'${name}' 已不再违规，请把它从 eslint.config.js 的 UNUSED_VARS_FROZEN 删掉（棘轮只许收紧）。`,
+          });
+        }
+      },
+    };
+  },
+};
+
 export default tseslint.config(
   {
     name: "arch/ignores",
@@ -156,6 +296,22 @@ export default tseslint.config(
     },
     linterOptions: {
       reportUnusedDisableDirectives: "warn",
+    },
+  },
+  {
+    name: "arch/unused-vars",
+    files: SOURCE_GLOBS,
+    plugins: {
+      arch: {
+        rules: {
+          "unused-vars": frozenUnusedVarsRule,
+          "unused-vars-stale": staleFrozenUnusedVarsRule,
+        },
+      },
+    },
+    rules: {
+      "arch/unused-vars": ["error", UNUSED_VARS_OPTIONS],
+      "arch/unused-vars-stale": [process.env.ARCH_STRICT === "1" ? "error" : "warn", UNUSED_VARS_OPTIONS],
     },
   },
   {

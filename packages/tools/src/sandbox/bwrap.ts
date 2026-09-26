@@ -50,7 +50,7 @@ import { bwrapEnforcement } from "./enforcement.js";
 import { captureRun, preview, resolveTimeout, spawnPlan, validateSandboxConfig } from "./launch.js";
 import { limitsForCpu, limitsFromEnv, refreshNproc, resolveCallCpuSec, type CallCpuResolution, type SandboxLimits } from "./limits.js";
 import { probeHost, type HostProbe } from "./probe.js";
-import { applyLimits, rlimitDiagnostics, rlimitVia, type RlimitDescribeOptions, type RlimitVia } from "./rlimit.js";
+import { applyLimits, rlimitDiagnostics, type RlimitDescribeOptions, type RlimitVia } from "./rlimit.js";
 import { openSeccompBlob } from "./seccomp.js";
 import { resolveWorkdir } from "./workdir.js";
 

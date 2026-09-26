@@ -12,8 +12,6 @@
  *   - write = pretty JSON -> `<file>.json.tmp` -> rename (atomic, no fsync).
  */
 
-import { renameSync } from "node:fs";
-
 import { renameWithRetry } from "@celestea/core";
 import { writeJsonAtomic, isDirectory, isFile, listEntries, readJsonIfExists } from "./fs-json.js";
 import { badRequest, conflict, errText, fail, notFound, ok, serverError, type StoreResult } from "./result.js";

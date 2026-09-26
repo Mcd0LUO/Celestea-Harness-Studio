@@ -15,7 +15,7 @@
  * `--strict` exits non-zero when a GOLDEN comparison (A) diverges.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { firstJsonDiff } from "@celestea/core";
 import { analyzeReplay, deriveMessages, deriveSseTranscript, parseSessionJsonl, projectMessages } from "@celestea/session";

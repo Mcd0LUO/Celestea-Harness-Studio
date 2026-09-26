@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_LOOP_SERVICE,
   LLM_SERVICE,
-  SESSION_LOG_SERVICE,
   TOOL_REGISTRY_SERVICE,
   definePlugin,
   type AgentConfig,

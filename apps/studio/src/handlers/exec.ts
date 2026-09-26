@@ -30,13 +30,6 @@ import { activeSession, failJson, readJsonBody, strField, type Deps } from "./co
 /** The structured refusal when this session's preset denies the shell. */
 export const SHELL_DENIED_CODE = "shell_denied";
 
-interface ExecBody {
-  command: string;
-  session?: string;
-  workdir?: string;
-  timeout_ms?: number;
-}
-
 function readCommand(body: Record<string, unknown>): string | { error: string } {
   const value = body["command"];
   if (typeof value !== "string") return { error: "field 'command' must be a string" };

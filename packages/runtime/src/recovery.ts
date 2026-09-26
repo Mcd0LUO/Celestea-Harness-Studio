@@ -24,7 +24,6 @@ import {
   filePathFor,
   PersistentSessionLog,
   recoverOpenTurn,
-  writeErrorCountOf,
   type CheckpointIdentity,
   type CheckpointRead,
   type RecoveryAction,

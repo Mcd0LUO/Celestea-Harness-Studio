@@ -9,7 +9,6 @@
 import type { SessionEvent, Tool, ToolDecision, ToolExecOutcome, ToolInput } from "@celestea/core";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { fnTool } from "../fn-tool.js";
 import type { ToolRegistryImpl } from "../registry.js";
 import { startBrokerHarness, type BrokerHarness } from "./broker.test-util.js";
 

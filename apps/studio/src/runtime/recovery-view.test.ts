@@ -14,7 +14,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { serializeEventLog } from "@celestea/runtime";
 import { getJson, jsonRequest, type StudioHarness } from "../harness.test-util.js";
 import { activate, makeEngineHarness, turns, type EngineHarnessOptions } from "./test-util.js";
 

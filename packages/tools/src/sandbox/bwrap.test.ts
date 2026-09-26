@@ -20,7 +20,7 @@ import {
 } from "./bwrap-argv.js";
 import { BwrapSandbox, bwrapMeta } from "./bwrap.js";
 import { buildSandboxConfig } from "./config.js";
-import { bwrapEnforcement, userspaceEnforcement } from "./enforcement.js";
+import { bwrapEnforcement } from "./enforcement.js";
 import { BwrapSandbox as SandboxClass } from "./bwrap.js";
 import { ENV_SANDBOX_FALLBACK, bwrapOptionsFromEnv, fallbackMode, selectSandboxDetailed } from "./provider.js";
 import { UserspaceSandbox } from "./userspace.js";

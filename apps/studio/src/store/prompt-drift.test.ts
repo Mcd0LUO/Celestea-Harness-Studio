@@ -30,7 +30,7 @@ import {
   systemdUnitNameFromCgroup,
 } from "../deployment.js";
 import { assembleSystemPromptFor } from "../handlers/config-shape.js";
-import { getJson, jsonRequest, makeHarness } from "../harness.test-util.js";
+import { jsonRequest, makeHarness } from "../harness.test-util.js";
 import { BUILTIN_SECTIONS, TOOL_ACCESS_VARIANTS, builtinRowsFor } from "./builtin-sections.js";
 import { SESSION_MODES } from "./mode.js";
 import { toPromptVars } from "./prompts-compose.js";

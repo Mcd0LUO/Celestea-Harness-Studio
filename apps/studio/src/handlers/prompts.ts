@@ -14,7 +14,7 @@ import type { PromptScope } from "../store/prompts.js";
 import type { StoreResult } from "../store/result.js";
 import { activePromptBinding, assembleSystemPromptFor } from "./config-shape.js";
 import { DEFAULT_SESSION_MODE } from "../store/mode.js";
-import { failJson, readJsonBody, strField, storeFail, type Deps, type JsonObject } from "./common.js";
+import { failJson, readJsonBody, strField, type Deps, type JsonObject } from "./common.js";
 
 /** Scope resolution result: either the scope, or the 404 workspace name. */
 interface ScopeOut {

@@ -156,7 +156,7 @@ describe("W783 · the maximum wait (§6)", () => {
     await activate(h, "sample-ws/s1");
     const turned = await h.app.request("/api/turn", jsonRequest("POST", { input: "问一下", session: "sample-ws/s1" }));
     expect(turned.status).toBe(202);
-    const id = await waitForQuestion(h);
+    await waitForQuestion(h);
 
     // Nobody answers: the §6.1 active track must settle the parked tool call.
     await waitIdleOf(h, 10_000);

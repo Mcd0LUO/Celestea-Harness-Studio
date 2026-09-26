@@ -210,7 +210,6 @@ describe("session independence", () => {
     // 2. a worker on this session settles -> a QUEUED receipt in the mailbox.
     const spawn = await getJson(h.app, "/api/worker/spawn", jsonRequest("POST", { wid: "W1", brief: "x", session: "sample-ws/s1" }));
     expect(spawn.body["ok"]).toBe(true);
-    const workerId = String(spawn.body["sessionId"]);
     const deadline = Date.now() + 4_000;
     while (Date.now() < deadline) {
       // `state: idle` means the driver parked in its mailbox loop, i.e. the

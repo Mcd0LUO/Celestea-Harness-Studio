@@ -42,18 +42,15 @@
  */
 
 import { outcomeErrorParts } from "@celestea/core";
-import type { AskUserQuestionAnswerItem, ImageRef, InjectionPlacement, InjectionLane, PendingInjection, SseEventName, Statusline, TurnOutcome } from "@celestea/core";
-import type { Watchdog, WorkerRecoveryReport, WorkerRegistry } from "@celestea/workers";
-import { createSessionInbox, type InjectedMessage, type SessionInbox } from "@celestea/runtime";
+import type { AskUserQuestionAnswerItem, ImageRef, SseEventName, Statusline, TurnOutcome } from "@celestea/core";
+import type { Watchdog, WorkerRegistry } from "@celestea/workers";
 import {
   autowakeEnabled,
   coldStatusline,
   keyOfSession,
   outcomePhaseOf,
-  HOST_SESSION_ID,
   PROFILE_KEYS,
   SessionRuntimeRegistry,
-  statuslineOf,
   TurnBusyError,
   type LedgerCostBlock,
   type LedgerQuery,
@@ -63,7 +60,7 @@ import {
 } from "@celestea/runtime";
 import { costBlockView, usageLedgerView } from "./ledger-view.js";
 import { join } from "node:path";
-import { CapacityError, EngineError, toolSpecView, type PendingQuestionView, type QuestionAnswerOutcome } from "../runtime-adapter.js";
+import { CapacityError, toolSpecView, type PendingQuestionView, type QuestionAnswerOutcome } from "../runtime-adapter.js";
 import { HostAutowake, autowakeLog, autowakeStateOf } from "./host-autowake.js";
 import { injectionHooksOf, publishSubCall, type SessionInjectionHooks } from "./session-publisher.js";
 import { sessionContextOf } from "./context-snapshot.js";
@@ -93,9 +90,7 @@ import { QuestionHost } from "./question-host.js";
 import { AdapterFallback, type FallbackStatusView } from "./fallback-host.js";
 import { createImageDowngradeReporter } from "./image-downgrade.js";
 import type { StudioBus } from "../sse.js";
-import { contextViewOf } from "./context-snapshot.js";
 import { applyProfilePatch, clampRetries, defaultEngineProfile, engineProfileOf, profileFromEngine, retriesOf } from "./engine-profile.js";
-import { SESSION_LOG_NAME, type SessionTarget } from "./engine-session.js";
 import {
   capacityErrorOf,
   disposeRuntime,
@@ -106,14 +101,6 @@ import {
   SessionComposer,
   type SessionComposerOptions,
 } from "./session-compose.js";
-import {
-  dispatchWorkerTool,
-  sendBodyOf,
-  spawnOutcomeOf,
-  workerMessagesOf,
-  workerSessionsOf,
-} from "./worker-bridge.js";
-import { inboxMessageOf } from "./inbox-message.js";
 import { watchdogCount, watchdogOf, watchdogRunningOf, workerStatusOf } from "./watchdog-view.js";
 import { hasLiveWorkersOf } from "./worker-live.js";
 import { recoveryViewOf, type RecoveryView } from "./recovery-view.js";
