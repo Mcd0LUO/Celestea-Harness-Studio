@@ -130,8 +130,15 @@ describe("W9206-35 · a dead stdin must never take the process down", () => {
       "(async () => {",
       "  for (let i = 0; i < 60; i++) {",
       withListener ? "    if (c.stdin.destroyed || !c.stdin.writable) break;" : "    if (c.stdin.destroyed) break;",
-      withListener ? "    try { c.stdin.write(Buffer.from('x')); } catch { break; }" : "    c.stdin.write(Buffer.from('x'));",
-      "    await new Promise((r) => setTimeout(r, 2));",
+      "    const chunk = Buffer.alloc(65536, 120);",
+      withListener ? "    try { c.stdin.write(chunk); } catch { break; }" : "    c.stdin.write(chunk);",
+      // Write IMMEDIATELY (no delay) with a full pipe buffer, so a write is still
+      // in flight when the child exits. The earlier version wrote 1 byte every
+      // 2 ms; under full-suite load the 60-iteration loop could finish BEFORE the
+      // 50 ms child exited, so no write ever hit a dead pipe and the process
+      // exited 0 — the assertion below then failed. Measured: 2/20 runs took that
+      // path; 0/15 with this shape. A real flake, not a slow machine.
+      "    await new Promise((r) => setTimeout(r, 0));",
       "  }",
       "  process.exit(0);",
       "})();",
