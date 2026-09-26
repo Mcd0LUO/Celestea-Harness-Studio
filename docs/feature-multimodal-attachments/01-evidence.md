@@ -52,13 +52,13 @@ if (text === "") return errorOnly(c, 400, "input must not be empty");
 
 ### 1.4 wire 层：纯文本
 
-`packages/llm/src/wire.ts:29-34`：
+`packages/llm/src/wire.ts:58-64`：
 
 ```ts
 export interface WireMessage { role: string; content: string | null; … }
 ```
 
-`mapMessage`（`:57-86`）对 system/user/tool 一律 `collectMessageText(msg.content)`；`collectMessageText`（`packages/llm/src/seam.ts:114-119`）只把 `type==="text"` 的块按 `
+`mapMessage`（`:57-86`）对 system/user/tool 一律 `collectMessageText(msg.content)`；`collectMessageText`（`packages/llm/src/seam.ts:140-145`）只把 `type==="text"` 的块按 `
 ` 拼接，**非 text 块被静默丢弃**。
 
 ### 1.5 前端：零附件入口

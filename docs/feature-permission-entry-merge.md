@@ -16,9 +16,9 @@
 
 | 事实 | 位置 |
 |---|---|
-| 状态栏右端有两个并列按钮：`#slPerm`（档位，**锁**图标）与 `#slGrant`（盾牌，三态） | `apps/web/index.html:94-97`、`:100-103` |
+| 状态栏右端有两个并列按钮：`#slPerm`（档位，**锁**图标）与 `#slGrant`（盾牌，三态）—— **合并前**的状态（W1517 已删 `#slPerm`，见 §6.1） | `apps/web/index.html` 的 `.sl-end`（合并前为 `:94-97`、`:100-103`） |
 | 盾牌 SVG（`M8 1.6 13.2 3.4v4.2c0 3.1-2.1 5.6-5.2 6.8-3.1-1.2-5.2-3.7-5.2-6.8V3.4z`） | `apps/web/index.html:101` |
-| 档位入口的显隐/徽标/弹层自持，**注释明写「入口分列、互不合并（任务书明确要求）」** | `apps/web/src/statusline/permission.ts:9`、`:52,150-151,236` |
+| 档位入口的显隐/徽标/弹层自持；文件头**已改为合并后的口径**（旧「入口分列、互不合并」被本轮用户指令取代，见 `:11-12`） | `apps/web/src/statusline/permission.ts:9`、`:52,150-151` |
 | 盾牌入口的三态渲染与徽标 | `apps/web/src/ui/grants.ts:188-189`、`apps/web/src/ui/grants/panel/shield.ts:2,29-32` |
 | 已存在的历史压力：`.sl-end` 集群在窄屏溢出，停止键被裁 | `apps/web/index.html:88-95` 的 W847 注释（会话接续手册已于 W1518 移出 `docs/`，见 [`README.md`](./README.md) 维护约定） |
 

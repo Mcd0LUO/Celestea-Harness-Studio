@@ -9,7 +9,7 @@
 
 ### 3.1 现状与缺口
 
-**已经成立的**：`usage` 帧解析覆盖三种 cache key 形状 + nested reasoning（`packages/llm/src/usage.ts:22-35,89-113`）；agent-loop 每个 `usage` 帧都 `record()`（`loop.ts:229-230`）；`cache_hit_ratio` 已派生（`runtime/usage.ts:67-71`）；statusline 输出 `latest` + `total`（`core/types.ts:191`）。
+**已经成立的**：`usage` 帧解析覆盖三种 cache key 形状 + nested reasoning（`packages/llm/src/usage.ts:26-35,67-91`）；agent-loop 每个 `usage` 帧都 `record()`（`loop.ts:229-230`）；`cache_hit_ratio` 已派生（`runtime/usage.ts:67-71`）；statusline 输出 `latest` + `total`（`core/types.ts:191`）。
 
 **缺口**：
 

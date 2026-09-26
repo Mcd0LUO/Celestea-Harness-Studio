@@ -6,14 +6,20 @@
  *   · `feature-multimodal-attachments.md` 自称「未实现」而地图写「已实现 P0」；
  *   · `docs/README.md` 的端点数字从 47 漂到 64。
  *
- * 七条断言：
+ * 十一条断言：
  *   ① 登记：每篇现行文档（根文档 + 分册索引）必须在地图里，地图链接必须可达；
+ *   ①b 表宽：地图表格的每个数据行段数与表头一致（防两行被并成一行）；
  *   ② 状态：每篇必须声明状态、与地图同属一个类别（闭集），且现行文档不得是历史类；
  *   ③ 链接：现行文档的相对链接可达，带锚点的必须命中目标标题；
+ *   ③b 锚点：现行文档的 `file:line` 锚点落在真实非空行上（只看**第一个**数字）；
+ *   ③c 锚点全量：锚点里**每一个**数字（区间端点 / 逗号列表 / 相对 `:NN`）都在非空行上；
  *   ④ 行数：任何文档（含归档）单篇 ≤ 700 行；
  *   ⑤ 本机事实：提交进仓的文档不得含本机 git 提交身份；
  *   ⑥ 归档：`docs/archive/**` 每篇必须带 `📦` 横幅与历史类状态；
- *   ⑦ 可达：分册目录里的非索引文档必须被该目录的 `README.md` 链接。
+ *   ⑦ 可达：分册目录里的非索引文档必须被该目录的 `README.md` 链接；
+ *   ⑧ 例外表：`ARCHITECTURE.md` §5 与 `eslint.config.js` 的 `ARCH_EXCEPTIONS` 逐条一致；
+ *   ⑨ 路径：**当前**文档里作为事实写下的仓内路径必须存在（设计文档可写未来文件）；
+ *   ⑩ 计数：`ARCHITECTURE.md` §6.5.5 的 `console.warn`/`console.log` 计数由 `apps/web/src` 派生。
  */
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -158,6 +164,187 @@ function anchorProblems(): string[] {
   return problems;
 }
 
+/** 把文档里的锚点目标解析到仓内真实文件（含裸 basename 的几种候选前缀）。 */
+function resolveRepoFile(target: string): string | undefined {
+  const candidates = [target, target.replace(/^@celestea\//, ''), 'packages/' + target, 'apps/' + target];
+  return candidates.find((c) => existsSync(join(REPO, c)));
+}
+
+/** 该锚点里的哪些数字越界或指向空行（空数组 = 全落在非空行上）。 */
+function badAnchorNumbers(real: string, spec: string): number[] {
+  const body = readFileSync(join(REPO, real), 'utf8').split('\n');
+  return spec
+    .split(/[-,]/)
+    .map(Number)
+    .filter((n) => n > body.length || (body[n - 1] ?? '').trim() === '');
+}
+
+/**
+ * 一行文档里所有锚点的问题。
+ *
+ * 抽成独立函数而不是留在 `anchorNumberProblems()` 的循环里：那样会有
+ * `for 文档 → for 行 → for 锚点 → for 相对锚点 → if` 五层，撞上 `max-depth` 的 4 层硬线
+ * （实测：本仓 eslint 直接报 `Blocks are nested too deeply (5)`）。按 §4.2 范式 3
+ * 「按阶段拆函数」提出来，两层循环各自回到线性。
+ */
+function lineAnchorProblems(doc: string, lineNo: number, line: string): string[] {
+  const problems: string[] = [];
+  const anchors = [...line.matchAll(/([a-zA-Z0-9_@/.-]+\.(?:ts|mjs|js|css)):(\d+(?:[-,]\d+)*)/g)];
+  for (let k = 0; k < anchors.length; k++) {
+    const m = anchors[k]!;
+    const real = resolveRepoFile(m[1]!);
+    if (real === undefined) continue;
+    const bad = badAnchorNumbers(real, m[2]!);
+    if (bad.length > 0) {
+      problems.push(doc + ':' + lineNo + ' ' + m[0] + ' 的 ' + bad.join('/') + ' 不在非空行上');
+    }
+    // 相对锚点：本行内该完整锚点之后、下一个完整锚点之前的 :NN 引用同一个文件。
+    const start = (m.index ?? 0) + m[0].length;
+    const end = k + 1 < anchors.length ? (anchors[k + 1]!.index ?? line.length) : line.length;
+    for (const rm of line.slice(start, end).matchAll(/:(\d+(?:[-,]\d+)*)/g)) {
+      const relBad = badAnchorNumbers(real, rm[1]!);
+      if (relBad.length > 0) {
+        problems.push(doc + ':' + lineNo + ' ' + m[1] + rm[0] + ' 的 ' + relBad.join('/') + ' 不在非空行上');
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * ③c 的判据：锚点里**每一个**数字都必须落在真实文件的非空行上。
+ *
+ * ③b 的正则是 `file:(\d+)` —— 它只看得见**第一个数字**。于是
+ * `persistent.ts:58-73` 的 **73**、`usage.ts:22-35,89-113` 的 **113**、
+ * `permission.ts:52,150-151,236` 的 **236** 全在检查范围之外：端点漂到空行或
+ * 越界时 ③b 照样绿（本轮实测 11 处现行文档漂移，③b 一处都没报）。
+ *
+ * 相对锚点（`:52,150-151,236`，文件由同一行**前一个**完整锚点决定）此前也从未
+ * 被检查 —— 它是「同一个文件的后续行号」，写法很省字，于是最容易烂。
+ *
+ * 范围收窄与 ③b 逐字一致（不含归档、跳过围栏块）：同一条规则的两个入口必须同口径，
+ * 否则会「修好一个、漏掉另一个」。
+ *
+ * **已知未覆盖**（如实登记，不假装完整）：跨行的相对锚点（`mapMessage`（`:57-86`）
+ * 里那个 `:57-86` 指向前一行才出现的文件）无法机械归属，故不检查；本仓该类引用
+ * 已改为绝对锚点。若日后又出现，需要人工。
+ */
+function anchorNumberProblems(): string[] {
+  const problems: string[] = [];
+  for (const p of activeDocs()) {
+    let inFence = false;
+    const lines = readFileSync(p, 'utf8').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      if (/^\s*```/.test(line)) { inFence = !inFence; continue; }
+      if (inFence) continue;
+      problems.push(...lineAnchorProblems(relDocs(p), i + 1, line));
+    }
+  }
+  return problems;
+}
+
+/**
+ * ⑨ 的判据：**当前**文档里作为事实写下的仓内路径必须存在。
+ *
+ * 为什么只查「当前」：`设计` 文档的职责就是描述**尚未存在**的文件（`scripts/sync-pricing.ts`
+ * 是 P1 计划，写它是对的）；`历史参考` 已被 ③b/⑤ 一致地排除在外。把三类混在一起查，
+ * 唯一的「修法」是删掉有价值的前瞻路径 —— 比漂移更糟。
+ *
+ * 为什么值得查：`docs/feature-multimodal-attachments/README.md` 曾把附件编解码的落点
+ * 写成 `packages/core/src/attachments.ts`（该文件从未存在，实现一直在 `message.ts`），
+ * 而没有任何门禁看得见 —— 代码路径是最容易被静默搬走、文档却留在原地的引用。
+ *
+ * 只认**具体路径**：含 `*` `?` `<` `>` `{` `|` 或空格的 glob / 占位符一律跳过，
+ * 否则 `packages/<pkg>/src/*.test.ts` 这类「形状示例」会被误判。
+ */
+function inlinePathProblems(): string[] {
+  const roots = ['packages/', 'apps/', 'scripts/', 'contracts/', 'tests/', 'benchmarks/'];
+  const ext = /\.(ts|tsx|mjs|js|json|css|sh|py|yml|yaml)$/;
+  const problems: string[] = [];
+  for (const p of activeDocs()) {
+    const declared = declaredStatus(p);
+    if (declared === null || classifyStatus(declared) !== '当前') continue;
+    let inFence = false;
+    const lines = readFileSync(p, 'utf8').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      if (/^\s*```/.test(line)) { inFence = !inFence; continue; }
+      if (inFence) continue;
+      for (const m of line.matchAll(/`([^`\n]+)`/g)) {
+        const s = m[1]!.trim().replace(/:\d+(?:[-,]\d+)*$/, '').replace(/\(\)$/, '');
+        if (!ext.test(s) || !roots.some((r) => s.startsWith(r))) continue;
+        if (/[*?<>{}|]/.test(s) || /\s/.test(s)) continue;
+        if (!existsSync(join(REPO, s))) {
+          problems.push(relDocs(p) + ':' + (i + 1) + ' 引用了不存在的仓内路径：' + s);
+        }
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * ⑧ 的判据：`ARCHITECTURE.md` §5 的例外表与 `eslint.config.js` 的 `ARCH_EXCEPTIONS`
+ * 必须逐条一致 —— **两份真源不许分叉**。
+ *
+ * 文档自己写死了这条规则（§5：「本节表格与配置文件必须逐条一致；新增例外要同时改两处」），
+ * 但此前**没有任何门禁**看它（全仓 grep：只有一处注释提到 ARCH_EXCEPTIONS）。于是
+ * 「配置加了例外、表没加」会静默通过所有检查 —— 例外清单是安全语义的一部分，不能靠记性。
+ */
+function exceptionTableProblems(): string[] {
+  const cfg = readFileSync(join(REPO, 'eslint.config.js'), 'utf8');
+  const arch = readFileSync(join(DOCS, 'ARCHITECTURE.md'), 'utf8');
+  const rows = (text: string, re: RegExp): Map<string, string> => {
+    const out = new Map<string, string>();
+    for (const m of text.matchAll(re)) out.set(m[1]!, m[2]!);
+    return out;
+  };
+  const cfgRows = rows(cfg, /id:\s*"(EX-\d+)"[\s\S]*?files:\s*\[\s*"([^"]+)"/g);
+  const archRows = rows(arch, /^\|\s*(EX-\d+)\s*\|\s*`([^`]+)`/gm);
+  const problems: string[] = [];
+  for (const [id, file] of cfgRows) {
+    if (!archRows.has(id)) problems.push(id + ' 在 eslint.config.js 的 ARCH_EXCEPTIONS 里，但 ARCHITECTURE.md §5 没有登记');
+    else if (archRows.get(id) !== file) problems.push(id + ' 的文件不一致：配置 ' + file + ' vs 文档 ' + String(archRows.get(id)));
+  }
+  for (const id of archRows.keys()) {
+    if (!cfgRows.has(id)) problems.push(id + ' 在 ARCHITECTURE.md §5 里，但 ARCH_EXCEPTIONS 没有这条（文档不能凭空多出例外）');
+  }
+  return problems;
+}
+
+/**
+ * ⑩ 的判据：`ARCHITECTURE.md` §6.5.5 的 `console.*` 计数必须由 `apps/web/src` 派生。
+ *
+ * 那是**散文里的硬数字**（「实测只有 console.warn（N 处）、console.log 0 处」），
+ * 与 README 的端点数字同类：写的时候是真的，之后每加一处诊断就漂一点，而没有任何
+ * 门禁盯着它。本轮实测已从 23 漂到 38。数字必须来自被数的那个东西。
+ */
+function consoleClaimProblems(): string[] {
+  const dir = join(REPO, 'apps', 'web', 'src');
+  const counts = { warn: 0, log: 0 };
+  const walk = (d: string): void => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) { walk(p); continue; }
+      if (!/\.(ts|tsx)$/.test(e.name)) continue;
+      const text = readFileSync(p, 'utf8');
+      counts.warn += [...text.matchAll(/console\.warn\s*\(/g)].length;
+      counts.log += [...text.matchAll(/console\.log\s*\(/g)].length;
+    }
+  };
+  walk(dir);
+  const arch = readFileSync(join(DOCS, 'ARCHITECTURE.md'), 'utf8');
+  const claim = /`console\.warn`（(\d+) 处）[\s\S]{0,20}`console\.log`\s*(\d+) 处/.exec(arch);
+  if (claim === null) {
+    return ['ARCHITECTURE.md §6.5.5 找不到 console.warn/console.log 的计数声明（改动措辞后请同步本门禁）'];
+  }
+  const problems: string[] = [];
+  if (Number(claim[1]) !== counts.warn) problems.push('ARCHITECTURE.md 说 console.warn ' + claim[1] + ' 处，实际 ' + counts.warn + ' 处');
+  if (Number(claim[2]) !== counts.log) problems.push('ARCHITECTURE.md 说 console.log ' + claim[2] + ' 处，实际 ' + counts.log + ' 处');
+  return problems;
+}
+
 describe('文档不变量', () => {
   it('① 每篇现行文档都登记在地图里，且地图链接都指向存在的东西', () => {
     const rows = mapRows();
@@ -264,6 +451,11 @@ describe('文档不变量', () => {
     // 时指向空行、`turn-id.ts:25-47` 在内容搬到 core 后指向一个 16 行的重导出垫片。
     // 判据与两处范围收窄见 `anchorProblems()` 的注释。
     expect(anchorProblems(), '文档里的 file:line 锚点漂了（文件搬走/行号变了）').toEqual([]);
+  });
+
+  it('③c 锚点里每一个数字（含区间端点与逗号列表、含相对锚点）都落在真实非空行', () => {
+    // WHY 与已知未覆盖见 anchorNumberProblems() 的注释：③b 只看得见第一个数字。
+    expect(anchorNumberProblems(), '文档锚点的区间端点/列表项/相对锚点漂了（③b 看不见它们）').toEqual([]);
   });
 
 });
@@ -391,5 +583,17 @@ describe('文档不变量 · 规模与机器事实', () => {
       }
     }
     expect(problems, '分册必须从它的索引可达').toEqual([]);
+  });
+
+  it('⑧ ARCHITECTURE.md §5 例外表与 eslint 的 ARCH_EXCEPTIONS 逐条一致', () => {
+    expect(exceptionTableProblems(), '例外清单的两份真源分叉了（文档说「必须逐条一致」）').toEqual([]);
+  });
+
+  it('⑨ 当前文档里作为事实写下的仓内路径必须存在', () => {
+    expect(inlinePathProblems(), '当前文档引用了不存在的仓内路径（设计文档可写未来文件，当前文档不行）').toEqual([]);
+  });
+
+  it('⑩ ARCHITECTURE.md 的 console.warn / console.log 计数由 apps/web/src 派生', () => {
+    expect(consoleClaimProblems(), '散文里的计数漂了；数字必须来自被数的那个东西').toEqual([]);
   });
 });

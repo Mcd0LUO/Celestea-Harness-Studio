@@ -51,7 +51,7 @@
 
 | 维度 | 现状 | 位置 |
 |---|---|---|
-| 日志持久化 | `PersistentSessionLog.open` = `mkdir` → `replayFile` 取**最长有效前缀** → 截断 torn tail → 补尾换行 → `nextTurnNumber()` 恢复计数器 → `openSync(path,"a")` | `packages/session/src/log/persistent.ts:58-73` |
+| 日志持久化 | `PersistentSessionLog.open` = `mkdir` → `replayFile` 取**最长有效前缀** → 截断 torn tail → 补尾换行 → `nextTurnNumber()` 恢复计数器 → `openSync(path,"a")` | `packages/session/src/log/persistent.ts:105-125` |
 | 写入耐久性 | `fs.writeSync`（无缓冲，达 OS）；`flush()` 是 no-op；`sync()` 才 fsync；`syncEachAppend` 默认 **false** | `persistent.ts:75-90,117-125`；`defaultPersistentOptions` `:36-38` |
 | 写失败模型 | 磁盘写失败**不抛**：事件仍在内存视图 + stderr 告警 + `writeErrorCount()`（**静默降级**，无 durable 标记） | `persistent.ts:75-90,127-130` |
 | turn 计数 | 日志拥有计数器，`maxTurnNumber(events)+1`，从不复用 id | `packages/core/src/turn-id.ts:30`（`packages/session/src/turn-id.ts` 是稳定重导出路径） |
@@ -68,7 +68,7 @@
 | 用量视图 | `Statusline.usage: UsageBlock & {total}`（按会话取） | `packages/core/src/types.ts:369`（`usage`）与 `:372`（`UsageBlock`） |
 | LLM 失败 | 单次尝试、零重试；非 2xx → `LlmError("stream request failed: <status>: …","generate")`，**状态码只在文案里** | `packages/llm/src/client.ts:132-146,169-176` |
 | 超时 | 三档 connect 15s / response 60s / idle 90s；无总请求超时（有意） | `packages/llm/src/timeouts.ts:26-58` |
-| provider 选择 | 宿主侧 `providers.json` + profile（`base_url`/`api_key_env`）；`LlmRegistry` last-wins 但 studio 只构造**一个** | `apps/studio/src/runtime/provider-target.ts`、`llm-assembly.ts:99-115`、`packages/core/src/llm.ts:21-39` |
+| provider 选择 | 宿主侧 `providers.json` + profile（`base_url`/`api_key_env`）；`LlmRegistry` last-wins 但 studio 只构造**一个** | `apps/studio/src/runtime/provider-target.ts`、`llm-assembly.ts:99-115`、`packages/core/src/llm.ts:28-46` |
 | 外部协同方 | `celes-worker-spawn`（纯 JS，无 shell）：DSH 侧 registry.tsv + 30s 巡检 + 重派 + 硬删；`watch.enabled` 默认 **false** | `/src/dsh_plugins/celes-worker-spawn/README.md:169-205` |
 
 **一句话现状**：**日志层面的恢复已经做完了（并且做得很好），缺的是「运行态 + 编排态 + 经济态 + 可用性态」这四层。**

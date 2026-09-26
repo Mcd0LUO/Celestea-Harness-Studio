@@ -169,10 +169,10 @@ export type Content = TextContent | ToolCallContent | ImageContent;   // ← 唯
 
 | 文件:行 | 现状 | 必须怎么改 |
 | --- | --- | --- |
-| `llm/src/seam.ts:114-119` | `collectMessageText` 静默丢弃非 text 块 | **保留**（它只答「文本是什么」）；新增 `collectMessageParts(content)` 产出 `WireContentPart[]`，并在注释里写明「切勿用它处理带图消息」 |
-| `llm/src/wire.ts:29-34` | `WireMessage.content: string \| null` | 放宽为 `string \| WireContentPart[] \| null` |
+| `llm/src/seam.ts:140-145` | `collectMessageText` 静默丢弃非 text 块 | **保留**（它只答「文本是什么」）；新增 `collectMessageParts(content)` 产出 `WireContentPart[]`，并在注释里写明「切勿用它处理带图消息」 |
+| `llm/src/wire.ts:58-64` | `WireMessage.content: string \| null` | 放宽为 `string \| WireContentPart[] \| null` |
 | `llm/src/wire.ts:200` | `mapMessage` 四个 role 分支 | `user`：有图则产数组；`tool`：有图则**不在这里产**（交给 buildRequestBody 拆分）；`system`/`assistant` 保持纯文本 |
-| `llm/src/wire.ts:110-130` | `buildRequestBody` 逐条 push `mapMessage` | 新增：单个 seam message 可能展开成 **2 条** wire message（tool 文本 + user 图片），并保持顺序 |
+| `llm/src/wire.ts:231-253` | `buildRequestBody` 逐条 push `mapMessage` | 新增：单个 seam message 可能展开成 **2 条** wire message（tool 文本 + user 图片），并保持顺序 |
 | `llm/src/index.ts:32-34` | 导出 `collectMessageText` 等 | 导出新 helper |
 | `llm/src/stream.ts:82` | `doneMessage` 只产 text/tool_call | **不改**（本轮不处理「模型回图」；OpenAI chat 流式本就不回图） |
 
@@ -228,7 +228,7 @@ export type Content = TextContent | ToolCallContent | ImageContent;   // ← 唯
 | `contracts/endpoints.json` | `post_turn.request.fields` 加 `attachments`；若新增端点则 `count` 与 `endpoints` 同步 |
 | `contracts/route-table.snapshot.json:309` | `tsApiEndpoints` 与 `tsOnlyRoutes` 计数（若新增 TS-only 端点） |
 | `contracts/data-files/index.json` | 若把附件目录登记为数据文件，加一条 |
-| `scripts/export-golden.ts:70-90,185-196` | 脱敏器与导出白名单（§5.6） |
+| `scripts/export-golden.ts:75-93,185-196` | 脱敏器与导出白名单（§5.6） |
 
 ### 4.3 日志行形状（向后兼容分析）
 
