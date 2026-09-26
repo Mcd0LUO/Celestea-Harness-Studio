@@ -162,6 +162,15 @@ export interface DataFilesIndex {
  * from the files, and must never be edited to paper over a contract edit -- the
  * file change is what gets reviewed and the counts only follow a deliberate
  * freeze revision.
+ *
+ * W9213: the endpoint count has exactly ONE source of truth --
+ * `contracts/endpoints.json` (`endpoints[]`; its `count` field is the validated
+ * mirror). `FROZEN_COUNTS.endpoints` is the frozen ANCHOR that source is checked
+ * against, and the derivation point for every consumer (`API_ENDPOINT_COUNT`,
+ * the tests); the route snapshot's counts are checked against the contract in
+ * [checkRouteSnapshot]. Keeping this an independent literal -- rather than
+ * deriving it from the file -- is deliberate: a derived `expected` would make
+ * the frozen check a tautology and the drift gate would stop existing.
  */
 export const FROZEN_COUNTS = {
   // W860: 57 -> 60 (GET|PUT /api/sessions/{id}/tools + GET /api/plugins).
@@ -242,6 +251,43 @@ function checkFrozen(file: string, doc: unknown, dir: string): ContractMismatch[
 }
 
 /**
+ * W9213 -- the route-table snapshot is checked AGAINST THE CONTRACT, not against
+ * a second hand-maintained literal.
+ *
+ * The snapshot's two TS-facing counts describe the contract exactly:
+ * `tsApiEndpoints` is the number of `/api/*` routes reachable from the
+ * TypeScript backend (the frozen extraction PLUS `tsOnlyRoutes`) and
+ * `tsMethodPathCombos` adds the 4 static routes. The old test asserted them as
+ * literal 70 / 74; here they are DERIVED from `endpoints.json` and the snapshot's
+ * own arrays, so adding an endpoint can no longer leave a stale number behind.
+ *
+ * This closes the file-level gap the frozen check cannot see: endpoints.json is
+ * validated at the boot gate, but route-table.snapshot.json is read lazily by
+ * `loadRouteSnapshot()` -- so a drifted snapshot would previously have gone
+ * unnoticed by the process and been caught only by a test.
+ */
+export function checkRouteSnapshot(contract: EndpointsContract, snapshot: RouteSnapshot, dir: string): ContractMismatch[] {
+  const path = resolve(dir, "route-table.snapshot.json");
+  const apiRoutes = snapshot.routes.filter((r) => r.path.startsWith("/api/"));
+  const tsOnly = snapshot.tsOnlyRoutes ?? [];
+  const expected = contract.endpoints.length;
+  const expectedCombos = expected + snapshot.staticRoutes.length;
+  const mismatches: ContractMismatch[] = [];
+  if (snapshot.tsApiEndpoints !== expected) {
+    mismatches.push({ file: "route-table.snapshot.json", path, field: "tsApiEndpoints", expected, actual: snapshot.tsApiEndpoints ?? -1 });
+  }
+  if (snapshot.tsMethodPathCombos !== expectedCombos) {
+    mismatches.push({ file: "route-table.snapshot.json", path, field: "tsMethodPathCombos", expected: expectedCombos, actual: snapshot.tsMethodPathCombos ?? -1 });
+  }
+  // The snapshot's own arrays must ADD UP to the numbers it declares: a route
+  // added to one array without the other is drift too.
+  if (apiRoutes.length + tsOnly.length !== expected) {
+    mismatches.push({ file: "route-table.snapshot.json", path, field: "routes[] + tsOnlyRoutes[]", expected, actual: apiRoutes.length + tsOnly.length });
+  }
+  return mismatches;
+}
+
+/**
  * A contract store bound to one directory. Every value is read from disk at
  * most once: the first (validated) read wins and is reused for the rest of the
  * process lifetime. Tests point a store at a throwaway copy; the process-wide
@@ -292,6 +338,14 @@ export function createContractStore(dir: string): ContractStore {
       mismatches.push(...checkFrozen(file, value, dir));
       snapshot.set(file, value);
     }
+    // W9213: the route snapshot is not a FROZEN file, but its counts are derived
+    // from the endpoint contract -- check them at the same gate so a stale
+    // snapshot refuses the boot instead of surfacing in a test only.
+    if (mismatches.length === 0) {
+      const routeTable = readJson<RouteSnapshot>("route-table.snapshot.json");
+      mismatches.push(...checkRouteSnapshot(snapshot.get("endpoints.json") as EndpointsContract, routeTable, dir));
+      snapshot.set("route-table.snapshot.json", routeTable);
+    }
     if (mismatches.length > 0) throw new ContractValidationError(dir, mismatches);
     for (const [file, value] of snapshot) cache.set(file, value);
   }
@@ -301,7 +355,15 @@ export function createContractStore(dir: string): ContractStore {
     loadEndpoints: () => loadChecked<EndpointsContract>("endpoints.json"),
     loadSse: () => loadChecked<SseContract>("sse-events.json"),
     loadTools: () => loadChecked<ToolsContract>("tools.json"),
-    loadRouteSnapshot: () => cached("route-table.snapshot.json", () => readJson<RouteSnapshot>("route-table.snapshot.json")),
+    // W9213: the same derived check on the lazy path, so a drifted snapshot is
+    // refused wherever it is read (not only at the explicit boot gate).
+    loadRouteSnapshot: () =>
+      cached("route-table.snapshot.json", () => {
+        const value = readJson<RouteSnapshot>("route-table.snapshot.json");
+        const mismatches = checkRouteSnapshot(loadChecked<EndpointsContract>("endpoints.json"), value, dir);
+        if (mismatches.length > 0) throw new ContractValidationError(dir, mismatches);
+        return value;
+      }),
     loadSessionEventSchema: () => cached("session-event.schema.json", () => readJson<Record<string, unknown>>("session-event.schema.json")),
     loadDataFilesIndex: () => cached("data-files/index.json", () => readJson<DataFilesIndex>("data-files", "index.json")),
     loadDataFileSchema: (name: string) => cached("data-files/" + name, () => readJson<Record<string, unknown>>("data-files", name)),

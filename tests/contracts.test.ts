@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { EXECUTION_TOOL_NAMES } from "@celestea/tools";
 import { API_ENDPOINT_COUNT } from "../apps/studio/src/routes.js";
 import {
+  FROZEN_COUNTS,
   loadDataFileSchema,
   loadDataFilesIndex,
   loadEndpoints,
@@ -17,6 +18,16 @@ import {
   TURN_OUTCOMES,
 } from "@celestea/core";
 
+/**
+ * W9213 -- the endpoint count is written ONCE (in `contracts/endpoints.json`, the
+ * source of truth) and this suite derives every expectation from it instead of
+ * repeating the literal. `FROZEN_COUNTS.endpoints` is the frozen anchor the
+ * contract file is validated against, so an assertion against the anchor still
+ * fails when the file and the anchor drift apart -- the gate kept its teeth while
+ * losing the 20-odd hand-maintained copies of "70".
+ */
+const ENDPOINT_COUNT = FROZEN_COUNTS.endpoints;
+
 describe("contracts/endpoints.json", () => {
   const c = loadEndpoints();
 
@@ -26,9 +37,9 @@ describe("contracts/endpoints.json", () => {
   // model switch `PUT /api/sessions/{id}/model`); G5: 61 -> 62 (`GET /api/fs/list`).
   // W1528: 66 -> 69 (the workbench terminal's real-PTY face: open / input / close).
   // W9209: 69 -> 70 (POST /api/sessions/{id}/goal, the persistent session goal).
-  it("holds exactly 70 endpoints (W725 context, W767 cookie gate, W783 questions, W785 ledger, W791 mode, W9 permissions, W860 tools/plugins, W870 session model, G5 fs list, W895 display plugins, W1528 terminal, W9209 goal)", () => {
-    expect(c.count).toBe(70);
-    expect(c.endpoints).toHaveLength(70);
+  it("holds exactly the frozen number of endpoints (W725 context, W767 cookie gate, W783 questions, W785 ledger, W791 mode, W9 permissions, W860 tools/plugins, W870 session model, G5 fs list, W895 display plugins, W1528 terminal, W9209 goal)", () => {
+    expect(c.count).toBe(ENDPOINT_COUNT);
+    expect(c.endpoints).toHaveLength(ENDPOINT_COUNT);
   });
 
   // W767: Studio's own login-cookie gate is served on `/login` + `/auth/*` — the
@@ -53,6 +64,8 @@ describe("contracts/endpoints.json", () => {
 
   it("matches the frozen route table snapshot plus the declared TS-only delta", () => {
     const snap = loadRouteSnapshot();
+    // The LEGACY extraction is a frozen historical fact (38 route() declarations
+    // / 43 method+path combos / 39 API + 4 static): it must never move again.
     expect(snap.routeDeclarations).toBe(38);
     expect(snap.methodPathCombos).toBe(43);
     expect(snap.staticRoutes).toHaveLength(4);
@@ -68,14 +81,26 @@ describe("contracts/endpoints.json", () => {
     // W870: 21 -> 22 (PUT /api/sessions/{id}/model); G5: 22 -> 23 (GET /api/fs/list).
     // W1528: 23 -> 26 (the terminal's open / input / close).
     // W9209: 26 -> 27 (POST /api/sessions/{id}/goal, the persistent session goal).
-    expect(snap.tsOnlyRoutes).toHaveLength(31);
-    expect(snap.tsApiEndpoints).toBe(70);
-    // 70 API endpoints + the 4 static routes = 74 method+path combos.
-    expect(snap.tsMethodPathCombos).toBe(74);
+    // W9213: both numbers are DERIVED -- the delta is "contract minus the frozen
+    // 39 API routes", and the snapshot's own declared counts are checked against
+    // the contract by checkRouteSnapshot (which the store runs on every read).
+    expect(snap.tsOnlyRoutes).toHaveLength(ENDPOINT_COUNT - api.length);
+    expect(snap.tsApiEndpoints).toBe(ENDPOINT_COUNT);
+    // the contract's endpoints + the 4 static routes = the TS method+path combos.
+    expect(snap.tsMethodPathCombos).toBe(ENDPOINT_COUNT + snap.staticRoutes.length);
     const fromSnapshot = new Set([...api, ...(snap.tsOnlyRoutes ?? [])].map((r) => `${r.method} ${r.path}`));
-    expect(fromSnapshot.size).toBe(70);
+    expect(fromSnapshot.size).toBe(ENDPOINT_COUNT);
     const fromContract = new Set(c.endpoints.map((e) => `${e.method} ${e.path}`));
     expect([...fromContract].sort()).toEqual([...fromSnapshot].sort());
+  });
+
+  // W9213: the contract's own TITLE repeats the count ("... (70 endpoints)"). It is
+  // prose, so it cannot be derived -- but it CAN be checked, which is the point:
+  // before this assertion the title was a hand-maintained copy with no gate at all.
+  it("states the endpoint count in its title consistently with endpoints[]", () => {
+    const stated = /^(.*) \((\d+) endpoints\)$/.exec(c.title);
+    expect(stated, "the contract title must state '<...> (N endpoints)'").not.toBeNull();
+    expect(Number(stated?.[2])).toBe(ENDPOINT_COUNT);
   });
 
   it("documents the documented error status codes", () => {
@@ -100,7 +125,7 @@ describe("contracts/endpoints.json", () => {
     expect(field?.type).toBe("string");
     expect(String(field?.note)).toContain("git tag");
     expect(health?.notes?.some((n) => n.includes("W887"))).toBe(true);
-    expect(c.count).toBe(70);
+    expect(c.count).toBe(ENDPOINT_COUNT);
   });
 
   it("freezes the W804 per-model modality bits with the optimistic default", () => {
@@ -252,7 +277,7 @@ describe("contracts/data-files", () => {
     expect(kind?.enum).toEqual(["ok", "error"]);
     expect(loadDataFileSchema("pricing.schema.json")["title"]).toContain("pricing.json");
 
-    expect(loadEndpoints().count).toBe(70);
+    expect(loadEndpoints().count).toBe(ENDPOINT_COUNT);
   });
 });
 
@@ -269,8 +294,8 @@ describe("E-P0③ checkpoint + boot recovery (contract delta)", () => {
     // moved for the unrelated reason that the question, ledger, mode, permission,
     // session-tool, plugin and session-model endpoints exist (W870: 61); W1528
     // added the terminal's three.
-    expect(loadEndpoints().count).toBe(70);
-    expect(loadEndpoints().endpoints).toHaveLength(70);
+    expect(loadEndpoints().count).toBe(ENDPOINT_COUNT);
+    expect(loadEndpoints().endpoints).toHaveLength(ENDPOINT_COUNT);
   });
 
   it("freezes the sidecar shape (version, open_turn, repaired[])", () => {
@@ -301,8 +326,8 @@ describe("E-P0③ checkpoint + boot recovery (contract delta)", () => {
     const worker = byId.get("get_worker_status")?.response.fields.map((f) => f.name) ?? [];
     expect(worker).toContain("stale");
     expect(worker).toContain("orphans");
-    expect(loadEndpoints().count).toBe(70);
-    expect(API_ENDPOINT_COUNT).toBe(70);
+    expect(loadEndpoints().count).toBe(ENDPOINT_COUNT);
+    expect(API_ENDPOINT_COUNT).toBe(ENDPOINT_COUNT);
   });
 
   it("W1470b: the previous generation is a declared PURE ADDITION on both listings", () => {
@@ -320,8 +345,8 @@ describe("E-P0③ checkpoint + boot recovery (contract delta)", () => {
     expect(rowType).toContain("parentSessionId?:string");
     expect((sessions?.notes ?? []).some((n) => n.includes("PLUS the previous one"))).toBe(true);
     // No new endpoint: the count is frozen at the W870 number (+ W1528's three).
-    expect(loadEndpoints().count).toBe(70);
-    expect(API_ENDPOINT_COUNT).toBe(70);
+    expect(loadEndpoints().count).toBe(ENDPOINT_COUNT);
+    expect(API_ENDPOINT_COUNT).toBe(ENDPOINT_COUNT);
   });
 
   it("B7: the studio's own worker table is a declared data file with the new tokens", () => {
@@ -378,8 +403,8 @@ describe("W729 session modes (P0 contract delta)", () => {
     // W729 added no endpoint; W791's mode switch is the P1 addition (50 -> 51),
     // W9's six permission endpoints took it to 57, W860's three to 60, W870's
     // session-level model switch to 61 and W1528's terminal face to 69.
-    expect(c.count).toBe(70);
-    expect(c.endpoints).toHaveLength(70);
+    expect(c.count).toBe(ENDPOINT_COUNT);
+    expect(c.endpoints).toHaveLength(ENDPOINT_COUNT);
   });
 
   it("declares spawn_worker.mode without changing the tool count", () => {
@@ -441,8 +466,8 @@ describe("W791 P1 session mode + archived list (contract delta)", () => {
     // Declared as TypeScript-only (the retired backend has no counterpart).
     const tsOnly = loadRouteSnapshot().tsOnlyRoutes ?? [];
     expect(tsOnly.map((r) => `${r.method} ${r.path}`)).toContain("POST /api/sessions/{id}/mode");
-    expect(c.count).toBe(70);
-    expect(API_ENDPOINT_COUNT).toBe(70);
+    expect(c.count).toBe(ENDPOINT_COUNT);
+    expect(API_ENDPOINT_COUNT).toBe(ENDPOINT_COUNT);
   });
 
   /**
@@ -487,8 +512,8 @@ describe("W791 P1 session mode + archived list (contract delta)", () => {
     // B adds NO endpoint: W791's 51 is the mode switch alone (W860's 60 comes
     // from the session-tool switches and the plugin inventory; W870's 61 is the
     // session-level model switch; W1528's 69 adds the terminal's three).
-    expect(c.count).toBe(70);
-    expect(c.endpoints).toHaveLength(70);
+    expect(c.count).toBe(ENDPOINT_COUNT);
+    expect(c.endpoints).toHaveLength(ENDPOINT_COUNT);
   });
 });
 
@@ -512,9 +537,9 @@ describe("W870 session-scoped model switch (contract delta)", () => {
     // target is THIS endpoint, while POST /api/config stays the global default.
     expect(model?.notes?.some((n) => n.includes("POST /api/config"))).toBe(true);
     expect(model?.notes?.some((n) => n.includes("profileFor"))).toBe(true);
-    expect(c.count).toBe(70);
-    expect(c.endpoints).toHaveLength(70);
-    expect(API_ENDPOINT_COUNT).toBe(70);
+    expect(c.count).toBe(ENDPOINT_COUNT);
+    expect(c.endpoints).toHaveLength(ENDPOINT_COUNT);
+    expect(API_ENDPOINT_COUNT).toBe(ENDPOINT_COUNT);
   });
 
   it("keeps POST /api/config meaning the GLOBAL default (no semantic drift)", () => {
@@ -547,8 +572,8 @@ describe("W9209 persistent session goal (contract delta)", () => {
     // Declared as TypeScript-only (the retired backend has no counterpart).
     const tsOnly = loadRouteSnapshot().tsOnlyRoutes ?? [];
     expect(tsOnly.map((r) => `${r.method} ${r.path}`)).toContain("POST /api/sessions/{id}/goal");
-    expect(c.count).toBe(70);
-    expect(API_ENDPOINT_COUNT).toBe(70);
+    expect(c.count).toBe(ENDPOINT_COUNT);
+    expect(API_ENDPOINT_COUNT).toBe(ENDPOINT_COUNT);
   });
 
   it("freezes the 404 / 422 / 500 error texts the handler actually returns", () => {

@@ -1,7 +1,10 @@
 /**
  * Route table derived from the frozen contract.
  *
- * 70 endpoints (74 method+path combos minus the 4 static routes).
+ * `API_ENDPOINT_COUNT` below is DERIVED from the contract's frozen anchor
+ * (`FROZEN_COUNTS.endpoints`), never typed as a second literal: the boot
+ * assertion, the contract file and the route snapshot can no longer disagree
+ * with a third hand-maintained number (W9213).
  * The contract path params use `{id}`; Hono uses `:id`, so paths are translated here
  * once and the translation is asserted in tests.
  *
@@ -27,7 +30,7 @@
  * lists the TypeScript-only additions separately.
  */
 
-import { loadEndpoints, type EndpointContract } from "@celestea/core";
+import { FROZEN_COUNTS, loadEndpoints, type EndpointContract } from "@celestea/core";
 
 export interface RegisteredRoute {
   id: string;
@@ -61,7 +64,13 @@ export function studioRoutes(): RegisteredRoute[] {
   }));
 }
 
-export const API_ENDPOINT_COUNT = 70;
+/**
+ * W9213: the startup assertion's expected count, derived from the contract's
+ * frozen anchor. It stays a compile-time constant (no runtime I/O on the boot
+ * hot path) and the anchor is the very number the contract is validated against
+ * at `verifyContractsAtStartup()`, so the three can no longer drift apart.
+ */
+export const API_ENDPOINT_COUNT = FROZEN_COUNTS.endpoints;
 export const STATIC_ROUTE_COUNT = 4;
 
 /** Id-keyed view of the contract routes: a handler asks for its id, never a path. */

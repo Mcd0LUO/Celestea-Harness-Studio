@@ -26,6 +26,7 @@
 | [`configuration.md`](./configuration.md) | 当前 | **配置**：`CELESTEA_HOME` 解析顺序与目录布局、环境变量全表、模型接入、权限档位 | 本文；数据文件 schema 见 [`data-files.md`](./data-files.md) |
 | [`AGENT.md`](./AGENT.md) | 当前 | **开发与提交规范**：完成定义（Definition of Done）、提交消息格式与粒度、发布流程（先 tag 再 build）、派工协议、文档规范、写代码取向 | 本文；门禁清单见根 `package.json` 的 `check` |
 | [`DEPENDENCY-POLICY.md`](./DEPENDENCY-POLICY.md) | 当前（W847 W0） | **依赖与工具链策略**：Node 版本带 + 启动守卫、冻结安装（pnpm-workspace.yaml）、升级验证协议与回滚、为什么 audit 不进门禁、外部运行时依赖清点 | 本文 |
+| [`retrospective-2026-09-27.md`](./retrospective-2026-09-27.md) | 当前 | **复盘**：一轮审计驱动的修复暴露的五类失效模式（测试固化错误行为 / 注释描述不存在的状态 / 把宿主事实当平台事实 / 只验证机制不验证输入面 / 声称做了但没做）与已落成的机械门禁；含「仍未解决」与「无法核实的说法」两节 | 本文；门禁落点见 `tests/cross-platform-scripts.test.ts`、`scripts/run-gate.mjs` |
 
 上表覆盖 `docs/` 的全部**现行文档**（根文档 + 分册索引，本索引除外）；**新增文档必须在上表登记**。
 （这里刻意不写篇数：那个数字漂过 —— 迭代 F/G/H 三篇都漏登记了。`tests/readme-claims.test.ts` 只钉根 `README.md` 的硬数字，不覆盖本文件。）
@@ -33,6 +34,8 @@
 本机文件 `docs/AGENT.local.md`（由 `AGENT.local.md.example` 复制而来）**不入库、不需登记**：那里放机器相关的事实。
 契约类真源不在 `docs/`，而在
 [`../contracts/`](../contracts/)（`endpoints.json` 70 端点、`sse-events.json`、`tools.json`、`data-files/`）——
+端点数只有**一个真源**（`endpoints.json` 的 `endpoints[]`，其 `count` 是它的校验镜像）；
+本文件与根 `README.md` 里的引用由 `tests/readme-claims.test.ts` 机械核对，改契约忘改这里会红。
 退役后端的归档 HTTP 契约已于 W881 清理出公开仓，相关端点的 `docRef` 现指向
 `contracts/endpoints.json` 自身的冻结条目。
 

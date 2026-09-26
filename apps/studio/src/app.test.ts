@@ -1,7 +1,7 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadEndpoints } from "@celestea/core";
+import { FROZEN_COUNTS, loadEndpoints } from "@celestea/core";
 import { busyRuntime, getJson, jsonRequest, makeHarness, type StudioHarness } from "./harness.test-util.js";
 import { API_ENDPOINT_COUNT } from "./routes.js";
 
@@ -63,8 +63,10 @@ describe("W729/W791 endpoint invariants", () => {
     // W791 (P1) adds `POST /api/sessions/{id}/mode` (50 -> 51). W9's permission
     // CRUD took it to 57, W860's session-tool switches + plugin inventory to 60,
     // W870's model switch to 61 and G5's `GET /api/fs/list` to 62.
-    expect(API_ENDPOINT_COUNT).toBe(70);
-    expect(loadEndpoints().count).toBe(70);
+    // W9213: the constant is derived from the frozen anchor, so this compares the
+    // three faces instead of repeating the number a fourth time.
+    expect(API_ENDPOINT_COUNT).toBe(FROZEN_COUNTS.endpoints);
+    expect(loadEndpoints().count).toBe(API_ENDPOINT_COUNT);
     expect(loadEndpoints().endpoints.map((e) => e.id)).toContain("post_session_mode");
   });
 });
@@ -230,7 +232,7 @@ describe("health / status / tools / config", () => {
   });
 
   it("409s POST /api/config while a turn is running", async () => {
-    const h = make();
+    make();
     const busy = busyRuntime();
     const h2 = makeHarness({ runtime: busy });
     harnesses.push(h2);

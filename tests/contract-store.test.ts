@@ -120,6 +120,58 @@ describe("W807 contract store", () => {
   });
 });
 
+/**
+ * W9213 -- the route snapshot's endpoint counts are DERIVED from the contract.
+ *
+ * Before this change the only thing pinning `tsApiEndpoints` / `tsMethodPathCombos`
+ * was a literal in a test, so an endpoint could be added to the contract while the
+ * snapshot kept the old number and the process would boot happily. The snapshot is
+ * not a FROZEN file (it is read lazily), so this is checked on every read and at
+ * the boot gate; these tests pin BOTH paths on a throwaway copy.
+ */
+describe("W9213 route snapshot counts are derived from the contract", () => {
+  /** Bump the snapshot's declared count WITHOUT touching its arrays (the drift). */
+  function driftSnapshotCount(dir: string, field: "tsApiEndpoints" | "tsMethodPathCombos"): string {
+    const file = join(dir, "route-table.snapshot.json");
+    const doc = JSON.parse(readFileSync(file, "utf8")) as Record<string, number>;
+    writeFileSync(file, JSON.stringify({ ...doc, [field]: Number(doc[field]) + 1 }, null, 2) + "\n");
+    return file;
+  }
+
+  it("accepts the real snapshot (the check is not vacuous)", () => {
+    const store = createContractStore(REAL_CONTRACTS);
+    const snap = store.loadRouteSnapshot();
+    expect(snap.tsApiEndpoints).toBe(FROZEN_COUNTS.endpoints);
+    expect(snap.tsMethodPathCombos).toBe(FROZEN_COUNTS.endpoints + snap.staticRoutes.length);
+  });
+
+  it("fails fast when tsApiEndpoints disagrees with the contract, naming the field", () => {
+    const dir = copyContracts();
+    const file = driftSnapshotCount(dir, "tsApiEndpoints");
+    const store = createContractStore(dir);
+
+    expect(() => store.loadRouteSnapshot()).toThrow(ContractValidationError);
+    expect(() => store.verifyAtStartup()).toThrow(ContractValidationError);
+    let message = "";
+    try {
+      store.verifyAtStartup();
+    } catch (e) {
+      message = e instanceof Error ? e.message : String(e);
+    }
+    expect(message).toContain("route-table.snapshot.json");
+    expect(message).toContain("tsApiEndpoints");
+    expect(message).toContain("expected " + FROZEN_COUNTS.endpoints);
+    expect(message).toContain(file);
+  });
+
+  it("fails fast when tsMethodPathCombos disagrees with the contract + static routes", () => {
+    const dir = copyContracts();
+    driftSnapshotCount(dir, "tsMethodPathCombos");
+    const store = createContractStore(dir);
+    expect(() => store.loadRouteSnapshot()).toThrow(/tsMethodPathCombos/);
+  });
+});
+
 /* ===== contract-doc-pointers.test.ts ===== */
 /**
  * W893 — 契约里的**文档指针必须可达**。

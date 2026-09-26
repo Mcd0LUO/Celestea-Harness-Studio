@@ -20,7 +20,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { loadEndpoints, loadSse, repoRoot, SSE_EVENT_NAMES } from "@celestea/core";
+import { FROZEN_COUNTS, loadEndpoints, loadSse, repoRoot, SSE_EVENT_NAMES } from "@celestea/core";
 import { whichSync } from "@celestea/tools";
 import { API_ENDPOINT_COUNT } from "../apps/studio/src/routes.js";
 import { getJson, makeHarness, type StudioHarness } from "../apps/studio/src/harness.test-util.js";
@@ -98,9 +98,12 @@ function alive(pid: number): boolean {
 describe("W1528 · contract consistency (the three-way count)", () => {
   it("keeps API_ENDPOINT_COUNT == endpoints.json count == endpoints[] length", () => {
     const c = loadEndpoints();
+    // W9213: no literal here -- API_ENDPOINT_COUNT is DERIVED from the frozen
+    // anchor (FROZEN_COUNTS.endpoints) and this asserts the contract matches it,
+    // so the three-way equality is the whole assertion.
     expect(API_ENDPOINT_COUNT).toBe(c.count);
     expect(c.endpoints).toHaveLength(c.count);
-    expect(c.count).toBe(70);
+    expect(c.count).toBe(FROZEN_COUNTS.endpoints);
   });
 
   it("declares the three terminal endpoints with self-referencing docRefs", () => {
