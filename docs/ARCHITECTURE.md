@@ -261,6 +261,24 @@ apps/studio → runtime.compose(profile)
 4. **测试也受规模规则约束**（同为 `SOURCE_GLOBS`），但允许 `import` 自己被测的包（`*.test.ts` 豁免横向导入限制）。
 5. **不要 mock 掉被验证的 seam 本身**；要 mock 的是 HTTP、进程、时钟、文件系统这类外部边界。
 6. 金标准来源优先级：**运行中的实机 > 参考实现单测 > TS 自洽**。前两者产出的 fixture 入库；自洽对比必须在报告里标注 `derived`。
+7. **执行架构：两池 + 白名单（W9219）**。`vitest.config.ts` 把测试文件分到三个 project：
+   - `isolated`（`isolate` 默认 true，**一文件一进程**）—— **默认归宿**，新文件一律进这里；
+   - `shared`（`isolate:false`，共享进程）—— 只装 `tests/lib/shared-pool-allowlist.json` 里的白名单；
+   - `real-backend`（默认零文件，`CELESTEA_E2E=1` 才装载；见 `vitest.config.ts` 的 W847/W862 注释）。
+
+   **为什么只能白名单、不能全局共享**：6 次全量 `isolate:false` 实测的不稳定并集有 21 个文件，
+   且**没有一个是 6/6 失败** —— 这是跨文件不确定性，不是某个文件的固有缺陷。
+   根因已定位并修复：`tests/lib/w1467-dom.ts` 的 `installDom()` 把 `globalThis.Node` 设成
+   不可调用对象且从不还原，导致同进程后续文件的 `expect(str).toContain(x)` 在 chai 的
+   `actual instanceof Node` 处抛 `TypeError`（实测 288 个白名单文件里 98 个因此变红，isolated 池 0 个）。
+
+   **白名单是 fail-closed 的**：只有「6 次全量 6/6 通过」且非 jsdom 的文件才入选；
+   实测「单独跑过、共享跑红」或已知 flaky 的文件登记在 `reviewedDemotions` 并退回 isolated。
+   **平台 fail-closed**：证据只在 **win32** 采集（`shared-pool-allowlist.json` 的 `platform` 字段），
+   而白名单里有 20 个带条件跳过（平台或能力探测）的文件（在 Windows 上被跳过 ⇒ 其 6/6 证据是空洞的，到 Linux 会真跑），
+   故 shared 池**只在 `process.platform === "win32"` 时启用**，其它平台全部走 isolated
+   （= 改动前行为）⇒ ubuntu CI 行为零变化。判定真源：`tests/lib/shared-pool-policy.ts`。
+   机械兜底：`tests/w9219-test-pool-ratchet.test.ts`（含 ★ 调包用例）、`tests/w9217-test-workers.test.ts`。
 
 ### 6.5 口径与豁免（W889 审计补遗）
 
@@ -278,6 +296,7 @@ apps/studio → runtime.compose(profile)
   `tests/lib/w795-dom.ts` 装配工具，放在 `src/` 会把这些拖进生产 program。
 - **`apps/cli/src`：单元测试与被测同级**（与 packages 同规则）。
 - `tests/` 仍只放跨包契约测试、端到端回放、以及上面明确划归它的前端测试。
+- **池归属与位置无关**（W9219）：无论测试放在哪，都默认进 `isolated` 池；只有进白名单才共享进程（见 §6.4.7）。
 
 **6.5.3 空 catch：有说明即可（补 §6.2.4）**
 「不许空 catch」的判定是**有没有一行说明为什么可以忽略**：

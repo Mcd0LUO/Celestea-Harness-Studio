@@ -163,7 +163,7 @@ tag 一推就有自己的 CI 结论；**等它绿了再 `publish`** 才是完整
 | `RLIMIT_AS` 与 Chromium 不兼容 | 浏览器进程 SIGTRAP（133） | 浏览器调用走 `noAddressSpaceLimit` 豁免 |
 | benchmark 跨运行噪声 | 同一提交两次跑 p50 2.6% / p90 12.6%（**本仓开发机实测；换机器请自测，量级可能不同**） | 别信单次对比的 <10% 变动；认真对比用 `--repeat 3` |
 | 时序敏感用例 | 并发构建时 flaky（本仓真实发生过 2 条） | 静默条件下重跑；不要用「flaky」搪塞，要定位 |
-| **CI 的 Windows runner 只有 4 核**，而 vitest 会 spawn 300+ 个 worker（日志自己会写 `Isolate N workers spawned`） | 轮询型用例（如 `tests/w795-optimistic-grants.test.ts`）在**本机 28 核怎么跑都绿**、在 CI 偶发 `Error: timed out waiting for ...`；且常出现在**纯文档提交**上（证明与改动无关） | 先按「负载 flake」判：本机重跑 + `taskset -c 0-3` 限核重跑，都绿即可判非回归；**不要**为了绿去加大轮询预算（那是掩盖）。根治方向是降并行度（CI 日志提示 `isolate: false` 可省 ~47s） |
+| **CI 的 Windows runner 只有 4 核**，而 vitest 会为每个测试文件 spawn 一个 worker（日志自己会写 `Isolate N workers spawned`） | 轮询型用例（如 `tests/w795-optimistic-grants.test.ts`）在**本机 28 核怎么跑都绿**、在 CI 偶发 `Error: timed out waiting for ...`；且常出现在**纯文档提交**上（证明与改动无关） | 先按「负载 flake」判：本机重跑 + `taskset -c 0-3` 限核重跑，都绿即可判非回归；**不要**为了绿去加大轮询预算（那是掩盖）。根治方向是降并行度：W9219 已落地**两池**（`isolated` + `shared` 白名单，见 `docs/ARCHITECTURE.md` §6.4.7）—— 本机实测 worker 启动 401→121（−70%）、墙钟 −12%；但**全局** `isolate: false` 不可行（6 次全量实测 21 个文件不稳定） |
 
 ---
 

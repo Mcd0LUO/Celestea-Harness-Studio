@@ -140,7 +140,38 @@ export class El {
 
 const WIN = globalThis as unknown as Record<string, unknown>;
 
-/** 装全局 document / window / Node（幂等：重复调用无副作用）。 */
+/** 被 installDom 覆盖的全局名字（还原时的唯一真源）。 */
+const INSTALLED_GLOBALS = ["document", "Node", "window"] as const;
+/** navigator 是 accessor（node 自带只读 getter），要按属性描述符单独还原。 */
+const NAVIGATOR_DESCRIPTOR = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+
+/** 本进程里是否已安装（幂等 + 只还原「装过」的东西）。 */
+let installed = false;
+
+/**
+ * W9219：还原 installDom 覆盖过的全局。
+ *
+ * 为什么必须还原：W9219 的 shared 池让多个测试文件**共享一个进程**，
+ * 而 `WIN["Node"] = { DOCUMENT_POSITION_FOLLOWING: 4 }` 是个**不可调用**的对象。
+ * 它一旦残留，后续任何文件里的 `expect(str).toContain(x)` 都会在 chai 的
+ * `actual instanceof Node` 处抛 `TypeError: Right-hand side of 'instanceof' is not callable`
+ * —— 实测：共享进程下 288 个白名单文件里 98 个因此变红（isolated 池 0 个）。
+ * 单独跑这些文件时 288 个全过，正是「泄漏」而非「缺陷」的判据。
+ *
+ * 在 `isolate:true`（默认）下各文件本来就是独立进程，此还原是**无害的加固**：
+ * 覆盖前先存原值，还原时按原样写回（原本没有该全局则删除）。
+ */
+export function restoreDom(): void {
+  if (!installed) return;
+  installed = false;
+  for (const key of INSTALLED_GLOBALS) {
+    if (key in WIN) delete WIN[key];
+  }
+  if (NAVIGATOR_DESCRIPTOR === undefined) delete (globalThis as Record<string, unknown>)["navigator"];
+  else Object.defineProperty(globalThis, "navigator", NAVIGATOR_DESCRIPTOR);
+}
+
+/** 装全局 document / window / Node（幂等：重复调用无副作用；配 restoreDom 还原）。 */
 export function installDom(): void {
   WIN["document"] = {
     createElement: (tag: string) => new El(tag),
@@ -160,6 +191,7 @@ export function installDom(): void {
     configurable: true,
     writable: true,
   });
+  installed = true;
 }
 
 /** 用 esbuild 把一组前端模块打成可 import 的 ESM（解析器挂在 apps/web 的依赖树上）。 */

@@ -21,7 +21,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { bundleFrontend, El, installDom } from "./lib/w1467-dom.js";
+import { bundleFrontend, El, installDom, restoreDom } from "./lib/w1467-dom.js";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 
@@ -44,7 +44,12 @@ beforeAll(async () => {
   mod = (await import(pathToFileURL(out).href)) as ScrollMod;
 });
 
-afterAll(() => { if (tmpDir) rmSync(tmpDir, { recursive: true, force: true }); });
+afterAll(() => {
+  // W9219：还原 installDom 覆盖的全局（Node/document/window/navigator）。
+  // 不还原时共享进程下的后续文件会在 chai 的 `instanceof Node` 处整片变红（见 w1467-dom.ts）。
+  restoreDom();
+  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+});
 
 /**
  * 一个可控几何的会话容器。

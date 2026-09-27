@@ -26,7 +26,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { projectMessages } from "@celestea/session";
 import { subCallFrame } from "@celestea/runtime";
-import { bundleFrontend, depthOfCards, El, installDom, treeSkeleton } from "./lib/w1467-dom.js";
+import { bundleFrontend, depthOfCards, El, installDom, restoreDom, treeSkeleton } from "./lib/w1467-dom.js";
 import type { SessionEvent, StudioMessage } from "@celestea/core";
 
 /** StudioMessage 的 tool 行守卫（联合收窄用）。 */
@@ -131,7 +131,12 @@ beforeAll(async () => {
   mod = (await import(pathToFileURL(out).href)) as TreeMod;
 });
 
-afterAll(() => { if (tmpDir) rmSync(tmpDir, { recursive: true, force: true }); });
+afterAll(() => {
+  // W9219：还原 installDom 覆盖的全局（Node/document/window/navigator）。
+  // 不还原时共享进程下的后续文件会在 chai 的 `instanceof Node` 处整片变红（见 w1467-dom.ts）。
+  restoreDom();
+  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+});
 
 /** 按 live / replay **同一套规则**建树：父卡先建，子项按 parentId 挂。 */
 function buildTree(rows: Array<{ id: string; name: string; parent?: string; sub?: number }>): El {

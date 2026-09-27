@@ -19,7 +19,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { bundleFrontend, depthOfCards, El, installDom, treeSkeleton } from "./lib/w1467-dom.js";
+import { bundleFrontend, depthOfCards, El, installDom, restoreDom, treeSkeleton } from "./lib/w1467-dom.js";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const WIN = globalThis as unknown as Record<string, unknown>;
@@ -50,7 +50,12 @@ beforeAll(async () => {
   restore = (await import(pathToFileURL(rOut).href)) as RestoreMod;
 });
 
-afterAll(() => { if (tmpDir) rmSync(tmpDir, { recursive: true, force: true }); });
+afterAll(() => {
+  // W9219：还原 installDom 覆盖的全局（Node/document/window/navigator）。
+  // 不还原时共享进程下的后续文件会在 chai 的 `instanceof Node` 处整片变红（见 w1467-dom.ts）。
+  restoreDom();
+  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+});
 
 /** 一个够 pushToolCard / restoreSessionHistory 用的会话容器（SessionPane 的相关字段）。 */
 function fakePane(): Record<string, unknown> {
