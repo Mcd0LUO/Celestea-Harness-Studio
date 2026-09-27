@@ -261,25 +261,30 @@ apps/studio → runtime.compose(profile)
 4. **测试也受规模规则约束**（同为 `SOURCE_GLOBS`），但允许 `import` 自己被测的包（`*.test.ts` 豁免横向导入限制）。
 5. **不要 mock 掉被验证的 seam 本身**；要 mock 的是 HTTP、进程、时钟、文件系统这类外部边界。
 6. 金标准来源优先级：**运行中的实机 > 参考实现单测 > TS 自洽**。前两者产出的 fixture 入库；自洽对比必须在报告里标注 `derived`。
-7. **执行架构：两池 + 白名单（W9219）**。`vitest.config.ts` 把测试文件分到三个 project：
-   - `isolated`（`isolate` 默认 true，**一文件一进程**）—— **默认归宿**，新文件一律进这里；
-   - `shared`（`isolate:false`，共享进程）—— 只装 `tests/lib/shared-pool-allowlist.json` 里的白名单；
-   - `real-backend`（默认零文件，`CELESTEA_E2E=1` 才装载；见 `vitest.config.ts` 的 W847/W862 注释）。
+7. **执行架构：vmThreads 主池 + forks 兜底（W9220）**。`vitest.config.ts` 有四个 project：
+   - `vm`（**主池**，`pool: "vmThreads"`）—— 绝大多数文件；**每个文件一个独立 VM 上下文**；
+   - `gc`（`pool: "forks"` + `execArgv: ["--expose-gc"]`）—— 只有 `packages/workers/src/tools.test.ts`
+     （弱引用释放用例需要**真实**的 `--expose-gc` 进程）；
+   - `native`（`pool: "forks"`）—— `process.chdir()` 与 URL/objectURL 垫片在 worker 线程里
+     不可用/语义不同，共 2 个文件；
+   - `real-backend`（默认零文件，`CELESTEA_E2E=1` 才装载，`fileParallelism: false`）。
 
-   **为什么只能白名单、不能全局共享**：6 次全量 `isolate:false` 实测的不稳定并集有 21 个文件，
-   且**没有一个是 6/6 失败** —— 这是跨文件不确定性，不是某个文件的固有缺陷。
-   根因已定位并修复：`tests/lib/w1467-dom.ts` 的 `installDom()` 把 `globalThis.Node` 设成
-   不可调用对象且从不还原，导致同进程后续文件的 `expect(str).toContain(x)` 在 chai 的
-   `actual instanceof Node` 处抛 `TypeError`（实测 288 个白名单文件里 98 个因此变红，isolated 池 0 个）。
+   **为什么是 vmThreads**：`isolate:true` + forks 是「一文件一进程」，400 个文件约 400 次进程启动；
+   `vmThreads` 把每个文件放进独立 VM，**免掉进程启动同时保住跨文件隔离**。本机实测（32 核，默认并发）：
+   **墙钟 34 s → 20 s（−41%）**、CPU 264 → 230 CPU·s（−13%）、进程 133 → 6（−95%）。
 
-   **白名单是 fail-closed 的**：只有「6 次全量 6/6 通过」且非 jsdom 的文件才入选；
-   实测「单独跑过、共享跑红」或已知 flaky 的文件登记在 `reviewedDemotions` 并退回 isolated。
-   **平台 fail-closed**：证据只在 **win32** 采集（`shared-pool-allowlist.json` 的 `platform` 字段），
-   而白名单里有 20 个带条件跳过（平台或能力探测）的文件（在 Windows 上被跳过 ⇒ 其 6/6 证据是空洞的，到 Linux 会真跑），
-   故 shared 池**只在 `process.platform === "win32"` 时启用**，其它平台全部走 isolated
-   （= 改动前行为）⇒ ubuntu CI 行为零变化。判定真源：`tests/lib/shared-pool-policy.ts`。
-   机械兜底：`tests/w9219-test-pool-ratchet.test.ts`（含 ★ 调包用例）、`tests/w9217-test-workers.test.ts`。
+   **★ 顶层绝不能有 `execArgv`**：worker_threads 会拒绝 `--expose-gc`，报
+   `ERR_WORKER_INVALID_EXEC_ARGV`，**整个 vmThreads 池起不来**（0 个用例）。
+   W9219 正是踩了这个坑，才误判「vmThreads 不可用」并转而做了两池白名单方案
+   （该方案在默认并发下墙钟与改动前**相同**）。需要 gc 的文件必须单独走 `gc` project。
+   机械兜底：`tests/w9220-test-arch-ratchet.test.ts`（含 ★ 调包用例）、`tests/w9217-test-workers.test.ts`；
+   规则真源：`tests/lib/test-arch-rules.ts`。
 
+   **历史（两池白名单，已废弃）**：W9219 曾用 `isolated` + `shared`（`isolate:false` + 283 文件白名单）。
+   废弃原因：默认并发下墙钟无收益，却要维护一整套证据 JSON 与平台 fail-closed。
+   它留下的**真实发现**仍然有效并已修复：`tests/lib/w1467-dom.ts` 的 `installDom()` 把
+   `globalThis.Node` 设成不可调用对象且从不还原，导致同进程后续文件的 `expect(str).toContain(x)`
+   在 chai 的 `actual instanceof Node` 处抛 `TypeError`。
 ### 6.5 口径与豁免（W889 审计补遗）
 
 > 来源：W889 对 §6 的 24 条逐条审计。它发现 3 条机械强制、4 条部分、**17 条仅散文**，

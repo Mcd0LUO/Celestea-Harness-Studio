@@ -1,7 +1,6 @@
 import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
-import { sharedPoolEnabled, sharedPoolFiles } from "./tests/lib/shared-pool-policy.js";
 
 const r = (p: string): string => fileURLToPath(new URL(p, import.meta.url));
 
@@ -26,7 +25,7 @@ const alias = {
  * (404) and the "active_session must be null" assertion is clobbered by the other
  * file's activate. Run them one at a time; keep everything else parallel.
  *
- * W862 (explicit opt-in — a real incident): running the root `pnpm check` used to hit
+ * W862 (explicit opt-in — a real incident): running the root pnpm check used to hit
  * the LIVE 3777 service, and the multimodal file's deliberate IMAGE_UNSUPPORTED case
  * (a text-only test model fed an image) broadcast a bogus downgrade notice into the
  * user's Studio window. Therefore the default gate must NEVER touch the online service:
@@ -34,10 +33,40 @@ const alias = {
  *
  * - Opted in: the three files run here, serial (fileParallelism=false), assertions intact.
  * - Not opted in: this project collects no files; the three files are instead collected
- *   by the `isolated` project and end as a VISIBLE skip (never silently disappear), each
+ *   by the vm project and end as a VISIBLE skip (never silently disappear), each
  *   printing the opt-in command. A missing/empty project is not an error as long as the
- *   run has tests, and the in-file `describe.skipIf` gate is the belt-and-braces backstop
+ *   run has tests, and the in-file describe.skipIf gate is the belt-and-braces backstop
  *   so no code path — probe included — can reach 3777 without the switch.
+ */
+/**
+ * 测试 worker 上限（W9217）。
+ *
+ * 为什么需要：本仓有 400 个测试文件、isolate 默认 true（一个文件一个环境，
+ * 每个约 600ms 启动开销）。开发机核多时，pnpm test 会同时起几十个 node 进程，
+ * 整机在跑测试期间不可用。所以提供一个可选的上限。
+ *
+ * ★ vitest 5 的真实默认不是核数，而是 max(availableParallelism() - 1, 1)
+ *   （getDefaultThreadsCount；watch 下是 max(floor(n/2),1)）。
+ *   我因为这个误解连错两次，两次都在 4 核 CI 上把并发提了上去：
+ *     v1  无条件 return 8               ⇒ CI 默认 3 被提到 8；
+ *     v2  min(8, max(cores-1, 1))       ⇒ 理论等于默认，但 CI 恰在该提交开始红
+ *                                           main.test.ts 的 SIGTERM 用例。
+ *   而该用例是 describe.skipIf(!POSIX_PROCESS_GROUPS) —— 本机（Windows）跳过，
+ *   所以我无法本地复现 v2 是否有害。
+ *
+ * **结论：默认不设**（return undefined），让 vitest 用自己的默认 —— CI 行为零变化。
+ * **要限制时显式开启**（覆盖值按原样使用，那是操作者明确要求的）：
+ *   CELESTEA_TEST_WORKERS=8  pnpm test     # 留出机器余量
+ *   CELESTEA_TEST_WORKERS=16 pnpm test     # 快一些
+ *
+ * 实测代价曲线（本仓 3300+ 用例，Windows 32 核；vitest 默认 = 31）：
+ *   workers   wall clock
+ *   31 (默认)     27 s
+ *   16            33 s
+ *    8            47 s
+ *    4            81 s
+ *    2           149 s
+ *   （上表是 forks 池时代的数据；W9220 换 vmThreads 后 16 workers 为 ~20 s。）
  */
 const TEST_WORKERS = (() => {
   const raw = process.env.CELESTEA_TEST_WORKERS;
@@ -48,11 +77,11 @@ const TEST_WORKERS = (() => {
   }
   // Default: HALF the cores — and only ever LOWER, never raise.
   //
-  // vitest's own default is `max(availableParallelism() - 1, 1)` (NOT the core
+  // vitest's own default is max(availableParallelism() - 1, 1) (NOT the core
   // count). Two earlier attempts here raised it on a 4-core runner and broke CI:
-  //   v1  `return 8`                 -> 3 became 8;
-  //   v2  `min(8, max(cores-1, 1))`  -> theoretically equal, but CI started failing
-  //                                    `main.test.ts`'s SIGTERM case at that commit
+  //   v1  return 8                 -> 3 became 8;
+  //   v2  min(8, max(cores-1, 1))  -> theoretically equal, but CI started failing
+  //                                    main.test.ts's SIGTERM case at that commit
   //                                    (unreproducible here: that suite SKIPS on Windows).
   // So: emit a cap ONLY when it is strictly below vitest's default. When it is not,
   // emit nothing — the config is then identical to having no cap, so CI cannot move.
@@ -60,19 +89,6 @@ const TEST_WORKERS = (() => {
   //   32-core dev box -> default 31, half = 16 -> cap to 16
   //    8-core laptop  -> default  7, half =  4 -> cap to  4
   //    4-core CI      -> default  3, half =  2 -> cap to  2 (a LOWER, i.e. safer)
-  // 实测代价曲线（本仓 3300+ 用例，Windows 32 核；vitest 默认 = 31）：
-  //   workers   wall clock
-  //   31 (默认)     27 s
-  //   16            33 s
-  //    8            47 s
-  //    4            81 s
-  //    2           149 s
-  //
-  // 为什么当初不顺手开 `isolate: false`（runner 提示能省 ~7.4s）：本仓有 64 个测试文件用
-  // `vi.stubGlobal` 改全局状态，共享模块注册表会让它们互相污染 —— 省下的时间不值这个风险。
-  // ★ W9219 复核了这条结论：**全局共享确实不可行**（6 次全量实测不稳定并集 21 文件，
-  //   无一 6/6 失败），但**白名单式共享**可行（283 文件、6/6 证据、3 次全量 3/3 绿）——
-  //   见下方 SHARED_ALLOWLIST 与 tests/lib/shared-pool-policy.ts。
   const cores = availableParallelism();
   const vitestDefault = Math.max(cores - 1, 1);
   const half = Math.max(Math.floor(cores / 2), 1);
@@ -88,33 +104,7 @@ const REAL_BACKEND = [
 /** 未选入时的占位：文件不存在 ⇒ real-backend project 零文件（选入才装载真实套件）。 */
 const REAL_BACKEND_OFF = ["tests/__real-backend-disabled-until-CELESTEA_E2E__.test.ts"];
 
-/**
- * W9219 · 两池测试架构（isolated / shared）——用**实测**换掉「一个文件一个进程」。
- *
- * 问题（本机 32 核、vitest 5.0.1、400 个测试文件实测）：isolate 默认 true = 一文件一进程，
- * 每个进程约 600ms 启动。40 个"空转"文件的对照实验：
- *     isolate:true  40 个进程 / 1.8s
- *     isolate:false  4 个进程 / 0.6s   ⇒ 启动开销是主要成本，而它集中在大量轻文件上。
- * 但全局 `isolate:false` 一把梭**不可行**：本仓 6 次全量实测（架构师 3 次 + W9219 3 次）
- * 的不稳定文件并集有 21 个，且**没有一个是 3/3 失败**——这是跨文件不确定性，不是固有缺陷。
- * 根因已用最小探针钉死：`isolate:false` 下 jsdom 全局**真的会跨文件泄漏**
- * （探针：A 文件 stub navigator= en-US / body.innerHTML="<b>poisoned</b>"，B 文件读到的就是
- *  en-US + poisoned；`isolate:true` 下 B 读到的是干净值）。故：
- *
- *   · isolated 池（isolate:true）—— 默认归宿，装一切**未被实测证明**的文件；
- *   · shared   池（isolate:false）—— 只装白名单，白名单来自 6 次全量运行的原始 JSON。
- *
- * ★ fail-closed：新文件默认进 isolated。只有**实测 6/6 通过**、非 jsdom、非 real-backend
- *   的文件才会被登记进 `tests/lib/shared-pool-allowlist.json`；该表由
- *   `tests/w9219-test-pool-ratchet.test.ts` 钉住（表外文件混进 shared 即红）。
- *
- * 候选 B（`pool:"vmThreads"`）已**实测否决**：node 的 worker_threads 拒绝本仓必需的
- *   `execArgv:["--expose-gc"]`，报 `ERR_WORKER_INVALID_EXEC_ARGV`，全量 0 个用例、17 个错误。
- * 候选 C（jsdom 降级）实测收益≈0：96 个 jsdom 文件里只有 4 个完全不碰 DOM 全局。
- */
-const SHARED_POOL_ON = sharedPoolEnabled(process.platform);
-const SHARED_ALLOWLIST: readonly string[] = Object.freeze([...sharedPoolFiles(process.platform)]);
-/** unit 面（isolated 池的采集范围，与改动前的 unit project 逐字一致）。 */
+/** 全部测试文件的采集范围（与改动前逐字一致）。 */
 const UNIT_INCLUDE = [
   "packages/**/*.test.ts",
   "apps/studio/**/*.test.ts",
@@ -122,23 +112,51 @@ const UNIT_INCLUDE = [
   "apps/web/**/*.test.ts",
   "tests/**/*.test.ts",
 ];
-/** isolated 池必须**显式排除**白名单，否则同一文件被两个 project 采集（重复执行）。 */
-const ISOLATED_EXCLUDE = [
-  "**/node_modules/**",
-  "**/dist/**",
-  ...(E2E ? REAL_BACKEND : []),
-  ...SHARED_ALLOWLIST,
-];
+
+/**
+ * W9220 · 执行架构：**vmThreads 池**（VM 上下文隔离）+ 两个 forks 兜底 project。
+ *
+ * 历史：W9219 先用「两池」——isolated（forks/isolate:true）+ shared（isolate:false，
+ * 283 个实测 6/6 通过的白名单文件）。那个方案**在默认并发下墙钟与改动前相同（都是 34 s）**，
+ * 只把 worker 启动从 401 降到 121；代价却是一整套白名单机器（证据 JSON + 平台 fail-closed + 棘轮）。
+ *
+ * W9220 实测发现：**pool: vmThreads 才是本仓该用的池**，而且它自带隔离，
+ * 白名单整套都不需要了。W9219 当初否决 vmThreads 的依据是错的 —— 它报
+ * ERR_WORKER_INVALID_EXEC_ARGV，于是判断「worker_threads 不接受本仓必需的
+ * --expose-gc，池起不来」。**真正的原因是那条 execArgv 被放在顶层（全局继承）**：
+ * 只要把它从顶层移走、只给真正需要它的那一个文件单独开 forks project，vmThreads 完全可用。
+ *
+ * 本机实测（Windows 32 核，默认 16 workers，401 文件 / 3411 用例）：
+ *   · 墙钟  34 s → **20 s（−41%）**
+ *   · CPU   264 → **230 CPU·s（−13%）**
+ *   · 进程  133 → **6（−95%）**
+ *   · 3/3 全绿，且**不需要任何白名单**
+ *
+ * 为什么 vmThreads 能免掉白名单：它把**每个测试文件放进独立的 VM 上下文**，
+ * 全局（globalThis.Node / navigator / 模块注册表）**不会跨文件泄漏** ——
+ * 而 6 次 isolate:false 全量实测里那 21 个不稳定文件，正是被这类泄漏害的。
+ * 实测：这 21 个文件在 vmThreads 下 3/3 全过。
+ *
+ * ★ 顶层**绝不能**再放 execArgv: ["--expose-gc"]：worker_threads 会拒绝该 flag，
+ *   整个 vmThreads 池起不来（0 个用例 + ERR_WORKER_INVALID_EXEC_ARGV）。
+ *   需要 gc 的文件单独走下面的 gc project（forks 池才接受该 flag）。
+ */
+/** vmThreads 跑不了的：process.chdir() 在 worker 线程里不可用（所有平台都如此）。 */
+const CHDIR_FILES = ["packages/tools/src/guard/w824-guard.test.ts"];
+/** 需要**真实** --expose-gc 进程的文件；worker 线程拒绝该 execArgv，只能走 forks。 */
+const GC_FILES = ["packages/workers/src/tools.test.ts"];
+/** vmThreads 下 URL/objectURL 垫片语义不同：单独跑 3/3 稳定失败，故退回 forks。 */
+const URL_SHIM_FILES = ["tests/frontend-r3-b5-attachments-dom.test.ts"];
+/** 必须走 forks 的文件总集（vm 池显式排除它们，避免重复采集）。 */
+const FORKS_ONLY = [...CHDIR_FILES, ...GC_FILES, ...URL_SHIM_FILES];
 
 export default defineConfig({
   test: {
     // W9217: OPTIONAL pool cap (see TEST_WORKERS above). Unset by default so
     // vitest's own default applies untouched; set CELESTEA_TEST_WORKERS to cap it.
     ...(TEST_WORKERS === undefined ? {} : { maxWorkers: TEST_WORKERS }),
-    // W839 (R3 B8 / W818-P2-1): the weak-reference release case needs --expose-gc.
-    // Vitest 5 removed poolOptions; execArgv is a top-level (and inherited) option.
-    // ★ 不要把它挪进 project：vmThreads 池会因此整池起不来（见上）。
-    execArgv: ["--expose-gc"],
+    // ★ W9220：这里**故意没有**顶层 execArgv。worker 线程会拒绝 --expose-gc，
+    //   顶层放它 = 整个 vmThreads 池起不来（见上）。需要 gc 的文件走 gc project。
     /**
      * 覆盖率是**诊断**，不是门禁（与 deps:audit 同一定位，DEPENDENCY-POLICY.md §6）。
      * 为什么明确不设 thresholds：本仓门禁的唯一价值是**确定性**——覆盖率随平台/运行波动，
@@ -164,38 +182,48 @@ export default defineConfig({
       {
         resolve: { alias },
         test: {
-          name: "isolated",
+          name: "vm",
+          // W9220：VM 上下文隔离 —— 一个 worker 线程内每个文件一个独立 VM，
+          // 免掉进程启动，同时保住隔离（见上）。
+          pool: "vmThreads",
           setupFiles: [r("./vitest.setup.ts")],
-          // 默认池：isolate 不写 = vitest 默认 true = 一文件一进程，隔离强度与改动前一致。
           include: UNIT_INCLUDE,
-          exclude: ISOLATED_EXCLUDE,
+          exclude: ["**/node_modules/**", "**/dist/**", ...(E2E ? REAL_BACKEND : []), ...FORKS_ONLY],
           testTimeout: 30_000,
         },
       },
-      // ★ W9219：shared 池**只在 win32 启用**（见 tests/lib/shared-pool-policy.ts）。
-      // 白名单证据只在 Windows 采集，而白名单里有 20 个带条件跳过（平台或能力探测）的文件；
-      // 它们到 Linux 会真跑（最危险的是 main.test.ts 的 SIGTERM 用例，正是历史 CI 事故那条）。
-      // 非 win32 ⇒ SHARED_ALLOWLIST 为空 ⇒ 下面这个 project 整体不注册 ⇒ 全部文件走 isolated
-      // （= 改动前行为）⇒ ubuntu CI 行为零变化。fail-closed：只降并发，不升。
-      ...(SHARED_POOL_ON ? [{
+      {
         resolve: { alias },
         test: {
-          name: "shared",
+          name: "gc",
+          // W839 (R3 B8 / W818-P2-1)：弱引用释放用例需要真实的 --expose-gc 进程。
+          // worker 线程拒绝该 execArgv，所以这一个文件必须走 forks。
+          pool: "forks",
+          execArgv: ["--expose-gc"],
           setupFiles: [r("./vitest.setup.ts")],
-          include: [...SHARED_ALLOWLIST],
-          // 白名单文件共享进程：省掉每文件约 600ms 的进程启动。
-          // 隔离强度由白名单的实测来源保证（6/6），不靠 vitest 兜底。
-          isolate: false,
+          include: [...GC_FILES],
           testTimeout: 30_000,
         },
-      }] : []),
+      },
+      {
+        resolve: { alias },
+        test: {
+          name: "native",
+          // process.chdir() 与 URL 垫片在 vmThreads 下不可用/语义不同，
+          // 这几个文件退回真实的子进程（forks）。
+          pool: "forks",
+          setupFiles: [r("./vitest.setup.ts")],
+          include: [...CHDIR_FILES, ...URL_SHIM_FILES],
+          testTimeout: 30_000,
+        },
+      },
       {
         resolve: { alias },
         test: {
           name: "real-backend",
           setupFiles: [r("./vitest.setup.ts")],
           // W862：只有显式选入（CELESTEA_E2E=1）才装载这三个文件；默认零文件，
-          // 文件在 isolated project 里可见跳过（见上方 REAL_BACKEND 注释）。
+          // 文件在 vm project 里可见跳过（见上方 REAL_BACKEND 注释）。
           include: E2E ? [...REAL_BACKEND] : [...REAL_BACKEND_OFF],
           // One live server, one active_session: fileParallelism=false runs the
           // three files one at a time (everything else keeps the parallel pool).
