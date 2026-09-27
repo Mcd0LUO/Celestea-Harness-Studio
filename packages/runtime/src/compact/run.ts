@@ -1,5 +1,6 @@
 /**
- * Compaction orchestration (port of `celestea_studio/src/compact.rs:410-500`).
+ * Compaction orchestration (port of `celestea_studio/src/compact.rs:410-500`,
+ * extended by W2011/B2 with a head budget).
  *
  * One call is: read -> parse -> threshold -> summarize -> plan -> atomic rewrite.
  * Every branch is explicit and observable, because the HTTP layer has to answer
@@ -16,7 +17,15 @@
 
 import { readFileSync } from "node:fs";
 import { parseSessionEvent, type SessionEvent } from "@celestea/core";
-import { COMPACT_KEEP_TURNS, COMPACT_NOTE_SKIPPED, compactNote, countCompleteTurns, planCompaction } from "./plan.js";
+import {
+  COMPACT_HEAD_TURNS,
+  COMPACT_KEEP_TURNS,
+  COMPACT_NOTE_SKIPPED,
+  compactNote,
+  countCompleteTurns,
+  planCompaction,
+  selectTurns,
+} from "./plan.js";
 import { rewriteAtomic } from "./rewrite.js";
 import type { Summarizer } from "./summarize.js";
 import { renderTranscript } from "./transcript.js";
@@ -25,8 +34,10 @@ export interface CompactionInput {
   /** Absolute path of the session log (`<session dir>/cli-main.jsonl`). */
   logPath: string;
   summarize: Summarizer;
-  /** Surviving complete turns (default [COMPACT_KEEP_TURNS]). */
+  /** Surviving most-recent complete turns (default [COMPACT_KEEP_TURNS]). */
   keep?: number;
+  /** Surviving oldest complete turns (default [COMPACT_HEAD_TURNS]; 0 = pure tail). */
+  head?: number;
   /** Injection seams for tests (defaults: real fs). */
   readText?: (path: string) => string;
   write?: (path: string, events: readonly SessionEvent[]) => void;
@@ -34,7 +45,12 @@ export interface CompactionInput {
 
 export interface CompactionResult {
   compacted: boolean;
-  /** Present (as a number) only when `compacted === true`. */
+  /**
+   * Complete ORIGINAL turns the new log still carries, head + tail (present as a
+   * number only when `compacted === true`). The elision row is not a turn of its
+   * own, so it is not counted here — the count answers "how much history
+   * survived", not "how many turn_start rows are in the file".
+   */
   kept_turns: number | null;
   note: string;
   /** Complete turns found in the log BEFORE the decision. */
@@ -69,14 +85,22 @@ function readLog(input: CompactionInput): string {
  */
 export async function runCompaction(input: CompactionInput): Promise<CompactionResult> {
   const keep = input.keep ?? COMPACT_KEEP_TURNS;
+  const head = input.head ?? COMPACT_HEAD_TURNS;
   const events = parseEventLog(readLog(input));
   const turns = countCompleteTurns(events);
-  if (turns <= 0 || planCompaction(events, "", keep) === null) {
+  if (turns <= 0 || planCompaction(events, "", keep, head) === null) {
     return { compacted: false, kept_turns: null, note: COMPACT_NOTE_SKIPPED, turns_before: turns, events: null };
   }
   const summary = await input.summarize(renderTranscript(events));
-  const planned = planCompaction(events, summary, keep);
+  const planned = planCompaction(events, summary, keep, head);
   if (planned === null) throw new Error("内部错误：压缩计划为空");
   (input.write ?? rewriteAtomic)(input.logPath, planned);
-  return { compacted: true, kept_turns: Math.min(keep, turns), note: compactNote(keep), turns_before: turns, events: planned };
+  const kept = selectTurns(events, keep, head);
+  return {
+    compacted: true,
+    kept_turns: Math.min(kept.head.length + kept.tail.length, turns),
+    note: compactNote(keep, head),
+    turns_before: turns,
+    events: planned,
+  };
 }

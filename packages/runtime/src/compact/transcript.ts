@@ -1,6 +1,6 @@
 /**
  * Summary-input rendering + the compaction prompt
- * (port of `celestea_studio/src/compact.rs:34-54,180-262`).
+ * (port of `celestea_studio/src/compact.rs:34-54,180-262`; W2011/B5).
  *
  * The transcript handed to the summarising model is a flat, human-readable
  * rendering of the event stream (turn headings + per-role lines), clipped twice:
@@ -24,14 +24,32 @@ export const SUMMARY_MAX_TOKENS = 4_096;
 /** Whole-request timeout of the summarising call. */
 export const SUMMARY_TIMEOUT_MS = 90_000;
 
-/** The four-section structured summary prompt (verbatim contract text). */
+/**
+ * The structured summary prompt.
+ *
+ * W2011 (B5): the section list is a MINIMUM ("至少"), not "必须且只需四个小节",
+ * and section 5 is "what is still UNVERIFIED / unknown". The retrospective
+ * (`docs/retrospective-2026-09-27.md` §1.5, "叙事会漂，diff 不会") names exactly
+ * this failure mode: a claim that a step was done, repeated onward without ever
+ * being checked. A summary is a retelling of a retelling, so it must be allowed
+ * to say "this was never verified" instead of restating it as a fact. Kimi Code
+ * does the same (`compaction-instruction.md:35-38,59-62`).
+ *
+ * ★ Section 5 is placed FIRST among the sections, not last, and that is load
+ * bearing: [clip] keeps the HEAD of a string, and `plan.ts` runs the summary
+ * through `clip(summary, SUMMARY_KEEP_MAX_CHARS)`. A trailing section is
+ * therefore the first thing a long summary loses — the section this whole change
+ * exists for would be the one that disappears.
+ */
 export const COMPACT_SYSTEM_PROMPT =
   "你是上下文压缩器。把用户提供的会话记录压缩成一份中文结构化摘要，" +
-  "必须且只需包含以下四个小节（保留小节标题）：\n" +
-  "1) 正在进行的任务：当前目标、所处阶段、尚未完成的部分。\n" +
-  "2) 已做的决策：已经确定的技术/方案选择及其理由，包括被否决的方案。\n" +
-  "3) 关键事实与文件改动：涉及的文件路径、函数/接口名、配置项、数据结论、报错信息等可复用的硬事实。\n" +
-  "4) 待办：接下来要做的事，按优先级排列。\n" +
+  "至少包含以下五个小节（保留小节标题；顺序不限，但每节都必须出现）：\n" +
+  "1) 仍未验证 / 未知：哪些结论只是「声称完成」而从未被验证（没跑过测试、没看 diff、没复现过），" +
+  "哪些问题仍然没有答案。**凡早先某步声称做完但从未验证的，必须明说它是未验证，不得写成事实。**\n" +
+  "2) 正在进行的任务：当前目标、所处阶段、尚未完成的部分。\n" +
+  "3) 已做的决策：已经确定的技术/方案选择及其理由，包括被否决的方案。\n" +
+  "4) 关键事实与文件改动：涉及的文件路径、函数/接口名、配置项、数据结论、报错信息等可复用的硬事实。\n" +
+  "5) 待办：接下来要做的事，按优先级排列。\n" +
   "要求：忠于原始记录，不得编造；保留路径、标识符、数字、命令原样；压缩冗余寒暄与重复内容；直接输出摘要正文，不要任何前言、结语或解释。";
 
 /** Character-wise clip with a truncation marker (`clip`). */
