@@ -160,6 +160,9 @@ describe("W794 删除活动会话", () => {
     expect(frames.some((f) => f.event === "status" && f.session === S1 && f.phase === "cancelled")).toBe(true);
     // ……而删除返回之后，该会话一个帧都不再出现（孤儿回合的收尾被抑制）。
     const mark = frames.length;
+    // W9225：这里断言的是「**没有**帧 / 没有发生」，没有可轮询的条件 —— 必须有界地等一段
+    // 真实时间才能证明「什么都没发生」。这是 sleep 的**合法**用法（Fowler 也只反对用它
+    // 等异步结果）。150ms 远大于本路径的观测延迟（删除已同步返回，孤儿收尾若存在会立即排出）。
     await new Promise((r) => setTimeout(r, 150));
     expect(frames.slice(mark).filter((f) => f.session === S1)).toEqual([]);
 
@@ -184,6 +187,9 @@ describe("W794 删除活动会话", () => {
 
     // 删除返回之后：该会话不得再产生任何帧，也不得把目录写回来。
     const mark = frames.length;
+    // W9225：这里断言的是「**没有**帧 / 没有发生」，没有可轮询的条件 —— 必须有界地等一段
+    // 真实时间才能证明「什么都没发生」。这是 sleep 的**合法**用法（Fowler 也只反对用它
+    // 等异步结果）。250ms 覆盖「结算预算 = 0 时孤儿回合的迟到收尾」这一整段窗口。
     await new Promise((r) => setTimeout(r, 250));
     expect(frames.slice(mark).filter((f) => f.session === S1)).toEqual([]);
     expect(existsSync(join(h.workspace, "s1"))).toBe(false);
@@ -264,6 +270,9 @@ describe("W794 归档活动会话", () => {
 
     // 归档同样不向订阅方留悬空帧。
     const mark = frames.length;
+    // W9225：这里断言的是「**没有**帧 / 没有发生」，没有可轮询的条件 —— 必须有界地等一段
+    // 真实时间才能证明「什么都没发生」。这是 sleep 的**合法**用法（Fowler 也只反对用它
+    // 等异步结果）。归档路径与删除路径共用同一道 detach 闸门，150ms 同样远大于观测延迟。
     await new Promise((r) => setTimeout(r, 150));
     expect(frames.slice(mark).filter((f) => f.session === S1)).toEqual([]);
     sub.close();

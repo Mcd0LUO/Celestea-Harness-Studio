@@ -122,6 +122,10 @@ describe("W784 question card in a real DOM", () => {
     const pane = makePane();
     card.renderQuestionCard(pane, FRAME);
     click(sel(pane, ".q-submit"));
+    // W9225：这里断言的是「**没有**帧 / 没有发生」，没有可轮询的条件 —— 必须有界地等一段
+    // 真实时间才能证明「什么都没发生」。这是 sleep 的**合法**用法（Fowler 也只反对用它
+    // 等异步结果）。这里证的是「不完整提交**什么都没发出去**」这个否定事实 —— 没有可轮询的
+    // 条件（请求计数恒为 0 才是正确态）。5ms 足以让任何会发出的请求排到 fetch。
     await new Promise((r) => setTimeout(r, 5));
     expect(calls).toHaveLength(0);
     expect(sel(pane, ".q-hint")?.textContent).toContain("没作答");

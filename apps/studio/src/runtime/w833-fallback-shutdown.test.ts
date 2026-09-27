@@ -106,6 +106,10 @@ describe("W833 B8/F4: adapter shutdown flushes the fallback audit", () => {
     const shutdown = adapter.shutdown().then(() => {
       settled = true;
     });
+    // W9225：这里断言的是「**没有**帧 / 没有发生」，没有可轮询的条件 —— 必须有界地等一段
+    // 真实时间才能证明「什么都没发生」。这是 sleep 的**合法**用法（Fowler 也只反对用它
+    // 等异步结果）。这里证的是「shutdown 在等」这个**否定**事实：POST 被服务端扣住，没有可轮询的
+    // 条件能证明「它还没完成」。150ms 远大于「若 bug 存在则 shutdown 早已 resolve」的时延。
     await new Promise((r) => setTimeout(r, 150));
     expect(settled).toBe(false); // shutdown is AWAITING the POST
     releaseAudit();

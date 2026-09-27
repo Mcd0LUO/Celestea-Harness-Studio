@@ -432,6 +432,10 @@ describe("W789 · 权限面板：唯一滚动层 + 内联上限 + 自身滚动�
     position.attachPosition();
     // 内部滚动（滚轮滚 .sl-popup-body）→ 不重排：重排会打断用户正在进行的滚动
     row.dispatchEvent(new Ev("scroll", { bubbles: true }));
+    // W9225：这里断言的是「**没有**帧 / 没有发生」，没有可轮询的条件 —— 必须有界地等一段
+    // 真实时间才能证明「什么都没发生」。这是 sleep 的**合法**用法（Fowler 也只反对用它
+    // 等异步结果）。这里证的是「面板**没有**重排」这个否定事实（重排会打断用户滚动）：没有
+    // 可轮询的条件能证明「什么都没发生」。40ms 远大于一次 scroll 重排的时延。
     await new Promise((r) => setTimeout(r, 40));
     expect(tops).toEqual([]);
     // 页面级滚动 → 仍然重新落位（面板跟随盾牌）
