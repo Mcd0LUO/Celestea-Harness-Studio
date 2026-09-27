@@ -23,7 +23,7 @@
     "access": "public"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json --incremental --tsBuildInfoFile ../../node_modules/.cache/tsc/cli.tsbuildinfo",
     "build": "tsc -p tsconfig.build.json && node ../../scripts/make-bin-executable.mjs dist/main.js"
   },
   "dependencies": {

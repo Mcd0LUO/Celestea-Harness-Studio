@@ -87,3 +87,10 @@ docs/AGENT.local.md
 # W9113 收口补漏：usage-ledger.jsonl 同样由 <data dir> 决定（CELESTEA_USAGE_LEDGER_FILE），
 # 从仓库根起实例时也会落在根上。它含逐轮的 token/成本明细，与上面几个同一类产物。
 /usage-ledger.jsonl
+
+# TypeScript 增量编译缓存（W9225 起 typecheck/build 带 --incremental）。
+# 正常路径指向 node_modules/.cache/tsc/（已被 node_modules/ 覆盖），
+# 但**忘了 --tsBuildInfoFile** 时 tsc 会把 tsconfig.tsbuildinfo 落在仓库根 ——
+# 那是纯缓存，绝不该入库。这条兜底正是为那种手滑准备的（本机实测过：
+# `tsc --noEmit -p tsconfig.json --incremental` 确实在根上生成了它）。
+*.tsbuildinfo
