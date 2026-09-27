@@ -34,9 +34,12 @@ export const RUN_CODE_SDK_TS = `// =============================================
 //                     {"__error__": "<message>"} (uncaught exception)
 //
 // Contract:
-//   - Write the program as a \`function main()\` BODY (an indented body is wrapped
-//     for you), or as a complete script that defines main. main() MAY be async:
-//     the harness awaits it. Its resolved value (lossless JSON) is the result.
+//   - Write the program as a BODY (a quick script: plain statements ending in
+//     \`return <value>\` - it is wrapped into \`async function main()\` for you,
+//     indentation not required), or as a complete script that defines main.
+//     Leading \`import\` lines are hoisted above the wrapper (an import statement
+//     cannot live inside a function body). main() MAY be async: the harness
+//     awaits it. Its resolved value (lossless JSON) is the result.
 //   - \`tools.<name>({...})\` is a SYNCHRONOUS bridge: every sub-call is dispatched
 //     by the parent through its normal tool pipeline (guards, schema checks,
 //     limits). A failure throws ToolCallError - catch it and continue.
@@ -252,12 +255,23 @@ function _celesteaFail(error: unknown): void {
 
 async function _celesteaRunMain(): Promise<unknown> {
   // \`typeof\` on an undeclared identifier is safe, so a program without main()
-  // gets a clear message instead of a ReferenceError.
+  // gets a clear message instead of a ReferenceError. Reaching this function at
+  // all means the user's top level RAN to its end, so a \`main\` binding (if the
+  // program declares one) is initialized here - the probe cannot hit a TDZ.
   const entry: unknown = typeof main === "function" ? main : undefined;
   if (entry === undefined) {
+    // Reaching this line means the user's top level RAN to its end and left no
+    // callable main behind - a mistake, and one that must NOT be reported as a
+    // crash (code=aborted) but as a program error the model can act on.
+    if (typeof main !== "undefined") {
+      throw new Error(
+        "run_code: 'main' is not a function - define it as \`function main() { ... }\` " +
+          "or \`const main = async () => { ... }\`",
+      );
+    }
     throw new Error(
-      "run_code: no 'main' defined - write the program as a function body, or as a " +
-        "complete script defining function main() (it may be async)",
+      "run_code: the program finished without defining 'main' - write it as a function body " +
+        "(plain statements ending in \`return <value>\`) or as a complete script defining main()",
     );
   }
   return await (entry as () => unknown)();

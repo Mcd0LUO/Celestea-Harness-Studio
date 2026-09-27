@@ -53,6 +53,7 @@ import {
   type RunCodeConfig,
 } from "./limits.js";
 import { LineReader, appendBounded, jsonByteLength, tail, truncateValue, type BoundedLine } from "./lines.js";
+import { classifyProgramFailure } from "./program-failure.js";
 import { assembleProgram, DEFAULT_RUN_CODE_LANGUAGE, type RunCodeLanguage } from "./sdk.js";
 
 /** Session-log sink for sub-call rows (legacy `Fn(SessionEvent)` sink). */
@@ -66,6 +67,12 @@ export interface BrokerContext {
   config: RunCodeConfig;
   /** The `run_code` call id: sub-call ids are `<parentId>:c<n>`. */
   parentId: string;
+  /**
+   * The language of the program being run (W2012): the failure classifier keys
+   * its stderr markers on it (Node's `SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]`
+   * vs CPython's `SyntaxError`). Defaults to TypeScript, the shipped default.
+   */
+  language?: RunCodeLanguage;
 }
 
 /** One parsed sub-call request from the child. */
@@ -102,6 +109,7 @@ export async function brokerRun(ctx: BrokerContext, args: unknown): Promise<Tool
   // W880: the program is written to <CELESTEA_HOME>/.../run-code, NOT into the
   // workspace. The sandbox config owns that absolute path; the interpreter is
   // invoked with the absolute path so no cwd-relative lookup is involved.
+  ctx.language = source.language;
   const script = await placeProgram(ctx.sandbox.config.programDir, source);
   const state = newRunState();
   state.cpuSec = cpuSec;
@@ -576,12 +584,60 @@ function composeRender(config: RunCodeConfig, state: RunState): string | null {
   return parts.length === 0 ? null : parts.join("\n");
 }
 
-/** The canonical value, or the structured error (infra > program > CPU > aborted). */
+/**
+ * The canonical value, or the structured error
+ * (infra > program > CPU > syntax/entry > aborted).
+ *
+ * W2012: the syntax/entry rung is what turns "the program is not valid" from a
+ * `code=aborted` infrastructure verdict into a diagnosable `code=program_syntax`
+ * / `code=program_error` one. It sits AFTER the CPU verdict on purpose — a
+ * SIGXCPU death with a syntax error in its stderr is a CPU story — and BEFORE
+ * `abortedMessage`, which stays the honest answer when stderr explains nothing.
+ */
 function outcomeOf(ctx: BrokerContext, state: RunState): ToolExecOutcome {
   const render = composeRender(ctx.config, state);
-  const error = state.infraError ?? state.programError ?? cpuExceededFailure(state) ?? (state.hasFinal ? null : abortedMessage(state));
+  const settled = state.hasFinal || completedSilently(state);
+  const error =
+    state.infraError ??
+    state.programError ??
+    cpuExceededFailure(state) ??
+    (settled ? null : (classifiedMessage(ctx, state) ?? abortedMessage(state)));
   if (error !== null) throw new ToolFailure(errorCode(error) ?? RUN_CODE_ERROR_PREFIX, withLogsText(error, render));
   return { value: state.hasFinal ? state.finalValue : null, render };
+}
+
+/**
+ * Did the program END ITSELF successfully (W2012)?
+ *
+ * A complete script may legitimately finish with `process.exit(0)` after writing
+ * its answer to stdout — the runner's final line is then unreachable. The exit
+ * code is the interpreter's own verdict, so `0` (and not killed by the broker)
+ * means the program ran to completion; reporting that as
+ * `code=aborted … without a final line` was the same class of lie as reporting a
+ * syntax error as a timeout. The run's stdout logs are its answer and the value
+ * is `null` (there was no `main` to return one).
+ *
+ * Only the FAILING runs (non-zero exit, or a signal) reach the classifier.
+ */
+function completedSilently(state: RunState): boolean {
+  const settled = state.settle;
+  return settled !== null && !settled.killed && settled.exitCode === 0;
+}
+
+/**
+ * W2012: the program-level verdict for a run that produced no protocol line —
+ * `null` when stderr does not name a cause (then the caller says `aborted`).
+ *
+ * `state.settle` is non-null on this path by construction: `executeProgram`
+ * always settles the child before `outcomeOf` is reached, so the captured
+ * stderr (and its tail) is available exactly once.
+ */
+function classifiedMessage(ctx: BrokerContext, state: RunState): string | null {
+  const settled = state.settle;
+  if (settled === null || settled.stderrText.trim() === "") return null;
+  const failure = classifyProgramFailure(ctx.language ?? DEFAULT_RUN_CODE_LANGUAGE, settled.stderrText);
+  if (failure === null) return null;
+  return runCodeFailure(failure.kind, failure.message).message;
 }
 
 /**

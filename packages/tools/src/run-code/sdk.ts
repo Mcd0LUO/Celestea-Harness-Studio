@@ -242,65 +242,78 @@ class _Tools:
 tools = _Tools()
 `;
 
-/** The two languages `run_code` can run (W774: TypeScript is the default). */
-export type RunCodeLanguage = "typescript" | "python";
+/**
+ * The program's FORM is decided by `program-form.ts` (W2012), not by layout:
+ * a main-less program is wrapped whether or not it happens to be indented, and
+ * only a program that genuinely runs at module top level (its own `main`, a
+ * top-level `await`/`import`/`export`, a bare top-level call) keeps the
+ * historical "complete script" treatment. See that module for the rule table and
+ * for the one hard boundary (an `import` cannot live inside a function body).
+ */
+export {
+  DEFAULT_RUN_CODE_LANGUAGE,
+  definesEntryPoint,
+  firstNonblankLineIndented,
+  hoistLeadingImports,
+  importedNames,
+  programLayout,
+  splitProgramLines,
+  terminate,
+  wrapBody,
+  wrapBodyTs,
+  wrapPythonBody,
+  wrapTypeScriptBody,
+  type HoistedImports,
+  type ProgramForm,
+  type ProgramLayout,
+  type RunCodeLanguage,
+} from "./program-form.js";
+import {
+  programLayout,
+  terminate,
+  wrapBody,
+  wrapTypeScriptBody,
+  type RunCodeLanguage,
+} from "./program-form.js";
 
-/** What `run_code` runs when the call omits `language`. */
-export const DEFAULT_RUN_CODE_LANGUAGE: RunCodeLanguage = "typescript";
+/**
+ * The failure vocabulary of a program that never reached its runner (W2012):
+ * `program_syntax` / `program_error` instead of the misleading `aborted`.
+ */
+export {
+  PROGRAM_ERROR_CODE,
+  PROGRAM_SYNTAX_CODE,
+  classifyProgramFailure,
+  firstErrorLine,
+  type ProgramFailure,
+} from "./program-failure.js";
 
 /**
  * Assemble the program file for one language: SDK preamble + user code + runner.
  *
- * When the first non-blank line of the user code is indented it is treated as a
- * **function body** and wrapped (`async def main():` / `async function main()`);
- * otherwise it must be a complete script defining `main` itself (legacy
- * `assemble_program`). The Python path is byte-for-byte what it always was; the
- * TypeScript path lays the file out the same way and deliberately does NOT
- * re-indent a wrapped body — JavaScript does not need it, and re-indenting would
- * rewrite the contents of a template literal.
+ * The user code is first classified ([programLayout]): a **body** is wrapped
+ * (`async def main():` / `async function main()`), a **script** is emitted
+ * verbatim. The Python path is byte-for-byte what it always was for an indented
+ * body; the TypeScript path deliberately does NOT re-indent a wrapped body —
+ * JavaScript does not need it, and re-indenting would rewrite the contents of a
+ * template literal.
+ *
+ * When a TypeScript body carried leading `import` statements they are emitted
+ * BEFORE the wrapper (module scope is the only place an import statement is
+ * legal). A refused hoist leaves the program a SCRIPT — emitted verbatim, so
+ * nothing in the file pretends the imports moved — and `hoistNote` carries the
+ * reason for callers that report it.
  */
 export function assembleProgram(userCode: string, language: RunCodeLanguage): string {
-  const body = firstNonblankLineIndented(userCode);
+  const layout = programLayout(userCode, language);
   if (language === "python") {
     const parts = [RUN_CODE_SDK, "\n\n# ========================== user program ==========================\n"];
-    parts.push(body ? wrapBody(userCode) : terminate(userCode));
+    parts.push(layout.form === "body" ? wrapBody(layout.code) : terminate(layout.code));
     parts.push(RUN_CODE_RUNNER);
     return parts.join("");
   }
   const parts = [RUN_CODE_SDK_TS, "\n\n// ========================== user program ==========================\n"];
-  parts.push(body ? wrapBodyTs(userCode) : terminate(userCode));
+  parts.push(layout.form === "body" ? wrapTypeScriptBody(layout.code, layout.hoisted) : terminate(layout.code));
   parts.push(RUN_CODE_RUNNER_TS);
   return parts.join("");
-}
-
-/** `async function main() {` + the user body verbatim + `}`. */
-function wrapBodyTs(userCode: string): string {
-  return `async function main() {\n${terminate(userCode)}}\n`;
-}
-
-/** True when the first non-blank line starts with whitespace (body form). */
-export function firstNonblankLineIndented(code: string): boolean {
-  const line = splitProgramLines(code).find((candidate) => candidate.trim() !== "");
-  return line !== undefined && (line.startsWith(" ") || line.startsWith("\t"));
-}
-
-/** `async def main():` + the user body, indented one level (blank lines kept). */
-function wrapBody(userCode: string): string {
-  const out: string[] = ["async def main():\n"];
-  for (const line of splitProgramLines(userCode)) {
-    out.push(line.trim() === "" ? "\n" : `    ${line}\n`);
-  }
-  out.push("\n");
-  return out.join("");
-}
-
-function terminate(userCode: string): string {
-  return userCode.endsWith("\n") ? userCode : `${userCode}\n`;
-}
-
-/** Split on `\n`, drop a trailing `\r`, no final empty line. */
-function splitProgramLines(code: string): string[] {
-  const lines = code.split("\n");
-  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  return lines.map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
 }

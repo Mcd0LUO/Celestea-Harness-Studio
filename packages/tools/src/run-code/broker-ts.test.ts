@@ -166,9 +166,27 @@ describe.skipIf(!h.nodeReady)("run_code TypeScript (W774, default language)", ()
     );
   });
 
-  it("reports a main-less program with a clear message", async () => {
+  // W2012: this case used to assert that a main-less program is REJECTED with
+  // "no 'main' defined" — the very behaviour that failed 114/549 production
+  // calls. `const x = 1;` is a legitimate quick script and is now wrapped, so
+  // the two assertions below pin both halves of the fix: a quick script RUNS,
+  // and a program that really has no entry point is reported as a PROGRAM error
+  // (never as the infrastructure verdict `code=aborted`).
+  it("wraps and runs a main-less quick script instead of rejecting it", async () => {
     const tool = mount(echoRegistry());
-    await expect(run(tool, "rc-ts-nomain", { code: "const x = 1;\n" })).rejects.toThrow(/no 'main' defined/);
+    const out = (await run(tool, "rc-ts-quick", { code: "const x = 1;\nreturn { x };\n" })) as ToolExecOutcome;
+    expect(out.value).toEqual({ x: 1 });
+    expect(out.render).toBeNull();
+  });
+
+  it("reports a main-less SCRIPT with a clear program-level message (not aborted)", async () => {
+    const tool = mount(echoRegistry());
+    const failure = await run(tool, "rc-ts-nomain", { code: "const x = await Promise.resolve(1);\n" }).catch(
+      (error: unknown) => error as Error,
+    );
+    if (!(failure instanceof Error)) throw new Error("expected the main-less script to reject");
+    expect(failure.message).toContain("without defining 'main'");
+    expect(failure.message).not.toMatch(/code=aborted/);
   });
 
   it("cleans the temporary .ts program file from the session workdir", async () => {
