@@ -457,6 +457,27 @@ function chooseSandbox(
   };
   if (selection.degradedByGrant) {
     audit?.({ event: "degraded_by_grant", cap: "unsandboxed", provider: selection.provider, reason: selection.reason ?? undefined });
+  } else if (selection.degraded) {
+    // W9205-E4 · POLICY-level degradation was SILENT — the audit above fires only
+    // when a session grant accepted the userspace provider. The ordinary path
+    // (host probe says bwrap is unusable, `CELESTEA_SANDBOX_FALLBACK` defaults to
+    // `userspace`) degraded with NO operator-visible record at all.
+    //
+    // That is precisely the W268 lesson the provider doc cites ("the engine spent
+    // months on the weak userspace path because the degradation was never
+    // reported"), and it is the COMMON case on Windows: `probeBwrap` rejects
+    // unconditionally off Linux (`if (process.platform !== "linux") return reject(...)`)
+    // so every Windows host runs `no_os_isolation` with nothing said.
+    //
+    // A NEW event name (not `degraded_by_grant`): that name asserts the session
+    // unchanged; `cap` distinguishes the two origins (grant vs policy) and is
+    // already an optional field. The model ALREADY sees this through `SandboxMeta`
+    // (`decidedMeta` annotates any real degradation) — this is the operator side.
+    //
+    // NOT changed: the `userspace` DEFAULT. On Windows bwrap can never be usable,
+    // so defaulting to `fail` would make every `run_shell`/`/api/exec` refuse —
+    // a deployment decision, not a bug fix (see results/W9205-tools包审计.md §E4).
+    audit?.({ event: "degraded_by_policy", cap: "sandbox", provider: selection.provider, reason: selection.reason ?? undefined });
   }
   return { sandbox: new DecidedSandbox(selection.sandbox, decision), decision };
 }

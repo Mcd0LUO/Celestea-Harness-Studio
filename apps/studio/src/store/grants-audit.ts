@@ -33,6 +33,7 @@ export type GrantsAuditEventName =
   | "grants_unreadable"
   | "platform_audit_failed"
   | "degraded_by_grant"
+  | "degraded_by_policy"
   | "net_hosts_ineffective";
 
 /** One audit line. Optional fields are the documented per-event extras. */

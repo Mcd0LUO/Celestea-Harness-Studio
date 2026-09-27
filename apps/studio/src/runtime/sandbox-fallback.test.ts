@@ -303,3 +303,58 @@ describe.skipIf(!POSIX_SHELL)("W741 §3 — degradation happens only when the po
     expect(String(deny?.detail)).toContain("an 'unsandboxed' session grant is the only override");
   });
 });
+
+describe("W9205-E4 — POLICY-level degradation is audited, not silent", () => {
+  /**
+   * The gap this pins: `chooseSandbox` audited ONLY `degradedByGrant`. The
+   * ordinary path — the host probe says bwrap is unusable and the fallback mode
+   * defaults to `userspace` — degraded with no operator-visible record at all.
+   *
+   * That is the COMMON case on Windows: `probeBwrap` rejects unconditionally off
+   * Linux, so every Windows host runs `no_os_isolation` silently. It is also
+   * exactly the W268 lesson the provider doc cites.
+   *
+   * UNGATED on purpose: the audit line is emitted by `chooseSandbox` while the
+   * composition is built, so this needs no shell — and a test that skips on the
+   * very platform the defect is about would prove nothing.
+   */
+  it("emits an audit line when the POLICY (not a grant) degrades to userspace", () => {
+    const dir = tempDir("policy-degrade");
+    const events: EngineGrantEvent[] = [];
+    // NO_BWRAP = the probe cannot use bwrap; the env leaves the fallback at its
+    // `userspace` default, and there are no grants — so this is pure policy.
+    const tools = compose(dir, { probe: NO_BWRAP, env: envOf(dir), events });
+    expect(tools.decision).toMatchObject({ provider: "userspace", degraded: true, source: "policy" });
+
+    // The fix: the operator gets a record. It must NOT claim a grant caused it.
+    const line = events.find((event) => event.event === "degraded_by_policy");
+    expect(line, "policy degradation must be audited").toBeDefined();
+    expect(line).toMatchObject({ event: "degraded_by_policy", provider: "userspace" });
+    expect(String(line?.reason)).toContain("host cannot create a user namespace");
+    expect(String(line?.reason)).not.toContain("unsandboxed");
+    expect(events.some((event) => event.event === "degraded_by_grant"), "no grant was involved").toBe(false);
+  });
+
+  it("still distinguishes the GRANT origin (the two must not be conflated)", () => {
+    const dir = tempDir("grant-degrade");
+    const events: EngineGrantEvent[] = [];
+    // `fail` + the `unsandboxed` grant: the ONE path that legitimately degrades
+    // because a session grant asked for it.
+    compose(dir, {
+      probe: NO_BWRAP,
+      env: envOf(dir, { [FALLBACK_ENV]: "fail" }),
+      grants: { ...EMPTY_GRANTS, unsandboxed: true },
+      events,
+    });
+    expect(events.some((event) => event.event === "degraded_by_grant")).toBe(true);
+    expect(events.some((event) => event.event === "degraded_by_policy")).toBe(false);
+  });
+
+  it("does NOT audit the ordinary bwrap path (no noise when nothing degraded)", () => {
+    const dir = tempDir("no-degrade");
+    const events: EngineGrantEvent[] = [];
+    compose(dir, { probe: probeWith(), events });
+    expect(events.some((event) => event.event === "degraded_by_policy")).toBe(false);
+    expect(events.some((event) => event.event === "degraded_by_grant")).toBe(false);
+  });
+});
