@@ -125,6 +125,11 @@ export function validateSessionEvent(raw: unknown): ValidateResult {
       requireArray(raw, "answers", errors);
       optionalBoolean(raw, "timed_out", errors);
       break;
+    // W2018 (B1): the two field-free compaction markers. Nothing to require —
+    // the tag IS the payload, so any object carrying this type is valid.
+    case "compaction_start":
+    case "compaction_end":
+      break;
   }
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, event: normalizeSessionEvent(raw, type) };
@@ -201,6 +206,11 @@ function normalizeSessionEvent(raw: Record<string, unknown>, type: SessionEventT
     if (origin !== undefined && origin !== "user") ev.origin = origin;
     return ev;
   }
+  // W2018 (B1): the tag is the whole row. Unknown keys are ignored (the wire
+  // rule), so the in-memory event is always the canonical field-free marker —
+  // a stray field can never leak into a later re-serialization.
+  if (type === "compaction_start") return { type };
+  if (type === "compaction_end") return { type };
   return raw as unknown as SessionEvent;
 }
 
@@ -392,6 +402,10 @@ export function serializeSessionEvent(ev: SessionEvent): string {
       parts.push(`"id":${JSON.stringify(ev.id)}`);
       parts.push(`"answers":${serdeJsonString(ev.answers)}`);
       if (ev.timed_out !== undefined) parts.push(`"timed_out":${JSON.stringify(ev.timed_out)}`);
+      break;
+    // W2018 (B1): the tag is the entire row — no fields to append.
+    case "compaction_start":
+    case "compaction_end":
       break;
   }
   return `{${parts.join(",")}}`;

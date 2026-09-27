@@ -2,7 +2,11 @@
  * Compaction orchestration (port of `celestea_studio/src/compact.rs:410-500`,
  * extended by W2011/B2 with a head budget).
  *
- * One call is: read -> parse -> threshold -> summarize -> plan -> atomic rewrite.
+ * One call is: read -> parse -> threshold -> summarize -> plan -> atomic rewrite
+ * (W2018/B1: the rewrite installs a leading `compaction_start` marker inside the
+ * same atomic rename, and a trailing `compaction_end` is appended once it
+ * returned — see ./markers.ts for why that placement is the only one that can
+ * make an interrupted compaction detectable).
  * Every branch is explicit and observable, because the HTTP layer has to answer
  * three different ways:
  *   - `compacted:false` (at/below [COMPACT_THRESHOLD] complete turns) is a
@@ -26,6 +30,7 @@ import {
   planCompaction,
   selectTurns,
 } from "./plan.js";
+import { appendCompactionEnd, compactionEndEvent, compactionStartEvent } from "./markers.js";
 import { rewriteAtomic } from "./rewrite.js";
 import type { Summarizer } from "./summarize.js";
 import { renderTranscript } from "./transcript.js";
@@ -41,6 +46,8 @@ export interface CompactionInput {
   /** Injection seams for tests (defaults: real fs). */
   readText?: (path: string) => string;
   write?: (path: string, events: readonly SessionEvent[]) => void;
+  /** W2018/B1: the post-rewrite end-marker append (default: real fs + fsync). */
+  append?: (path: string) => void;
 }
 
 export interface CompactionResult {
@@ -55,7 +62,11 @@ export interface CompactionResult {
   note: string;
   /** Complete turns found in the log BEFORE the decision. */
   turns_before: number;
-  /** The new event list, or null when nothing was compacted. */
+  /**
+   * The NEW LOG exactly as it was written (W2018/B1: the leading
+   * `compaction_start` and the trailing `compaction_end` included), or null
+   * when nothing was compacted.
+   */
   events: SessionEvent[] | null;
 }
 
@@ -94,13 +105,26 @@ export async function runCompaction(input: CompactionInput): Promise<CompactionR
   const summary = await input.summarize(renderTranscript(events));
   const planned = planCompaction(events, summary, keep, head);
   if (planned === null) throw new Error("内部错误：压缩计划为空");
-  (input.write ?? rewriteAtomic)(input.logPath, planned);
+  // W2018 (B1): the start marker rides INSIDE the atomic rewrite, as the first
+  // row of the NEW log — so it is installed all-or-nothing together with the
+  // compacted history. Appending it to the OLD log instead would be
+  // self-defeating: the rename replaces that file, destroying the marker.
+  const rewritten: SessionEvent[] = [compactionStartEvent(), ...planned];
+  (input.write ?? rewriteAtomic)(input.logPath, rewritten);
+  // The end marker lands only AFTER the rename returned, so a log whose last
+  // start has no end is the durable signature of a compaction that died in
+  // between (docs/pitfalls.md P12). A failure here propagates: the caller must
+  // not be told "compacted" while the log says otherwise.
+  (input.append ?? appendCompactionEnd)(input.logPath);
   const kept = selectTurns(events, keep, head);
   return {
     compacted: true,
     kept_turns: Math.min(kept.head.length + kept.tail.length, turns),
     note: compactNote(keep, head),
     turns_before: turns,
-    events: planned,
+    // The log AS IT NOW IS on disk, both markers included — so the existing
+    // "parsed file equals result.events" invariant keeps holding
+    // (w2011-headtail.test.ts pins it).
+    events: [...rewritten, compactionEndEvent()],
   };
 }

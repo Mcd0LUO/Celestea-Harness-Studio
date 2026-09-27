@@ -152,6 +152,31 @@ export interface UserAnswerEvent {
   timed_out?: boolean;
 }
 
+/**
+ * W2018 (B1): a compaction BEGAN — a PURE MARKER row; the tag is the payload.
+ *
+ * It is written as the FIRST row of the NEW log, inside the same atomic rename
+ * that installs the compacted history (rewriteAtomic), so it can never be
+ * observed half-written: either the whole compacted log (marker included) is on
+ * disk, or the pre-compaction log is, untouched. Its partner
+ * [CompactionEndEvent] is appended only AFTER the rename succeeded, so a log
+ * whose compaction_start has no following compaction_end is the durable
+ * signature of a compaction interrupted between the rewrite and its completion
+ * — a state that used to be indistinguishable from an ordinary short session
+ * (docs/pitfalls.md P12).
+ */
+export interface CompactionStartEvent {
+  type: "compaction_start";
+}
+
+/**
+ * W2018 (B1): the compaction FINISHED — appended after the atomic rewrite
+ * succeeded. See [CompactionStartEvent] for the pairing contract.
+ */
+export interface CompactionEndEvent {
+  type: "compaction_end";
+}
+
 export type SessionEvent =
   | TurnStartEvent
   | TurnEndEvent
@@ -161,7 +186,9 @@ export type SessionEvent =
   | ToolCallEvent
   | ToolResultEvent
   | UserQuestionEvent
-  | UserAnswerEvent;
+  | UserAnswerEvent
+  | CompactionStartEvent
+  | CompactionEndEvent;
 
 export const SESSION_EVENT_TYPES = [
   "turn_start",
@@ -173,6 +200,11 @@ export const SESSION_EVENT_TYPES = [
   "tool_result",
   "user_question",
   "user_answer",
+  // W2018 (B1): the two field-free compaction markers (9 -> 11). Additive, like
+  // the W783 question rows: a reader that does not know them stops at that row
+  // (torn tail) instead of inventing content.
+  "compaction_start",
+  "compaction_end",
 ] as const;
 
 export type SessionEventType = (typeof SESSION_EVENT_TYPES)[number];

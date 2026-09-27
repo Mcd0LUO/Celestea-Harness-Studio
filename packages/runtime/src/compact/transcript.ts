@@ -94,6 +94,12 @@ export function transcriptLine(ev: SessionEvent): string {
     case "user_question":
     case "user_answer":
       return "";
+    // W2018 (B1): markers are not transcript content. Returning "" (not a note)
+    // keeps the summary prompt for a given log byte-identical whether or not an
+    // earlier interrupted compaction left a marker behind.
+    case "compaction_start":
+    case "compaction_end":
+      return "";
   }
 }
 

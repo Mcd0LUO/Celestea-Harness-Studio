@@ -92,7 +92,12 @@ export function expectedCompactLog(
   const dropped = ranges.slice(headCount, tailFrom);
   const tailRanges = ranges.slice(tailFrom);
 
-  const out: SessionEvent[] = summaryTurn(summary);
+  // W2018 (B1): the markers are part of the frozen plan shape now — the start
+  // row is written INSIDE the atomic rewrite (so it is the FIRST row of the new
+  // log) and the end row is appended after it. Written LITERALLY here, not via
+  // the runtime's constructors, so this stays an independent re-derivation: a
+  // change to either marker's shape or position must show up as a diff.
+  const out: SessionEvent[] = [{ type: "compaction_start" }, ...summaryTurn(summary)];
   const append = (part: ReadonlyArray<[number, number]>, firstTurn: number): void => {
     part.forEach(([from, to], i) => {
       const id = `turn-${firstTurn + i}`;
@@ -113,6 +118,7 @@ export function expectedCompactLog(
     });
   }
   append(tailRanges, 2 + headCount);
+  out.push({ type: "compaction_end" });
   return out;
 }
 

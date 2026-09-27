@@ -112,6 +112,12 @@ export function projectEvent(event: SessionEvent): Message | null {
     case "user_question":
     case "user_answer":
       return null;
+    // W2018 (B1): the compaction markers are LOG-STRUCTURAL rows — the model
+    // never sees them (they carry no content), so they project to nothing. This
+    // is what keeps deriveMessages byte-identical for every existing log.
+    case "compaction_start":
+    case "compaction_end":
+      return null;
     case "tool_call":
       // Legacy: unreachable!("ToolCall must be accumulated by derive_messages…")
       throw new Error("ToolCall must be accumulated by derive_messages, not projected");
