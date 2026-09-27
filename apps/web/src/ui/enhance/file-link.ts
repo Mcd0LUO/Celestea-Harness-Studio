@@ -13,38 +13,47 @@
 //     · 文本节点（「文件：x」句式）→ 直接 detectFromText(node.data)。
 //   于是「正文里可点的东西」与「工具卡认得的文件」永远是同一个答案。
 //
-// ★ 为什么委托宿主是 document.body，而不是传进来的 container（本遍最重要的发现）：
+// ★ 为什么委托宿主是 document.body，而不是传进来的 container（W2013 最重要的发现）：
 //   registry 的合同说 enhance(container) 收到的是「包住目标的容器」。这句话在
 //   **重放/重置**路径上成立（assistant.ts:190 传 view.content），但在**流式**路径上
 //   不成立 —— assistant.ts:103-108 的 runEnhancersOnFragment 会把本 tick 的新节点搬进
 //   一个**临时 div**、对它跑增强、再把子节点搬回 fragment 插入正文。于是：
 //     · 挂在该 div 上的监听随 div 一起被丢弃（节点搬走了，监听不跟着走）；
 //     · 打在该 div 上的 dataset 标记同样被丢弃。
-//   实测（W2013 探针，见报告）：把监听挂在传入容器上，点击正文节点 hits=[] —— 死的。
-//   而流式恰恰是本遍最需要覆盖的路径。节点身份在搬移中保持不变（这正是 hljs 的
-//   innerHTML 写回、code-copy 的 .code-wrap 包裹能活下来的原因），但**容器不是**。
-//   所以：委托宿主必须是**比节点活得久**的那个元素 ⇒ document.body。
-//   代价与对策：body 级监听是全局的，因此处理器自己重新判定作用域（见 SCOPE_SELECTOR）
-//   与「插件是否仍注册」（见 enhancerIds 门），不依赖任何闭包里的容器引用。
+//   实测（W2013 探针）：把监听挂在传入容器上，点击正文节点 hits=[] —— 死的。
+//   节点身份在搬移中保持不变（这正是 hljs 的 innerHTML 写回、code-copy 的 .code-wrap
+//   包裹能活下来的原因），但**容器不是**。所以委托宿主取 document.body。
+//   代价与对策：body 级监听是全局的，处理器自己重新判定作用域与注册状态。
 //
-// ★ 为什么不抢外链（detect.ts:11 的既有口径，必须保住）—— 两道彼此独立的守卫：
-//   ① 锚点一律放行：marked 渲染的外链/站内链接都是 a[href]，浏览器按原语义处理。
-//      这一条是必要的：markdown 的 [docs/readme.md](/some/url) 渲染出的锚点**正文**
+// ★ 为什么不抢外链（detect.ts 的既有口径）—— 两道彼此独立的守卫：
+//   ① 锚点一律放行：markdown 的 [docs/readme.md](/some/url) 渲染出的锚点**正文**
 //      恰好是一个合法路径，只靠判定拦不住它。
-//   ② 判定只走 detectFromText / looksLikePath，它对 http(s)/file 等 scheme 一律返回空
-//      ⇒ 不以锚点形态出现的 URL（例如正文里裸写的 https://…/a.ts）也不会被拦下。
+//   ② 判定只走 detectFromText / looksLikePath，它对 http(s)/file 等 scheme 一律返回空。
 //
 // ★ 幂等：标记打在**委托宿主**上（dataset.fileLinkDone），沿用 builtin.ts 的
-//   dataset.hlDone 范例 —— 同一个宿主只挂一次监听。宿主是 body（活得比任何容器都久），
-//   所以「流式每节拍重跑整条链」不会重复挂。
+//   dataset.hlDone 范例。宿主是 body（活得比任何容器都久），所以流式每节拍重跑
+//   整条链不会重复挂。
 //
-// 铁律（FRONTEND-RULES）：本遍不重建任何节点、不写 innerHTML、不 replaceChildren，
-//   只挂一个委托监听 ⇒ 铁律 1/2/4/5 均不适用（没有可违反的动作）。
+// ★★ W2025（键盘等效路径）—— 本遍原先只有 click 委托，键盘用户够不到正文里的路径。
+//   真机实测（CDP，隔离实例）：正文行内 code 是 tabIndex === -1，focus() 之后
+//   document.activeElement 不变 ⇒ **无法聚焦 ⇒ 无法用 Enter/Space 触发**。
+//   工具卡上的 .toolcard-preview 是 button（键盘可达），但它的条件是
+//   PREVIEW_CONTENT_TOOLS.has(name)，而那张表只有 'read_file'（preview/detect.ts:51）
+//   ⇒ 它覆盖的是「工具卡认得的文件」，不覆盖「模型在正文里提到的任意路径」。
+//   缺口因此是真的：同一个功能，指针可达、键盘不可达。
+//
+//   修法（两件事，各自独立）：
+//     ① **渲染期**给命中节点补上 tabindex / role=button / title，并保证一个正文容器
+//        同一时刻只有一个 Tab 停靠点 —— 见 file-link-mark.ts（含与 W2013 纪律的关系）；
+//     ② **事件期**加一个 Enter/Space 的委托 keydown，与 click 走**同一个出口**
+//        （resolveTarget + openFilePreview），口径不可能分叉。
+//   鼠标行为一字不动：click 仍是**原来那个**处理器，defaultPrevented 与打开结果不变。
 // ============================================================================
 import { joinPath } from "../fs-path";
 import { workspacePath } from "../commands/files";
-import { detectFromText, type PreviewCandidate } from "../preview/detect";
 import { openFilePreview } from "../workbench/files-open";
+import { candidateAt } from "./file-link-caret";
+import { HIT_SEL, PATH_ATTR, SCOPE_SELECTOR, applyStops, hitOf, markScope, moveStop, releaseStop } from "./file-link-mark";
 import { enhancerIds, type Enhancer } from "./registry";
 
 /** 登记表 / 设置页 / 测试共用的身份。 */
@@ -63,15 +72,11 @@ export const ORDER_FILE_LINK = 30;
 /** 委托宿主上的幂等标记（照 builtin.ts 的 dataset.hlDone 范例）。 */
 const DONE = "fileLinkDone";
 
-/**
- * 只处理**消息正文**：ui/messages/user.ts:66 与 ui/messages/assistant.ts:365 都用
- * "content rendered" 建正文容器。
- *
- * 为什么必须自己判定：委托宿主是 body，事件来自整个文档。预览面板自己的正文是
- * "preview-body rendered"，不匹配本选择器 ⇒ 在预览里点路径不会递归开新预览；
- * 代码块（pre > code）也在下面被显式跳过 —— 代码块是拿来复制的，不是拿来点的。
- */
-const SCOPE_SELECTOR = ".content.rendered";
+/** 只处理**消息正文**（唯一真源在 file-link-mark.ts，这里转出去给测试与调用方用）。 */
+export { SCOPE_SELECTOR };
+
+/** 键盘语义：与原生 button 一致（Enter / Space）。 */
+const ACTIVATE_KEYS: ReadonlySet<string> = new Set(["Enter", " "]);
 
 /** 一个「正文里的文件路径可点开预览」的增强遍（工厂：幂等，可反复调用）。 */
 export function fileLinkEnhancer(): Enhancer {
@@ -81,15 +86,24 @@ export function fileLinkEnhancer(): Enhancer {
 /**
  * 幂等：委托宿主上只挂**一次**监听（流式每节拍都会重跑整条链）。
  *
- * 宿主取 ownerDocument.body，**不是**传进来的 container —— 理由见文件头
- * 「为什么委托宿主是 document.body」。标记打在宿主上而不是每个可点节点上：
- * 本遍因此零逐节点 DOM 写入（不改结构、不加 class、不加属性）。
+ * 宿主取 ownerDocument.body，**不是**传进来的 container —— 理由见文件头。
+ * 五个监听全是委托：click / keydown 是功能本体；focusin / focusout / mouseover
+ * 只为「Tab 停靠点移交」服务（见 file-link-mark.ts 的 applyStops）。
  */
 function applyFileLinks(container: Element): void {
   const host = delegationHost(container);
-  if (host === null || host.dataset[DONE] === "1") return;
-  host.dataset[DONE] = "1";
-  host.addEventListener("click", onDelegatedClick);
+  if (host === null) return;
+  if (host.dataset[DONE] !== "1") {
+    host.dataset[DONE] = "1";
+    host.addEventListener("click", onDelegatedClick);
+    host.addEventListener("keydown", onDelegatedKeydown);
+    host.addEventListener("focusin", onFocusIn);
+    host.addEventListener("focusout", onFocusOut);
+    host.addEventListener("mouseover", onHover);
+    observeInsertions(host.ownerDocument);
+  }
+  // 渲染期写入：属性只有在**渲染时**就落在 DOM 上，Tab 才够得到它（见文件头 W2025）。
+  markScope(container);
 }
 
 /** 委托宿主：比任何正文节点活得久的那个元素（见文件头）。 */
@@ -113,7 +127,7 @@ function onDelegatedClick(ev: MouseEvent): void {
   if (scope === null) return;
   // 外链守卫①：锚点（markdown 链接的渲染结果）一律交给浏览器，不抢默认行为。
   if (target.closest("a[href]") !== null) return;
-  const hit = candidateAt(target, ev);
+  const hit = candidateAt(target, ev, markedPath(target));
   if (hit === null) return;
   const abs = resolveTarget(hit.path);
   if (abs === null) return;
@@ -121,114 +135,77 @@ function onDelegatedClick(ev: MouseEvent): void {
   openFilePreview(abs);
 }
 
+/**
+ * W2025 委托键盘处理器：Enter/Space 打开预览 —— 与点击**同一个出口**
+ * （resolveTarget + openFilePreview），所以「什么算路径」「打不开就不开」的口径
+ * 不可能分叉。
+ *
+ * 只认**命中节点自己**收到的事件：正文里的其它控件（复制按钮、csv 表头、图片灯箱）
+ * 有自己的键盘语义，本遍不抢。Space 必须 preventDefault（否则页面会滚一屏）。
+ */
+function onDelegatedKeydown(ev: KeyboardEvent): void {
+  if (!enhancerIds().includes(FILE_LINK_ID)) return;
+  if (!ACTIVATE_KEYS.has(ev.key)) return;
+  const target = ev.target;
+  if (!isElement(target) || target.closest(SCOPE_SELECTOR) === null) return;
+  const hit = hitOf(target);
+  if (hit === null) return;
+  const abs = resolveTarget(hit.getAttribute(PATH_ATTR) ?? "");
+  if (abs === null) return;
+  ev.preventDefault();
+  openFilePreview(abs);
+}
+
+/** 命中节点上存着的路径（没打标记 ⇒ null，交给 candidateAt 走 W2013 的判定）。 */
+function markedPath(target: Element): string | null {
+  const hit = hitOf(target);
+  return hit === null ? null : hit.getAttribute(PATH_ATTR);
+}
+
 /** 事件目标 → Element（用 nodeType 判定：跨文档/跨 window 也成立）。 */
 function isElement(node: EventTarget | null): node is Element {
   return node !== null && (node as Node).nodeType === 1;
 }
 
-/**
- * 点击目标 → 一个路径候选（判定全部来自 detect.ts，本文件**零正则**）。
- *
- * 归一顺序与 detect.ts 的形态一一对应：
- *   · 内联 code（行内反引号形态）优先 —— 边界由 DOM 直接给出，最明确；
- *   · 否则看点击落点所在的文本节点（「文件：x」句式）。
- */
-function candidateAt(target: Element, ev: MouseEvent): PreviewCandidate | null {
-  // 代码块整个跳过：它是拿来复制的，不是拿来点的。必须在 code 分支**之前**返回 ——
-  // 否则会掉进下面的文本分支，把 pre 里的 "a/b.ts" 当成正文里的路径（真 bug，
-  // 由 tests 的 ⑦ 号用例抓到）。
-  if (target.closest("pre") !== null) return null;
-  const code = target.closest("code");
-  if (code !== null) return candidatesOfCode(code)[0] ?? null;
-  const point = clickPoint(target, ev);
-  if (point === null) return null;
-  const list = detectFromText(point.node.data);
-  if (list.length === 0) return null;
-  // 只有一个候选 ⇒ 就是它；多个 ⇒ 必须用落点偏移挑，绝不猜（猜错会打开错的文件）。
-  if (list.length === 1) return list[0] ?? null;
-  return candidateAtOffset(point.node.data, list, point.offset);
+/** 焦点进来时把停靠点落到真正拿到焦点的那个命中上（多 pane 并存时不串台）。 */
+function onFocusIn(ev: FocusEvent): void {
+  moveStop(ev.target);
 }
+/** 焦点离开停靠点 ⇒ 交给下一个，Tab 继续走（不是把整段路径变成死胡同）。 */
+function onFocusOut(ev: FocusEvent): void {
+  releaseStop(ev.target);
+}
+/** 鼠标悬停也移交停靠点：先动鼠标再按 Tab 的用户，落点与视觉焦点一致。 */
+function onHover(ev: MouseEvent): void {
+  moveStop(ev.target);
+}
+
+// ---------------------------------------------------------------------------
+// W2025 · 流式路径的补画（渲染期写入做不到，必须观察插入）
+// ---------------------------------------------------------------------------
+
+/** 观察器单例（每个 document 一个）。 */
+const observed = new WeakSet<Document>();
 
 /**
- * 内联代码节点的候选：把内容还原成 code-span 的**源形态**再交给 detectFromText。
+ * 为什么必须有观察器：流式路径上 enhance 收到的容器是一个**临时 div**（见文件头），
+ * 它此刻不在正文里 ⇒ markScope 的作用域判定（closest）必然为空，画不上属性。
+ * 而 tabindex 必须在渲染时就位（见文件头），所以只能等节点真的进了正文再补画一次。
  *
- * 为什么可以这样还原：DOM 里 code 的主要来源就是 markdown 的行内反引号，所以
- * 「节点类型 = 形态」由构造保证。本函数只负责把内容送回那条**已存在**的判定，
- * 而不是重写一条「看起来差不多」的。含反引号的内容还原不忠实 ⇒ 直接放弃
- * （那种文本本来也不是路径）。
+ * 代价：body 级 childList 观察（subtree: true，但回调只处理**本 tick 新增的节点**，
+ * 不做全量重扫 —— 与 W9229 收窄增强作用域的动机一致）。
  */
-function candidatesOfCode(code: Element): PreviewCandidate[] {
-  const text = code.textContent ?? "";
-  if (text === "" || text.includes("`")) return [];
-  return detectFromText("`" + text + "`");
-}
-
-/** 一个文本节点 + 点击落点在该节点内的字符偏移（取不到偏移 ⇒ null）。 */
-interface TextPoint {
-  node: Text;
-  offset: number | null;
-}
-
-/**
- * 真机取 caret 的两个 API（各引擎实现不同）。
- *
- * 为什么用 Partial + 断言而不是 interface extends Document：lib.dom 已经声明了这两个
- * 方法，而 jsdom 与旧引擎**运行时**没有 —— 接口继承会与库声明冲突（TS2430），
- * Partial 则如实表达「类型上有、运行时可能没有」，调用点用 ?. 兜住。
- */
-interface CaretApi {
-  caretRangeFromPoint(x: number, y: number): Range | null;
-  caretPositionFromPoint(x: number, y: number): CaretPosition | null;
-}
-
-/**
- * 点击落在哪个文本节点、哪个字符上。
- *
- * 真机走 caretRangeFromPoint（浏览器自己的排版与字符边界，与正文同源）；
- * 取不到（jsdom / 旧引擎）时退化为「目标元素里的第一个文本节点」并把偏移留空 ——
- * 那时只有单候选的形态会被处理，多候选一律放弃（**静默不处理比误判安全**）。
- */
-function clickPoint(target: Element, ev: MouseEvent): TextPoint | null {
-  const doc = target.ownerDocument;
-  const api = doc === null ? null : (doc as unknown as Partial<CaretApi>);
-  const range = api?.caretRangeFromPoint?.(ev.clientX, ev.clientY) ?? null;
-  const pos = api?.caretPositionFromPoint?.(ev.clientX, ev.clientY) ?? null;
-  const node: Node | null = range?.startContainer ?? pos?.offsetNode ?? null;
-  // isConnected：caret API 可能返回别的文档里的节点，那种节点不属于本次点击。
-  if (node !== null && node.nodeType === 3 && node.isConnected) {
-    const offset = range === null ? (pos === null ? null : pos.offset) : range.startOffset;
-    return { node: node as Text, offset };
-  }
-  const fallback = firstTextNode(target);
-  return fallback === null ? null : { node: fallback, offset: null };
-}
-
-/** 元素子树里的第一个非空文本节点（深度优先，与文档序一致）。 */
-function firstTextNode(el: Element): Text | null {
-  for (const n of Array.from(el.childNodes)) {
-    if (n.nodeType === 3) {
-      if ((n.textContent ?? "") !== "") return n as Text;
-      continue;
+function observeInsertions(doc: Document): void {
+  if (observed.has(doc) || doc.body === null) return;
+  observed.add(doc);
+  new MutationObserver((records) => {
+    if (!enhancerIds().includes(FILE_LINK_ID)) return;
+    for (const r of records) {
+      for (const n of Array.from(r.addedNodes)) {
+        if (n.nodeType === 1) markScope(n as Element);
+      }
     }
-    const deep = n.nodeType === 1 ? firstTextNode(n as Element) : null;
-    if (deep !== null) return deep;
-  }
-  return null;
-}
-
-/**
- * 多候选时按落点偏移挑出被点中的那一个。
- *
- * 只用 indexOf 在**已由 detectFromText 给出的**路径上定位 —— 不再跑任何新的匹配，
- * 否则「哪个子串算路径」就又有了第二份口径。偏移落在某个路径的字符区间内即命中。
- */
-function candidateAtOffset(data: string, list: readonly PreviewCandidate[], offset: number | null): PreviewCandidate | null {
-  if (offset === null) return null;
-  for (const c of list) {
-    const i = data.indexOf(c.path);
-    if (i >= 0 && offset >= i && offset <= i + c.path.length) return c;
-  }
-  return null;
+  }).observe(doc.body, { childList: true, subtree: true });
 }
 
 /**
@@ -238,7 +215,13 @@ function candidateAtOffset(data: string, list: readonly PreviewCandidate[], offs
  * （宁可不打开，也不去猜一个可能不存在的绝对路径 —— 猜错会弹一个读不出来的面板）。
  */
 export function resolveTarget(path: string): string | null {
-  if (path.startsWith("/") || path.startsWith("\\\\") || /^[A-Za-z]:[\\/]/.test(path)) return path;
+  if (path.startsWith("/") || path.startsWith("\\") || /^[A-Za-z]:[\/]/.test(path)) return path;
   const root = workspacePath();
   return root === "" ? null : joinPath(root, path);
+}
+
+/** 停靠点重算（调用方在正文容器变化后重挑一个；正文没命中时是 no-op）。 */
+export function refreshStops(scope: Element): void {
+  const box = scope.closest(SCOPE_SELECTOR);
+  if (box !== null && box.querySelector(HIT_SEL) !== null) applyStops(box);
 }

@@ -13,6 +13,8 @@ export const plugins = {
   // W2013: a file path in the message body opens the right-hand preview panel.
   'plugins.desc.fileLink.label': 'File links in text',
   'plugins.desc.fileLink.hint': 'A file path mentioned in a message opens in the preview panel; external links are unaffected.',
+  // W2025: the keyboard channel for file paths in the message body.
+  'chat.fileLink.open': 'Open preview (Enter)',
   // The inline config panel (same shape as the model provider rows).
   'settings.plugins.expand': 'Show settings for "{label}"',
   'settings.plugins.noConfig': 'This plugin has no adjustable settings',
