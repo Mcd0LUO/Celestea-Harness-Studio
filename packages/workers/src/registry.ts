@@ -40,7 +40,9 @@ import { SessionRegistry } from "./sessions.js";
 import type { SessionLogFactory } from "./log.js";
 import {
   REGISTRY_TSV_PATH,
+  acquireTableLock,
   getExtra,
+  type TableLockOptions,
   leaseToken,
   mergeTableRows,
   parseRegistryTsv,
@@ -53,7 +55,7 @@ import {
   workerRetries,
 } from "./registry-tsv.js";
 import { dropTokens, isOwn, setToken as setTokenOf, terminalEntry, withProc, withState, withTokens } from "./row.js";
-import { observeWorkerTable, pidAliveDefault, workerOwner, type WorkerRecoveryOptions, type WorkerRecoveryReport } from "./recovery.js";
+import { WORKER_LEASE_TTL_MS, leaseExpired, observeWorkerTable, pidAliveDefault, workerOwner, type WorkerRecoveryOptions, type WorkerRecoveryReport } from "./recovery.js";
 import { hydrateSessions, inheritableRows, statusView } from "./rehydrate.js";
 import { utcNow, workerTitle, type SpawnInfo, type WorkerSession, type WorkerVerdict } from "./types.js";
 import { PersistFailureLog, type PersistFailure } from "./persist-log.js";
@@ -63,6 +65,12 @@ import { PersistFailureLog, type PersistFailure } from "./persist-log.js";
 export { entryView, isOwn, withProc, withState } from "./row.js";
 
 export const RESULTS_DIR_DEFAULT = "results";
+/**
+ * W9224 P1-7: how often a driven row's `lease=` is renewed. Must be well below
+ * `WORKER_LEASE_TTL_MS` (10 min) so several renewals are missed before a live
+ * row is ever judged stale: 30 s gives a 20x margin.
+ */
+export const DRIVER_HEARTBEAT_MS = 30_000;
 export const WORKER_REGISTRY_SERVICE = "celestea.workers.WorkerRegistry";
 
 export type { SpawnInfo } from "./types.js";
@@ -86,8 +94,30 @@ export interface WorkerRegistryOptions {
    * worker belonged even after the process that spawned it is gone (G2-6).
    */
   hostSessionId?: string | null;
+  /**
+   * W9224 P1-6: which `host=` conversations a registry with NO
+   * `hostSessionId` may TAKE ROWS OVER from. The boot converger is exactly that
+   * shape (it runs before any session exists), and a hostless registry used to
+   * accept every row — so the `host=` guard that keeps one conversation out of
+   * another's rows did not exist on the one path that writes without a session.
+   * Absent = the historical `proc`-only standing (embedded / legacy callers).
+   */
+  mayAdoptHost?: (host: string) => boolean;
   now?: () => number;
   pid?: number;
+  /**
+   * W9224 P1-5: acquire budget of the cross-process table lock (attempts /
+   * backoff / stale window). Injectable for the same reason `now` and `pid`
+   * are — a test must be able to drive a contended write without waiting real
+   * seconds. Production always uses the module defaults.
+   */
+  lock?: TableLockOptions;
+  /**
+   * W9224 P1-7: how long a `lease=` stamp counts as evidence of life before
+   * [claim] may take the row over (default [WORKER_LEASE_TTL_MS]; must match
+   * the observer's `leaseTtlMs` or the two halves of P2 would disagree).
+   */
+  leaseTtlMs?: number;
   /**
    * W831 R3 B4 (R2-A4): file a failed persist is appended to (null = no file).
    * Persist never throws (W180 B1(c)), so without a sink the mismatch
@@ -113,6 +143,11 @@ export class WorkerRegistry {
   private sourceLabelValue: string;
   private hostModeValue: string | null;
   private readonly hostSessionValue: string | null;
+  private readonly mayAdoptHostValue: ((host: string) => boolean) | null;
+  private readonly lockOptions: TableLockOptions;
+  private readonly leaseTtlMs: number;
+  /** W9224 P1-7: the lease-renewal timer (null = not renewing). */
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private released = false;
 
   constructor(opts: WorkerRegistryOptions = {}) {
@@ -121,6 +156,10 @@ export class WorkerRegistry {
     this.sourceLabelValue = opts.sourceLabel ?? "unknown";
     this.hostModeValue = opts.hostMode ?? null;
     this.hostSessionValue = opts.hostSessionId ?? null;
+    this.mayAdoptHostValue = opts.mayAdoptHost ?? null;
+    this.lockOptions = opts.lock ?? {};
+    // W9224 P1-7: the takeover rule must match the observer's (recovery.ts).
+    this.leaseTtlMs = opts.leaseTtlMs ?? WORKER_LEASE_TTL_MS;
     this.now = opts.now ?? Date.now;
     this.ownPid = opts.pid ?? process.pid;
     this.persistLog = new PersistFailureLog(opts.alertsLog ?? null);
@@ -316,8 +355,17 @@ export class WorkerRegistry {
   claim(wid: string, pidAlive: (pid: number) => boolean = pidAliveDefault): WorkerEntry | null {
     const entry = this.rows.get(wid);
     if (entry === undefined || entry.status !== "RUNNING" || !this.mayInherit(entry) || isOwn(entry, this.ownPid)) return null;
+    // W9224 P1-6: `mayInherit` is vacuously true for a hostless registry, so the
+    // host guard did not exist on the boot path. A row that NAMES a host belongs
+    // to that conversation; a registry that declares none has no standing over
+    // it unless the caller supplied an explicit scope (the boot converger's,
+    // derived from the P0 probe).
+    if (!this.mayTakeOver(entry)) return null;
+    // W9224 P1-7: the SAME evidence the observer used. A bare pid is not
+    // enough — an owner whose lease stopped renewing (or whose pid was recycled)
+    // must be takeable here, or the boot converger can never close the row.
     const owner = workerOwner(entry);
-    if (owner !== null && pidAlive(owner.pid)) return null;
+    if (owner !== null && pidAlive(owner.pid) && !leaseExpired(entry, owner, this.now(), this.leaseTtlMs)) return null;
     const taken = withTokens(entry, { proc: String(this.ownPid), lease: this.lease(), claimed: this.lease() });
     this.rows.set(wid, taken);
     void this.persistObserved(wid);
@@ -434,6 +482,10 @@ export class WorkerRegistry {
   /** Attach the driver seams; `canDrive` is true only when all three exist. */
   attachDrivers(drivers: WorkerDrivers): void {
     this.drivers = drivers;
+    // W9224 P1-7: attaching the seams is what makes a driven worker's lease a
+    // HEARTBEAT — start renewing here so a parked worker's stamp cannot age past
+    // the staleness TTL while its driver is genuinely alive.
+    this.startHeartbeat();
   }
 
   canDrive(): boolean {
@@ -493,11 +545,62 @@ export class WorkerRegistry {
   }
 
   /**
+   * W9224 P1-7: start renewing the lease of every driven row (idempotent).
+   *
+   * `unref`ed on purpose, exactly like the watchdog's sweep timer: a renewal
+   * timer must never be the reason a host stays alive, and a host that forgets
+   * to shut down still exits.
+   */
+  startHeartbeat(): void {
+    if (this.heartbeatTimer !== null) return;
+    this.heartbeatTimer = setInterval(() => this.heartbeat(), DRIVER_HEARTBEAT_MS);
+    this.heartbeatTimer.unref();
+  }
+
+  /** Stop renewing (idempotent; [shutdown] calls it). */
+  stopHeartbeat(): void {
+    if (this.heartbeatTimer === null) return;
+    clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = null;
+  }
+
+  /**
+   * W9224 P1-7: renew the `lease=` of every RUNNING row this process DRIVES.
+   *
+   * WHY it exists: `lease=` was only renewed as a side effect of
+   * `setWorkerState` (a driver state change), so a worker parked on its mailbox
+   * between messages carried a stamp that could be hours old — which is exactly
+   * why the staleness rule could not use the stamp at all (the audit's "lease
+   * 只写不读" finding). A periodic renewal is what turns `lease=` into a real
+   * heartbeat, and it is what makes `driven=yes` the precise condition under
+   * which an old stamp means "the owner stopped" (see recovery.leaseExpired).
+   *
+   * Only rows with a LIVE driver task are touched (`isDriving`): a row whose
+   * driver exited is the watchdog's business, and renewing it here would keep a
+   * dead row looking alive forever — the exact bug this batch fixes.
+   *
+   * Returns the wids it renewed (diagnostics / tests).
+   */
+  heartbeat(): string[] {
+    const renewed: string[] = [];
+    for (const entry of this.ownEntries()) {
+      if (entry.status !== "RUNNING") continue;
+      const sid = getExtra(entry, "sess");
+      if (sid === null || !this.isDriving(sid)) continue;
+      this.rows.set(entry.wid, withTokens(entry, { lease: this.lease() }));
+      renewed.push(entry.wid);
+    }
+    if (renewed.length > 0) void this.persistObserved(null);
+    return renewed;
+  }
+
+  /**
    * Idempotent teardown: stop drivers, settle the rows they were driving, purge
    * queues, drop sessions and rows. A stopping host leaves no RUNNING row behind
    * (W736) — an abandoned row would otherwise read as RUNNING forever.
    */
   shutdown(): void {
+    this.stopHeartbeat();
     this.abortAllNow();
     this.settleOpenRows("registry-shutdown");
     this.mailboxRegistry.purgeAll();
@@ -543,12 +646,36 @@ export class WorkerRegistry {
    */
   private persist(): string | null {
     if (this.path === null) return null;
+    // W9224 P1-5: the read-merge-rename below is a critical section ACROSS
+    // PROCESSES. Without this lock two hosts sharing the table path read the
+    // same base and the second rename drops the first one's rows (a lost
+    // update). Same-process writers were already safe (the whole method is
+    // synchronous), which is why no in-process test could see it.
+    // The lock file lives NEXT TO the table, so the directory must exist first
+    // (it is created here rather than inside the critical section for exactly
+    // that reason: a first write into a fresh data dir must still be able to
+    // take the lock).
     try {
       mkdirSync(dirname(this.path), { recursive: true });
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+    const lock = acquireTableLock(this.path, this.lockOptions);
+    if (lock === null) return `registry write aborted: could not lock ${this.path}`;
+    try {
+      return this.writeTable();
+    } finally {
+      lock.release();
+    }
+  }
+
+  /** The critical section itself (caller holds the table lock). */
+  private writeTable(): string | null {
+    try {
       // W831 R3 B4 (W813 P1-persist-foreign): a READ failure ABORTS the write.
       // The old readTableRows -> [] made the merge base empty, so the rename
       // deleted every foreign row. Only an absent file is an empty table.
-      const read = readTable(this.path);
+      const read = readTable(this.path as string);
       if (read.error !== null) return "registry write aborted: cannot read " + this.path + ": " + read.error;
       const merged = mergeTableRows(read.rows, this.ownEntries());
       this.rows.clear();
@@ -556,7 +683,7 @@ export class WorkerRegistry {
       const tmp = `${this.path}.tmp-${this.ownPid}-${this.now()}`;
       // W831 R3 B4 (W813 P1-persist-foreign): carry unparsed lines through.
       writeFileSync(tmp, serializeRegistryTsv(merged) + read.raw.map((line) => line + "\n").join(""), "utf8");
-      renameWithRetry(tmp, this.path);
+      renameWithRetry(tmp, this.path as string);
       return null;
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
@@ -598,6 +725,19 @@ export class WorkerRegistry {
     if (host === null) return true;
     const rowHost = getExtra(entry, "host");
     return rowHost === null || rowHost === host;
+  }
+
+  /**
+   * W9224 P1-6: standing to TAKE a row over (see [claim]). A row with no
+   * `host=` token carries only `proc=` as evidence, so the historical rule
+   * stands; a row that names a host is out of reach for a hostless registry
+   * without a declared scope.
+   */
+  private mayTakeOver(entry: WorkerEntry): boolean {
+    const rowHost = getExtra(entry, "host");
+    if (rowHost === null) return true;
+    if (this.hostSessionValue !== null) return true; // mayInherit already matched
+    return this.mayAdoptHostValue !== null && this.mayAdoptHostValue(rowHost);
   }
 
   private widForSession(sid: string): string | null {

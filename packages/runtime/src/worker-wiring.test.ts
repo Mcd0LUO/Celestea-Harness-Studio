@@ -9,11 +9,31 @@
  * by `(wid, attempt)` would silently drop the SECOND intentional message.
  */
 
-import { Context } from "@celestea/core";
+import { Context, type ToolRegistry } from "@celestea/core";
 import { InMemorySessionLog } from "@celestea/session";
 import { WorkerRegistry } from "@celestea/workers";
 import { describe, expect, it } from "vitest";
 import { ensureWorkerWiring } from "./worker-wiring.js";
+
+/** A no-op tool registry (the driver seam this probe never exercises). */
+function emptyToolRegistry(): ToolRegistry {
+  return {
+    register: () => undefined,
+    addGuard: () => undefined,
+    get: () => undefined,
+    schemas: () => [],
+    dispatch: (input) => Promise.resolve({ call_id: input.call_id, value: null, render: null, error: null, decision: null }),
+  };
+}
+
+/** Poll a condition with a hard ceiling (W9225: wait for a fact, not a duration). */
+async function waitUntil(cond: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error("timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
 
 const NOW = 1_700_000_000_000;
 
@@ -61,6 +81,42 @@ describe("worker receipt drain key (E §2.2.3)", () => {
     expect(ids[0]).toMatch(/^mailbox:\d+$/);
     expect(ids[1]).not.toBe(ids[0]);
     expect(ids.every((id) => !id.startsWith("receipt:"))).toBe(true);
+  });
+
+  it("attaching the driver seams STARTS the lease heartbeat (W9224 P1-7)", async () => {
+    // The production path is `compose.ts` -> `host.attach(drivers)`; attaching is
+    // what turns `lease=` from a one-shot stamp into a heartbeat, which is the
+    // precondition the staleness rule (recovery.leaseExpired) relies on.
+    const ctx = Context.root();
+    const host = ensureWorkerWiring(ctx, { tsvPath: null, resultsDir: "results", logFactory: () => new InMemorySessionLog(), hostSessionId: "ws/s1", sessionIdPrefix: "worker-" });
+    if (host === null) throw new Error("wiring disabled");
+    const sid = host.registry.sessions.create({ title: "W9·T", workspace: null, model: null, mode: null }).meta.id;
+    const staleAt = Math.floor(Date.now() / 1000) - 3_600;
+    const row = (): string => `sess=${sid} host=ws/s1 driven=yes attempt=1 lease=4242@${staleAt}`;
+    host.registry.upsert({ wid: "W9", started_at: "t", status: "RUNNING", extra: row() });
+    // Nothing renews yet: nobody is driving this row.
+    expect(host.registry.heartbeat()).toEqual([]);
+
+    const started = host.attach({
+      llm: { generate: () => Promise.reject(new Error("no llm in this probe")) },
+      tools: emptyToolRegistry(),
+      agentLoop: { runTurn: async () => undefined },
+    });
+    expect(started).toBe(true);
+    host.registry.driveIfPossible(sid, "brief", false);
+    // Wait for the DRIVER TASK (not a duration): the registry must know it drives
+    // this session before its heartbeat can renew the row.
+    await waitUntil(() => host.registry.isDriving(sid));
+    // The driver's own state change also stamped the lease; age the row BACK so
+    // the only thing that can renew it is the heartbeat.
+    host.registry.upsert({ wid: "W9", started_at: "t", status: "RUNNING", extra: row() });
+    // `heartbeat()` is what the TIMER calls, so polling it with a real timer is
+    // exactly the production renewal. It must have replaced the aged stamp.
+    await waitUntil(() => host.registry.heartbeat().length > 0);
+    expect(host.registry.getEntry("W9")!.extra).not.toContain(`lease=4242@${staleAt}`);
+    expect(host.registry.getEntry("W9")!.extra).toMatch(new RegExp(`lease=${process.pid}@\\d+`));
+    host.registry.shutdown();
+    await host.registry.joinDrivers();
   });
 
   it("stamps the dispatching host session on the rows it writes (`host=`)", () => {

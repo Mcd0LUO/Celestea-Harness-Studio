@@ -171,13 +171,39 @@ export function prunePaneDom(ctx: SessionPane, force = false): number {
  */
 export function pruneThinkBudget(ctx: SessionPane, doomed: HTMLElement[]): number {
   let released = 0;
-  for (const col of doomed) {
+  for (const col of removedThinkCols(doomed)) {
     const chars = retainedThinkChars(col);
     if (chars === 0) continue;
     addThinkRetained(ctx.el, -chars);
     released += chars;
   }
   return released;
+}
+
+/**
+ * W9222（F-12）：本次摘列真正**离开容器**的全部 `.mcol`（含被摘列的**嵌套子树**）。
+ *
+ * 缺陷：`doomed` 是「计划摘掉的列」，而一个顶层列被摘时，它 `.toolcard-subs` 里的
+ * 嵌套 `.mcol`（W1467 的 run_code 子调用树，tooltree.css:15 明写可再嵌套）也随它一起
+ * 离开文档，却**不在 doomed 里** ⇒ 它们的思考保留量不减 ⇒ 账本偏高 ⇒ 后续
+ * `enforceThinkBudget` 把**新段**当旧的回收（预算形同虚设，与 F-11 同一症状家族）。
+ *
+ * 为什么用 Set 去重：`querySelectorAll` 是文档序，嵌套子列本身也可能出现在 doomed 里
+ * （回收边界正好切在子列上时）—— 去重保证「同一节点只减一次账」，不会双倍减。
+ *
+ * 为什么按「当前保留长度」减而不是另记一份「记入量」：本模块的账本不变式是
+ * `thinkRetained(container) === Σ(仍在容器里的段的 text.length)`。对一段而言，
+ * 「离开容器时应当从账本里减掉的量」就是它此刻的 `text.length` —— 已被
+ * enforceThinkBudget 回收过的段 text 为空（减 0，正确），未回收的段按全额减（正确）。
+ * 独立记一份「记入量」反而会在「正文被回收但节点还在」的中间态上与账本分叉。
+ */
+function removedThinkCols(doomed: HTMLElement[]): Set<HTMLElement> {
+  const out = new Set<HTMLElement>();
+  for (const col of doomed) {
+    out.add(col);
+    for (const nested of col.querySelectorAll<HTMLElement>('.mcol')) out.add(nested);
+  }
+  return out;
 }
 
 /**

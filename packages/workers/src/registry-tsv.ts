@@ -12,10 +12,10 @@
  * backward-compatible change (B7 round-trip).
  */
 
-import { readFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WORKER_STATUSES, type WorkerEntry, type WorkerStatus } from "@celestea/core";
+import { WORKER_STATUSES, sleepSync, type WorkerEntry, type WorkerStatus } from "@celestea/core";
 
 export const REGISTRY_TSV_PATH = join(tmpdir(), "celestea-workers-registry.tsv");
 
@@ -78,6 +78,143 @@ export function mergeTableRows(fileRows: readonly WorkerEntry[], mine: readonly 
   for (const row of fileRows) merged.set(row.wid, row);
   for (const row of mine) merged.set(row.wid, row);
   return [...merged.values()];
+}
+
+/**
+ * W9224 P1-5 — the cross-process lock of the shared table's read-modify-write.
+ *
+ * THE BUG: [WorkerRegistry.persist] is "read the table -> merge my rows -> atomic
+ * rename over it". Two processes sharing one table path (the legacy default
+ * `REGISTRY_TSV_PATH` above is in `tmpdir()`, so every host that does not pass an
+ * explicit path shares it) can interleave between the read and the rename: both
+ * read the same base, both write, and the SECOND rename silently drops the rows
+ * the first one added — a lost update. Same-process writers never hit it (the
+ * whole persist is synchronous), which is exactly why no in-process test saw it.
+ *
+ * THE PRIMITIVE: `openSync(lockPath, "wx")`. O_CREAT|O_EXCL on POSIX and
+ * CREATE_NEW on Windows are the SAME atomic "create only if absent" — the one
+ * filesystem operation with identical, atomic semantics on both platforms this
+ * repo targets. No flock (absent from Node), no directory lock (Windows
+ * `mkdir` races are not EEXIST-reliable across SMB), no dependency.
+ *
+ * THE HOLDER IS NAMED IN THE FILE (`<pid>@<unix>@<nonce>`), so a lock left
+ * behind by a CRASHED process can be told apart from a live one and, once it is
+ * older than [REGISTRY_LOCK_STALE_MS], taken over instead of wedging the table
+ * forever. The stale window is ~4 orders of magnitude above a real hold (one
+ * read + one write + one rename of a table this size), so a live holder is never
+ * robbed; a dead one never blocks the next boot.
+ *
+ * A caller that cannot take the lock FAILS CLOSED (the write is aborted and
+ * reported) — never "write anyway and hope", because that is the lost update.
+ */
+
+/** A lock file older than this is a crash leftover and may be taken over. */
+export const REGISTRY_LOCK_STALE_MS = 10_000;
+/** Bounded acquire attempts (synchronous backoff, like `renameWithRetry`). */
+export const REGISTRY_LOCK_ATTEMPTS = 25;
+/** Base backoff; attempt i waits `delayMs * (i + 1)` — 25 tries ≈ 6.5 s worst case. */
+export const REGISTRY_LOCK_DELAY_MS = 20;
+
+/** The lock file of one table path (sibling, so it lives on the same volume). */
+export function tableLockPath(path: string): string {
+  return `${path}.lock`;
+}
+
+/** An acquired lock. `release` is idempotent and only removes OUR lock. */
+export interface TableLock {
+  release(): void;
+}
+
+export interface TableLockOptions {
+  /** Total acquire attempts (first try + retries). */
+  attempts?: number;
+  /** Base backoff in ms (injectable so a test need not wait real seconds). */
+  delayMs?: number;
+  /** Age past which a lock file is a crash leftover. */
+  staleMs?: number;
+  /** Injectable sleep (tests). Defaults to core's `sleepSync`. */
+  sleep?: (ms: number) => void;
+  /** Injectable clock for the holder stamp (tests). */
+  now?: () => number;
+}
+
+/**
+ * Take the table's exclusive lock, or return null (fail closed).
+ *
+ * A non-EEXIST failure (EACCES on a read-only directory, ENOSPC, ...) returns
+ * null IMMEDIATELY: retrying a permission error only delays an honest report.
+ */
+export function acquireTableLock(path: string, opts: TableLockOptions = {}): TableLock | null {
+  const lockPath = tableLockPath(path);
+  const attempts = opts.attempts ?? REGISTRY_LOCK_ATTEMPTS;
+  const delayMs = opts.delayMs ?? REGISTRY_LOCK_DELAY_MS;
+  const staleMs = opts.staleMs ?? REGISTRY_LOCK_STALE_MS;
+  const sleep = opts.sleep ?? sleepSync;
+  const now = opts.now ?? Date.now;
+  const token = `${process.pid}@${Math.floor(now() / 1000)}@${Math.random().toString(36).slice(2)}`;
+  for (let i = 0; i < attempts; i += 1) {
+    const attempt = createLockFile(lockPath, token);
+    // A permanent failure (permissions, a missing directory) is NOT "busy":
+    // spinning on it would only delay an honest error by the whole backoff.
+    if (attempt === "error") return null;
+    if (attempt === "acquired") return { release: (): void => releaseLockFile(lockPath, token) };
+    if (lockIsStale(lockPath, staleMs, now)) {
+      // Another process may have taken the stale lock between our stat and this
+      // rm; that only costs us the next loop iteration.
+      try {
+        rmSync(lockPath, { force: true });
+      } catch {
+        /* the winner of the race owns it now */
+      }
+      continue;
+    }
+    if (i < attempts - 1) sleep(delayMs * (i + 1));
+  }
+  return null;
+}
+
+/** `wx` = atomic create-if-absent. "held" and "error" are NOT the same answer. */
+function createLockFile(lockPath: string, token: string): "acquired" | "held" | "error" {
+  let fd: number;
+  try {
+    fd = openSync(lockPath, "wx");
+  } catch (error) {
+    if (errorCodeOf(error) === "EEXIST") return "held";
+    return "error";
+  }
+  try {
+    writeSync(fd, `${token}\n`);
+  } catch {
+    /* the holder stamp is diagnostic; the lock itself is the fd's existence */
+  } finally {
+    closeSync(fd);
+  }
+  return "acquired";
+}
+
+/** Delete the lock only while it is still OURS (a stolen lock is left alone). */
+function releaseLockFile(lockPath: string, token: string): void {
+  try {
+    if (readFileSync(lockPath, "utf8").trim() !== token) return;
+  } catch {
+    return;
+  }
+  try {
+    rmSync(lockPath, { force: true });
+  } catch {
+    /* a lock we cannot delete is reclaimed by the stale window */
+  }
+}
+
+/** Age of a lock file past the stale window (a missing lock is "not stale"). */
+function lockIsStale(lockPath: string, staleMs: number, now: () => number): boolean {
+  try {
+    return now() - statSync(lockPath).mtimeMs > staleMs;
+  } catch {
+    // Cannot prove it is stale (it vanished, or we may not stat it) => do NOT
+    // delete a file we cannot read; the next loop iteration re-tries the create.
+    return false;
+  }
 }
 
 /** Read a table for a merge (`[]` for a missing / unreadable file). */

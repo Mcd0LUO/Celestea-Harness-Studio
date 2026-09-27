@@ -26,9 +26,15 @@
 import { el, fmtNow } from '../utils/dom';
 import type { SessionPane } from './viewctx';
 import { railSync } from './rail';
-import { autoscroll, hideEmptyHint } from './messages/scroll';
+import { autoscroll, hideEmptyHint, renderEmptyHint as rawRenderEmptyHint } from './messages/scroll';
 import { buildTruncatedNote, setOmittedCount } from './messages/oversize';
-import { addThinkRetained, registerThinkSeg, thinkOverBudget } from './messages/think-budget';
+import {
+  addThinkRetained,
+  registerThinkSeg,
+  retainedThinkChars,
+  thinkOverBudget,
+  thinkRetained,
+} from './messages/think-budget';
 import { t } from '../i18n';
 // W1512：预算账本住在 ./messages/think-budget.ts，但公开面仍留在 messages.ts
 // （调用方与测试只认这个入口，与 W867 把 cadence 拆出去时同一取舍）。
@@ -94,6 +100,22 @@ export function noteRestoredThinking(container: HTMLElement, seg: ThinkSegDom): 
 export function noteRestoredThinkingBatch(container: HTMLElement, segs: ThinkSegDom[]): void {
   for (const seg of segs) addThinkRetained(container, seg.text.length);
   if (segs.length > 0) enforceThinkBudget(container);
+}
+
+/**
+ * W9222（F-11）：容器被**整体重建**（replaceChildren）后，把账本重定基为「当前 DOM
+ * 里实际保留的思考正文总量」，再守一次预算。账本键是容器**对象**，replaceChildren
+ * 不换对象 ⇒ 旧账本会跟着新内容活下来，第一个新段一进来就被判超预算并从最旧（其实
+ * 正是新段）回收。用「DOM 实况」而非「清零」：搬家会把窗口期到达的 live 段一并搬进来
+ * （F-05），它们的账本条目是对的，清零会丢掉它们。重建路径都必须走这里。
+ */
+export function rebaseThinkRetained(container: HTMLElement): void {
+  let sum = 0;
+  for (const col of container.querySelectorAll<HTMLElement>('.mcol')) sum += retainedThinkChars(col);
+  // 用「增量 = 目标 - 现值」而不是新加一个 setThinkRetained：addThinkRetained 是账本
+  // 模块**既有**的对外面（W9113 就在用），账本语义（只增只减、钳在 ≥0）完全一致。
+  addThinkRetained(container, sum - thinkRetained(container));
+  enforceThinkBudget(container);
 }
 
 function enforceThinkBudget(container: HTMLElement): void {
@@ -387,7 +409,29 @@ export function appendThinking(ctx: SessionPane, delta: string): void {
 
 // ---- 对外 API 再导出（W759：实现见 ./messages/*，import 路径与拆分前逐字兼容） --
 
-export { autoscroll, hideEmptyHint, renderEmptyHint } from './messages/scroll';
+export { autoscroll, hideEmptyHint } from './messages/scroll';
+
+/**
+ * W9222（F-11）：空态重建的**唯一对外入口**（scroll.ts 的实现 + 状态/账本复位）。
+ *
+ * F-11 的根因是「账本与三个流式句柄的生命周期没有跟随 DOM」：
+ *   · 账本键是容器**对象**（replaceChildren 不换对象）⇒ 旧账本活下来，新思考段一进来
+ *     就被判超预算并从最旧（其实正是新段）回收；
+ *   · ctx.assistant / ctx.thinkSeg / ctx.lastTextCol 仍指着**已脱离文档**的节点 ⇒
+ *     下一次 appendThinking/appendText 把内容写进孤儿节点（新内容凭空消失）。
+ * 审计给的正解就是「让这条重建路径走 resetMessages 的复位口径」，这里照做。
+ *
+ * 为什么包在 messages.ts 而不是 scroll.ts：本轮文件边界只覆盖 restore.ts / messages.ts /
+ * messages/assistant.ts / think-budget.ts / dom-cap.ts，而这里正是 messages.ts 的对外
+ * 再导出面（restore.ts 走的就是这个入口）；assistant.ts 的 resetMessages 各自复位。
+ */
+export function renderEmptyHint(ctx: SessionPane): void {
+  ctx.assistant = null;
+  ctx.thinkSeg = null;
+  ctx.lastTextCol = null;
+  rawRenderEmptyHint(ctx);
+  rebaseThinkRetained(ctx.el); // 清空后容器里没有 .mcol ⇒ 账本按实况归零（F-11）
+}
 export { md } from './messages/markdown';
 export {
   appendText,

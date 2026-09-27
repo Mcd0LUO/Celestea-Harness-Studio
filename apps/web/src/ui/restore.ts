@@ -26,14 +26,14 @@ import {
   buildThinkSeg,
   ensureAssistant,
   finalizeAssistant,
-  noteRestoredThinkingBatch,
+  rebaseThinkRetained,
   renderEmptyHint,
   renderInboxMessage,
   type MsgKind,
-  type ThinkSegDom,
 } from './messages';
 import { parseQuoteBlocks } from './quote/model'; // F1：历史回放解析引用块
-import { railReset, railSync } from './rail';
+import { railAdd, railReset, railSync } from './rail';
+import type { ToolCardRef } from './view';
 import { renderToolMessage } from './restore-tool'; // W1485：工具条目渲染拆出（纯搬家）
 import { setToolResult } from './toolcards'; // 收尾时给「有调用无结果」的卡补终态
 import { prunePaneDom } from './messages/dom-cap'; // W1485：消息容器的 DOM 上限
@@ -140,7 +140,6 @@ function renderOne(
   m: HistoryMsg,
   container: HTMLElement,
   questions: Map<string, HistoryQuestion>,
-  pending: ThinkSegDom[],
 ): void {
   const content = String(m.content ?? '');
   // W784：提问行 → 提问卡片（未结算的渲染成「已过期 · 未作答」终态，§7.2 规则 4）；
@@ -175,7 +174,7 @@ function renderOne(
     return;
   }
   if (m.role === 'thinking') {
-    renderThinkingHistory(content, container, pending);
+    renderThinkingHistory(content, container);
     return;
   }
   renderToolMessage(ctx, m, container);
@@ -185,20 +184,43 @@ function renderOne(
  * 历史思考条目：与 live **同一构建函数** buildThinkSeg（默认折叠态因此不可能分叉）。
  * 历史恢复 = 静态内容，永远用默认态（collapsed: true），不随 live 流式状态变化。
  *
- * ★ W9113（P1-2）：这里**只收集**，不记账。记账必须发生在
- *   `ctx.el.replaceChildren(...off.childNodes)` **之后** —— 改动前记在离屏 off 上，
- *   搬家后 off 被丢弃，于是 `thinkRetained(ctx.el)` 恒为 0（刷新后的会话在下一个 live
- *   思考段到达前完全不受容器预算约束）。见 restoreSessionHistory 的收尾段。
+ * ★ W9113（P1-2）：构造期**不记账**（容器还是离屏的 off）。记账由收尾段的
+ *   [rebaseThinkRetained] 在**搬家之后**按 DOM 实况重定基 —— 既保住「账本记在真正
+ *   持有节点的容器上」，又顺带覆盖窗口期到达的 live 段与容器重建（W9222/F-11）。
  */
-function renderThinkingHistory(content: string, container: HTMLElement, pending: ThinkSegDom[]): void {
-  const seg = buildThinkSeg({ text: content, collapsed: true });
-  pending.push(seg);
-  container.appendChild(seg.root);
+function renderThinkingHistory(content: string, container: HTMLElement): void {
+  container.appendChild(buildThinkSeg({ text: content, collapsed: true }).root);
 }
 
 function appendNote(ctx: SessionPane, text: string): void {
   if (ctx.el.querySelector('.restore-note')) return;
   ctx.el.appendChild(el('div', 'restore-note', text));
+}
+
+/**
+ * W9222（F-06）：恢复**中止**时把已发生的副作用回滚。
+ *
+ * 缺陷：`railReset` / `restoreOps.clear` / `histToolStep = 0` 在 guard 检查**之前**
+ * 就执行了，而函数有 4 个 return 点 —— 中途放弃时旧 DOM 原样留着，长条与工具卡索引
+ * 却被清了（「有调用无结果」的卡片永远停在 running；长条整批消失）。
+ *
+ * 回滚口径：
+ *   · `restoreOps` / `histToolStep` 是纯 ctx 字段 —— 按快照还原。快照存的是 Map
+ *     **引用**（不是副本），回滚即换回原 Map：全仓只有 `ctx.restoreOps` 这一条读路径，
+ *     没人按引用缓存过它，换身份比「清空 + 逐条塞回」更准（一条不丢）也更省。
+ *   · rail 没有「还原快照」的公开入口（记账住在 rail-state.ts，超出本轮文件边界），
+ *     但 rail 记账是**旧 DOM 的纯函数**：旧 DOM 仍在 `ctx.el` 里，按它重建即可
+ *     （railAdd 的合并规则与当初建 DOM 时逐条同构，角色由 msg 的类判定）。
+ */
+function rollbackRestore(ctx: SessionPane, ops: Map<string, ToolCardRef>, step: number): void {
+  ctx.restoreOps = ops;
+  ctx.histToolStep = step;
+  railReset(ctx);
+  for (const col of Array.from(ctx.el.children) as HTMLElement[]) {
+    const c = col.firstElementChild?.classList;
+    if (c?.contains('assistant')) railAdd(ctx, col, 'assistant');
+    else if (c?.contains('user')) railAdd(ctx, col, c.contains('interject') ? 'interject' : 'user');
+  }
 }
 
 /**
@@ -227,10 +249,17 @@ export async function restoreSessionHistory(
   const all = resp.messages ?? [];
   if (ctx.streaming) return; // 已开跑：不打断实时流
 
+  // W9222（F-06）：副作用**之前**先留快照 —— 中途放弃（guard / streaming）要能回滚。
+  const ops = ctx.restoreOps;
+  const step = ctx.histToolStep;
+  ctx.restoreOps = new Map();
+  ctx.histToolStep = 0;
+  // W9222（F-05）：记下窗口期**之前**就存在的节点 —— 之后新出现的都是 live 增量。
+  // 用节点集合而不是「起始下标」：窗口期内 live 帧可能触发 prunePaneDom 从**头部**回收
+  // 节点，下标会因此整体前移、尾部切片会漏掉真正的 live 节点；按身份判定不受影响。
+  const preexisting = new Set<Node>(Array.from(ctx.el.childNodes));
   // 离屏构建（不挂载，浏览器不绘制中间态）
   railReset(ctx); // 先清该会话旧长条；离屏渲染注册的新条目在替换后重新 layout
-  ctx.restoreOps.clear();
-  ctx.histToolStep = 0;
   const off = document.createElement('div');
   if (all.length > MAX_RESTORE) {
     off.appendChild(
@@ -238,8 +267,6 @@ export async function restoreSessionHistory(
     );
   }
   const recent = all.length > MAX_RESTORE ? all.slice(all.length - MAX_RESTORE) : all;
-  // W9113（P1-2）：历史思考段**先收集**（容器还是离屏的 off），搬家之后再记账。
-  const pendingThink: ThinkSegDom[] = [];
   // W784 §7.2：提问/回答两行按 question_id 配对（有问无答 = 该提问不可再答）。
   const questions = new Map(historyQuestionsOf(recent).map((row) => [row.id, row]));
   // W1485：分片渲染（片间让出事件循环）—— 200 条重消息不再一次性占满主线程。
@@ -247,10 +274,10 @@ export async function restoreSessionHistory(
   for (let i = 0; i < recent.length; i += RESTORE_CHUNK) {
     if (i > 0) {
       await yieldToBrowser();
-      if (guard && !guard()) return; // 期间切了会话：丢弃半成品（离屏容器随之被 GC）
-      if (ctx.streaming) return;     // 期间开跑了：不打断实时流（与开头同一判据）
+      if (guard && !guard()) { rollbackRestore(ctx, ops, step); return; } // 期间切了会话
+      if (ctx.streaming) { rollbackRestore(ctx, ops, step); return; }     // 期间开跑了
     }
-    for (const m of recent.slice(i, i + RESTORE_CHUNK)) renderOne(ctx, m, off, questions, pendingThink);
+    for (const m of recent.slice(i, i + RESTORE_CHUNK)) renderOne(ctx, m, off, questions);
   }
   if (ctx.restoreOps.size) {
     for (const ref of ctx.restoreOps.values()) {
@@ -264,11 +291,19 @@ export async function restoreSessionHistory(
     sep.title = t('shell.restore.earlier');
     off.appendChild(sep);
   }
-  if (guard && !guard()) return;
+  if (guard && !guard()) { rollbackRestore(ctx, ops, step); return; }
+
+  // W9222（F-05）：恢复窗口期到达的 live 节点（thinking / text / tool）此前会被
+  // replaceChildren 连同旧 DOM 一起丢掉 —— 实时流不因恢复而暂停，所以这是必然丢帧。
+  // 把它们按文档序搬进离屏容器（排在历史与「以下为本次会话」分隔线**之后**），
+  // 随同一次替换进入新 DOM；段自己的账本条目（thinkFolds / registerThinkSeg）挂在
+  // 节点上，因此随节点一起保留（W895-R 的「实时与重放逐字一致」因此仍成立）。
+  const liveAdded = Array.from(ctx.el.childNodes).filter((n) => !preexisting.has(n));
+  for (const n of liveAdded) off.appendChild(n);
 
   // 一次性替换（无空白帧）
   ctx.el.replaceChildren(...off.childNodes);
-  if (!recent.length) {
+  if (!recent.length && liveAdded.length === 0) {
     renderEmptyHint(ctx);
     const sep = el('div', 'live-sep');
     sep.appendChild(el('span', null, t('shell.restore.sessionStart')));
@@ -278,11 +313,9 @@ export async function restoreSessionHistory(
   ctx.dedup.guardActive = false;
   ctx.dedup.guardBuf = '';
   ctx.dedup.guardAll = false;
-  ctx.restored = true;
-  // W9113（P1-2）：**搬家之后**才记账 —— 账本必须记在真正持有这些节点的容器上。
-  // 改动前记在离屏 off 上，而 off 在这一行之后就被丢弃，于是 thinkRetained(ctx.el) 恒 0。
-  // 刷新路径与 live 路径的记账口径自此一致（W895-R 的「逐字一致」精神）。
-  noteRestoredThinkingBatch(ctx.el, pendingThink);
+  // W9113（P1-2）+ W9222（F-11）：**搬家之后**按 DOM 实况把账本重定基 —— 账本必须
+  // 记在真正持有这些节点的容器上，且容器整体重建后旧账本不得残留（见 rebaseThinkRetained）。
+  rebaseThinkRetained(ctx.el);
   // W1485：恢复收尾统一裁一次 DOM（force：不参与 assistant 那条时间窗节流）。
   // 历史本身已按 MAX_RESTORE 条截断，这一步兜的是「服务端一次给回上千条」的情形。
   prunePaneDom(ctx, true);
@@ -295,6 +328,11 @@ export async function restoreSessionHistory(
   // 历史就位后再问服务端「还有哪些提问没结算」：进程没重启的刷新靠这一步把卡片
   // 从「未作答」放回可作答；进程重启了服务端就没有它，卡片留在终态（§7.2）。
   void recoverQuestions(ctx);
+  // W9222（F-07）：`restored` 必须是**最后一条语句**。改动前它在 mountTaskPanel /
+  // railSync / autoscroll **之前**，其中任何一步抛错都会让 Promise reject（openSession
+  // 只挂 .finally，无 catch）而 `restored` 已是 true ⇒ 该会话从此再不会被恢复（只能
+  // 刷新）。放在最后，任何一步失败都不会把它标成「已恢复」，切回即可重试。
+  ctx.restored = true;
 }
 
 /**
@@ -337,8 +375,18 @@ export async function restoreActiveHistory(): Promise<void> {
     return;
   }
   const pane = adoptPane(id);
-  if (!pane.restored && !pane.streaming) await restoreSessionHistory(pane);
-  else void recoverQuestions(pane); // 历史已在/正在跑：仍补一次未决列表
+  // W9222（F-07）：恢复失败不得把 Promise 变成 unhandled rejection（main.ts 是 void 调用）。
+  // 失败不标「已恢复」，切回即重试。此处不写 console.warn：apps/web/src 的计数是
+  // docs/ARCHITECTURE.md §6.5.5 的硬数字（doc-conventions ⑩ 对拍），该文档超出本轮边界。
+  if (!pane.restored && !pane.streaming) {
+    try {
+      await restoreSessionHistory(pane);
+    } catch {
+      pane.restored = false; // 未完成的恢复不得被标成「已恢复」
+    }
+  } else {
+    void recoverQuestions(pane); // 历史已在/正在跑：仍补一次未决列表
+  }
 }
 
 // ---- 会话切换（无空白帧 + 竞态防护 + 后台会话不阻塞） ----------------------------
@@ -373,9 +421,15 @@ export function openSession(id: string, meta?: { kind?: string; title?: string }
     const seq = ++pane.restoreSeq;
     showSwitchProgress();
     // restoreSessionHistory 末尾自带一次未决列表重建，此处不重复请求
-    void restoreSessionHistory(pane, () => seq === pane.restoreSeq).finally(() => {
-      if (seq === pane.restoreSeq) hideSwitchProgress();
-    });
+    // W9222（F-07）：必须挂 catch —— 只挂 finally 时中途抛错会变成 unhandled rejection，
+    // 而旧行为已把 ctx.restored 置位，该会话会永远停在半成品。不写 console.warn 同上。
+    void restoreSessionHistory(pane, () => seq === pane.restoreSeq)
+      .catch(() => {
+        pane.restored = false; // 失败不标「已恢复」：切回时重试
+      })
+      .finally(() => {
+        if (seq === pane.restoreSeq) hideSwitchProgress();
+      });
   } else {
     // 切回已有内容的会话：可能错过了提问帧（切走期间模型问了）→ 补齐未决卡片
     void recoverQuestions(pane);

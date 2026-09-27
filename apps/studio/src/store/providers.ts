@@ -26,7 +26,16 @@ export const PROVIDERS_MODE = 0o600;
 export interface ProviderModel {
   id: string;
   name: string;
-  reasoning_efforts: string[];
+  /**
+   * W9227: the SECOND optimistic-default field (after `input_modalities`, W804).
+   * ABSENT = "never configured" ⇒ the frontend shows the optimistic default
+   * (`low`/`high`/`max`) and the model counts as reasoning-capable. An EXPLICIT
+   * array is authoritative, `[]` included: `[]` means "this model does not support
+   * reasoning" and the effort gate refuses it. Preserving the absence is the only
+   * way the two states stay distinguishable — the old code collapsed both into
+   * `[]`, which made the frontend's optimistic default unreachable (P1-1).
+   */
+  reasoning_efforts?: string[];
   context_window: number | null;
   max_output_tokens: number | null;
   /**
@@ -90,14 +99,16 @@ function parseModel(raw: unknown): ProviderModel | null {
   const rec = raw as Record<string, unknown>;
   const id = asString(rec["id"]);
   if (id === "") return null;
-  const efforts = Array.isArray(rec["reasoning_efforts"]) ? rec["reasoning_efforts"].filter((x): x is string => typeof x === "string") : [];
   const model: ProviderModel = {
     id,
     name: asString(rec["name"], id) || id,
-    reasoning_efforts: efforts,
     context_window: nullableInt(rec["context_window"]),
     max_output_tokens: nullableInt(rec["max_output_tokens"]),
   };
+  // W9227: only written when PRESENT, so a legacy row (no `reasoning_efforts`) stays
+  // absent end-to-end instead of being normalized into `[]` here (P1-1's root cause).
+  const efforts = effortsList(rec["reasoning_efforts"]);
+  if (efforts !== undefined) model.reasoning_efforts = efforts;
   // W804: preserved only when present, so a legacy row is re-serialized verbatim.
   const input = modalityList(rec["input_modalities"]);
   if (input !== undefined) model.input_modalities = input;
@@ -111,6 +122,20 @@ function modalityList(v: unknown): string[] | undefined {
   if (!Array.isArray(v)) return undefined;
   const out = v.filter((x): x is string => typeof x === "string" && x !== "");
   return out.length === 0 ? undefined : out;
+}
+
+/**
+ * W9227: the reasoning-effort list, or `undefined` when the key is ABSENT.
+ *
+ * Deliberately NOT the same rule as `modalityList` above: an EXPLICIT empty array
+ * is PRESERVED here. `[]` is the operator's authoritative "this model does not
+ * support reasoning" (the effort gate in handlers/config.ts refuses it), while
+ * absence means "never configured" and falls back to the optimistic default
+ * (`low`/`high`/`max`). Collapsing the two was P1-1.
+ */
+function effortsList(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  return v.filter((x): x is string => typeof x === "string");
 }
 
 function parseRow(raw: unknown, file: string): ProviderRow {
@@ -146,6 +171,19 @@ function load(file: string): { providers: ProviderRow[]; default_model: string |
   };
 }
 
+/**
+ * W9227: is this model reasoning-capable?
+ *
+ * ABSENT `reasoning_efforts` = never configured = the optimistic default
+ * (`low`/`high`/`max`), so the model IS capable — exactly what the frontend shows.
+ * An EXPLICIT array is authoritative, `[]` included: the operator declared the
+ * model non-reasoning. ONE helper so the effort gate (handlers/config.ts) and the
+ * catalogue's `reasoning` flag (handlers/config-shape.ts) cannot disagree.
+ */
+export function reasoningCapable(m: ProviderModel): boolean {
+  return m.reasoning_efforts === undefined || m.reasoning_efforts.length > 0;
+}
+
 /** Normalize a base_url for the keyless-borrow comparison (trim + no trailing '/'). */
 export function normalizeBaseUrl(url: string): string {
   return url.trim().replace(/\/+$/, "");
@@ -167,6 +205,23 @@ export class ProvidersStore {
     return this.data.providers.find((p) => p.id === id);
   }
 
+  /**
+   * W9227: is `model` reasoning-capable? Unknown id = capable (the contract's
+   * "custom endpoint friendly" rule). The ONE reading shared by the effort gate
+   * (handlers/config.ts) and the catalogue flag (handlers/config-shape.ts).
+   */
+  reasoningCapableById(model: string): boolean {
+    for (const p of this.data.providers) {
+      for (const m of p.models) if (m.id === model) return reasoningCapable(m);
+    }
+    return true;
+  }
+
+  /** W9227: the same reading for a model row already in hand. */
+  reasoningCapableOf(m: ProviderModel): boolean {
+    return reasoningCapable(m);
+  }
+
   defaultModel(): string | null {
     return this.data.default_model;
   }
@@ -186,7 +241,9 @@ export class ProvidersStore {
       note: p.note,
       base_url: p.base_url,
       request_format: p.request_format,
-      models: p.models.map((m) => ({ ...m, reasoning_efforts: [...m.reasoning_efforts] })),
+      // W9227: an absent list stays ABSENT on the wire (a clone when present, so the
+      // caller can never alias the store's array).
+      models: p.models.map((m) => (m.reasoning_efforts === undefined ? { ...m } : { ...m, reasoning_efforts: [...m.reasoning_efforts] })),
       is_default: def !== null && p.models.some((m) => m.id === def),
       has_key: typeof p.api_key === "string" && p.api_key !== "",
     };

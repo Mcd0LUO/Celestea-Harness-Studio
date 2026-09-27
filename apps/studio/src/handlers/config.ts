@@ -154,10 +154,8 @@ function isHttp(url: string): boolean {
  * "custom endpoint friendly" rule, `src/main.rs:135-137`).
  */
 function isReasoningCapable(deps: Deps, model: string): boolean {
-  for (const p of deps.providers.rows()) {
-    for (const m of p.models) {
-      if (m.id === model) return m.reasoning_efforts.length > 0;
-    }
-  }
-  return true;
+  // W9227: the reading lives in ONE place (store/providers.ts) so this gate and the
+  // catalogue's `reasoning` flag cannot drift apart. ABSENT = the optimistic default
+  // (capable); an explicit [] = a refusal. Unknown id stays capable (contract rule).
+  return deps.providers.reasoningCapableById(model);
 }

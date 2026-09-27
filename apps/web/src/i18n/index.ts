@@ -56,10 +56,22 @@ export function onLocaleChange(cb: () => void): () => void {
   return () => listeners.delete(cb);
 }
 
-/** 取文案；未知 key 回落到中文（运行期兜底，编译期已由 Key 约束）。 */
+/**
+ * 取文案；未知 key 回落到中文，**两种语言都没有该 key 时回落 key 本身**。
+ *
+ * W9226（F5）：旧实现在两语字典都查不到 key 时返回 `undefined`。三个属性型填充
+ * （i18n/dom.ts 的 title / aria-label / placeholder）会把它交给 `setAttribute`，
+ * 而 `setAttribute` 的参数是非空 `DOMString` ⇒ WebIDL 的 `ToString(undefined)`
+ * 不抛错，页面上就出现字面量 `"undefined"`（jsdom 实测 `getAttribute('title')`
+ * 得到字符串 "undefined"）。而旧断言只判「非空」，`"undefined"` 非空 ⇒ 门禁全绿。
+ *
+ * 返回 key 本身让「拼错的 key」在界面上自曝（一眼看出是 `shell.xxx.YYY`），
+ * 同时它仍是**非空字符串**，不会把 undefined 泄漏给 DOM 层。
+ * 刻意不抛错：静态骨架的一条文案缺失不该让整页白屏（与 `?? zh` 同一降级方向）。
+ */
 export function t(key: Key, params?: Record<string, string | number>): string {
   const dict = DICTS[current] ?? zh;
-  let s = dict[key] ?? zh[key];
+  let s = dict[key] ?? zh[key] ?? key; // F5：两语都没有 ⇒ key 本身（不再是 undefined）
   if (params) {
     for (const name of Object.keys(params)) {
       s = s.split('{' + name + '}').join(String(params[name]));

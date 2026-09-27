@@ -30,7 +30,36 @@ import type { WorkerEntry } from "@celestea/core";
 import { getExtra, workerAttempt, workerHost, workerLease, workerProc, workerRetries, type WorkerLease } from "./registry-tsv.js";
 
 /** Why a RUNNING row is considered left behind (P0: reported, never acted on). */
-export type WorkerRecoveryReason = "stale_lease" | "orphan_host";
+export type WorkerRecoveryReason = "stale_lease" | "stale_lease_expired" | "orphan_host";
+
+/**
+ * W9224 P1-7 — how long a `lease=` stamp is evidence of life.
+ *
+ * THE BUG: liveness was decided by `pidAlive(lease.pid)` ALONE, so the two
+ * failures the lease exists to catch both read as "alive":
+ *   - PID RECYCLING: the OS handed the number to an unrelated process, so a row
+ *     whose owner died months ago is judged live forever and never converges;
+ *   - A STOPPED HEARTBEAT: `setWorkerState` only renews `lease=` when the driver
+ *     changes state, so a hung owner keeps an old stamp while still holding the
+ *     pid.
+ *
+ * The rule is deliberately NARROW, because a TTL is only sound for a row that
+ * promised a heartbeat:
+ *   - `driven=yes` means a driver task exists and renews the lease (the driver's
+ *     state changes, plus `WorkerRegistry`'s own heartbeat while that task is
+ *     alive), so a stamp older than the TTL is real evidence the owner stopped;
+ *   - a row with NO `lease=` token keeps the historical `proc=`-only rule (see
+ *     [workerOwner]) — it has no timestamp, and inventing one would declare every
+ *     pre-W787 row stale on the spot;
+ *   - a row that was never driven (`driven=no`) has no renewal path at all, so
+ *     its one-shot stamp says nothing about life: pid-only stays the rule.
+ * Without that last exemption the TTL would FALSELY converge a live host's
+ * non-driven row — a worse failure than the one this fixes.
+ *
+ * Ten minutes is ~20 missed heartbeats ([DRIVER_HEARTBEAT_MS] = 30 s): far above
+ * any scheduling hiccup, far below the days-old stamps a crashed process leaves.
+ */
+export const WORKER_LEASE_TTL_MS = 10 * 60 * 1000;
 
 /** What the P2 decision table WOULD do (declared so the report is forward-compatible). */
 export type WorkerRecoveryAction = "close_done" | "respawn" | "fail" | "observe";
@@ -80,6 +109,25 @@ export interface WorkerRecoveryOptions {
   /** Deliverable probe (the caller owns the results dir; §2.4 R2-4). */
   artifactExists?: (entry: WorkerEntry) => boolean;
   now?: number;
+  /**
+   * W9224 P1-7: how long a `lease=` stamp counts as evidence of life
+   * (default [WORKER_LEASE_TTL_MS]). `Infinity` restores the old pid-only rule.
+   */
+  leaseTtlMs?: number;
+}
+
+/**
+ * W9224 P1-7: is this owner's lease still fresh? `at === 0` is the synthesised
+ * stamp of a lease-less legacy row ([workerOwner]) — it has no evidence either
+ * way, so it is NEVER expired by this rule.
+ *
+ * `entry` is the ROW the owner came from: only a `driven=yes` row promised the
+ * heartbeat that makes a stale stamp meaningful (see [WORKER_LEASE_TTL_MS]).
+ */
+export function leaseExpired(entry: WorkerEntry, owner: WorkerLease, nowMs: number, ttlMs: number): boolean {
+  if (owner.at <= 0) return false;
+  if (getExtra(entry, "driven") !== "yes") return false;
+  return nowMs - owner.at * 1_000 > ttlMs;
 }
 
 /** `process.kill(pid, 0)` — signal 0 asks "may I signal it at all?". */
@@ -97,16 +145,25 @@ export function pidAliveDefault(pid: number): boolean {
 export function observeWorkerTable(entries: readonly WorkerEntry[], opts: WorkerRecoveryOptions = {}): WorkerRecoveryReport {
   const alive = opts.pidAlive ?? pidAliveDefault;
   const artifact = opts.artifactExists ?? ((): boolean => false);
-  const report: WorkerRecoveryReport = { observed_at: opts.now ?? Date.now(), stale: [], orphans: [], live: [], frozen: [] };
-  for (const entry of entries) judgeRow(entry, opts, alive, artifact, report);
+  const now = opts.now ?? Date.now();
+  const ttl = opts.leaseTtlMs ?? WORKER_LEASE_TTL_MS;
+  const report: WorkerRecoveryReport = { observed_at: now, stale: [], orphans: [], live: [], frozen: [] };
+  for (const entry of entries) judgeRow(entry, opts, { alive, artifact, now, ttl }, report);
   return report;
+}
+
+/** The evidence one row is judged from (bundled so the judge stays small). */
+interface JudgeEvidence {
+  alive: (pid: number) => boolean;
+  artifact: (entry: WorkerEntry) => boolean;
+  now: number;
+  ttl: number;
 }
 
 function judgeRow(
   entry: WorkerEntry,
   opts: WorkerRecoveryOptions,
-  alive: (pid: number) => boolean,
-  artifact: (entry: WorkerEntry) => boolean,
+  ev: JudgeEvidence,
   report: WorkerRecoveryReport,
 ): void {
   if (entry.status !== "RUNNING") {
@@ -120,12 +177,23 @@ function judgeRow(
   // healthy row either, so it never appears in `live[]`; a row can be both an
   // orphan AND stale, because both facts are true and each list is a fact list.
   const orphan = host !== null && opts.knownHost !== undefined && !opts.knownHost(host);
-  if (orphan) report.orphans.push(candidate(entry, "orphan_host", artifact(entry)));
-  if (lease === null || alive(lease.pid)) {
+  if (orphan) report.orphans.push(candidate(entry, "orphan_host", ev.artifact(entry)));
+  // W9224 P1-7: the pid is necessary but NOT sufficient. A lease that stopped
+  // renewing — or a pid the OS recycled to an unrelated process — is stale
+  // evidence, not life; trusting it is exactly why such a row never converges.
+  if (lease === null) {
     if (!orphan) report.live.push(entry.wid);
     return;
   }
-  report.stale.push(candidate(entry, "stale_lease", artifact(entry)));
+  if (!ev.alive(lease.pid)) {
+    report.stale.push(candidate(entry, "stale_lease", ev.artifact(entry)));
+    return;
+  }
+  if (leaseExpired(entry, lease, ev.now, ev.ttl)) {
+    report.stale.push(candidate(entry, "stale_lease_expired", ev.artifact(entry)));
+    return;
+  }
+  if (!orphan) report.live.push(entry.wid);
 }
 
 /**

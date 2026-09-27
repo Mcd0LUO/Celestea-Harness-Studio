@@ -127,7 +127,7 @@ export function availableModels(deps: Deps): AvailableModel[] {
         provider: p.name,
         provider_id: p.id,
         active: m.id === activeModel && base === activeBase,
-        reasoning: m.reasoning_efforts.length > 0,
+        reasoning: deps.providers.reasoningCapableOf(m),
       });
     }
   }

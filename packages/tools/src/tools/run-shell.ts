@@ -83,16 +83,32 @@ export function runShellTool(options: RunShellToolOptions): Tool {
       return { background: true, handle: handle.handle, pid: handle.pid, sandbox: spawned.sandbox };
     }
     const run = await options.sandbox.run({ command, workdir, timeoutMs: optionalIntArg(args, "timeout_ms"), ...cpu });
-    // W6: an RLIMIT_CPU kill (SIGXCPU, or the SIGKILL that follows) must not read
-    // as a bare death; mark it when the provider reported a CPU cap in force.
-    const cpuExceeded =
-      run.exit_code === null && run.sandbox.cpu_sec !== undefined && (run.signal === "SIGXCPU" || run.signal === "SIGKILL");
+    // W6/W9223: an RLIMIT_CPU kill must not read as a bare death - mark it when
+    // the kernel reports the ONE signal only RLIMIT_CPU can send.
+    //
+    // W9223 (W9205-D7): SIGKILL was ALSO accepted here, and that made every
+    // unattributed SIGKILL a "CPU time limit exceeded". The wall clock does not
+    // reach this line (captureRun throws SandboxError("timeout") first), so the
+    // deaths that DID reach it were exactly the ones the CPU limit did NOT cause:
+    // the OOM killer, an external kill -9, bwrap --die-with-parent reaping the
+    // tree. run.sandbox.cpu_sec !== undefined was no help - resolveCallCpuSec
+    // always derives a number for a foreground call, so that guard was true on
+    // essentially every run.
+    //
+    // SIGXCPU is sent by RLIMIT_CPU and nothing else, so it attributes the death
+    // on its own. This matches run-code/cpu-kill.ts (isCpuKill), where the broker
+    // additionally excludes the children IT killed; run_shell has no such flag,
+    // so the signal alone is the honest test. A hard-limit SIGKILL is still
+    // covered: the soft limit (SIGXCPU) is delivered first.
+    const cpuExceeded = run.exit_code === null && run.signal === "SIGXCPU";
     return {
       stdout: run.stdout,
       stderr: run.stderr,
       exit_code: run.exit_code,
       ...(run.signal === null || run.signal === undefined ? {} : { signal: run.signal }),
-      ...(cpuExceeded ? { cpu_exceeded: true, message: `CPU time limit ${run.sandbox.cpu_sec}s exceeded` } : {}),
+      // The cap is named when the provider reported one (it always does on a
+      // real SIGXCPU); "unknown" keeps the sentence honest if an embedding did not.
+      ...(cpuExceeded ? { cpu_exceeded: true, message: `CPU time limit ${run.sandbox.cpu_sec ?? "unknown"}s exceeded` } : {}),
       stdout_truncated: run.stdout_truncated,
       stderr_truncated: run.stderr_truncated,
       sandbox: run.sandbox,

@@ -51,7 +51,7 @@ import {
   type PricingTable,
 } from "./pricing.js";
 import type { UsageAccounting } from "./usage.js";
-import { LedgerKeySet, readLedgerRecords } from "./ledger-io.js";
+import { LedgerKeySet, invalidateLedgerRecords, readLedgerRecordsCached } from "./ledger-io.js";
 
 /** `<data dir>/usage-ledger.jsonl` (§3.2.1). */
 export const USAGE_LEDGER_FILE = "usage-ledger.jsonl";
@@ -232,12 +232,20 @@ export class UsageLedgerFile {
       return false;
     }
     if (key !== null) this.keys.add(key);
+    // W9224 P1-4: the parse memo must not serve a view from before THIS write.
+    // The size+mtime key alone cannot prove that on a coarse filesystem clock
+    // (Windows mtime ticks are ~15 ms), so the writer invalidates explicitly.
+    invalidateLedgerRecords(this.target);
     return true;
   }
 
   /** The CURRENT file records only, in file order (audit detail, P2-2). */
   read(): UsageLedgerRecord[] {
-    return readLedgerRecords<UsageLedgerRecord>(this.target);
+    // W9224 P1-4: the parse is memoized on the file's identity (size + mtimeMs)
+    // and dropped by every write of this process, so a poll that reads the
+    // ledger three times (latest/total/totals) parses it ONCE. A COPY is
+    // returned so a caller can never poison the memo by mutating the result.
+    return [...readLedgerRecordsCached<UsageLedgerRecord>(this.target)];
   }
 
   /**
@@ -247,7 +255,8 @@ export class UsageLedgerFile {
    * cannot double-count rows that are also reachable under `.1`.
    */
   readAll(): UsageLedgerRecord[] {
-    return [...readLedgerRecords<UsageLedgerRecord>(`${this.target}.1`), ...this.read()];
+    // W9224 P1-4: both segments go through the same identity memo as [read].
+    return [...readLedgerRecordsCached<UsageLedgerRecord>(`${this.target}.1`), ...this.read()];
   }
 
   /** How many idempotency keys are remembered (bounded-memory diagnostics). */
@@ -293,6 +302,10 @@ export class UsageLedgerFile {
     } catch (e) {
       warn(`ledger rotation failed (${errorText(e)})`);
     }
+    // W9224 P1-4: a rotation changes BOTH identities (the current path becomes a
+    // fresh file, the rolled path is replaced) — drop both memos.
+    invalidateLedgerRecords(this.target);
+    invalidateLedgerRecords(`${this.target}.1`);
   }
 
   /** One `O_APPEND` descriptor; one `writeSync` per record keeps lines whole. */

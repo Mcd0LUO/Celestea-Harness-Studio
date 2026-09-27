@@ -42,12 +42,42 @@ export function absolutize(target: string, workspace: string): string {
  * Linux CI runner. Using the host's `sep` there built `"c:\\users\\a/"` for a
  * Windows root and the containment test silently answered false — the assertion
  * passed on Windows and failed on ubuntu, which is how it was found.
+ *
+ * W9223 (W9210-F8): the comparison follows the PLATFORM's case rules too.
+ *
+ * Windows paths are case-INSENSITIVE, but `realpathSync` does NOT fold case —
+ * `realpathSync("C:\\USERS\\LENOVO")` answers `"C:\\USERS\\LENOVO"` — so a plain
+ * `startsWith` on canonical paths judged the SAME file a different one whenever
+ * the caller spelled it with other capitalisation. In the guard that is a
+ * functional failure on Windows: `write_file` with a legitimately-spelled path
+ * under the workspace came back `code=path_forbidden`. The win32 branch folds
+ * case (and normalises `/` to `\`) before comparing; POSIX is case-SENSITIVE
+ * and is left byte-for-byte alone, because `~/.ssh` and `~/.SSH` really are two
+ * different directories there.
+ *
+ * `platform` is injectable, so the win32 answer is proven on a Linux host — the
+ * same W885 rule the separator above already follows.
  */
 export function isInside(child: string, root: string, platform: string = process.platform): boolean {
-  if (child === root) return true;
-  const s = isWindows(platform) ? "\\" : "/";
-  const prefix = root.endsWith(s) ? root : `${root}${s}`;
-  return child.startsWith(prefix);
+  const windows = isWindows(platform);
+  const c = windows ? foldWin32(child) : child;
+  const r = windows ? foldWin32(root) : root;
+  if (c === r) return true;
+  const s = windows ? "\\" : "/";
+  const prefix = r.endsWith(s) ? r : `${r}${s}`;
+  return c.startsWith(prefix);
+}
+
+/**
+ * The win32 spelling of a path for COMPARISON only: lowercase + `\` separators.
+ *
+ * Lowercasing is what Windows itself does when it resolves a name; the separator
+ * normalisation is what lets a caller that mixed `C:/x` with `C:\\x` still be
+ * recognised as the same path. Never used to build a path that is opened — only
+ * the two sides of a containment test.
+ */
+function foldWin32(target: string): string {
+  return target.toLowerCase().replace(/\//g, "\\");
 }
 
 export function isDirectory(target: string): boolean {

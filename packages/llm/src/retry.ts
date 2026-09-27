@@ -44,12 +44,28 @@
  *      into `[0, maxDelayMs]` (an over-cap header means "wait the cap", never
  *      "retry instantly"). The sleep is injectable, so tests never really wait;
  *   4. VISIBILITY — every retry is reported through `onRetry`, so "this was a
- *      retry" can never be silent.
+ *      retry" can never be silent;
+ *   5. ONE USAGE FRAME PER `generate()` (W9225 / F-04) — the usage of every
+ *      attempt is SUMMED and forwarded exactly once, just before the terminal
+ *      event, instead of forwarding each attempt's frame. The ledger books one
+ *      row per `generate()` with an OVERWRITE-style `record`, while the
+ *      agent-loop's `UsageTracker` is ADDITIVE; forwarding N frames therefore
+ *      made the statusline show N attempts' tokens and the ledger only the last
+ *      one, so neither agreed with the other or with the real bill. One summed
+ *      frame makes all three the same number.
  *
- * Honest boundary: the ledger books ONE step per `generate()` call, so an
- * un-armed (no fallback) retry sequence is one ledger row whose attempt count is
- * 1 while the audit/SSE channel shows every retry. Per-attempt ledger rows are
- * the fallback decorator's job (it owns `beginStep` per target attempt).
+ * Honest boundary: the ledger still books ONE step per `generate()` call, so an
+ * un-armed (no fallback) retry sequence is one ledger row while the audit/SSE
+ * channel shows every retry. That row's usage is now the TRUE total (see #5).
+ * Per-attempt ledger rows are the fallback decorator's job (it owns `beginStep`
+ * per target attempt).
+ *
+ * W9225 (F-10): a `Retry-After` LARGER than `maxDelayMs` is not merely clamped
+ * — it forbids the same-target re-issue outright. The retry decorator cannot
+ * honour "come back in 120s" (it would wait 60s at most), and re-issuing anyway
+ * is what multiplied one rate-limited turn into `targets x (maxRetries+1)`
+ * upstream calls. Declining here hands the decision to the OUTER fallback
+ * decorator, which switches target instead of hammering the same one.
  */
 
 import {
@@ -60,6 +76,7 @@ import {
   type FailureInfo,
   type StatusTable,
 } from "./fallback.js";
+import { usageAdd, type Usage } from "@celestea/core";
 import type { Llm, LlmStream, ModelRequestDraft, StreamEvent } from "./seam.js";
 
 /**
@@ -217,8 +234,8 @@ export function createRetryLlm(opts: RetryLlmOptions): RetryLlm {
 
 /** The verdict of one consumed attempt (the fallback decorator's shape). */
 type AttemptOutcome =
-  | { kind: "done" }
-  | { kind: "failed"; info: FailureInfo; terminal: StreamEvent | null; error: unknown };
+  | { kind: "done"; terminal: StreamEvent; usage: Usage | null }
+  | { kind: "failed"; info: FailureInfo; terminal: StreamEvent | null; error: unknown; usage: Usage | null };
 
 /** An OPENED attempt: the stream plus the retry index it was issued under. */
 interface OpenAttempt {
@@ -251,10 +268,23 @@ async function openAttempt(rt: RetryRuntime, req: ModelRequestDraft, startRetry:
  */
 async function* attemptLoop(rt: RetryRuntime, req: ModelRequestDraft, first: OpenAttempt): LlmStream {
   let current = first;
+  // W9225 (F-04): every attempt's usage, summed ACROSS attempts, so the single
+  // frame below is the true total. Forwarding each attempt's frame made the
+  // additive `UsageTracker` report N attempts while the overwrite-style ledger
+  // reported only the last one.
+  let usage: Usage | null = null;
   for (;;) {
     const outcome = yield* consume(current.stream, rt.policy);
-    if (outcome.kind === "done") return;
+    usage = addUsage(usage, outcome.usage);
+    if (outcome.kind === "done") {
+      yield* yieldUsage(usage);
+      yield outcome.terminal;
+      return;
+    }
     if (!canRetry(rt, outcome.info, current.retry, outcome.error)) {
+      // The failed attempt still cost money: its usage rides out ahead of the
+      // terminal event (or the throw), exactly where a single attempt put it.
+      yield* yieldUsage(usage);
       if (outcome.error !== null) throw outcome.error;
       if (outcome.terminal !== null) yield outcome.terminal;
       return;
@@ -262,6 +292,17 @@ async function* attemptLoop(rt: RetryRuntime, req: ModelRequestDraft, first: Ope
     await backoff(rt, outcome.info, current.retry);
     current = await openAttempt(rt, req, current.retry + 1);
   }
+}
+
+/** Sum two attempts' usage; `null` means "that attempt reported none". */
+function addUsage(total: Usage | null, next: Usage | null): Usage | null {
+  if (next === null) return total;
+  return total === null ? { ...next } : usageAdd(total, next);
+}
+
+/** Forward the accumulated usage once, just before the terminal event. */
+function* yieldUsage(usage: Usage | null): Generator<StreamEvent> {
+  if (usage !== null) yield { kind: "usage", usage };
 }
 
 /**
@@ -276,7 +317,26 @@ async function* attemptLoop(rt: RetryRuntime, req: ModelRequestDraft, first: Ope
  */
 function canRetry(rt: RetryRuntime, info: FailureInfo, retry: number, error: unknown): boolean {
   if (isAbort(error)) return false;
+  if (retryAfterExceedsCap(rt.policy, info)) return false;
   return info.retryable && info.produced === 0 && retry < rt.policy.maxRetries;
+}
+
+/**
+ * W9225 (F-10): true when the failure asked to be left alone for LONGER than
+ * this policy may wait. Such a failure is not "retry the same target" material:
+ * clamping the wait and re-issuing anyway is what turned one rate-limited turn
+ * into `targets x (maxRetries+1)` upstream calls. Declining here lets the outer
+ * fallback decorator switch target, which is the only honest response to
+ * "come back in two minutes" when the budget for one wait is one minute.
+ *
+ * `respectRetryAfter:false` deliberately opts out: the caller has said it does
+ * not want the header consulted at all, so it cannot also veto on it.
+ */
+export function retryAfterExceedsCap(policy: RetryPolicy, info: { retryAfterMs: number | null }): boolean {
+  if (!policy.respectRetryAfter || info.retryAfterMs === null) return false;
+  if (!Number.isFinite(info.retryAfterMs)) return false;
+  const cap = Number.isFinite(policy.maxDelayMs) ? Math.max(0, policy.maxDelayMs) : 0;
+  return info.retryAfterMs > cap;
 }
 
 /** A caller cancellation, recognised structurally (core's LlmError or a DOMError). */
@@ -307,25 +367,34 @@ async function backoff(rt: RetryRuntime, info: FailureInfo, retry: number): Prom
   if (delayMs > 0) await rt.sleep(delayMs);
 }
 
-/** Forward one attempt's events, counting what the consumer has already seen. */
+/**
+ * Forward one attempt's events, counting what the consumer has already seen.
+ *
+ * W9225 (F-04): a `usage` frame is NOT forwarded here — it is captured and
+ * returned with the verdict, and `attemptLoop` emits ONE summed frame for the
+ * whole `generate()`. Forwarding each attempt's frame is what split the
+ * statusline's additive total from the ledger's overwrite-style row.
+ */
 async function* consume(stream: LlmStream, policy: StatusTable): AsyncGenerator<StreamEvent, AttemptOutcome, undefined> {
   let produced = 0;
+  let usage: Usage | null = null;
   try {
     for await (const event of stream) {
       if (isProducedEvent(event)) produced += 1;
-      if (event.kind === "done") {
-        yield event;
-        return { kind: "done" };
+      if (event.kind === "done") return { kind: "done", terminal: event, usage };
+      if (event.kind === "usage") {
+        usage = addUsage(usage, event.usage);
+        continue;
       }
       if (event.kind === "failed" || event.kind === "interrupted") {
-        return { kind: "failed", info: describeEvent(event, produced), terminal: event, error: null };
+        return { kind: "failed", info: describeEvent(event, produced), terminal: event, error: null, usage };
       }
       yield event;
     }
   } catch (error) {
-    return { kind: "failed", info: describeFailure(error, produced, policy), terminal: null, error };
+    return { kind: "failed", info: describeFailure(error, produced, policy), terminal: null, error, usage };
   }
   // A provider stream that ended without a terminal event: the same torn-stream
   // verdict the fallback decorator reaches, and retryable while nothing was seen.
-  return { kind: "failed", info: describeEvent({ kind: "interrupted" }, produced), terminal: { kind: "interrupted" }, error: null };
+  return { kind: "failed", info: describeEvent({ kind: "interrupted" }, produced), terminal: { kind: "interrupted" }, error: null, usage };
 }

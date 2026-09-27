@@ -71,6 +71,31 @@ let configCache: PluginConfigMap = {};
 let loaded = false;
 let available = true;
 
+/**
+ * W9227（P1-5）：**所有「读-改-写」串行化**，与后端 handlers/display-plugins.ts 的
+ * SerialQueue 同构。
+ *
+ * 为什么必须有：服务端是**整表替换**（PUT {disabled, config}），而每个 persist* 都是
+ * 「读当前镜像 → 算 next → await 落库 → 写回镜像」。两个并发调用各自在 await **之前**
+ * 读到同一份旧快照，于是后落库的那次会把前一次的改动用旧快照覆盖掉 —— 「快速切换一个
+ * 插件开关 + 改另一个插件的配置」时前一次改动静默消失，界面上却显示成功。
+ *
+ * 这条 promise 链把整个「读-改-写」放进临界区：后一个任务在前一个**写回镜像之后**
+ * 才开始读，所以它读到的一定是最新状态。链上任何一次失败都只影响它自己的返回值，
+ * 不会卡住后续任务（见 serialize 的 catch）。
+ */
+let writeChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * 把一次「读-改-写」排进串行队列。返回本次任务自己的 promise（成功/失败原样透传，
+ * 调用方的 fail-closed 回滚逻辑不变），同时保证队列本身永远处于可继续的状态。
+ */
+function serialize<T>(task: () => Promise<T>): Promise<T> {
+  const run = writeChain.then(task, task); // 前一个失败也照常执行本任务
+  writeChain = run.catch(() => undefined); // 队尾吞掉错误，避免 unhandled rejection 卡住队列
+  return run;
+}
+
 /** 当前禁用集合（读不到 = 空集 = 全部默认开启）。 */
 export function disabledPlugins(): string[] {
   return [...cache];
@@ -166,11 +191,15 @@ export async function loadDisabledFromServer(knownIds: readonly string[]): Promi
     }
     disabled = legacy;
   }
-  cache = disabled;
-  configCache = config;
-  loaded = true;
-  notify();
-  return [...cache];
+  // W9227（P1-5）：与 persist* 共用同一条队列 —— 装配期的「读 + 一次迁移写 + 写回
+  // 镜像」若与用户在设置页的首个写并发，旧实现会让后落库者覆盖前者的快照。
+  return serialize(async () => {
+    cache = disabled;
+    configCache = config;
+    loaded = true;
+    notify();
+    return [...cache];
+  });
 }
 
 /**
@@ -195,16 +224,20 @@ export async function persistDisabledMany(
   changes: readonly { id: string; off: boolean }[],
   knownIds: readonly string[],
 ): Promise<string[]> {
-  const next = new Set(cache);
-  for (const c of changes) {
-    if (c.off) next.add(c.id);
-    else next.delete(c.id);
-  }
-  const kept = knownIds.filter((k) => next.has(k));
-  await saveDisplayPlugins(kept, configCache);
-  cache = kept;
-  notify();
-  return [...kept];
+  // W9227（P1-5）：整段「读 cache/configCache → 算 kept → PUT → 写回镜像」进临界区。
+  // 在 await 之前读快照、await 之后才写镜像是旧实现互相抹掉的根因。
+  return serialize(async () => {
+    const next = new Set(cache);
+    for (const c of changes) {
+      if (c.off) next.add(c.id);
+      else next.delete(c.id);
+    }
+    const kept = knownIds.filter((k) => next.has(k));
+    await saveDisplayPlugins(kept, configCache);
+    cache = kept;
+    notify();
+    return [...kept];
+  });
 }
 
 /**
@@ -218,19 +251,23 @@ export async function persistPluginConfig(
   values: PluginConfigValues,
   knownIds: readonly string[],
 ): Promise<PluginConfigValues> {
-  const next: PluginConfigMap = { ...configCache };
-  const entry: PluginConfigValues = { ...(next[id] ?? {}) };
-  for (const [key, value] of Object.entries(values)) {
-    if (value === '') delete entry[key];
-    else entry[key] = value;
-  }
-  if (Object.keys(entry).length === 0) delete next[id];
-  else next[id] = entry;
-  // 与 disabled 一起整表替换：服务端是「一个资源」，两条信息必须同一次落库。
-  await saveDisplayPlugins(knownIds.filter((k) => cache.includes(k)), next);
-  configCache = next;
-  notify();
-  return { ...entry };
+  // W9227（P1-5）：与 persistDisabledMany 共用同一条队列 —— 「切开关 + 改配置」两个
+  // 并发写不再各自携带旧快照，后一个任务读到的是前一个已写回的镜像。
+  return serialize(async () => {
+    const next: PluginConfigMap = { ...configCache };
+    const entry: PluginConfigValues = { ...(next[id] ?? {}) };
+    for (const [key, value] of Object.entries(values)) {
+      if (value === '') delete entry[key];
+      else entry[key] = value;
+    }
+    if (Object.keys(entry).length === 0) delete next[id];
+    else next[id] = entry;
+    // 与 disabled 一起整表替换：服务端是「一个资源」，两条信息必须同一次落库。
+    await saveDisplayPlugins(knownIds.filter((k) => cache.includes(k)), next);
+    configCache = next;
+    notify();
+    return { ...entry };
+  });
 }
 
 function messageOf(err: unknown): string {

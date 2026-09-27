@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { statusError, timeoutError } from "./errors.js";
+import { setRetryAfterMs, statusError, timeoutError } from "./errors.js";
 import { clampRetries, createRetryLlm, DEFAULT_RETRY_POLICY, MAX_RETRIES, retryDelayMs, type RetryAttemptInfo } from "./retry.js";
 import { assistantText, collectStream, userMessage, type Llm, type LlmStream, type StreamEvent } from "./seam.js";
 
@@ -293,5 +293,110 @@ describe("W9104 — the policy is clamped to the product's hard cap", () => {
     expect(exposed.retryableStatuses).not.toBe(callerStatuses);
     callerStatuses.push(999);
     expect(llm.policy().retryableStatuses).toEqual([503]);
+  });
+});
+
+describe("W9225 (F-04) — one summed usage frame per generate()", () => {
+  const usage = (total: number): StreamEvent => ({
+    kind: "usage",
+    usage: { prompt_tokens: total, completion_tokens: 0, total_tokens: total, cache_read: 0, reasoning_tokens: 0 },
+  });
+
+  it("sums every attempt's usage into ONE frame instead of forwarding each", async () => {
+    const h = harness([
+      // Attempt 1 bills 10 tokens and then tears; attempt 2 bills 20 and answers.
+      { events: [usage(10), { kind: "failed", kindOf: "stream", message: "torn" }] },
+      { events: [usage(20), ...done("ok")] },
+    ], { maxRetries: 1 });
+
+    const events = await collectStream(await h.llm.generate(REQ));
+    const usageFrames = events.filter((e) => e.kind === "usage");
+
+    // The pre-fix behaviour forwarded BOTH frames (measured 4 frames for 4
+    // attempts in the audit's probe), which made the additive UsageTracker
+    // report 30 while the overwrite-style ledger row reported 20.
+    expect(h.seam.calls()).toBe(2);
+    expect(usageFrames).toHaveLength(1);
+    expect(usageFrames[0]?.kind === "usage" ? usageFrames[0].usage.total_tokens : null).toBe(30);
+    // The attempt's own text streams live; the summed usage still rides out
+    // immediately BEFORE the terminal event, exactly where a single attempt's
+    // did (the pre-fix order had a frame after every failed attempt instead).
+    expect(events.map((e) => e.kind)).toEqual(["text", "usage", "done"]);
+  });
+
+  it("still surfaces the usage of an attempt that failed terminally", async () => {
+    const h = harness([
+      { events: [usage(7), { kind: "failed", kindOf: "stream", message: "boom" }] },
+    ], { maxRetries: 0 });
+
+    const events = await collectStream(await h.llm.generate(REQ));
+
+    // No retry happened, but the tokens were really spent: the frame rides out
+    // ahead of the failure exactly where it used to.
+    expect(h.seam.calls()).toBe(1);
+    expect(events.map((e) => e.kind)).toEqual(["usage", "failed"]);
+    expect(events[0]?.kind === "usage" ? events[0].usage.total_tokens : null).toBe(7);
+  });
+
+  it("emits no usage frame when no attempt reported any", async () => {
+    const h = harness([{ events: done("hi") }], { maxRetries: 0 });
+    const events = await collectStream(await h.llm.generate(REQ));
+
+    // No attempt carried a usage frame, so none is invented: the decorator
+    // forwards what the provider said, not a synthetic zero.
+    expect(events.map((e) => e.kind)).toEqual(["text", "done"]);
+  });
+});
+
+describe("W9225 (F-10) — an over-cap Retry-After forbids the same-target re-issue", () => {
+  it("declines the retry entirely instead of amplifying the turn into N x 4 calls", async () => {
+    // The audit's scenario: the server says "come back in two minutes", the
+    // policy may wait at most one. Re-issuing anyway is what multiplied one
+    // rate-limited turn by the retry budget.
+    // statusError carries no Retry-After, so attach one the way the client does.
+    const err = statusError(429, "Too Many Requests", "slow down");
+    setRetryAfterMs(err, 120_000);
+    const seam = scripted([{ error: err }]);
+    const llm = createRetryLlm({
+      inner: seam.llm,
+      policy: { maxRetries: 3, respectRetryAfter: true, maxDelayMs: 60_000 },
+      sleep: async () => undefined,
+    });
+
+    await expect(llm.generate(REQ)).rejects.toThrow(/slow down/);
+    // ONE upstream call: the retry budget is not spent against a target that
+    // asked to be left alone longer than this policy can wait.
+    expect(seam.calls()).toBe(1);
+    expect(llm.retries()).toBe(0);
+  });
+
+  it("still retries a Retry-After the policy CAN honour", async () => {
+    const err = statusError(429, "Too Many Requests", "slow down");
+    setRetryAfterMs(err, 30_000);
+    const seam = scripted([{ error: err }, { events: done("ok") }]);
+    const sleeps: number[] = [];
+    const llm = createRetryLlm({
+      inner: seam.llm,
+      policy: { maxRetries: 1, maxDelayMs: 60_000 },
+      sleep: async (ms) => { sleeps.push(ms); },
+    });
+
+    expect((await collectStream(await llm.generate(REQ))).at(-1)?.kind).toBe("done");
+    expect(seam.calls()).toBe(2);
+    expect(sleeps).toEqual([30_000]);
+  });
+
+  it("respectRetryAfter:false opts out of the veto (the caller does not want the header)", async () => {
+    const err = statusError(429, "Too Many Requests", "slow down");
+    setRetryAfterMs(err, 120_000);
+    const seam = scripted([{ error: err }, { events: done("ok") }]);
+    const llm = createRetryLlm({
+      inner: seam.llm,
+      policy: { maxRetries: 1, respectRetryAfter: false, backoffMs: 10 },
+      sleep: async () => undefined,
+    });
+
+    expect((await collectStream(await llm.generate(REQ))).at(-1)?.kind).toBe("done");
+    expect(seam.calls()).toBe(2);
   });
 });

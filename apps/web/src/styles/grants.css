@@ -76,17 +76,30 @@
 /* 角标：生效条数（仅已授予时可见）。
    W1517：从「绝对定位浮在按钮右上角」改为徽标区里的**行内小胶囊** —— 入口现在是
    图标 + 档位名 + 计数的横排，浮起来的角标会压住档位名。 */
+/* W9226（F8）：字色与字号。
+   ① 色：原 `color: #fff` 是本文件头注释明令禁止的「组件层写死颜色」，
+      而且在深色主题下把白字画在浅橙底上 —— 白 on --c-grant 实测：
+      mono 浅 #c2410c 5.18 ✓ / claude 浅 #a8502a 5.46 ✓ /
+      **mono 深 #fb923c 2.26 ✗ / claude 深 #e08a66 2.63 ✗**（正文门槛 4.5）。
+      改为跟随主题的 `--c-accent-fg`（各配色都定义了它，且语义正是「强调底上的前景」）：
+      mono 深 #131313 on #fb923c = 8.21 ✓、claude 深 #262521 on #e08a66 = 5.84 ✓，
+      浅色两套仍是白字（5.18 / 5.46 ✓）—— 四套配色全部 ≥4.5:1。
+      未新增 --c-grant-fg token：那要改 tokens.css 与 theme-claude.css 两个主题文件，
+      其中 theme-claude.css 不在本轮授权清单内（跨格线索已登记在报告里）。
+   ② 字号：8.5px 低于任何可读下限（审计 F8 同条点名）。提到 10px，几何同步
+      11 → 12px（line-height/min-width 一并跟上），徽标仍远小于所在 28px 的盾牌行，
+      不改变状态行高度。 */
 .sl-grant-badge {
   display: none;
-  min-width: 11px;
-  height: 11px;
+  min-width: 12px;
+  height: 12px;
   padding: 0 3px;
   border-radius: var(--r-badge);
   background: var(--c-grant);
-  color: #fff;
+  color: var(--c-accent-fg);
   font-family: var(--mono);
-  font-size: 8.5px;
-  line-height: 11px;
+  font-size: 10px;
+  line-height: 12px;
   text-align: center;
 }
 .sl-grant.granted .sl-grant-badge:not(:empty) { display: block; }

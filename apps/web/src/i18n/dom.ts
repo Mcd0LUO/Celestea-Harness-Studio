@@ -45,24 +45,50 @@ function applyCssCopyVars(root: ParentNode): void {
   }
 }
 
+/**
+ * W9226（F5）：**属性型填充的最后一道守卫**。
+ *
+ * 为什么需要它（除了 t() 已改成回落 key 之外）：`setAttribute(name, v)` 的 v 是
+ * 非空 DOMString，`v = undefined` 不抛错、被 WebIDL 转成**字面量 `"undefined"`**
+ * 写进属性 —— 用户悬停看到一个写着 undefined 的 tooltip，而「非空」断言照样通过
+ * （w9109 的 `if (text === '') unset.push(…)` 正是这样被绕过的）。
+ *
+ * 判据覆盖「没有文案」的三种形态，全部不写属性：
+ *   · undefined —— t() 被改回旧契约时的兜底（W9226 变异 M1 专门验证这条分支）；
+ *   · ''        —— 字典里刻意的空值（本仓实有：'shell.status.online'）；
+ *   · key 本身  —— t() 的「两语都没有」回落（= index.html 里拼错的 key）。
+ *
+ * 刻意**不打日志**：这条守卫是「不写出坏值」的防线，而 `t()` 已经把「拼错的 key」
+ * 变成界面上的可见事实（回落 key 本身），诊断信息已经足够。反之，多一行 console.warn
+ * 会同时抬高两个机械计数：bundle gzip 棘轮（提示语进产物）与
+ * tests/doc-conventions ⑩（ARCHITECTURE.md §6.5.5 的 console.warn 计数由 apps/web/src
+ * 派生，实测会从 38 变成 39）—— 后者要改 docs/ARCHITECTURE.md，不在本轮授权清单内。
+ */
+function setAttr(node: Element, attr: string, key: string, value: string | undefined): void {
+  if (!value || value === key) return;
+  node.setAttribute(attr, value);
+}
+
 /** 把 root 内所有带 data-i18n* 属性的元素设为对应 key 的当前语言文案。 */
 export function applyI18n(root: ParentNode): void {
   applyCssCopyVars(root);
   for (const node of root.querySelectorAll('[data-i18n]')) {
     const key = node.getAttribute('data-i18n');
+    // textContent 分支本来就是安全的（undefined → 空串，会被 w9109 的判空抓到），
+    // 故这里不加守卫，保持既有语义逐字不变。
     if (key) node.textContent = t(key as Key);
   }
   for (const node of root.querySelectorAll('[data-i18n-title]')) {
     const key = node.getAttribute('data-i18n-title');
-    if (key) node.setAttribute('title', t(key as Key));
+    if (key) setAttr(node, 'title', key, t(key as Key));
   }
   for (const node of root.querySelectorAll('[data-i18n-aria-label]')) {
     const key = node.getAttribute('data-i18n-aria-label');
-    if (key) node.setAttribute('aria-label', t(key as Key));
+    if (key) setAttr(node, 'aria-label', key, t(key as Key));
   }
   for (const node of root.querySelectorAll('[data-i18n-placeholder]')) {
     const key = node.getAttribute('data-i18n-placeholder');
-    if (key) node.setAttribute('placeholder', t(key as Key));
+    if (key) setAttr(node, 'placeholder', key, t(key as Key));
   }
 }
 

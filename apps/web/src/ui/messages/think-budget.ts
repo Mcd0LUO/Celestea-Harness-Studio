@@ -72,7 +72,8 @@ export function registerThinkSeg(root: HTMLElement, entry: ThinkLedgerEntry): vo
 /**
  * 该列当前**保留**的思考正文字符数（0 = 不是思考列，或正文已被回收）。
  *
- * W9113：摘列时用它把账本减回去 —— 与 pruneToolCards 的「节点归属」判据对称。
+ * W9113：与 pruneToolCards 的「节点归属」判据对称。
+ * W9222（F-11）：容器被整体重建时也用它**重定基**（只保留「被搬运过来」的段）。
  */
 export function retainedThinkChars(root: HTMLElement): number {
   return ledgerEntries.get(root)?.text.length ?? 0;

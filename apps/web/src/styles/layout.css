@@ -303,6 +303,24 @@ body.resizing { cursor: col-resize; user-select: none; }
   padding-bottom: 40px;
   padding-left: 8px;
 }
+/* W9226（F7）：键盘聚焦必须可见。
+   修复前的两条聚焦路径同时被关掉：① base.css 的 `input,textarea,select{outline:none}`
+   没有任何 :focus-visible 补偿；② 唯一的替代品 `input:focus{border-color:--c-accent}`
+   打在 #input 上无效 —— 本文件用 **id 选择器**（特异性 1,0,0）把 `border:none`
+   写在 base.css 的**元素选择器**（0,0,1）之上。真机实测聚焦时 outline:none / border:none
+   —— 零视觉变化，Tab 进输入框的操作者完全不知道焦点在哪（WCAG 2.4.7）。
+
+   为什么用 `#inputbar:focus-within` + box-shadow，而不是恢复 #input 的 outline/border：
+     · 不碰 #input 的 border/background —— tests/w1297-composer-flat.test.ts 的
+       「输入框不得随状态变形」门禁（W1297/W1466 用户明确要求）原样成立，
+       两态几何也不变（box-shadow 不参与布局，border-box 下的盒高仍是 96px）；
+     · #input 在视觉上与 composer 是**一个**扁平大框（W1297），焦点指示理应画在这个
+       大框上；`:focus-within` 还顺带覆盖「焦点在发送键/附件键上」的同一格控件；
+     · 鼠标点击也可见（`:focus-visible` 只覆盖键盘），符合「输入框是当前输入目标」的直觉。
+   inset 让环画在框内，不改变外部几何、也不会被 .chat-shell 的圆角裁掉。 */
+#inputbar:focus-within {
+  box-shadow: inset 0 0 0 1px var(--c-accent-ring);
+}
 /* W847：图片入口收进输入框内联 —— .input-box 承担原 #input 的 flex 槽位，
    #btnAttach 绝对定位在框内左下角（出流 ⇒ 不改变 #inputbar 行宽）。 */
 .input-box { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }

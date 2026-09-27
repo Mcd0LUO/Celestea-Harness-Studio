@@ -45,7 +45,15 @@ import {
   type ToolRegistry,
   type TurnOutcome,
 } from "@celestea/core";
-import { CANCELLED_BEFORE_EXECUTION, closeIterator, errorMessage, isAborted, raceAbort } from "./cancel.js";
+import {
+  CANCELLED_BEFORE_EXECUTION,
+  CANCELLED_EXECUTION_UNCERTAIN,
+  closeIterator,
+  closeStream,
+  errorMessage,
+  isAborted,
+  raceAbort,
+} from "./cancel.js";
 import { estimateTokens, trimContext } from "./context-trim.js";
 import { doneEvent, toolCallEvent, toolResultEvent, turnEndEvent, type EventSink } from "./events.js";
 import { isPerturbable } from "./perturbation.js";
@@ -286,7 +294,11 @@ export class DefaultAgentLoop implements AgentLoop {
 
   /** Start one model response; interruptible, never throws on provider failure. */
   private async generate(seams: Seams, request: ModelRequest): Promise<GenerateResult> {
-    const raced = await raceAbort(this.signal, seams.llm.generate(request));
+    // W9225 (F-07): a cancel that lands while `generate` is in flight (headers
+    // already arrived, the promise about to resolve) abandons a stream nobody
+    // will iterate. Without [closeStream] the provider's response and socket
+    // stayed open for the life of the process — the leak the audit measured.
+    const raced = await raceAbort(this.signal, seams.llm.generate(request), closeStream);
     if (raced.outcome === "aborted") return { kind: "cancelled" };
     if (raced.outcome === "failed") {
       // Generation failure is a terminal error state with a TurnEnd (R1),
@@ -490,8 +502,16 @@ export class DefaultAgentLoop implements AgentLoop {
     // W855: ONE cumulative budget per step, debited in model order.
     const step = newStepRetention();
     let cancelled = false;
+    // W9225 (F-08): one past the last call that was DISPATCHED. A tool is not
+    // interruptible, so every call below this index really ran (its side effects
+    // are already out there); every call at or above it never started. The
+    // synthesized tail must say which of the two it is — the log is the only
+    // source of truth, and "cancelled before execution" is a claim about a call
+    // that this loop cannot make once the batch is in flight.
+    let dispatched = 0;
     for (let start = 0; start < calls.length; start += limit) {
       const batch = calls.slice(start, start + limit);
+      dispatched = start + batch.length;
       const raced = await raceAbort(this.signal, this.dispatchBatch(seams.registry, batch));
       // Unreachable: dispatchCall is total, so a batch never rejects.
       if (raced.outcome === "failed") throw new AgentError(`tool dispatch failed: ${errorMessage(raced.error)}`);
@@ -502,7 +522,7 @@ export class DefaultAgentLoop implements AgentLoop {
       for (const output of raced.value)
         await this.recordToolResult(seams, output, answered, step, names.get(output.call_id) ?? null);
     }
-    if (cancelled) this.synthesizeCancelledResults(seams, calls, answered);
+    if (cancelled) this.synthesizeCancelledResults(seams, calls, answered, dispatched);
     return cancelled;
   }
 
@@ -542,10 +562,20 @@ export class DefaultAgentLoop implements AgentLoop {
    * cancelled result per unanswered call keeps the LOG protocol-valid: in the
    * model's call order, after every real result and before TurnEnd.
    */
-  private synthesizeCancelledResults(seams: Seams, calls: readonly ToolCall[], answered: ReadonlySet<string>): void {
-    for (const call of calls) {
-      if (answered.has(call.id)) continue;
-      const error = CANCELLED_BEFORE_EXECUTION;
+  private synthesizeCancelledResults(
+    seams: Seams,
+    calls: readonly ToolCall[],
+    answered: ReadonlySet<string>,
+    dispatched: number,
+  ): void {
+    for (let index = 0; index < calls.length; index += 1) {
+      const call = calls[index];
+      if (call === undefined || answered.has(call.id)) continue;
+      // W9225 (F-08): `index < dispatched` means the call was in the batch that
+      // was in flight when the signal fired. Its result is genuinely UNKNOWN —
+      // the tool keeps running after the loop stops waiting — so the row says so
+      // instead of asserting "never ran" about work that already had effects.
+      const error = index < dispatched ? CANCELLED_EXECUTION_UNCERTAIN : CANCELLED_BEFORE_EXECUTION;
       seams.session.append({ type: "tool_result", id: call.id, value: null, error });
       this.emit(toolResultEvent({ call_id: call.id, value: null, render: null, error, decision: null }));
     }

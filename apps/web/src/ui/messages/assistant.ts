@@ -15,6 +15,9 @@ import { buildOmittedNote, clampForRender, MESSAGE_RENDER_LIMIT, setOmittedCount
 import { prunePaneDom } from './dom-cap'; // W1485：消息容器的 DOM 上限
 import { waitFor } from './cadence'; // W1524：合并窗口 = 上次渲染实测耗时（自适应）
 import { autoscroll, hideEmptyHint, renderEmptyHint } from './scroll';
+// W9222（F-11）：resetMessages 是「清空会话」的规范复位入口，账本也必须归零 ——
+// 见下方注释（容器对象不变 ⇒ 账本不会随 replaceChildren 自动作废）。
+import { addThinkRetained, thinkRetained } from './think-budget';
 
 // ---- 文本段增量渲染器（W301） ---------------------------------------------------
 /** 每个 AssistantView 一份流式渲染状态（WeakMap 挂载，不改 view.ts 公共接口）。 */
@@ -63,6 +66,10 @@ export function resetMessages(ctx: SessionPane): void {
   ctx.interjectNote = null;
   ctx.ops.clear();
   ctx.step = 0;
+  // W9222（F-11）：账本键是 ctx.el（容器**对象**），replaceChildren 不换对象 ⇒ 旧账本
+  // 会跟着新内容活下来。清空会话必须显式归零，否则下一个新思考段一进来就被误判超预算
+  // 并从最旧（其实正是新段）开始回收。与 messages.ts 的 renderEmptyHint 包装同一不变式。
+  addThinkRetained(ctx.el, -thinkRetained(ctx.el));
   renderEmptyHint(ctx);
 }
 

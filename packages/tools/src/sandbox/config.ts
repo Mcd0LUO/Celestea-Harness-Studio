@@ -218,10 +218,26 @@ export function sandboxConfigFromEnv(env: NodeJS.ProcessEnv = process.env, overr
 /**
  * W768: the sandbox config of ONE session — the session's workspace as cwd and
  * root, the operator's limits unchanged. `null` scope = the env posture.
+ *
+ * W9223 (W9205-B1): `platform` now travels through BOTH exits.
+ *
+ * It used to be dropped here, so the win32 branch of [windowsUtf8Env] was
+ * reachable only through `sandboxConfigFromEnv` / `buildSandboxConfig` — and
+ * those are NOT the functions production calls. The session path
+ * (`plugin.ts`, `engine-plugins.ts`, `handlers/exec.ts`) is, and with the
+ * platform pinned to the host there, the W885 seam stopped at the process
+ * boundary: the win32 child env could not be proven from a Linux host on the
+ * path that actually builds a session's sandbox. The default is still the
+ * host's platform, so production is byte-for-byte unchanged; only a caller that
+ * PASSES a platform (a test) can move it.
  */
-export function sessionSandboxConfig(scope: SessionFsScope | null, env: NodeJS.ProcessEnv = process.env): SandboxConfig {
-  if (scope === null) return sandboxConfigFromEnv(env);
-  return sandboxConfigFromEnv(env, { workdir: scope.workspace, root: scope.workspace });
+export function sessionSandboxConfig(
+  scope: SessionFsScope | null,
+  env: NodeJS.ProcessEnv = process.env,
+  platform: string = process.platform,
+): SandboxConfig {
+  if (scope === null) return sandboxConfigFromEnv(env, { platform });
+  return sandboxConfigFromEnv(env, { workdir: scope.workspace, root: scope.workspace, platform });
 }
 
 /** Materialize a config, filling defaults (tests pin explicit knobs). */

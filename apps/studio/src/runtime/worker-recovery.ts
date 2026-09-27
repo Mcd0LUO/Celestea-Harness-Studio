@@ -77,6 +77,19 @@ export function recoverWorkerTableOnBoot(input: WorkerBootObservationInput, repo
     tsvPath: input.path,
     resultsDir: input.resultsDir,
     sourceLabel: "celestea.studio-ts",
+    // W9224 P1-6: this converger runs BEFORE any session exists, so it has no
+    // host conversation of its own — and a hostless registry used to accept
+    // every row (`mayInherit` is vacuously true), which made the `host=` guard
+    // absent on the one path that writes without a session. The scope is now
+    // DECLARED, not inherited from that vacuous default:
+    //   · the table this runs on is the STUDIO's own
+    //     (`workerTablePath` -> `<data dir>/worker-registry.tsv`), and the schema
+    //     (R2-1) says the studio and the DSH fleet never share one;
+    //   · so every `host=` in it is a studio conversation, and a DEAD one must
+    //     be converged — that is the whole P1-3 point.
+    // A hostless caller that does NOT declare a scope now fails closed instead
+    // of silently claiming another conversation's rows (packages/workers tests).
+    mayAdoptHost: () => true,
     ...(input.now === undefined ? {} : { now: input.now }),
   });
   const applied = applyRecovery(registry, report);
