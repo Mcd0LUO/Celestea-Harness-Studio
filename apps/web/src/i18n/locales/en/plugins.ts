@@ -10,6 +10,9 @@ export const plugins = {
   'plugins.desc.hljs.hint': 'Colour code blocks by language; when off, code blocks stay as they are.',
   'plugins.desc.math.label': 'Math formulas',
   'plugins.desc.math.hint': 'Render $…$ and $$…$$ as formulas; when off, the raw text stays as it is.',
+  // W2013: a file path in the message body opens the right-hand preview panel.
+  'plugins.desc.fileLink.label': 'File links in text',
+  'plugins.desc.fileLink.hint': 'A file path mentioned in a message opens in the preview panel; external links are unaffected.',
   // The inline config panel (same shape as the model provider rows).
   'settings.plugins.expand': 'Show settings for "{label}"',
   'settings.plugins.noConfig': 'This plugin has no adjustable settings',

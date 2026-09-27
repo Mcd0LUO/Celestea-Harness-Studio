@@ -7,6 +7,9 @@ export const plugins = {
   'plugins.desc.hljs.hint': '按语言给代码块着色；关闭后代码块保持原样。',
   'plugins.desc.math.label': '数学公式',
   'plugins.desc.math.hint': '把 $…$ 与 $$…$$ 渲染成公式；关闭后保持原始写法。',
+  // W2013：正文里的文件路径点一下就能开右侧预览面板。
+  'plugins.desc.fileLink.label': '正文文件链接',
+  'plugins.desc.fileLink.hint': '消息正文里提到的文件路径可以点开右侧预览；外部链接不受影响。',
   // 行内配置面板（形状同「模型提供商」的行内面板）。
   'settings.plugins.expand': '展开「{label}」的配置',
   'settings.plugins.noConfig': '这个插件没有可调项',
