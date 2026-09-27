@@ -14,6 +14,7 @@
 // ============================================================================
 import { bootApp, pageModule, PANE_EXPR, control, readSummary, readLoafByInvoker, readTopLoaf, readRafGaps } from '../lib/scenario.mjs';
 import { saveRaw, mdTable, fmt } from '../lib/stats.mjs';
+import { backendPort, cdpPort } from '../lib/ports.mjs';
 
 const SIZES = [8192, 65536, 262144, 1048576, 1363020];
 const CHUNK = 512;
@@ -133,7 +134,7 @@ async function sseBurst(app, chars, stepMs, turn) {
 }
 
 export async function q1() {
-  const app = await bootApp({ port: 3788, cdpPort: 9333 });
+  const app = await bootApp({ port: backendPort(), cdpPort: cdpPort() });
   const rows = [];
   try {
     for (const chars of SIZES) {

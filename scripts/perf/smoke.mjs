@@ -1,7 +1,8 @@
 // scripts/perf/smoke.mjs — 冒烟：冻结前端 + 确定性假后端 + SSE 真连通。
 import { boot, waitFor, control, SESSION_ID } from './lib/app.mjs';
+import { backendPort, cdpPort } from './lib/ports.mjs';
 
-const app = await boot({ port: 3788, cdpPort: 9333 });
+const app = await boot({ port: backendPort(), cdpPort: cdpPort() });
 try {
   await app.boot();
   await waitFor(app.page, 'return document.querySelector(".sess-pane:not([hidden])") !== null;', { label: 'pane' });

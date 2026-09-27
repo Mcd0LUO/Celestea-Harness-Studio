@@ -10,6 +10,7 @@
 // ============================================================================
 import { bootApp, pageModule, PANE_EXPR } from './lib/scenario.mjs';
 import { saveRaw, mdTable, fmt } from './lib/stats.mjs';
+import { backendPort, cdpPort } from './lib/ports.mjs';
 
 const ONE = [
   'const M = window.__W9111M.messages;',
@@ -52,7 +53,7 @@ const FORCE_PRUNE = [
 ].join('\n');
 
 export async function focusOps() {
-  const app = await bootApp({ port: 3788, cdpPort: 9333 });
+  const app = await bootApp({ port: backendPort(), cdpPort: cdpPort() });
   const series = [];
   try {
     await pageModule(app.page, 'messages', '/src/ui/messages.ts');

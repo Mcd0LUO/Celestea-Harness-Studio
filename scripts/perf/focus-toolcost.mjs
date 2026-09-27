@@ -13,6 +13,7 @@
 // ============================================================================
 import { bootApp, pageModule, PANE_EXPR } from './lib/scenario.mjs';
 import { saveRaw, mdTable, fmt } from './lib/stats.mjs';
+import { backendPort, cdpPort } from './lib/ports.mjs';
 
 /** 逐张建卡 + 回填，分别计时。 */
 const PER_CARD = [
@@ -48,7 +49,7 @@ const SCROLL_COST = [
 ].join('\n');
 
 export async function focusToolCost() {
-  const app = await bootApp({ port: 3788, cdpPort: 9333 });
+  const app = await bootApp({ port: backendPort(), cdpPort: cdpPort() });
   const stages = [];
   try {
     await pageModule(app.page, 'messages', '/src/ui/messages.ts');

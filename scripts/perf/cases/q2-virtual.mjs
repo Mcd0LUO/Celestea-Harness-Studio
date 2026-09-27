@@ -10,6 +10,7 @@
 // ============================================================================
 import { bootApp, pageModule, PANE_EXPR, readSummary, readLoafByInvoker } from '../lib/scenario.mjs';
 import { saveRaw, mdTable, fmt } from '../lib/stats.mjs';
+import { backendPort, cdpPort } from '../lib/ports.mjs';
 
 /** 造 N 列：每列 = 一条用户消息（走应用自己的 addUserMessage）。 */
 const BUILD_COLS = [
@@ -74,7 +75,7 @@ const PRUNE_ONCE = [
 ].join('\n');
 
 export async function q2() {
-  const app = await bootApp({ port: 3788, cdpPort: 9333 });
+  const app = await bootApp({ port: backendPort(), cdpPort: cdpPort() });
   const out = { levels: [], prune: null, railSync: null };
   try {
     for (const n of [600, 1200, 3000]) {

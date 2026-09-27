@@ -15,6 +15,7 @@
 // ============================================================================
 import { bootApp, pageModule, PANE_EXPR } from './lib/scenario.mjs';
 import { saveRaw, mdTable } from './lib/stats.mjs';
+import { backendPort, cdpPort } from './lib/ports.mjs';
 
 /** 一轮 = user + think + assistant + tool（4 列），think 约 3000 字符。 */
 const ONE = [
@@ -56,7 +57,7 @@ function thinkHistory(n, chars) {
 
 export async function focusThinkLedger() {
   // ---------- 疑点 A ----------
-  const app = await bootApp({ port: 3788, cdpPort: 9333 });
+  const app = await bootApp({ port: backendPort(), cdpPort: cdpPort() });
   const drift = [];
   let restoreCase = null;
   try {

@@ -8,6 +8,7 @@
 // ============================================================================
 import { bootApp, pageModule, PANE_EXPR, readSummary } from './lib/scenario.mjs';
 import { saveRaw, mdTable, fmt } from './lib/stats.mjs';
+import { backendPort, cdpPort } from './lib/ports.mjs';
 
 const BUILD = [
   'const M = window.__W9111M.messages;',
@@ -47,7 +48,7 @@ const SCROLL = [
 ].join('\n');
 
 export async function focusScroll() {
-  const app = await bootApp({ port: 3788, cdpPort: 9333 });
+  const app = await bootApp({ port: backendPort(), cdpPort: cdpPort() });
   const levels = [];
   try {
     for (const n of [600, 1200, 3000]) {

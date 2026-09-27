@@ -40,7 +40,30 @@ cd $repo\apps\web
 node node_modules/vite/bin/vite.js --port 3787 --strictPort --host 127.0.0.1
 ```
 
-Chrome 在 `C:/Program Files/Google/Chrome/Application/chrome.exe`（实测 153.0.8010.53）。
+### Linux / macOS 等价做法（W2019）
+
+上面的 `cmd /c mklink /J` 是 Windows 专有；POSIX 上的等价物是**符号链接**：
+
+```bash
+tmp=$(mktemp -d)
+git archive HEAD | tar -x -C "$tmp"
+ln -s "$PWD/node_modules"            "$tmp/node_modules"
+ln -s "$PWD/apps/web/node_modules"   "$tmp/apps/web/node_modules"
+cd "$tmp/apps/web" && node node_modules/vite/bin/vite.js --port 3787 --strictPort --host 127.0.0.1
+```
+
+Chrome 的查找顺序（W2019）：`W9111_CHROME` 环境变量 → 各平台常见安装路径 →
+Playwright 浏览器缓存（`~/.cache/ms-playwright/<browser>-<build>/…`，含
+`chrome-headless-shell`）。**没有 Chrome 时不再只能靠"恰好装在默认位置"**：
+
+```bash
+export W9111_CHROME=/root/.cache/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell
+node scripts/perf/smoke.mjs
+```
+
+不设 `W9111_REPO` 时，仓根**从脚本自身位置推导**（上溯到含 `package.json` 的目录），
+并在 stderr 打一条警告 —— 正式测量仍应显式指向 `git archive` 导出的**冻结**检出，
+否则量的是活工作树（并发改动会让数字不可复现）。
 
 ## 跑
 
@@ -62,9 +85,15 @@ node scripts/perf/focus-think-ledger.mjs         # thinkBudget 账本漂移
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `W9111_REPO` | `%TEMP%/perf-w9111/repo` | 冻结检出根 |
+| `W9111_REPO` | 从脚本位置上溯出的仓根（推导时打警告） | 冻结检出根（**正式测量必须显式指定**） |
 | `W9111_VITE` | `http://127.0.0.1:3787` | Vite 转换服务 |
 | `W9111_RESULTS` | `results/perf-w9111` | 结果目录 |
+| `W9111_CHROME` | 自动查找（见上） | Chrome 可执行文件（**最高优先级**） |
+| `W9111_PORT` | `3788` | fixture 后端端口（并行跑时改它，避免撞端口） |
+| `W9111_CDP_PORT` | `9333` | Chrome 远程调试端口（同上） |
+
+`W9111_PORT` / `W9111_CDP_PORT` 的形状照抄仓内既有的 `W9113_PORT` / `W9113_CDP_PORT`
+范例（`w9113-p0.mjs`）：默认值不变，设了就用环境变量。
 
 ## 为什么不用 playwright / puppeteer
 
