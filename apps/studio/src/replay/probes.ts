@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseSessionJsonl } from "@celestea/session";
-import { serializeEventLog } from "@celestea/runtime";
+import { COMPACT_HEAD_TURNS, COMPACT_KEEP_TURNS, compactNote, serializeEventLog } from "@celestea/runtime";
 import { SESSION_LOG_NAME } from "../runtime/engine-session.js";
 import type { SseEventName } from "@celestea/core";
 import { compareBytes, compareJson, note, type Finding } from "./compare.js";
@@ -21,8 +21,15 @@ import type { ReplayHost } from "./host.js";
 const TERMINAL = ["completed", "cancelled", "error", "step_limit", "interrupted"];
 /** The frozen "nothing to compact" note. */
 export const SKIP_NOTE = "历史不足，无需压缩";
-/** The frozen compacted note for K = 4. */
-export const COMPACT_NOTE = "已压缩：摘要轮 + 最近4轮";
+/**
+ * The compacted note, DERIVED from the runtime's own budget (W2011).
+ *
+ * It used to be the literal "已压缩：摘要轮 + 最近4轮" (pure tail). W2011 added a
+ * head budget, so the golden must track the planner instead of freezing one
+ * phrasing -- a hand-copied expectation here would silently rot the next time
+ * the budget changes, which is exactly what the head+tail change did.
+ */
+export const COMPACT_NOTE = compactNote(COMPACT_KEEP_TURNS, COMPACT_HEAD_TURNS);
 
 export interface WireFrame {
   event: string;
@@ -258,18 +265,28 @@ function compactedFindings(input: CompactedInput): Finding[] {
   const findings: Finding[] = [];
   const events = parseSessionJsonl(after).events;
   const summary = headSummary(events);
-  const expected = summary === null ? null : expectedCompactLog(parseSessionJsonl(before).events, summary, 4);
+  // W2011: pass BOTH budgets explicitly; the oracle defaults to the same spec
+  // values, so a divergence in either direction is a real diff, not a default.
+  const expected =
+    summary === null
+      ? null
+      : expectedCompactLog(parseSessionJsonl(before).events, summary, COMPACT_KEEP_TURNS, COMPACT_HEAD_TURNS);
   if (expected === null) {
     findings.push(note(`${id} :: compact-log`, "spec-derived", "compacted log has no 【上下文压缩】 head turn", "diff"));
   } else {
     findings.push(compareBytes(`${id} :: compact-log`, serializeEventLog(expected), after, "independent re-derivation of the W259 plan"));
   }
   findings.push(compareBytes(`${id} :: compact-backup`, before, readFileSync(join(dir, "cli-main.jsonl.precompact"), "utf8"), ".precompact backup of the pre-compaction log"));
-  const keptBefore = rawTurnBodies(before, parseSessionJsonl).slice(-4);
-  const keptAfter = rawTurnBodies(after, parseSessionJsonl).slice(-4);
+  // The surviving TAIL turns (the head turns are the oldest, so the last K bodies
+  // are still exactly the tail; the elision row is not inside any turn body).
+  const keptBefore = rawTurnBodies(before, parseSessionJsonl).slice(-COMPACT_KEEP_TURNS);
+  const keptAfter = rawTurnBodies(after, parseSessionJsonl).slice(-COMPACT_KEEP_TURNS);
   findings.push(compareJson(`${id} :: compact-kept-turn-bodies`, "byte-exact", keptBefore, keptAfter, "kept turns are byte-identical apart from renumbering"));
-  findings.push(compareJson(`${id} :: compact-response`, "golden", { compacted: true, kept_turns: 4, note: COMPACT_NOTE }, { compacted: body["compacted"], kept_turns: body["kept_turns"], note: body["note"] }, "compacted branch"));
+  // W2011: kept_turns counts the ORIGINAL turns the new log still carries --
+  // head + tail, not just the tail.
+  const keptTurns = COMPACT_HEAD_TURNS + COMPACT_KEEP_TURNS;
+  findings.push(compareJson(`${id} :: compact-response`, "golden", { compacted: true, kept_turns: keptTurns, note: COMPACT_NOTE }, { compacted: body["compacted"], kept_turns: body["kept_turns"], note: body["note"] }, "compacted branch"));
   const payload = frame === null ? null : ((frame as { envelope: { payload: unknown } }).envelope.payload as Record<string, unknown>);
-  findings.push(compareJson(`${id} :: compact-sse`, "golden", { session: id, kept_turns: 4, note: COMPACT_NOTE, rebound: true }, payload, "compact frame"));
+  findings.push(compareJson(`${id} :: compact-sse`, "golden", { session: id, kept_turns: keptTurns, note: COMPACT_NOTE, rebound: true }, payload, "compact frame"));
   return findings;
 }

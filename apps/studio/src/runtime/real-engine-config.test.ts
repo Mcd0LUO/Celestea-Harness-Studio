@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseSessionJsonl } from "@celestea/session";
+import { COMPACT_HEAD_TURNS, COMPACT_KEEP_TURNS, compactNote } from "@celestea/runtime";
 import { getJson, jsonRequest, type StudioHarness } from "../harness.test-util.js";
 import { activate, engineOf, makeEngineHarness, readSessionLog, runTurnWithFrames, turns, waitIdle } from "./test-util.js";
 
@@ -69,12 +70,16 @@ describe("POST /api/sessions/{id}/compact", () => {
 
     const res = await getJson(h.app, "/api/sessions/sample-ws%2Fs12/compact", jsonRequest("POST"));
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, compacted: true, kept_turns: 4, note: "已压缩：摘要轮 + 最近4轮" });
+    // W2011: kept_turns is head + tail (the plan is no longer pure-tail); the
+    // note is derived from the runtime's own budgets, not hand-copied.
+    const keptTurns = COMPACT_HEAD_TURNS + COMPACT_KEEP_TURNS;
+    const note = compactNote(COMPACT_KEEP_TURNS, COMPACT_HEAD_TURNS);
+    expect(res.body).toEqual({ ok: true, compacted: true, kept_turns: keptTurns, note });
 
     const frame = await sub.next();
     expect(frame?.event).toBe("compact");
     expect(frame?.envelope.turn).toBe(0);
-    expect(frame?.envelope.payload).toMatchObject({ session: "sample-ws/s12", kept_turns: 4, rebound: true });
+    expect(frame?.envelope.payload).toMatchObject({ session: "sample-ws/s12", kept_turns: keptTurns, rebound: true });
     sub.close();
 
     const parsed = parseSessionJsonl(readSessionLog(h, "s12"));
@@ -83,15 +88,24 @@ describe("POST /api/sessions/{id}/compact", () => {
     expect(head?.type === "user_message" ? head.text.startsWith("【上下文压缩】") : false).toBe(true);
     expect(head?.type === "user_message" ? head.text : "").toContain("digest");
     const kept = parsed.events.filter((e) => e.type === "turn_start").map((e) => (e.type === "turn_start" ? e.id : ""));
-    expect(kept).toEqual(["turn-1", "turn-2", "turn-3", "turn-4", "turn-5"]);
+    // W2011: summary turn + head(2) + tail(4) = 7 turns, renumbered contiguously.
+    expect(kept).toEqual(Array.from({ length: 1 + keptTurns }, (_, i) => `turn-${i + 1}`));
     const users = parsed.events.filter((e) => e.type === "user_message").map((e) => (e.type === "user_message" ? e.text : ""));
-    expect(users.slice(1)).toEqual(["问 8", "问 9", "问 10", "问 11"]);
+    // W2011 row order: summary row, then the HEAD turns, then the elision row that
+    // stands in for the dropped middle, then the TAIL turns.
+    expect(users.slice(1, 1 + COMPACT_HEAD_TURNS)).toEqual(["问 0", "问 1"]);
+    expect(users[1 + COMPACT_HEAD_TURNS]).toContain("【上下文压缩·省略】");
+    expect(users.slice(2 + COMPACT_HEAD_TURNS)).toEqual(["问 8", "问 9", "问 10", "问 11"]);
     expect(readFileSync(join(h.workspace, "s12", "cli-main.jsonl.precompact"), "utf8")).toBe(original);
 
-    // The live generation was rebound: the NEXT turn id continues after turn-5.
+    // The live generation was rebound: the NEXT turn id continues after the last
+    // kept turn (W2011: 7 kept turns, so the new one is turn-8).
     const res2 = await runTurnWithFrames(h, "post compact");
     const next = parseSessionJsonl(readSessionLog(h, "s12")).events.filter((e) => e.type === "turn_start");
-    expect(next.map((e) => (e.type === "turn_start" ? e.id : ""))).toEqual(["turn-1", "turn-2", "turn-3", "turn-4", "turn-5", "turn-6"]);
+    expect(next.map((e) => (e.type === "turn_start" ? e.id : ""))).toEqual([
+      ...Array.from({ length: 1 + keptTurns }, (_, i) => `turn-${i + 1}`),
+      `turn-${2 + keptTurns}`,
+    ]);
     expect(res2.frames.find((f) => f.event === "done")?.payload["text"]).toBe("echo: post compact");
   });
 
