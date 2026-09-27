@@ -44,6 +44,21 @@ import { mountTaskPanel } from './taskpanel'; // W1533：历史恢复会 replace
 
 const MAX_RESTORE = 200;
 
+/**
+ * W2015：向服务端**要多少条** = 渲染窗口 + 1。
+ *
+ * 为什么是 201 而不是 200：折叠提示的判据是「总条数 > MAX_RESTORE」，而裁剪后的
+ * 响应里 `all.length` 已经是窗口大小 —— 直接要 200 会让「还有更早的」这件事在客户端
+ * 变得**不可判定**（200 条与「正好 200 条」不可区分），折叠提示就会凭空消失。
+ * 多要 1 条把「是否被裁」这个比特原样带回来：服务端回 201 ⇒ 总数 > 200 ⇒ 提示照出，
+ * 回 ≤200 ⇒ 总数就是这么多 ⇒ 与改动前逐字一致。随后 `slice(-MAX_RESTORE)` 取最近
+ * 200 条 —— 与服务端裁剪前 `full.slice(-200)` 是同一段，渲染结果不变。
+ *
+ * 旧后端不认识 `?tail`（忽略未知查询参数）→ 仍回全量 ⇒ 上面的判据照旧成立，
+ * 只是没省下带宽；**行为不回退**，因此这条改动对版本偏斜是安全的。
+ */
+const RESTORE_TAIL = MAX_RESTORE + 1;
+
 // W9229：衔接去重状态搬到 ./restore-dedup.ts（模块体积门禁），此处再导出保持 import 路径兼容。
 import { resetRestore } from './restore-dedup';
 export { feedAssistantDelta, finalAssistantDedup, guardBufLimit, resetRestore } from './restore-dedup';
@@ -184,7 +199,7 @@ export async function restoreSessionHistory(
 ): Promise<void> {
   let resp;
   try {
-    resp = await api.messages(ctx.id);
+    resp = await api.messages(ctx.id, RESTORE_TAIL);
   } catch (err) {
     if (!ctx.streaming) {
       appendNote(
