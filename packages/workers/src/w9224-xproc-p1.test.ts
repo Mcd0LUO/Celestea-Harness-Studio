@@ -28,6 +28,21 @@ import { acquireTableLock } from "./registry-tsv.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REGISTRY_TS = join(HERE, "registry.ts");
 const TSX_CLI = join(HERE, "..", "..", "..", "node_modules", "tsx", "dist", "cli.mjs");
+/**
+ * W9228 · the ROOT tsconfig, passed explicitly to every child.
+ *
+ * WHY: the child imports `registry.ts`, which imports `@celestea/core`. Without
+ * this flag tsx resolves that bare specifier through Node resolution — and
+ * `packages/core/package.json` points at `./dist/index.js`, which is GITIGNORED
+ * and absent on a fresh CI checkout (CI never builds the packages before the
+ * test gate). The child then dies with `Cannot find module …`, a failure that is
+ * invisible locally, where a stale `dist/` happens to exist.
+ *
+ * The root tsconfig carries the `paths` map (`@celestea/core` → `packages/core/src/`,
+ * …), so the child compiles the SOURCE and needs no build product. tsx reads the
+ * tsconfig it is GIVEN, not the one in cwd — which is why cwd alone never fixed it.
+ */
+const ROOT_TSCONFIG = join(HERE, "..", "..", "..", "tsconfig.json");
 const roots: string[] = [];
 
 afterEach(() => {
@@ -72,7 +87,7 @@ function runChild(script: string, args: readonly string[], env: Record<string, s
     // cwd = the REPO ROOT (this file's package dir): the child imports
     // `registry.ts`, which imports `@celestea/core` through the repo's tsconfig
     // path alias — a temp cwd would not resolve it.
-    const out = execFileSync(process.execPath, [TSX_CLI, script, ...args], {
+    const out = execFileSync(process.execPath, [TSX_CLI, '--tsconfig', ROOT_TSCONFIG, script, ...args], {
       encoding: "utf8",
       cwd: HERE,
       env: { ...process.env, ...env },
@@ -164,8 +179,8 @@ describe("W9224 P1-5: the table write is serialized ACROSS processes", () => {
     // Both children reach the barrier BEFORE either starts writing, so the
     // interleave is caused by real concurrency, not by a start-time skew.
     const children = [
-      spawn(process.execPath, [TSX_CLI, script, table, "A", "1111", "120", go, readyA], { cwd: HERE, stdio: "ignore" }),
-      spawn(process.execPath, [TSX_CLI, script, table, "B", "2222", "120", go, readyB], { cwd: HERE, stdio: "ignore" }),
+      spawn(process.execPath, [TSX_CLI, "--tsconfig", ROOT_TSCONFIG, script, table, "A", "1111", "120", go, readyA], { cwd: HERE, stdio: "ignore" }),
+      spawn(process.execPath, [TSX_CLI, "--tsconfig", ROOT_TSCONFIG, script, table, "B", "2222", "120", go, readyB], { cwd: HERE, stdio: "ignore" }),
     ];
     await waitFor(() => existsSync(readyA) && existsSync(readyB), "both children reached the barrier");
     writeFileSync(go, "1", "utf8");
