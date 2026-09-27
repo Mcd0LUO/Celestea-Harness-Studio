@@ -9,6 +9,51 @@
    宿主 .prov-model-adv-body 是两列网格（120px 标签 + 1fr 控件）。新组**横跨两列**
    并自带同样的两列内网格 —— 否则它会以「第 7/8 个网格项」的身份被塞进 120px 的
    标签列，类型片被迫竖排（真机实测踩到，见报告）。
+   ----------------------------------------------------------------------------
+   ★ W2010 · 行内面板的「无 JS 量高」约定（**改面板之前先读这一段**）
+
+   背景：providers 的行内面板（ui/providers/panel.ts）与 plugins 的行内配置面板
+   （ui/plugins/config-panel.ts）原先靠 JS 量高 —— 展开时把 scrollHeight+'px' 写进
+   inner.style.maxHeight、过渡结束后写 'none' 解除约束、收起时为了拿到动画还要
+   「先固定当前高度 + void offsetHeight 强制回流」。W2010 起高度**全部由 CSS 给**：
+     基态（settings.css / plugins.css）：max-height: 0
+     展开态：                            max-height: max-content   ← 无条件写
+     补间：                              interpolate-size: allow-keywords
+   JS 只剩 class 切换（.open / .expanded + aria-expanded），不再有任何高度写点。
+   max-content 会随内容增高自然变大，所以「过渡结束后解除约束」那一步也不再需要。
+
+   ── ★★ 反直觉要点：两个特性长得像，守卫的对错**相反**（照抄必错） ──
+
+     ① interpolate-size（本仓用于**过渡**）—— 守卫是**错的** ❌
+        绝不能写 @supports (interpolate-size: allow-keywords) 去守卫
+        max-height: max-content。实测：Firefox 155 / WebKit 26.6 的
+        CSS.supports('interpolate-size','allow-keywords') === false，
+        加了守卫那条规则整条失效、max-height 停在基态 0px ⇒ 内容**永久不可见**
+        （clientHeight = 0，不是「没动画」而是「打不开」）。
+        正解：max-content **无条件写** —— 它本身就是「不支持就瞬时到位」的安全降级；
+        interpolate-size 是纯增强，只决定要不要补间，不支持就整条被忽略。
+        本仓无 autoprefixer / 无 postcss，CSS 原样上线，没有构建期兜底。
+
+     ② field-sizing（**本仓当前未使用**，将来若用）—— 守卫是**对的** ✅
+        它给的是**能力**（textarea 自增长），不支持的引擎会静默忽略 ⇒ 输入框不再
+        自增长、内容被裁。所以必须保留 JS 回落，用 @supports (field-sizing: content)
+        判断后才决定是否绑定 autoGrow。
+
+     一句话：**特性给的是「增强」⇒ 别守卫（CSS 自己就是回落）；
+               特性给的是「能力」⇒ 要守卫（否则没有回落可用）。**
+
+   ── 另两条硬约束 ──
+     · **禁用 calc-size()**：实测 FF 155 / WebKit 26.6 下
+       max-height: calc-size(max-content, size) 的终值 clientHeight = 0
+       （内容永久不可见）。它没有任何 max-content 做不到的能力，一律不用。
+     · interpolate-size 是**可继承**属性：写在承载过渡元素的**祖先**上即可
+       （settings.css 的 .prov-table / plugins.css 的 .plug-entry），
+       **不必**写 :root —— 作用域更小、影响面更可控，也不去动 tokens.css。
+     · 承载 max-height 的元素（.prov-inline / .plug-panel-inner）**不得带 padding**：
+       max-height 夹的是内容盒，padding 落在它外面（收起态会剩一条 padding 高）。
+
+   机械门禁：tests/w2010-panel-no-js-height.test.ts（9 条）；
+   三引擎真机几何与变异负控制证据见 results/W2010-interpolate-size.md。
    ============================================================================ */
 
 /* ---- W9107 ①：相邻模型块之间的淡分隔线（中间粗、两端渐隐） ----

@@ -208,12 +208,17 @@
  *   .plug-entry[data-id]
  *     .plug-row（既有骨架：展开控件 / 名称 / 说明 / 开关）
  *     .plug-panel > .plug-panel-inner > .plug-cfg（描述驱动的控件）
- * 展开/收起只切 .open 与内联 max-height（同 providers 的 .prov-inline）——
- * 不重建列表、不重画行。
+ * 展开/收起只切 .open（max-height 的基态与终态都在本文件里，同 providers 的
+ * .prov-inline）—— 不重建列表、不重画行、不用 JS 量高。
  */
 .plug-entry {
   display: flex;
   flex-direction: column;
+  /* W2010：interpolate-size 是**可继承**属性（实测：写在这里，后代 .plug-panel-inner
+     的 computed 即为 allow-keywords）⇒ 不必写 :root（tokens.css 由架构师独占）。
+     作用：让 max-height 能从 0 补间到 max-content。不支持的引擎忽略它、直接落到
+     终值（瞬时展开，功能不丢）。见 provider-edit.css 顶部「W2010」整段。 */
+  interpolate-size: allow-keywords;
 }
 .plug-expand {
   flex: 0 0 auto;
@@ -246,12 +251,15 @@
   outline: 1px solid var(--interactive-focus-ring);
   outline-offset: 1px;
 }
-/* ★ 折叠的高度约束必须落在**同一个**被 JS 驱动 max-height 的元素上：
-   真机实测踩到过 —— 把 max-height:0 写在 .plug-panel（外层）而 JS 写 .plug-panel-inner，
-   结果是「加了 open 类、aria 也是 true，但几何永远 0」（面板不可见）。 */
-/* ★ 被 JS 驱动 max-height 的元素**不得带 padding**：max-height 夹的是内容盒，
+/* ★ 折叠的高度约束必须落在**同一个**承载过渡的元素上：
+   真机实测踩到过 —— 把 max-height:0 写在 .plug-panel（外层）而展开终值写在
+   .plug-panel-inner，结果是「加了 open 类、aria 也是 true，但几何永远 0」（面板不可见）。
+   ★ 承载 max-height 的元素**不得带 padding**：max-height 夹的是内容盒，
    而 padding 落在它外面 —— 真机实测（h=14px）就是「收起态还剩一条 padding 高度」。
-   providers 的行内面板同此形状（.prov-inline 无 padding，padding 在内层 .prov-form）。 */
+   providers 的行内面板同此形状（.prov-inline 无 padding，padding 在内层 .prov-form）。
+   ★ W2010 起基态与终态都在本文件里（max-height: 0 ↔ max-content），JS 只切 class；
+   原先「过渡结束后写 max-height:'none' 解除约束」那一步已删 —— max-content 本身
+   就会随内容增高自然变大，不需要再解除什么。 */
 .plug-panel-inner {
   overflow: hidden;
   max-height: 0;
@@ -263,6 +271,10 @@
 .plug-panel.open .plug-panel-inner {
   opacity: 1;
   visibility: visible;
+  /* W2010：展开终值走**内在尺寸**（同 providers 的 .prov-inline）。无条件写，
+     不加 @supports 守卫 —— 守卫会让 FF/WebKit 的 max-height 停在 0px、内容永久
+     不可见（实测 clientHeight = 0）。理由见 provider-edit.css 顶部「W2010」整段。 */
+  max-height: max-content;
   transition: max-height 0.22s ease, opacity 0.18s ease, visibility 0s linear 0s;
 }
 .plug-cfg {
