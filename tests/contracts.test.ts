@@ -103,6 +103,36 @@ describe("contracts/endpoints.json", () => {
     expect(Number(stated?.[2])).toBe(ENDPOINT_COUNT);
   });
 
+  /**
+   * W2005 -- the SAME class of rot as the title above, one file over, and it had
+   * already rotted twice. The `get_events` note carried a hand-copied list
+   * ("Event names (8): text, thinking, ...") that nothing ever read: the SSE gate
+   * below only compares `contracts/sse-events.json` against ITSELF, so W783
+   * (`question`) and W1528 (`terminal`) both landed without touching the prose.
+   * The note now POINTS AT the source of truth instead of copying it, and this
+   * gate keeps the one thing it still states -- the count -- derived, not pinned.
+   *
+   * The expectation is read from the file, never written as a second literal.
+   * The raw read (rather than `loadSse()`) is deliberate: the store validates the
+   * frozen anchor first, so a drift in sse-events.json would make THAT gate throw
+   * before this assertion compared anything -- the linkage this test exists to
+   * prove would be masked by the very check it is meant to complement.
+   */
+  it("states the SSE event count in the get_events note consistently with sse-events.json", () => {
+    const sse = JSON.parse(readFileSync(join(repoRoot(), "contracts", "sse-events.json"), "utf8")) as { events: { name: string }[] };
+    const note = String(c.endpoints.find((e) => e.id === "get_events")?.notes?.find((n) => n.startsWith("Event names")) ?? "");
+    const stated = /^Event names \((\d+)\):/.exec(note);
+    expect(stated, "the get_events note must state 'Event names (N): ...'").not.toBeNull();
+    expect(Number(stated?.[1])).toBe(sse.events.length);
+    // The note points AT the authoritative list -- the W2005 fix deleted the copy
+    // precisely so there is no second place for the names to drift.
+    expect(note).toContain("contracts/sse-events.json");
+    // If a list is ever re-inlined it must still match the source one-for-one: a
+    // comma-run of >= 3 snake_case names is a list, not prose.
+    const inlined = /([a-z_]+(?:, [a-z_]+){2,})/.exec(note)?.[1];
+    if (inlined !== undefined) expect(inlined.split(", ")).toEqual(sse.events.map((e) => e.name));
+  });
+
   it("documents the documented error status codes", () => {
     for (const code of ["400", "404", "409", "500", "502"]) {
       expect(c.errorCodes[code]).toBeDefined();
