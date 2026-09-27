@@ -31,6 +31,7 @@ import {
 import type { AttachmentStore } from "./attachments/store.js";
 import { builtinTools } from "./builtin.js";
 import { mountProductionGuards, type PathGuardGrants } from "./guard/path-guard.js";
+import { toolDenyGuard } from "./guard/tool-deny.js";
 import { HttpTargetPolicy, type SsrfGrantView } from "./http/ssrf.js";
 import type { HttpRequestToolOptions } from "./tools/http-request.js";
 import { PROCESS_REGISTRY_SERVICE, ProcessRegistry } from "./process/registry.js";
@@ -56,7 +57,16 @@ export interface RunCodeMount {
  * widen-only; `undefined` (no `grants.json`) reproduces the env-derived posture
  * byte for byte.
  */
-export interface ToolAssemblyGrants extends PathGuardGrants, SandboxGrantView, SsrfGrantView {}
+export interface ToolAssemblyGrants extends PathGuardGrants, SandboxGrantView, SsrfGrantView {
+  /**
+   * W9226 · the permission baseline's DISABLED tools (W9 `toolDeny`).
+   *
+   * Unlike the mode fold (which deliberately lets a program reach a folded
+   * tool), a DENIED tool must not be reachable from `run_code` either — so
+   * this list is enforced by a GUARD, not only by the exposed face.
+   */
+  toolDeny?: readonly string[];
+}
 
 export interface ToolsPluginOptions {
   /** Tool set; default: the six builtins sharing [processes] + [sandbox]. */
@@ -145,6 +155,14 @@ export function assembleTools(options: ToolsPluginOptions = {}): ToolAssembly {
     registry.addGuard(options.guard);
     guardMounted = true;
   } else guardMounted = mountProductionGuards(registry, env, grants, scope);
+  // W9226 (P0): the permission baseline's `toolDeny` is a DENIAL, not a mode fold.
+  // The exposed face hides it from the model, but `run_code`'s RegistryHandle is
+  // bound to this INNER registry, so without a guard a program could still call it
+  // (measured: direct `run_shell` refused, `tools.run_shell(...)` inside run_code
+  // executed). Mounted only when the list is non-empty so an ungated assembly keeps
+  // a byte-identical guard chain.
+  const toolDeny = grants.toolDeny ?? [];
+  if (toolDeny.length > 0) registry.addGuard(toolDenyGuard(toolDeny));
 
   return { registry, sandbox, processes, guardMounted, runCode };
 }

@@ -113,6 +113,8 @@ export {
   type PathGuardPolicyInit,
 } from "./guard/path-guard.js";
 export { absolutize, canonicalExisting, isDirectory, isInside, resolveExistingTarget, resolveWriteTarget } from "./guard/paths.js";
+// W9226 (P0): the `toolDeny` guard — a DENIAL must reach `run_code` sub-calls too.
+export { toolDenyGuard, TOOL_DENIED_CODE } from "./guard/tool-deny.js";
 
 // --- tools --------------------------------------------------------------------
 export { readFileTool, readFileSpec } from "./tools/read-file.js";

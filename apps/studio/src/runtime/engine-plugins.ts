@@ -254,7 +254,10 @@ export function engineTools(opts: EnginePluginInput): EngineTools {
     processes,
     env,
     scope,
-    grants: { readRoots: grants.readRoots, writeRoots: grants.writeRoots, workspaceWritable: grants.workspaceWritable },
+    // W9226 (P0): `toolDeny` must reach the ASSEMBLY (not only the face below),
+    // because the exposed face is bypassed by `run_code` sub-calls. `assembleTools`
+    // mounts a guard for it, and a guard covers both the direct and the program path.
+    grants: { readRoots: grants.readRoots, writeRoots: grants.writeRoots, workspaceWritable: grants.workspaceWritable, toolDeny: grants.toolDeny },
     ...(opts.guard === undefined ? {} : { guard: opts.guard }),
     // W1467: the sub-call sink rides the SAME assembly the program dispatches
     // through, so a nested row can never be recorded by a different registry
