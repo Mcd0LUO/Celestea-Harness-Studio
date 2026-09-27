@@ -32,6 +32,8 @@ import {
 import { createAttachTray, refreshAttachmentTray } from './attach-tray';
 import { initQuoteTray } from './quote/tray'; // F1：选段提及的待发引用 chip 收纳区
 import { mountCaretMirror, type CaretMirror } from './inputbar/caret-mirror'; // W1525 VSCode 风格光标
+// W2016：输入框自增长的能力开关（field-sizing 支持时 autoGrow 是 no-op）。
+import { createAutoGrow, MAX_HEIGHT, type GrowFn } from './inputbar/grow';
 import { t } from '../i18n';
 import { paintModeButton, paintSendButton } from './inputbar/button-labels';
 import { interceptKey as interceptCommandKey } from './commands'; // A3：命令补全框按键拦截
@@ -52,7 +54,16 @@ export interface InputBarHandlers {
 
 export type InputMode = 'idle' | 'interject' | 'worker';
 
-const MAX_HEIGHT = 240;
+// W2016：MAX_HEIGHT（自增长上限）搬去 ./inputbar/grow.ts —— 它现在同时是 JS 回落与
+// CSS `max-height` 的口径（styles/field-sizing.css），真源只能有一个。
+/**
+ * 模块级量高回调：initInputBar 装配它。支持 `field-sizing: content` 的引擎上它是
+ * **no-op**（高度由 CSS 给）；不支持的引擎上它是原来的量高实现。
+ * clearInput / setInputValue 也走它 —— 这样「支持与否」只有一处判定，不会出现
+ * 「输入时不自量、程序化改值时又量」的分叉。
+ */
+let autoGrow: GrowFn = () => {};
+
 /** 占位符（函数：语言切换后必须跟着变；W846 只说明输入行为，不重复状态词）。 */
 function placeholderIdle(): string {
   return t('chat.input.placeholderIdle');
@@ -116,10 +127,11 @@ export function initInputBar(h: InputBarHandlers): void {
   sendBtn = need<HTMLButtonElement>('#btnSend');
   modeBtn = document.getElementById('btnMode') as HTMLButtonElement | null;
 
-  const autoGrow = () => {
-    input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, MAX_HEIGHT) + 'px';
-  };
+  // W2016：支持 `field-sizing: content` 的引擎上，这里拿到的是 **no-op** —— 高度全交给
+  // CSS（styles/field-sizing.css），输入事件不再写 style.height、也不再读 scrollHeight
+  // （省掉每次输入的强制同步布局）。不支持的引擎（Firefox / WebKit）拿到的是原样的
+  // 量高实现。为什么这里必须探测而不能直接删 JS，见 ./inputbar/grow.ts 头注。
+  autoGrow = createAutoGrow(input, { maxHeight: MAX_HEIGHT });
 
   // W1512：一个按钮，两个动作。运行中点 = 终止（沿用 #slStop 的单点语义与
   // 「点一次即禁用、防重复取消」的纪律）；空闲点 = 发送。共用 chat.ts requestCancel。
@@ -144,7 +156,8 @@ export function initInputBar(h: InputBarHandlers): void {
       : submitMode;
     h.send(input.value, lane);
   });
-  input.addEventListener('input', autoGrow);
+  // 传闭包而不是 autoGrow 本身：装配后 autoGrow 才被赋值（上面那行）。
+  input.addEventListener('input', () => autoGrow());
   // W1525：假光标挂 .input-box（它已是 position:relative）。注册在 autoGrow 之后 ——
   // 高度先定，镜像层的裁剪区才对。光标是装饰：任何异常都不许影响输入栏本身。
   try {
@@ -154,7 +167,7 @@ export function initInputBar(h: InputBarHandlers): void {
   }
   initAttachmentEntries(input, bar);
   renderSubmitUi();
-  window.setTimeout(autoGrow, 0);
+  window.setTimeout(() => autoGrow(), 0);
   window.setTimeout(() => caret?.sync(), 0);
 }
 
@@ -162,8 +175,7 @@ export function initInputBar(h: InputBarHandlers): void {
 export function clearInput(): void {
   const input = inputEl ?? need<HTMLTextAreaElement>('#input');
   input.value = '';
-  input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, MAX_HEIGHT) + 'px';
+  autoGrow(); // W2016：支持 field-sizing 时是 no-op；不支持时量高（原样行为）
   caret?.sync(); // W1525：程序化改值不发 input 事件，显式重绘假光标
 }
 
@@ -176,8 +188,7 @@ export function inputValue(): string {
 export function setInputValue(v: string): void {
   const input = inputEl ?? need<HTMLTextAreaElement>('#input');
   input.value = v;
-  input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, MAX_HEIGHT) + 'px';
+  autoGrow(); // W2016：同上（支持 field-sizing 时是 no-op）
   caret?.sync(); // W1525：同上（恢复草稿 / 插话失败还原）
 }
 
