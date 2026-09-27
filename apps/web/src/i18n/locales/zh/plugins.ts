@@ -10,6 +10,8 @@ export const plugins = {
   // W2013：正文里的文件路径点一下就能开右侧预览面板。
   'plugins.desc.fileLink.label': '正文文件链接',
   'plugins.desc.fileLink.hint': '消息正文里提到的文件路径可以点开右侧预览；外部链接不受影响。',
+  // W2025：正文路径的键盘通道（Tab 聚焦 + Enter/Space 打开）。
+  'chat.fileLink.open': '打开预览（Enter）',
   // 行内配置面板（形状同「模型提供商」的行内面板）。
   'settings.plugins.expand': '展开「{label}」的配置',
   'settings.plugins.noConfig': '这个插件没有可调项',
