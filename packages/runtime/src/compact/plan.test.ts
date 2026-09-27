@@ -7,6 +7,7 @@ import {
   COMPACT_BACKUP_FILE,
   COMPACT_HEAD_ASSISTANT,
   COMPACT_HEAD_PREFIX,
+  COMPACT_HEAD_TURNS,
   COMPACT_KEEP_TURNS,
   COMPACT_NOTE_SKIPPED,
   COMPACT_THRESHOLD,
@@ -14,11 +15,13 @@ import {
   compactNote,
   compactTurnId,
   countCompleteTurns,
+  elisionEvent,
   parseEventLog,
   planCompaction,
   renderTranscript,
   rewriteAtomic,
   runCompaction,
+  selectTurns,
   serializeEventLog,
   splitCompleteTurns,
   SUMMARY_INPUT_MAX_CHARS,
@@ -66,12 +69,15 @@ afterEach(() => {
 describe("planCompaction", () => {
   it("prepends the summary and keeps the last K turns renumbered", () => {
     const events = logOf(12);
+    const selection = selectTurns(events, COMPACT_KEEP_TURNS, COMPACT_HEAD_TURNS);
     const next = planCompaction(events, "摘要正文", COMPACT_KEEP_TURNS);
     expect(next).not.toBeNull();
     const out = next ?? [];
 
-    expect(turnIds(out)).toEqual(["turn-1", "turn-2", "turn-3", "turn-4", "turn-5"]);
-    expect(countCompleteTurns(out)).toBe(5);
+    // W2011/B2: summary turn + the 2 OLDEST turns (the opening requirement) +
+    // the 4 newest ones = 7 complete turns in the new log.
+    expect(turnIds(out)).toEqual(["turn-1", "turn-2", "turn-3", "turn-4", "turn-5", "turn-6", "turn-7"]);
+    expect(countCompleteTurns(out)).toBe(1 + COMPACT_HEAD_TURNS + COMPACT_KEEP_TURNS);
     expect(out[0]).toEqual({ type: "turn_start", id: "turn-1" });
     // W888: the compact summary row carries origin: "compact" (rendered as an
     // inbox block, never as a typed user bubble).
@@ -79,8 +85,13 @@ describe("planCompaction", () => {
     expect(out[2]).toEqual({ type: "assistant_message", text: COMPACT_HEAD_ASSISTANT });
     expect(out[3]).toEqual({ type: "turn_end", id: "turn-1", outcome: "completed" });
 
+    // W2011/B2: the two oldest turns survive (turn 0 was the original goal);
+    // the elision row sits between them and the tail.
     const users = out.filter((e) => e.type === "user_message" && !e.text.startsWith(COMPACT_HEAD_PREFIX));
     expect(users.map((e) => (e.type === "user_message" ? e.text : ""))).toEqual([
+      "用户第 0 问",
+      "用户第 1 问",
+      elisionEvent(selection.dropped, selection.droppedTokens).text,
       "用户第 8 问",
       "用户第 9 问",
       "用户第 10 问",
@@ -89,8 +100,9 @@ describe("planCompaction", () => {
 
     const ends = out.filter((e) => e.type === "turn_end").map((e) => (e.type === "turn_end" ? e.id : ""));
     expect(ends).toEqual(turnIds(out));
-    expect(out.filter((e) => e.type === "tool_call")).toHaveLength(2);
-    expect(out.filter((e) => e.type === "thinking_delta")).toHaveLength(2);
+    // head turn 0 (tools) + tail turns 8 and 10 (tools) = 3 tool rounds.
+    expect(out.filter((e) => e.type === "tool_call")).toHaveLength(3);
+    expect(out.filter((e) => e.type === "thinking_delta")).toHaveLength(3);
 
     const firstKept = out.slice(4, 11);
     expect(firstKept.map((e) => e.type)).toEqual([
@@ -118,7 +130,7 @@ describe("planCompaction", () => {
     events.push({ type: "turn_start", id: "turn-99" });
     events.push({ type: "user_message", text: "中断的尾巴" });
     const out = planCompaction(events, "s", 4) ?? [];
-    expect(turnIds(out)).toEqual(["turn-1", "turn-2", "turn-3", "turn-4", "turn-5"]);
+    expect(turnIds(out)).toEqual(["turn-1", "turn-2", "turn-3", "turn-4", "turn-5", "turn-6", "turn-7"]);
     const texts = out.filter((e) => e.type === "user_message").map((e) => (e.type === "user_message" ? e.text : ""));
     expect(texts).not.toContain("turn_start 之前的孤儿");
     expect(texts).not.toContain("中断的尾巴");
@@ -135,6 +147,9 @@ describe("planCompaction", () => {
   it("skips at or below the threshold and compacts just above it", () => {
     expect(countCompleteTurns(logOf(COMPACT_THRESHOLD))).toBe(COMPACT_THRESHOLD);
     expect(planCompaction(logOf(COMPACT_THRESHOLD), "s", 4)).toBeNull();
+    // W2011/B2: the threshold decides BEFORE any head/tail split, so adding a
+    // head budget can never make a too-short log compactable.
+    expect(planCompaction(logOf(COMPACT_THRESHOLD), "s", 4, COMPACT_HEAD_TURNS)).toBeNull();
     expect(planCompaction(logOf(1), "s", 4)).toBeNull();
     expect(planCompaction([], "s", 4)).toBeNull();
     expect(planCompaction(logOf(COMPACT_THRESHOLD + 1), "s", 4)).not.toBeNull();
@@ -157,7 +172,7 @@ describe("rewriteAtomic", () => {
     const text = readFileSync(path, "utf8");
     expect(text.endsWith("\n")).toBe(true);
     expect(parseEventLog(text)).toEqual(events);
-    expect(turnIds(parseEventLog(text))).toEqual(["turn-1", "turn-2", "turn-3", "turn-4", "turn-5"]);
+    expect(turnIds(parseEventLog(text))).toEqual(["turn-1", "turn-2", "turn-3", "turn-4", "turn-5", "turn-6", "turn-7"]);
     expect(readdirSync(dir).filter((n) => n.startsWith(COMPACT_TMP_PREFIX))).toEqual([]);
 
     const second = planCompaction(logOf(12), "摘要2", 4) ?? [];
@@ -210,10 +225,12 @@ describe("runCompaction", () => {
     const path = writeLog(scratch(), logOf(12));
     const out = await runCompaction({ logPath: path, summarize: () => Promise.resolve("摘要正文") });
     expect(out.compacted).toBe(true);
-    expect(out.kept_turns).toBe(COMPACT_KEEP_TURNS);
-    expect(out.note).toBe(compactNote(COMPACT_KEEP_TURNS));
+    // W2011/B2: kept_turns is the number of ORIGINAL turns the new log carries
+    // (head + tail) — the elision row is not a turn of its own.
+    expect(out.kept_turns).toBe(COMPACT_HEAD_TURNS + COMPACT_KEEP_TURNS);
+    expect(out.note).toBe(compactNote(COMPACT_KEEP_TURNS, COMPACT_HEAD_TURNS));
     expect(out.turns_before).toBe(12);
-    expect(countCompleteTurns(parseEventLog(readFileSync(path, "utf8")))).toBe(5);
+    expect(countCompleteTurns(parseEventLog(readFileSync(path, "utf8")))).toBe(1 + COMPACT_HEAD_TURNS + COMPACT_KEEP_TURNS);
 
     const again = await runCompaction({ logPath: path, summarize: () => Promise.resolve("摘要2") });
     expect(again.compacted).toBe(false);
