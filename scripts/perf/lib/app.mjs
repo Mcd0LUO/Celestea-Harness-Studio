@@ -2,6 +2,7 @@
 import { launchChrome } from './chrome.mjs';
 import { startBackend, SESSION_ID } from './backend.mjs';
 import { repoRootFrom } from './repo-root.mjs';
+import { registerCleanup } from './cleanup.mjs';
 
 /**
  * 冻结检出根。`W9111_REPO` 覆盖优先；未设时**从本文件位置推导**仓根
@@ -68,6 +69,20 @@ export async function boot(o) {
     consoleErrors.push('EXCEPTION ' + (p.exceptionDetails?.exception?.description ?? p.exceptionDetails?.text ?? ''));
   });
   if (o.initScript) await page.addInitScript(o.initScript);
+
+  // ---- 进程收尾（W2021）----------------------------------------------------
+  // 一个实例**一个** close：chrome 与 backend 各自幂等，这里再包一层「同一个 Promise」，
+  // 让正常路径（case 的 finally）与信号路径（cleanup.mjs 的 drain）拿到同一次收尾。
+  // ★ 关键动作（kill Chrome / server.close() 释放监听端口）都在**第一个 await 之前**
+  //   同步发生 —— 信号处理器里不能 await，同步部分才是「一定不会留下孤儿」的保证。
+  let closePromise = null;
+  const close = () => {
+    if (closePromise === null) closePromise = (async () => { await chrome.close(); await backend.close(); })();
+    return closePromise;
+  };
+  // 起来之后登记、关完之后注销 ⇒ 信号到达时登记表里恰好是「已起来且还没关」的实例，
+  // 0/1/2 个都对；登记表清空时 cleanup.mjs 会把信号处理器摘掉（正常路径不被改动）。
+  const unregister = registerCleanup(() => { const p = close(); p.then(unregister, unregister); return p; });
   return {
     ...chrome,
     backend,
@@ -81,9 +96,9 @@ export async function boot(o) {
       });
       return page;
     },
+    // 幂等：重复调用返回同一次收尾（不抛错），并在关完后从登记表摘掉自己。
     async close() {
-      await chrome.close();
-      await backend.close();
+      try { await close(); } finally { unregister(); }
     },
   };
 }

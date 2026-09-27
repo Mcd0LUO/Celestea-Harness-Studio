@@ -154,11 +154,20 @@ export async function launchChrome(opts = {}) {
   await page.send('Network.enable');
   await page.send('Performance.enable');
 
-  const close = async () => {
-    try { browser.close(); } catch { /* ignore */ }
-    try { child.kill(); } catch { /* ignore */ }
-    await new Promise((r) => setTimeout(r, 300));
-    if (!opts.keepProfile) { try { rmSync(profileDir, { recursive: true, force: true }); } catch { /* ignore */ } }
+  // 幂等（W2021）：close() 可能被走两次 —— 正常路径的 finally 一次、信号路径的 drain 一次。
+  // 返回**同一个** Promise，第二次调用不重复 kill、不重复删 profile、不抛错。
+  // ★ 关键：`browser.close()`（关 ws）与 `child.kill()` 都在**第一个 await 之前**同步发生 ——
+  //   信号处理器里不能 await，同步的 kill 才是「Chrome 一定不会变成孤儿」的保证。
+  let closePromise = null;
+  const close = () => {
+    if (closePromise !== null) return closePromise;
+    closePromise = (async () => {
+      try { browser.close(); } catch { /* ignore */ }
+      try { child.kill(); } catch { /* ignore */ }
+      await new Promise((r) => setTimeout(r, 300));
+      if (!opts.keepProfile) { try { rmSync(profileDir, { recursive: true, force: true }); } catch { /* ignore */ } }
+    })();
+    return closePromise;
   };
   return { browser, page, close, port, profileDir, chromePath: exe, version };
 }
