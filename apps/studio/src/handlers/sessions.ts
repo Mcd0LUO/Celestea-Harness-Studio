@@ -103,18 +103,55 @@ function registerCreate(app: Hono, deps: Deps, table: RouteTable): string {
   return route.id;
 }
 
+/**
+ * W2015: `?tail=N` — return only the LAST N projected messages.
+ *
+ * WHY. Measured on the real 1047-message session
+ * (`celestea_studio-ts/main-1790525616.996000000`): the response is 1 421 547
+ * bytes, of which the UI reads exactly the last 200 (68% of the payload is tool
+ * results the transcript renders as collapsed cards, 26% is thinking). The
+ * frontend's window is a constant, so shipping the other 847 rows is pure waste
+ * on the critical path of opening a session — bandwidth AND the JSON parse plus
+ * object allocation of ~1.4 MB.
+ *
+ * SHAPE. A query parameter, not a new endpoint: the contract's endpoint count is
+ * frozen and shared, and "the last N rows of this list" is the same resource, not
+ * a second one. Absent/empty/unparsable `tail` = the UNCHANGED full response, so
+ * every existing client (the golden/replay toolchain, `verify-contracts`, the
+ * retired-backend parity harness) keeps byte-for-byte behaviour.
+ *
+ * NO DATA IS LOST: the parameter is opt-in and the default stays "everything", so
+ * the full transcript is always one request away — `GET …/messages` with no
+ * `tail` is the documented path, and it is what the export/replay tooling uses.
+ *
+ * `tail=0` is honoured as "zero rows", NOT as "the default": a caller that asks
+ * for nothing gets nothing rather than 1.4 MB. Negative / non-integer values are
+ * ignored (default) because they are not a window — silently clamping `-5` to
+ * "all" and `-5` to "0" would both invent an answer.
+ */
+function tailParam(raw: string | undefined): number | null {
+  if (raw === undefined) return null;
+  const value = raw.trim();
+  if (!/^\d+$/.test(value)) return null;
+  const n = Number.parseInt(value, 10);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
 function registerMessages(app: Hono, deps: Deps, table: RouteTable): string {
   const route = table.get("get_session_messages");
   app.on(route.method, route.honoPath, (c) => {
     const id = c.req.param("id") ?? "";
+    const tail = tailParam(c.req.query("tail"));
+    const window = (messages: unknown[]): unknown[] =>
+      tail === null || tail >= messages.length ? messages : messages.slice(messages.length - tail);
     if (id.startsWith("worker:")) {
       const messages = deps.runtime.workerMessages(id);
       if (messages === null) return failJson(c, 404, `unknown session '${id}'`);
-      return c.json({ ok: true, session: id, messages });
+      return c.json({ ok: true, session: id, messages: window(messages) });
     }
     const resolved = deps.sessions.require(id);
     if (!resolved.ok) return storeFail(c, resolved);
-    return c.json({ ok: true, session: id, messages: deps.sessions.messages(resolved.value) });
+    return c.json({ ok: true, session: id, messages: window(deps.sessions.messages(resolved.value)) });
   });
   return route.id;
 }

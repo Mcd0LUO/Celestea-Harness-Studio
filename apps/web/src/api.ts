@@ -188,9 +188,24 @@ export const api = {
     requestJson<SessionsResp>(
       '/api/sessions' + (opts?.archived === true ? '?archived=1' : ''),
     ),
-  /** 会话历史（回放/恢复）；404/超时 → ApiError。 */
-  messages: (id: string) =>
-    requestJson<MessagesResp>('/api/sessions/' + encodeURIComponent(id) + '/messages'),
+  /**
+   * 会话历史（回放/恢复）；404/超时 → ApiError。
+   *
+   * W2015：`tail` 非空且 > 0 → `?tail=N`，服务端只回**最后 N 条**。恢复路径的渲染
+   * 窗口本来就是固定 200 条（ui/restore.ts 的 MAX_RESTORE），而实测一个 1047 条的
+   * 会话整份响应 1 421 547 字节 —— 其中 847 条（约 1.1MB）取回来就被丢掉。传 tail
+   * 让服务端在**序列化之前**裁剪：省的是带宽，也是这 1.4MB 的 JSON 解析与对象分配。
+   *
+   * 不传 tail（或传 0/负数）→ 请求串与过去**逐字节一致**，整份历史仍可获取 ——
+   * 导出 / 回放 / 对拍工具走的就是这条路径，没有任何一条数据变得取不回来。
+   */
+  messages: (id: string, tail?: number) =>
+    requestJson<MessagesResp>(
+      '/api/sessions/' +
+        encodeURIComponent(id) +
+        '/messages' +
+        (tail !== undefined && tail > 0 ? '?tail=' + String(Math.floor(tail)) : ''),
+    ),
   /**
    * W726：只读上下文快照 —— 模型本轮实际看到的内容（系统提示词 / 工具清单 /
    * 消息流 + 用量）。404 = 该会话不存在（或服务未提供此能力，调用方按能力位降级）。
