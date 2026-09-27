@@ -61,7 +61,9 @@ jobs:
       # rights to download. Splitting the chain into one step per gate makes
       # every failure name itself in the run summary, which is exactly what a
       # gate is for. The commands are the same ones `pnpm check` runs, in the
-      # same order; `pnpm check` itself is unchanged for local use.
+      # same order. `pnpm check` (local) is now `node scripts/check-parallel.mjs`,
+      # which runs these SAME gate commands concurrently + with eslint/tsc caches; CI
+      # deliberately keeps them as separate serial steps so each failure names itself.
       - name: typecheck
         run: node scripts/run-gate.mjs typecheck -- pnpm typecheck
       - name: lint
