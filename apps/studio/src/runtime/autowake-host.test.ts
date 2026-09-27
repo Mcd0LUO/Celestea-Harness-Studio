@@ -29,8 +29,14 @@ function make(): StudioHarness {
  */
 function makeQueue(): StudioHarness {
   const script: OfflineStep[] = [];
-  const h = makeEngineHarness({ sessions: { s1: [], s2: [] }, llm: { script, deltaMs: 3, chunkChars: 8 } });
-  script.push({ text: "x".repeat(2400) }); // ~0.9s of frames
+  // W9220（测试提速，断言不变）：原为 2400 字符 / 8 每块 / 3ms ≈ 300 帧。
+  // 本用例证的是「忙窗口内选 queue ⇒ placement=queued，且恰好一次唤醒」，与帧数无关。
+  // ★ Windows 上 setTimeout 的真实节拍是 ~13-15ms（本机实测 setTimeout(3) 平均 14.3ms），
+  //   300 帧 ⇒ 白等 ~4.3s。改成 16 帧（1600 字符 / 100 每块）≈ 0.2s 的忙窗口：
+  //   对 in-process 请求往返仍有 10x 以上余量（与仓库 W896 在
+  //   session-independence.test.ts:34 的同款取舍一致），但不再为定时器粒度付费。
+  const h = makeEngineHarness({ sessions: { s1: [], s2: [] }, llm: { script, deltaMs: 3, chunkChars: 100 } });
+  script.push({ text: "x".repeat(1600) }); // 16 帧的忙窗口（见上）
   harnesses.push(h);
   return h;
 }

@@ -72,7 +72,7 @@ describe("W833 B8/F5: start frame source key", () => {
 
 describe("W833 B8/F7: no-arg cancel targets the most recently active session", () => {
   it("cancels the newest busy session, leaving the older one", async () => {
-    const h = make({ sessions: { s1: [], s2: [] }, llm: { script: [{ text: "x".repeat(4000) }], deltaMs: 40, chunkChars: 8 } });
+    const h = make({ sessions: { s1: [], s2: [] }, llm: { script: [{ text: "x".repeat(1600) }], deltaMs: 3, chunkChars: 100 } });
     await activate(h, "sample-ws/s1");
     const first = await h.app.request("/api/turn", jsonRequest("POST", { input: "one" }));
     expect(first.status).toBe(202);

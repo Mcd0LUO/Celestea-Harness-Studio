@@ -7,6 +7,12 @@
  *   ④ 未登录（401）时不显示用户名（不编占位名）；
  *   ⑤ 设置页有「使用统计」入口且可切；pane 渲染出摘要条 + 热力图 + 折线图；
  *   ⑥ 账本 ok:false（disabled / unavailable）时显示**降级说明**，不画假图。
+ *
+ * ★ W9220（测试提速，用例与断言逐字未动）：本文件是原 ~tests/w9103-usage-panel-dom.test.ts~
+ *   的**~使用统计 pane 部分~**。原文件 16 条、单条 0.05–1.07s、文件 4.0–4.7s；vitest 以**文件**为
+ *   调度单位，拆开后两部分可并行。夹具（~HTML~/~ledgerStub~/~setup~/~boot~/
+ *   ~openUsagePane~ 等）逐字复制自原文件，每个新文件都带**自己的** beforeEach(setup)
+ *   重置（W9219 的教训：共享夹具 + 缺重置 = 跨文件泄漏）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { at, doc, Ev, flush, reply, resetHarness, type ElLike } from './lib/w795-dom.js';
@@ -77,9 +83,6 @@ const dayModelStub = { status: 200 };
 /** 实际发出的账本请求 URL（回退路径的机械判据）。 */
 let ledgerCalls: string[] = [];
 
-const entry = (): ElLike => doc.getElementById('btnSettingsEntry') as ElLike;
-const userNode = (): ElLike => doc.getElementById('settingsUser') as ElLike;
-const usagePane = (): ElLike => doc.querySelector('.settings-pane[data-pane="usage"]') as ElLike;
 const usageBody = (): ElLike => doc.getElementById('settingsUsage') as ElLike;
 
 function stubFetch(): void {
@@ -165,95 +168,6 @@ async function openUsagePane(): Promise<ConfigMod> {
   return cfg;
 }
 
-describe('W9103 · 左下角设置入口', () => {
-  beforeEach(setup);
-  afterEach(() => { vi.unstubAllGlobals(); doc.body.replaceChildren(); });
-
-  it('顶栏不再有 #btnConfig（机械防回归）', async () => {
-    await boot();
-    // 真实 index.html 也一并断言（夹具只是骨架，真源是 index.html）。
-    const { readFileSync } = await import('node:fs');
-    const { join } = await import('node:path');
-    const html = readFileSync(join(process.cwd(), 'apps', 'web', 'index.html'), 'utf8');
-    expect(html.includes('btnConfig'), 'index.html 不得再有 #btnConfig').toBe(false);
-    expect(doc.getElementById('btnConfig'), 'DOM 里也不得有').toBeNull();
-  });
-
-  it('左下角入口存在：图标 + 「设置」文案 + 用户名', async () => {
-    await boot();
-    expect(entry(), '入口必须存在').not.toBeNull();
-    expect(entry().querySelector('svg.side-settings-ico'), '内联 SVG 图标').not.toBeNull();
-    // 文案走 i18n（data-i18n key 在标记上，值由 applyI18n 填）。
-    const text = entry().querySelector('.side-settings-text') as ElLike;
-    expect(text.getAttribute('data-i18n')).toBe('shell.sidebar.settings');
-    expect(text.textContent, '中文界面下显示「设置」').toBe('设置');
-    expect(userNode().textContent, '用户名来自登录态').toBe('alice');
-    expect(userNode().classList.contains('hidden'), '取到用户名 ⇒ 摘掉 hidden').toBe(false);
-  });
-
-  it('用户名超长单行截断（不撑破侧栏）', async () => {
-    authStub.user = 'a-very-long-user-name-that-would-otherwise-blow-up-the-sidebar-'.repeat(3);
-    await boot();
-    // 截断由 CSS 承担：min-width:0 + overflow:hidden + text-overflow:ellipsis + nowrap。
-    const { readFileSync } = await import('node:fs');
-    const { join } = await import('node:path');
-    const css = readFileSync(join(process.cwd(), 'apps', 'web', 'src', 'styles', 'layout.css'), 'utf8');
-    const rule = /\.side-settings-user\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
-    expect(rule, '.side-settings-user 规则必须存在').not.toBe('');
-    expect(rule).toContain('text-overflow: ellipsis');
-    expect(rule).toContain('overflow: hidden');
-    expect(rule).toContain('white-space: nowrap');
-    expect(rule).toContain('min-width: 0');
-    // jsdom 不做布局：scrollWidth/clientWidth 恒 0，故这里断言**类与样式**（真机几何
-    // 由 CDP 断言，见报告的真机证据一节）。
-    expect(userNode().className).toContain('side-settings-user');
-  });
-
-  it('未登录（401）⇒ 不显示用户名，也不编占位名', async () => {
-    authStub.status = 401;
-    await boot();
-    expect(userNode().classList.contains('hidden'), '401 ⇒ 保持隐藏').toBe(true);
-    expect(userNode().textContent, '不得编占位名').toBe('');
-    expect(userNode().title ?? '').toBe('');
-    // 图标 + 「设置」仍在（入口本身不因未登录而消失）。
-    expect(entry().querySelector('svg.side-settings-ico')).not.toBeNull();
-    expect((entry().querySelector('.side-settings-text') as ElLike).textContent).toBe('设置');
-  });
-
-  it('登录态答了 200 但没有 user 字段 ⇒ 仍不显示用户名（契约里 user 是可选的）', async () => {
-    // 契约 get_auth_check 的 `user` 是 required:false —— 成功应答也可能不带用户名。
-    // 这是「不编占位名」最容易破的一格：把空值当名字写进去就会显示成空白格或假名。
-    authStub.status = 200;
-    authStub.user = '';
-    await boot();
-    expect(userNode().classList.contains('hidden'), '空用户名 ⇒ 保持隐藏').toBe(true);
-    expect(userNode().textContent?.trim() ?? '', '不得把空值当名字写进去').toBe('');
-    // 只有非空用户名才摘掉 hidden（对照：这一条与上面两条构成完整口径）。
-    authStub.user = 'bob';
-    await boot();
-    expect(userNode().classList.contains('hidden')).toBe(false);
-    expect(userNode().textContent).toBe('bob');
-  });
-
-  it('点左下角入口真的打开设置页（整块可点）', async () => {
-    await boot();
-    expect(doc.getElementById('settingsPage')?.classList.contains('hidden'), '初始为关').toBe(true);
-    entry().dispatchEvent(new Ev('click', { bubbles: true }));
-    expect(doc.getElementById('settingsPage')?.classList.contains('hidden'), '点它 ⇒ 打开').toBe(false);
-  });
-
-  it('设置页有「使用统计」入口且可切到该 pane', async () => {
-    await boot();
-    const nav = doc.querySelector('.settings-nav-item[data-page="usage"]') as ElLike;
-    expect(nav, 'nav 项必须存在').not.toBeNull();
-    expect(nav.getAttribute('data-i18n')).toBe('usage.nav.title');
-    nav.dispatchEvent(new Ev('click', { bubbles: true }));
-    expect(usagePane().classList.contains('active')).toBe(true);
-    expect(doc.querySelector('.settings-pane[data-pane="config"]')?.classList.contains('active')).toBe(false);
-  });
-});
-
-/** 分组 2：「使用统计」pane 的内容与降级（同样每个 describe 自带夹具）。 */
 describe('W9103 · 使用统计 pane', () => {
   beforeEach(setup);
   afterEach(() => { vi.unstubAllGlobals(); doc.body.replaceChildren(); });

@@ -11,6 +11,13 @@
  *
  * 判据：用一个「SIGTERM 忽略、SIGKILL 才死」的假 child，
  * 断言 terminateTree 在 TERMINATE_GRACE_MS 内返回，且 kill() 被调用过。
+ *
+ * W9220（测试提速，断言不变）：本文件的 child 是**假 child** —— SIGTERM 被忽略、
+ * 只有 SIGKILL 才 settle，所以「有界」这条不变量与 grace 的真实长度无关。
+ * 原实现固定等满 5 s 只是白等。改用 terminateTree 的**可选** grace 参数传一个小值：
+ * `TERMINATE_GRACE_MS` 仍是**默认值**（生产调用点不传，行为逐字节不变），而本文件用
+ * `TEST_GRACE_MS` 驱动。上界断言仍然锚在真实的 `TERMINATE_GRACE_MS` 上
+ * （放宽预算 ⇒ 上界断言不变），所以它照样有牙。
  */
 import { describe, expect, it } from "vitest";
 import type { SandboxChild, SandboxExit } from "@celestea/core";
@@ -47,12 +54,19 @@ function entryWith(child: SandboxChild): TerminalEntry {
   return { id: "t1", session: null, child, cols: 80, rows: 24, bytes: 0, touchedAt: 0, closed: false };
 }
 
+/**
+ * 本文件注入的 grace：50 ms（真实的 `TERMINATE_GRACE_MS` 仍是 5000 ms，见上）。
+ * 50 ms 对「假 child 被 SIGKILL 立即 settle」有 100x 余量；下面的上界断言用的
+ * 仍是真实的 `TERMINATE_GRACE_MS`，所以放宽预算的改动照样会让它红。
+ */
+const TEST_GRACE_MS = 50;
+
 describe("W1528b · terminateTree is bounded", () => {
   it("escalates to SIGKILL when SIGTERM does not reap the tree", async () => {
     const { child, killed, terminated } = stubbornChild();
     const entry = entryWith(child);
     const started = Date.now();
-    await terminateTree(entry);
+    await terminateTree(entry, TEST_GRACE_MS);
     const elapsed = Date.now() - started;
 
     expect(terminated(), "SIGTERM is tried first (graceful path)").toBe(true);
@@ -80,7 +94,7 @@ describe("W1528b · terminateTree is bounded", () => {
       },
     };
     const started = Date.now();
-    await terminateTree(entryWith(child));
+    await terminateTree(entryWith(child), TEST_GRACE_MS);
     expect(killed, "a graceful exit must not be escalated").toBe(false);
     expect(Date.now() - started).toBeLessThan(1_000);
   });

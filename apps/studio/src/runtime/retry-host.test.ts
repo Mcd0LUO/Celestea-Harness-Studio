@@ -271,6 +271,16 @@ describe("F-06 — the retry budget reaches the provider through the REAL adapte
     };
   }
 
+  /**
+   * W9220（测试提速，断言不变）：把「不等待」的 sleep 注入**真实适配器**。
+   *
+   * 本用例证的是「重试预算真的到达 provider」（calls() 次数 + audit 行 + status 帧），
+   * 不是「退避真的等了 500/1000/2000ms」——后者由 packages/llm/src/retry.test.ts
+   * 用注入的 sleeps[] 精确断言。`sleep` 是 retry.ts:161 早已存在的缝，
+   * 只是此前没从 adapter 接到调用点；现在 `RealRuntimeAdapterOptions.sleep` 原样透传。
+   */
+  const NO_WAIT = async (): Promise<void> => undefined;
+
   /** A harness with NO fallback chain (the default) and a counting seam. */
   async function realHarness(failures: number): Promise<{ h: StudioHarness; seam: { llm: (p: Profile) => Llm; calls: () => number } }> {
     const seam = flakySeam(failures);
@@ -287,6 +297,7 @@ describe("F-06 — the retry budget reaches the provider through the REAL adapte
           providerLabel: null,
           host,
           llm: seam.llm,
+          sleep: NO_WAIT,
         };
       }),
     });
@@ -357,6 +368,8 @@ describe("F-06 — the retry budget reaches the provider through the REAL adapte
               throw statusError(400, "Bad Request", "bad request");
             },
           }),
+          // W9220: same injected (never-waiting) backoff as realHarness above.
+          sleep: NO_WAIT,
         };
       }),
     });

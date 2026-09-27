@@ -157,6 +157,14 @@ export default defineConfig({
     ...(TEST_WORKERS === undefined ? {} : { maxWorkers: TEST_WORKERS }),
     // ★ W9220：这里**故意没有**顶层 execArgv。worker 线程会拒绝 --expose-gc，
     //   顶层放它 = 整个 vmThreads 池起不来（见上）。需要 gc 的文件走 gc project。
+    //
+    // W9220（测试提速，行为不变）：把**转换结果**持久化到磁盘缓存。
+    // 依据：本仓实测全量的 transform 占墙钟 13–19%（W=16 实测 17.0s 里 13%），
+    // 且「每次运行重新 transform」是纯重复劳动 —— 转换是源码的纯函数，vitest 按
+    // 内容哈希失效。这与 check-parallel.mjs 已经采纳的 eslint --cache / tsc
+    // --incremental 是**同一类**改动（缓存不掩盖错误：源码一改，哈希即失效）。
+    // 缓存落在 node_modules/ 下（已 gitignore），不进版本库、不影响 CI 的首次冷跑。
+    fsModuleCache: true,
     /**
      * 覆盖率是**诊断**，不是门禁（与 deps:audit 同一定位，DEPENDENCY-POLICY.md §6）。
      * 为什么明确不设 thresholds：本仓门禁的唯一价值是**确定性**——覆盖率随平台/运行波动，

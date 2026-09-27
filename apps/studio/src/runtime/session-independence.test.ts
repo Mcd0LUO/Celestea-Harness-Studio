@@ -47,7 +47,12 @@ function make(options: Parameters<typeof makeEngineHarness>[0] = {}): StudioHarn
  */
 function makeSlow(sessions: Record<string, readonly SessionEvent[]>): StudioHarness {
   const script: OfflineStep[] = [];
-  const h = make({ sessions, llm: { script, deltaMs: 1, chunkChars: 8 } });
+  // W9220（测试提速，断言不变）：chunkChars 原为 8 ⇒ 1600/8 = 200 帧。
+  // ★ Windows 上 setTimeout(1) 的真实节拍是 ~12-13ms（本机实测 12.1ms），
+  //   200 帧 ⇒ 每个用例白等 ~2.5s（本文件 5 条共 ~11.8s）。
+  //   改成 100 每块 ⇒ 16 帧 ≈ 0.2s 的忙窗口：本文件要在忙窗口内落下第二个请求
+  //   （~10x 余量，与 W896 在 :34 的取舍同源），轮询每 10ms 采样一次 ⇒ 窗口仍有 ~20 个采样点。
+  const h = make({ sessions, llm: { script, deltaMs: 1, chunkChars: 100 } });
   script.push({ text: SLOW_TEXT, tool_calls: [{ id: "c1", name: "list_dir", args: { path: h.workspace } }] });
   return h;
 }

@@ -191,18 +191,23 @@ export const TERMINATE_GRACE_MS = 5_000;
  * never returned, the id was never dropped, and the panel could not be reopened
  * (observed as a 30s test timeout under load). Escalation is what makes the
  * function's contract true; `launch.ts:108-109` is the same two-step pattern.
+ *
+ * W9220（测试提速，行为不变）：`graceMs` 是**可选**参数，默认仍是 TERMINATE_GRACE_MS。
+ * 生产调用点（`terminal.ts:252`）不传，所以线上超时预算逐字节不变。
+ * 唯一用途是让 W1528b 的假 child（SIGTERM 忽略、SIGKILL 才 settle）不必真等 5 s：
+ * 它证的是「有界 + 会升级 SIGKILL」，不是「必须等满 5 s」。
  */
-export function terminateTree(entry: TerminalEntry): Promise<void> {
+export function terminateTree(entry: TerminalEntry, graceMs: number = TERMINATE_GRACE_MS): Promise<void> {
   entry.closed = true;
   entry.child.terminate();
-  return reapBounded(entry);
+  return reapBounded(entry, graceMs);
 }
 
 /** Wait for the child, SIGKILL the tree if it outlives the grace, wait again. */
-async function reapBounded(entry: TerminalEntry): Promise<void> {
-  if (await settlesWithin(entry.child.wait(), TERMINATE_GRACE_MS)) return;
+async function reapBounded(entry: TerminalEntry, graceMs: number): Promise<void> {
+  if (await settlesWithin(entry.child.wait(), graceMs)) return;
   entry.child.kill();
-  await settlesWithin(entry.child.wait(), TERMINATE_GRACE_MS);
+  await settlesWithin(entry.child.wait(), graceMs);
 }
 
 /**

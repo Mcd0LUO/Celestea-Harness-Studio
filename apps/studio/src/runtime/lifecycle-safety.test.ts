@@ -25,7 +25,9 @@ import { activate, engineOf, makeEngineHarness, readSessionLog, turns } from "./
  * well; 1500 chars / 1ms ≈ 0.19s removes ~1.8s from this case while keeping a
  * wide margin over the in-process bump.
  */
-const SLOW_BRIEF = { script: [{ text: "x".repeat(1_500) }], deltaMs: 1, chunkChars: 8 };
+// W9220（测试提速，断言不变）：原 1500/8/1ms ≈ 188 帧；Windows 定时器粒度 ~13-15ms
+// ⇒ 每个用例白等 ~2.5s。本文件证的是生命周期安全（并发 delete/release），与帧数无关。
+const SLOW_BRIEF = { script: [{ text: "x".repeat(1600) }], deltaMs: 3, chunkChars: 100 };
 
 const harnesses: StudioHarness[] = [];
 

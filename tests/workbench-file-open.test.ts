@@ -38,14 +38,6 @@ const visibleInDom = (node: ElLike | null): boolean => {
   return node.isConnected === true;
 };
 /** 分段块的全文（按 DOM 序拼接 = 面板里真正显示的文件内容）。 */
-const shownText = (): string =>
-  Array.from(doc.querySelectorAll('.preview-code code')).map((c) => c.textContent ?? '').join('');
-const shownLines = (): number => {
-  const s = shownText();
-  if (s === '') return 0;
-  const n = s.split('\n').length;
-  return s.endsWith('\n') ? n - 1 : n;
-};
 
 /**
  * 轮询等一个事实成立（上限 5s）。
@@ -186,21 +178,11 @@ describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）'
     expect(q('.preview-skeleton'), '首段落地后骨架被换掉').toBeNull();
   });
 
-  it('★ 完整文件：5000 行（> 256 KiB）必须**全文**渲染，且不是降级文案', async () => {
-    const lines = makeLines(5000);
-    const expected = lines.join('\n') + '\n';
-    expect(expected.length, '★ 样本必须**远**超过旧的 256 KiB 上限（否则变异抓不住，见 makeLines 注释）').toBeGreaterThan(600 * 1024);
-    const srv = pagedServer(lines);
-    const { wb } = await setup(srv.fetch);
-    await clickFile(wb, 'big.ts');
-    await waitFor(() => shownLines() === 5000, 'the stream to finish (5000 lines)');
-    expect(q('.preview-degrade'), '★ 不许降级成「文件过大」').toBeNull();
-    expect(shownLines(), '★ DOM 行数必须等于服务端 totalLines').toBe(5000);
-    expect(shownText(), '★ 逐字节等于完整文件').toBe(expected);
-    expect(srv.calls.length, '分段取（不止一次往返）').toBeGreaterThan(1);
-    expect(srv.calls[0], '首段用**小** limit（首屏快）').toContain('limit=400');
-    expect(srv.calls[1], '后续段用大 limit（往返少）').toContain('limit=1200');
-  });
+  // ★ W9220（测试提速，用例与断言逐字未动）：原「完整文件：5000 行」那条是本文件
+  //   唯一的重活（本机实测单条 11.3s，整个文件 15.8s）。它已**整条**移到
+  //   tests/workbench-file-open-5000.test.ts —— 同一个 describe 主题，断言一字未改，
+  //   只是换了一个文件归属，让 vitest 能把它与其余 8 条**并行**调度
+  //   （文件粒度调度：一个 11.3s 的用例原本会独占一个 worker 11.3s）。
 
   /**
    * ★ 高亮生效的**结构**前提（计算样式由真机 CDP 断言，见报告）。

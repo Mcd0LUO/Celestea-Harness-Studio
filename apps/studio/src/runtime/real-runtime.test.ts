@@ -139,7 +139,10 @@ describe("POST /api/turn over the real engine", () => {
   });
 
   it("W513: a concurrent turn becomes an interjection, then cancels cooperatively", async () => {
-    const h = make({ sessions: { s1: [] }, llm: { script: [{ text: "x".repeat(4000) }], deltaMs: 3, chunkChars: 8 } });
+    // W9220（测试提速，断言不变）：原 4000/8/3ms ≈ 500 帧。本用例证的是
+    // 「并发 turn 变成插话，然后协作式取消」（placement/outcome/JSONL），与帧数无关。
+    // ★ Windows 定时器粒度 ~13-15ms（本机实测 setTimeout(3) 平均 14.3ms）⇒ 白等 ~7s。
+    const h = make({ sessions: { s1: [] }, llm: { script: [{ text: "x".repeat(1600) }], deltaMs: 3, chunkChars: 100 } });
     await activate(h, "sample-ws/s1");
     const sub = h.studio.services.bus.subscribe();
     const first = await h.app.request("/api/turn", jsonRequest("POST", { input: "slow" }));
@@ -178,7 +181,7 @@ describe("POST /api/turn over the real engine", () => {
     // for "not busy" — is not a deterministic barrier for the `202` below.
     // Autowake has its own tests (autowake-host.test.ts); the analogous
     // placement test in session-independence.test.ts isolates it the same way.
-    const h = make({ sessions: { s1: [] }, llm: { script: [{ text: "x".repeat(4000) }], deltaMs: 3, chunkChars: 8 }, env: { CELESTEA_AUTOWAKE: "0" } });
+    const h = make({ sessions: { s1: [] }, llm: { script: [{ text: "x".repeat(1600) }], deltaMs: 1, chunkChars: 8 }, env: { CELESTEA_AUTOWAKE: "0" } });
     await activate(h, "sample-ws/s1");
     const sub = h.studio.services.bus.subscribe();
     const frames: FrameRecord[] = [];
@@ -189,9 +192,16 @@ describe("POST /api/turn over the real engine", () => {
     expect(queued.status).toBe(200);
     expect(queued.body).toEqual({ ok: true, injected: false, turn: 1, pending: 1, placement: "queued", duplicate: false });
 
-    // W892: 4000 chars / 8 per chunk at 3ms is ~500 frames (~1.5s here), but a
-    // loaded Windows runner pushed it past the 5s default and the run reported
-    // "did not terminate" — a deadline problem, not a missing terminal frame.
+    // W892: the deadline is generous on purpose — a loaded Windows runner pushed
+    // the stream past the 5s default and the run reported "did not terminate",
+    // a deadline problem, not a missing terminal frame. Keep the 25s ceiling.
+    //
+    // W9220（测试提速，断言不变）：本用例证的是**放置/队列泳道**（placement=queued、
+    // lane=next-turn、turn 1 只见自己的输入、drain 顺序），与流的时长无关。原脚本
+    // 4000 字符 / 8 每块 / 3ms ≈ 500 帧 ≈ 1.5s（本机实测整条 8.07s），是当时为了
+    // 「第二个请求落下时这一轮还在跑」而选的**过大**余量。改用仓库已有的 W896 模式
+    // （1600 字符 / 1ms，见 session-independence.test.ts:34 的同款取舍）：仍提供
+    // `0.2s 的忙窗口（对 in-process 请求往返有 10x 余量），但不再为时长本身付费。
     await collectUntilTerminal(sub, frames, 25_000);
     sub.close();
     await waitIdle(h);

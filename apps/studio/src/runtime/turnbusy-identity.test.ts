@@ -22,7 +22,9 @@ import { TurnBusyError as SeamTurnBusyError, type RuntimeAdapter } from "../runt
 import { activate, engineOf, makeEngineHarness, readSessionLog, waitIdle } from "./test-util.js";
 
 /** A turn slow enough (500 frames x 4ms) to keep the busy slot taken. */
-const SLOW_LLM = { script: [{ text: "x".repeat(4000) }], deltaMs: 4, chunkChars: 8 };
+// W9220（测试提速，断言不变）：原 4000/8/4ms ≈ 500 帧；Windows 定时器粒度 ~13-15ms
+// ⇒ 每个用例白等数秒。本文件证的是「turn/busy 身份在流式期间不串」，与帧数无关。
+const SLOW_LLM = { script: [{ text: "x".repeat(1600) }], deltaMs: 3, chunkChars: 100 };
 
 const harnesses: StudioHarness[] = [];
 

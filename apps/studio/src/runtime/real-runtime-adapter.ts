@@ -132,6 +132,12 @@ export interface RealRuntimeAdapterOptions extends Omit<SessionComposerOptions, 
    * Defaults to the ledger's directory (all three are process-level data files).
    */
   dataDir?: string;
+  /**
+   * W9220（测试提速，行为不变）：可注入的重试退避等待。
+   * 省略 = 真实 `setTimeout`（生产路径逐字节不变）；测试注入「不等待」后，
+   * 「重试预算真的到达 provider」这条不变量与 500/1000/2000ms 的真实退避解耦。
+   */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /** `RuntimeAdapter` + the lifecycle handles the host needs beyond the seam. */
@@ -240,7 +246,7 @@ class RealEngine implements RealRuntimeAdapter {
     });
     // E §4 P1 (W785): OFF unless `CELESTEA_LLM_FALLBACK` says on — `wrap()`
     // then returns null and the composer keeps the pre-P1 path (D9).
-    this.fallback = new AdapterFallback({ dataDir: opts.dataDir ?? null, ledgerFile: opts.ledgerFile ?? null, env: this.env, bus: () => this.bus, peek: (s) => this.registry.peek(s), maxRetries: () => this.maxRetries, ...(opts.now === undefined ? {} : { now: opts.now }) });
+    this.fallback = new AdapterFallback({ dataDir: opts.dataDir ?? null, ledgerFile: opts.ledgerFile ?? null, env: this.env, bus: () => this.bus, peek: (s) => this.registry.peek(s), maxRetries: () => this.maxRetries, ...(opts.now === undefined ? {} : { now: opts.now }), ...(opts.sleep === undefined ? {} : { sleep: opts.sleep }) });
     // F-06: the SAME-TARGET RETRY is a capability of its own, not a sub-case of
     // the fallback chain — a deployment with one endpoint still deserves it.
     // The decorator goes on the INNERMOST factory, so the composer ledger,

@@ -132,7 +132,7 @@ function switchView(next: PreviewView): void {
   modes?.setView(next);
   // ★ 只切 class，**不重画**：两个视图节点都已在 DOM 里（paint 时同时建好）。
   //   重画 = replaceChildren ⇒ 新 iframe 节点 ⇒ 文档被重新加载（闪白 + 丢滚动位）。
-  //   这条由 tests/w1534-html-panel.test.ts 的「iframe 节点身份不变」守着
+  //   这条由 tests/w1534-html-panel-modes.test.ts 的「iframe 节点身份不变」守着
   //   （该断言真的抓到过本函数的重画版本）。
   applyView();
 }

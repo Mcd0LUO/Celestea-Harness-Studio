@@ -137,6 +137,13 @@ export class AdapterFallback {
     peek: (sessionId: string | null) => { turnNo: number; runtime: { statusline(): Statusline } } | null;
     /** W9104: the live `POST /api/config.max_retries` (see FallbackHostOptions). */
     maxRetries?: () => number;
+    /**
+     * W9220（测试提速，行为不变）：可注入的退避等待，原样转交
+     * `createFallbackWiring` 的既有 `sleep` 缝（fallback-host.ts:216/362/454）。
+     * 省略 = 真实 `setTimeout`，生产路径逐字节不变；测试可注入「不等待」把
+     * 重试的**顺序/次数/上报**与**真实退避时长**解耦。
+     */
+    sleep?: (ms: number) => Promise<void>;
   }) {
     this.wiring = createFallbackWiring({
       dataDir: deps.dataDir ?? (deps.ledgerFile == null ? null : dirname(deps.ledgerFile.path)),
@@ -144,6 +151,7 @@ export class AdapterFallback {
       emit: (sessionId, frame) => this.emit(sessionId, frame),
       ...(deps.now === undefined ? {} : { now: deps.now }),
       ...(deps.maxRetries === undefined ? {} : { maxRetries: deps.maxRetries }),
+      ...(deps.sleep === undefined ? {} : { sleep: deps.sleep }),
     });
   }
 

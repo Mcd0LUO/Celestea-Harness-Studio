@@ -46,6 +46,12 @@ export interface EngineHarnessOptions {
    * the static mode baseline every existing test composes).
    */
   disclosure?: DisclosureOptions;
+  /**
+   * W9220：可注入的重试退避等待（见 `RealRuntimeAdapterOptions.sleep`）。
+   * 省略 = 真实退避；传入 `async () => undefined` 让「重试预算到达 provider」
+   * 这类用例不再为 500/1000/2000ms 的真实退避付费。
+   */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /** One complete turn in the engine's native JSONL shape. */
@@ -194,6 +200,7 @@ function offlineEngineDeps(opts: EngineHarnessOptions, host: HostRef): StudioEng
       host,
       llm: () => createOfflineLlm(opts.llm ?? {}),
       ...(opts.disclosure === undefined ? {} : { disclosure: opts.disclosure }),
+      ...(opts.sleep === undefined ? {} : { sleep: opts.sleep }),
     };
   };
 }

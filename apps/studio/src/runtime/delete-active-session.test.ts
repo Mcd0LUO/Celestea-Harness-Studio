@@ -33,7 +33,14 @@ const STAMP = "1700000000.0";
 const S1 = "sample-ws/s1";
 
 /** 一个「够长、会被中途掐断」的回合：4000 字符 × 8 字符/帧 × 3ms ≈ 1.5s。 */
-const SLOW_LLM = { script: [{ text: "x".repeat(4000) }], deltaMs: 3, chunkChars: 8 };
+/**
+ * W9220（测试提速，断言不变）：原为 4000 字符 / 8 每块 / 3ms ≈ 500 帧。
+ * ★ Windows 上 setTimeout 的真实节拍是 ~13-15ms（本机实测 setTimeout(3) 平均 14.3ms），
+ *   500 帧 ⇒ 每个用例白等 ~7s。本文件的三个用例证的都是**删除/释放期间的并发语义**
+ *   （忙窗口内 delete、释放结算、跨会话隔离），与帧数无关。
+ * 改成 16 帧（1600 字符 / 100 每块）≈ 0.2s 忙窗口，与 W896 同款取舍。
+ */
+const SLOW_LLM = { script: [{ text: "x".repeat(1600) }], deltaMs: 3, chunkChars: 100 };
 
 type Row = Record<string, unknown>;
 

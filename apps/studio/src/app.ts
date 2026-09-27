@@ -107,6 +107,11 @@ export interface StudioEngineInput {
    * (production); the real-engine tests inject the deterministic OFFLINE engine.
    */
   llm?: (profile: Profile) => Llm;
+  /**
+   * W9220（测试提速，行为不变）：可注入的重试退避等待，原样透传给
+   * `createRealRuntimeAdapter`。省略 = 真实 `setTimeout`（生产不变）。
+   */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /** Resolves the injected values of one engine build from the composed stores. */
@@ -147,6 +152,7 @@ export function createStudioEngine(deps: StudioEngineDeps): EngineFactory {
       providerLabel: input.providerLabel,
       ...(input.disclosure === undefined ? {} : { disclosure: input.disclosure }),
       ...(input.llm === undefined ? {} : { llm: input.llm }),
+      ...(input.sleep === undefined ? {} : { sleep: input.sleep }),
       resolveSession: (id) => {
         const resolved = stores.sessions.resolve(id);
         // W768: the workspace travels with the session target, so the tools'

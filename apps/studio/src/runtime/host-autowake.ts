@@ -12,7 +12,7 @@
  * queues that can carry one is exactly the set of live host sessions.
  */
 
-import { AutowakeLoop, HOST_SESSION_ID, keyOfSession } from "@celestea/runtime";
+import { AutowakeLoop, HOST_SESSION_ID, keyOfSession, type AutowakeTiming } from "@celestea/runtime";
 import type { SessionMailbox } from "@celestea/workers";
 
 /** What the adapter must tell the wiring. */
@@ -27,6 +27,13 @@ export interface HostAutowakeOptions {
   lookup: (session: string | null) => { mailbox: SessionMailbox | null; busy: boolean; userPending: number } | null;
   /** Claim the slot and run one ordinary turn over the drained receipts. */
   wake: (session: string | null, input: string | null) => boolean;
+  /**
+   * W9220（测试提速，行为不变）：可注入的定时器，原样转交 `AutowakeLoop` 早已接受的
+   * `AutowakeOptions.timing`（packages/runtime/src/autowake.ts:122）。省略 = 真实
+   * `setTimeout`/`clearTimeout`（生产路径逐字节不变）；测试注入「立即触发」后，
+   * 「恰好一次唤醒 / 顺序」这类不变量与 250ms 轮询节拍解耦。
+   */
+  timing?: AutowakeTiming;
 }
 
 /**
@@ -95,6 +102,7 @@ export class HostAutowake {
       userPending: () => this.opts.lookup(session)?.userPending ?? 0,
       wake: (input) => this.opts.wake(session, input),
       log: (line) => autowakeLog(session, line),
+      ...(this.opts.timing === undefined ? {} : { timing: this.opts.timing }),
     });
     this.loops.set(key, loop);
     loop.start();

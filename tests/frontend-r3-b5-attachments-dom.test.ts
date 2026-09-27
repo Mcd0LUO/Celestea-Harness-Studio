@@ -335,7 +335,7 @@ describe("R3 W838-F4 · config-saved 重算能力位", () => {
     (globalThis as unknown as { dispatchEvent(e: unknown): boolean }).dispatchEvent(new Ev("studio:config-saved"));
     await flush(14);
     // W869：「图片入口禁用」的判据由「按钮 disabled」改为「图片进不来 + 原因可见」——
-    // 同一个入口现在也收文本文件，而文本与图像能力位无关（见 tests/w869-text-file-attach.test.ts ⑥）。
+    // 同一个入口现在也收文本文件，而文本与图像能力位无关（见 tests/w869-text-file-attach-reject.test.ts ⑥）。
     expect(btn.title).toContain("不含图像");
     // 图片仍被显式排除：粘贴一张图，待发区必须为空（不静默收下）。
     const paste = new Ev("paste") as { clipboardData?: unknown };
