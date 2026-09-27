@@ -109,6 +109,39 @@ export const POOL_RULES: readonly NamedRule[] = Object.freeze([
   },
 ]);
 
+/**
+ * W9224 · CI 分片必须继续成立的契约。
+ *
+ * ★ 这里的每条规则都对应一个**不会让 CI 变红、只会让它悄悄少测**的陷阱。
+ */
+export const CI_RULES: readonly NamedRule[] = Object.freeze([
+  {
+    name: "shard-matrix",
+    why: "CI 矩阵必须有 shard 维度（否则分片命令没有取值来源）",
+    test: (c) => /shard:\s*\[\s*\d+\s*,/.test(c),
+  },
+  {
+    name: "sharded-test-step",
+    why: "test 步骤必须真的带 --shard=<i>/<N>",
+    test: (c) => /vitest run --shard=\$\{\{ matrix\.shard \}\}\/\d+/.test(c),
+  },
+  {
+    name: "no-full-test-step",
+    why: "不得再有整跑 pnpm test 的步骤（否则全量又被跑一遍，分片白做）",
+    test: (c) => !/run-gate\.mjs test -- pnpm test/.test(c),
+  },
+  {
+    name: "nontest-gated-to-one-shard",
+    why: "非 test 门禁必须只在 1 个分片上跑（否则同一份工作重复 N 遍）",
+    test: (c) => /name: typecheck\n\s+if: \$\{\{ matrix\.shard == 1 \}\}/.test(c),
+  },
+  {
+    name: "web-gated-to-one-shard",
+    why: "check:web 整链也必须只在 1 个分片上跑",
+    test: (c) => /name: check:web build\n\s+if: \$\{\{ matrix\.shard == 1 \}\}/.test(c),
+  },
+]);
+
 /** 按名判定：返回缺失的规则名（空数组 = 全过）。 */
 export function missingRules(rules: readonly NamedRule[], config: string): string[] {
   return rules.filter((rule) => !rule.test(config)).map((rule) => rule.name);

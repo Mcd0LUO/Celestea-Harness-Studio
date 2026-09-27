@@ -38,6 +38,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         node: [24, 26]
+        # W9224：测试分片。本机实测（3 workers 模拟 4 核 runner）：
+        # 全量 61.8s → 2 片各 ~32.8s → 3 片各 ~23s。分片是**并行 job**，
+        # 所以墙钟≈单片时长。只在 test 那一步用（其余门禁是秒级，分片无意义）。
+        shard: [1, 2, 3]
     steps:
       # Full history + tags: the version derives from `git describe --tags`
       # (scripts/version.mjs), and the web bundle embeds it. A shallow checkout
@@ -65,15 +69,21 @@ jobs:
       # which runs these SAME gate commands concurrently + with eslint/tsc caches; CI
       # deliberately keeps them as separate serial steps so each failure names itself.
       - name: typecheck
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs typecheck -- pnpm typecheck
       - name: lint
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs lint -- pnpm lint
       - name: lint:arch
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs lint:arch -- pnpm lint:arch
       - name: check:tmpdir
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs check:tmpdir -- pnpm check:tmpdir
-      - name: test
-        run: node scripts/run-gate.mjs test -- pnpm test
+      # 分片只在 test 上生效；其余门禁跑在 shard 1 上（每 OS×Node 组合各一次），
+      # 否则同一份 typecheck/lint 会被重复跑 3 遍（纯浪费，且 CI 分钟数翻倍）。
+      - name: test (shard ${{ matrix.shard }}/3)
+        run: node scripts/run-gate.mjs "test shard ${{ matrix.shard }}/3" -- pnpm exec vitest run --shard=${{ matrix.shard }}/3
         env:
           CI: 'true'
       # check:web is itself a chain (build -> tsc -> 8 sub-gates -> bundle
@@ -82,22 +92,32 @@ jobs:
       # annotation: the run that first reached this stage reported only
       # "exit code 1", and the job log needs admin rights to download.
       - name: check:web build
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs "check:web build" -- pnpm --dir apps/web run build
       - name: check:web typecheck
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs "check:web tsc" -- pnpm --dir apps/web exec tsc --noEmit
       - name: check:web copy gate
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs "check-ui-copy" -- node apps/web/tools/check-ui-copy.mjs
       - name: check:web scope-hash
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs "check-scope-hash" -- node apps/web/tools/check-scope-hash.mjs
       - name: check:web sse-events
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs "check-sse-events" -- node apps/web/tools/check-sse-events.mjs
       - name: check:web fold-default
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs "check-fold-default" -- node apps/web/tools/check-fold-default.mjs
       - name: check:web grants-permanent
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs "check-grants-permanent" -- node apps/web/tools/check-grants-permanent.mjs
       - name: check:web module-size
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs "check-module-size" -- node apps/web/tools/check-module-size.mjs
       - name: check:web version
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs "check-version" -- node apps/web/tools/check-version.mjs
       - name: check:web bundle ratchet
+        if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs "check-bundle-size" -- node scripts/run-with-env.mjs CELESTEA_BUNDLE_STRICT=1 -- node apps/web/tools/check-bundle-size.mjs
