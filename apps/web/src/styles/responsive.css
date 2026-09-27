@@ -89,7 +89,14 @@ button,
 
   /* 列表 / 折叠行 / 工具卡 / 弹层选项 */
   .sess-leaf, .ws-head { min-height: var(--tap-min); }
-  .sess-kebab { min-width: var(--tap-min); min-height: var(--tap-min); }
+  /* W2024：本档要 44px 命中区，而基础层的 .sess-kebab 用负外边距把 24px 命中区
+     收回成了「不占行高」。44px 必须**真的占位**（--tap-min 在本档的语义就是
+     「行内目标足够大」），否则负外边距会把这档的行高**反向压小**（实测 .ws-head
+     56 -> 52.63）。故这里把负外边距显式还原为 0 —— 本档的行高与改动前逐字相同。 */
+  .sess-kebab {
+    min-width: var(--tap-min); min-height: var(--tap-min);
+    margin-block: 0;
+  }
   .think-head { height: auto; min-height: var(--tap-min); }
   .toolcard-head { min-height: var(--tap-min); }
   .toolcard-copy { min-width: var(--tap-min); min-height: var(--tap-min); }

@@ -97,8 +97,36 @@
   font-family: var(--mono); font-size: 10px; color: var(--c-text-3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* W2024 · 24px 命中区（WCAG 2.2 SC 2.5.8 AA）。
+ *
+ * 为什么**不是**只写在 responsive.css 的触控层里：这是一个**桌面缺陷**，不是移动端
+ * 专属问题。实测（1440x900）：⋯ 是 19x13，而它被 .ws-head / .sess-leaf 的
+ * cursor:pointer 整行包住 —— 行内目标，按 SC 2.5.8 的 Spacing 例外判据，
+ * 以 ⋯ 为中心、直径 24 的圆**必然**与「行」这个目标相交（余量 -12px）⇒ **违反**。
+ * 桌面与触摸端同此一判：触摸层（≤1024px）早把 .sess-kebab 抬到 --tap-min=44，
+ * 偏偏 >1024px 这层从没覆盖过 —— 于是缺陷只在桌面暴露。修在基础层，两档一起对。
+ *
+ * 为什么**不**顺带放大 .sess-leaf / .ws-head：行高 30.63/32.63 已 >= 24，
+ * 它们本来就达标，放大只会平白改变桌面布局（W2024 的硬要求：桌面逐像素不变）。
+ *
+ * 19x13 -> 24x24 靠 min-width/min-height；display:grid + place-items:center 让
+ * 「⋯」保持视觉居中（原来是 flex 子项的默认基线对齐，加高后会贴顶）。
+ * 视觉外观（字号/颜色/无边框）一字未动。 */
 .sess-kebab {
   flex: 0 0 auto;
+  display: grid; place-items: center;
+  /* 所在行的内容高：12.5px 正文在 normal 行距下的行盒 = **20.625px**（实测，
+     不是猜的：.ws-name / .sess-leaf-name 的 getBoundingClientRect().height）。
+     行高 = 本值 + 容器上下内边距（.ws-head 6+6 ⇒ 32.625、.sess-leaf 5+5 ⇒ 30.625）。 */
+  --kebab-row-h: 20.625px;
+  min-width: var(--tap-hit); min-height: var(--tap-hit);
+  /* ★ 命中区 24px，但**不撑高所在行**：24 - 20.625 = 3.375 ⇒ 上下各用负外边距
+     收回 1.6875px，行高与改动前**逐像素相同**（门禁断言 .ws-head=32.625 /
+     .sess-leaf=30.625，与改动前基线逐字相等）。
+     不用「只加 ::before 撑命中区」是因为那样 border box 仍是 19x13：WCAG 判的
+     是目标区域没错，但**自动化审计量的是 getBoundingClientRect** —— 两者一旦
+     分叉，门禁就永远抓不到这类缺陷，而那正是本轮要根治的东西。 */
+  margin-block: calc((var(--tap-hit) - var(--kebab-row-h)) / -2);
   background: transparent; border: none; cursor: pointer;
   color: var(--c-text-3); font-size: 13px; line-height: 1; padding: 0 3px;
   border-radius: var(--r-sm);
