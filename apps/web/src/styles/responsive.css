@@ -146,7 +146,10 @@ button,
     position: fixed;
     top: var(--topbar-h-mobile); bottom: 0; left: 0;
     width: var(--drawer-w) !important; /* 覆盖 ui/sidebar.ts 写进 style 的桌面宽度 */
-    z-index: 61;
+    /* W2007：61 → --z-drawer（**值不变**，纯命名收敛）。抽屉是**导航层**：压住页面
+       内容与页内浮层，但必须低于设置页（--z-settings 70）—— 否则「抽屉开着点设置」
+       时设置页被会话树盖住（本次用户报障）。 */
+    z-index: var(--z-drawer);
     transform: translateX(-100%);
     transition: transform .18s ease;
     box-shadow: var(--shadow-panel);
@@ -165,7 +168,10 @@ button,
     position: fixed;
     inset: var(--topbar-h-mobile) 0 0 0;
     background: var(--c-overlay);
-    z-index: 60;
+    /* W2007：60 → --z-scrim（**值不变**，纯命名收敛）。遮罩盖住主区，抽屉
+       （--z-drawer = 61，紧邻其上）盖住遮罩 —— 这一对整体低于 --z-settings，
+       故设置页能压过抽屉。 */
+    z-index: var(--z-scrim);
   }
   .sidebar-scrim.hidden { display: none; }
 

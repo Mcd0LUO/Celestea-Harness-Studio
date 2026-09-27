@@ -124,6 +124,13 @@
 
 /* ---- 菜单浮层（锚定按钮右下，就近弹出） ---- */
 .sess-menu {
+  /* W2007：值 60 保持不动，但**语义变了** —— 它现在是结构性安全的。
+     架构师指出：桌面端先开 ⋯ 菜单再开设置页时，菜单被 sessions.ts 的
+     closeCtxMenu() 关掉（sessions.ts:240 的 document click 委托）⇒ 该路径当前
+     不可达，但「可达」靠的是**恰好有人记得关**，层级本身并不保证。
+     本轮把设置页提到 --z-settings(70) 后，菜单(60) 恒低于设置页 ⇒ 即使将来某条
+     新路径漏了 closeCtxMenu()，菜单也压不过设置页。**不变量由层级守，不靠调用方自觉。**
+     故这里只加注释、不改值（改值要动桌面端既有观感，收益为零）。 */
   position: absolute; z-index: 60;
   min-width: 168px;
   background: var(--c-surface-raised);
@@ -146,7 +153,9 @@
 
 /* ---- 新建会话 / 新建工作区（文件管理器）弹窗 ---- */
 .modal-scrim {
-  position: fixed; inset: 0; z-index: 80;
+  /* W2007：80 → --z-modal（**值不变**，纯命名收敛）。它必须高于设置页(--z-settings 70)：
+     从设置页里打开的弹窗要盖得住设置页。 */
+  position: fixed; inset: 0; z-index: var(--z-modal);
   background: var(--c-overlay);
   display: flex; align-items: center; justify-content: center;
 }
