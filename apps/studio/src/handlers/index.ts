@@ -2,9 +2,16 @@
  * Handler registry — the ONLY place that knows every endpoint group.
  *
  * Each `registerXxx` returns the contract ids it bound, and `app.ts` asserts
- * the union equals the frozen 47. A route can therefore never be silently
- * dropped: adding an endpoint to `contracts/endpoints.json` without a handler
- * fails at startup with the missing id.
+ * the union equals `API_ENDPOINT_COUNT` (`routes.ts`, derived from the contract's
+ * frozen anchor by W9213). A route can therefore never be silently dropped:
+ * adding an endpoint to `contracts/endpoints.json` without a handler fails at
+ * startup with the missing id.
+ *
+ * W9230 (W9206-20): this comment used to name the literal "47" and the file's
+ * history recorded a chain of arrows ("66 -> 69", "57 -> 59", …). Those numbers
+ * contradicted each other AND the constant after later endpoint additions. The
+ * count now lives in exactly ONE place — the derived constant the assertion
+ * reads — so prose can never drift from it again.
  *
  * Module map:
  *   common.ts        error/body/field helpers shared by every handler
@@ -81,7 +88,7 @@ export function registerHandlers(app: Hono, deps: Deps, table: RouteTable): stri
     ...registerExec(app, deps, table),
     // W1528: the workbench terminal's REAL pty (open / keystrokes / close).
     // Same permission gate + same sandbox boundary as /api/exec — by import,
-    // not by convention (66 -> 69).
+    // not by convention.
     ...registerTerminal(app, deps, table),
     ...registerProviders(app, deps, table),
     ...registerPrompts(app, deps, table),
@@ -89,22 +96,22 @@ export function registerHandlers(app: Hono, deps: Deps, table: RouteTable): stri
     ...registerGrants(app, deps, table),
     // W9: permission presets (custom CRUD + a session's chosen preset).
     ...registerPermissions(app, deps, table),
-    // W783: the user-question answer + pending-list endpoints (47 -> 49).
+    // W783: the user-question answer + pending-list endpoints.
     ...registerQuestions(app, deps, table),
-    // W785 (E-P1, capability 3): the usage ledger's aggregate view (49 -> 50).
+    // W785 (E-P1, capability 3): the usage ledger's aggregate view.
     ...registerUsage(app, deps, table),
     // W767: Studio's OWN login-cookie gate (page + login + nginx auth_request).
     ...registerAuth(app, deps, table),
-    // W860: session-level tool switches (57 -> 59) + the host plugin inventory (59 -> 60).
+    // W860: session-level tool switches + the host plugin inventory.
     ...registerSessionTools(app, deps, table),
     ...registerPlugins(app, deps, table),
     // W895-C1: the display-component enabled table moves from browser
-    // localStorage to the server (64 -> 66).
+    // localStorage to the server.
     ...registerDisplayPlugins(app, deps, table),
-    // W870: the session-scoped model switch (60 -> 61) — the statusline picker's
+    // W870: the session-scoped model switch — the statusline picker's
     // target; POST /api/config keeps meaning "the global default".
     registerSessionModel(app, deps, table),
-    // W9209: the persistent session goal (69 -> 70). The /goal command and the
+    // W9209: the persistent session goal. The /goal command and the
     // statusline badge have always called this; until now the endpoint did not
     // exist and every call fell through to the /api/* 404 fallback.
     ...registerGoal(app, deps, table),

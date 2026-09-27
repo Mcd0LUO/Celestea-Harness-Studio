@@ -21,7 +21,7 @@
  */
 
 import { parseMode, type SessionMode } from "./mode.js";
-import { readJsonIfExists, writeTextPlain } from "./fs-json.js";
+import { readJsonIfExists, writeTextAtomic } from "./fs-json.js";
 
 export const SESSION_META = "session.json";
 
@@ -67,5 +67,12 @@ export function writeSessionMeta(dir: string, meta: SessionMeta): void {
   if (model !== "") body["model"] = model;
   if (prompt !== "") body["prompt"] = prompt;
   if (mode !== "") body["mode"] = mode;
-  writeTextPlain(`${dir}/${SESSION_META}`, `${JSON.stringify(body, null, 2)}\n`);
+  // W9230 (W9206-23): ATOMIC. This used to be a bare `writeFileSync`, and this
+  // file is rewritten by rename / branch / compact / mode-switch / model-pin and
+  // session creation — so a crash or a kill mid-write truncated it, and
+  // `readSessionMeta` (which treats a broken file as a missing one) then
+  // silently dropped the session's title, model, prompt binding and mode. The
+  // write is not on a hot path, so the tmp+rename cost is worth the guarantee;
+  // mode 0644 matches the contract's declared mode for this file.
+  writeTextAtomic(`${dir}/${SESSION_META}`, `${JSON.stringify(body, null, 2)}\n`, { mode: 0o644 });
 }

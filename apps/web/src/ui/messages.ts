@@ -26,7 +26,7 @@
 import { el, fmtNow } from '../utils/dom';
 import type { SessionPane } from './viewctx';
 import { railSync } from './rail';
-import { autoscroll, hideEmptyHint, renderEmptyHint as rawRenderEmptyHint } from './messages/scroll';
+import { autoscroll, hideEmptyHint } from './messages/scroll';
 import { buildTruncatedNote, setOmittedCount } from './messages/oversize';
 import {
   addThinkRetained,
@@ -35,6 +35,7 @@ import {
   thinkOverBudget,
   thinkRetained,
 } from './messages/think-budget';
+import { resetMessages } from './messages/assistant';
 import { t } from '../i18n';
 // W1512：预算账本住在 ./messages/think-budget.ts，但公开面仍留在 messages.ts
 // （调用方与测试只认这个入口，与 W867 把 cadence 拆出去时同一取舍）。
@@ -419,31 +420,20 @@ export { autoscroll, hideEmptyHint } from './messages/scroll';
  *     就被判超预算并从最旧（其实正是新段）回收；
  *   · ctx.assistant / ctx.thinkSeg / ctx.lastTextCol 仍指着**已脱离文档**的节点 ⇒
  *     下一次 appendThinking/appendText 把内容写进孤儿节点（新内容凭空消失）。
- * 审计给的正解就是「让这条重建路径走 resetMessages 的复位口径」，这里照做。
  *
- * 为什么包在 messages.ts 而不是 scroll.ts：本轮文件边界只覆盖 restore.ts / messages.ts /
- * messages/assistant.ts / think-budget.ts / dom-cap.ts，而这里正是 messages.ts 的对外
- * 再导出面（restore.ts 走的就是这个入口）；assistant.ts 的 resetMessages 各自复位。
+ * ★ W9229（F-21）：这里**委托**给 assistant.ts 的 resetMessages —— 复位口径只有一份。
+ *   改动前两处各写一遍（本函数清三个句柄 + 重定基账本；resetMessages 另外还清
+ *   渲染定时器 / ops / step / turn），于是 resetMessages 成了「存在但从不被调用」的
+ *   死代码，而它的注释声称自己是「清空会话的规范复位入口」—— 文档与代码分叉。
+ *   现在它是这条路径上真正被跑到的实现（restore.ts 与 /api/clear 都经由本函数）。
+ *   代价如实记账：空态重建现在**顺带**清掉 ops/step/turn/渲染定时器 —— 对一个刚刚
+ *   replaceChildren 过的容器来说这些本就该是空的，清它们是幂等的。
  */
 export function renderEmptyHint(ctx: SessionPane): void {
-  ctx.assistant = null;
-  ctx.thinkSeg = null;
-  ctx.lastTextCol = null;
-  rawRenderEmptyHint(ctx);
-  rebaseThinkRetained(ctx.el); // 清空后容器里没有 .mcol ⇒ 账本按实况归零（F-11）
+  resetMessages(ctx);
 }
 export { md } from './messages/markdown';
-export {
-  appendText,
-  applyFinalText,
-  assistantHasContent,
-  ensureAssistant,
-  finalizeAssistant,
-  flushTextSegment,
-  flushVisible,
-  removeAssistant,
-  resetMessages,
-} from './messages/assistant';
+export { appendText, applyFinalText, assistantHasContent, ensureAssistant, finalizeAssistant, flushTextSegment, flushVisible, removeAssistant, resetMessages } from './messages/assistant';
 export { addUserMessage, laneLabel, renderInboxMessage } from './messages/user';
 export type { MsgKind } from './messages/user';
 export { renderInfoBlock, renderInterjectNote, updateInfoBlock } from './messages/info';

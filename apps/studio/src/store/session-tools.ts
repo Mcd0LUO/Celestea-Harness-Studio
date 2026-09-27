@@ -20,6 +20,18 @@ import { readJsonIfExists, writeJsonAtomic } from "./fs-json.js";
 
 export const SESSION_TOOLS_FILE = "tools.json";
 
+/**
+ * W9230 (W9206-21): ceiling on the session-level disabled list.
+ *
+ * Matches the sibling caps (preset `toolDeny` = MAX_PRESET_TOOLS 64, grant
+ * scope = MAX_SCOPE_ENTRIES 32). The list had NO bound, so a single
+ * authenticated `PUT /api/sessions/{id}/tools` with 200000 names was accepted
+ * and persisted: every later `tools.json` read/write walked the whole list and
+ * `engine-grants.ts` re-deduped it with the preset deny at every turn boundary
+ * (O(n) per turn), and the UI list renderer fell over.
+ */
+export const MAX_SESSION_DISABLED_TOOLS = 64;
+
 export interface SessionToolsRead {
   /** The normalized disabled list; empty whenever the file is absent or void. */
   disabled: string[];
@@ -59,10 +71,16 @@ export function readSessionTools(dir: string, expectedSession: string): SessionT
  * The PUT endpoint validates the raw array first (any non-string or blank is a
  * 422); a hand-written file goes through the same function on read, where a
  * blank entry is merely dropped.
+ *
+ * W9230 (W9206-21): the result is TRUNCATED at MAX_SESSION_DISABLED_TOOLS.
+ * The HTTP face refuses an over-long list outright (422), so this is the
+ * defensive half for a file written by hand or by an older build — a read must
+ * never hand the engine a list big enough to make the per-turn union O(n).
  */
 export function normalizeDisabledTools(disabled: readonly string[]): string[] {
   const out: string[] = [];
   for (const value of disabled) {
+    if (out.length >= MAX_SESSION_DISABLED_TOOLS) break;
     const name = value.trim();
     if (name === "" || out.includes(name)) continue;
     out.push(name);

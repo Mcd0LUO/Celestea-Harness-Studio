@@ -281,6 +281,18 @@ function hasSameOriginEvidence(c: Context): boolean {
  * A refused grant counts toward the 3-strikes cooldown (§5.5.5) and is audited
  * (§4.4). The audited reason is the SAME sanitized text the client got: a
  * rejected value never reaches the audit file either (§5.4).
+ *
+ * KNOWN ISSUE (W9206-24, registered by W9230, deliberately NOT fixed here):
+ * EVERY refusal feeds the cooldown, including pure transport errors (a missing
+ * confirm header, a replayed token, an unparsable body) — the limiter is
+ * documented as anti-confirmation-fatigue, not a parser-error counter. Measured:
+ * four POSTs without the confirm header answer 403,403,403,409, so a stale form
+ * can lock its own operator out for five minutes. The one-line fix (count only
+ * an illegal cap) was written and passes, but it turns
+ * `apps/studio/src/grants.test.ts:409-411` red — that case builds its three
+ * refusals from missing headers, i.e. it pins this very defect. That test file
+ * is outside this batch's write scope (handlers/ + store/ + auth/ only), so the
+ * fix was reverted and is handed back for whoever owns the test.
  */
 function denied(ctx: Refusal, response: Response): Response {
   ctx.deps.grants.limits.recordDenial(ctx.sessionId);

@@ -21,12 +21,12 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { TurnBusyError } from "@celestea/runtime";
-import { ATTACHMENTS_DIRNAME, createAttachmentStore } from "@celestea/tools";
+import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_DIRNAME, createAttachmentStore } from "@celestea/tools";
 import type { ImageRef } from "@celestea/core";
 import { CapacityError, type TurnDeliveryMode } from "../runtime-adapter.js";
 import type { RouteTable } from "../routes.js";
 import type { StoreResult } from "../store/result.js";
-import { activeSession, capacityJson, errorOnly, failJson, readJsonBody, storeFail, strField, type Deps } from "./common.js";
+import { activeSession, capacityJson, DEFAULT_JSON_BODY_BYTES, errorOnly, failJson, readJsonBody, storeFail, strField, type Deps } from "./common.js";
 
 function registerEvents(app: Hono, deps: Deps, table: RouteTable): string {
   const events = table.get("get_events");
@@ -165,7 +165,13 @@ async function storeTurnAttachments(
 function registerTurn(app: Hono, deps: Deps, table: RouteTable): string {
   const turn = table.get("post_turn");
   app.on(turn.method, turn.honoPath, async (c) => {
-    const read = await readJsonBody(c);
+    // W9230 (W9206-38): this is the ONE route that legitimately exceeds the default
+    // JSON ceiling — it carries up to MAX_TURN_ATTACHMENTS inline base64 images
+    // (each capped at ATTACHMENT_MAX_BYTES AFTER decoding, so base64 inflates them
+    // by 4/3). The budget is derived from those two constants rather than typed as
+    // a number, so it cannot drift when either cap moves; `+ 1 MiB` leaves room for
+    // the text, the JSON envelope and the per-item `name`.
+    const read = await readJsonBody(c, true, MAX_TURN_ATTACHMENTS * ATTACHMENT_MAX_BYTES * 2 + DEFAULT_JSON_BODY_BYTES);
     if (!read.ok) return read.response;
     const input = strField(c, read.body, "input");
     const asked = strField(c, read.body, "session");

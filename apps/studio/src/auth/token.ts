@@ -87,12 +87,25 @@ export function cookieValue(header: string | undefined, name: string): string | 
  * Read the secret, creating it (32 random bytes, base64url, mode 0600) when the
  * file is missing or unusable. A short/garbled file is regenerated rather than
  * silently widening the key space.
+ *
+ * W9230 (W9206-15): the READ path used to return whatever it found, so the
+ * module's stated 0600 invariant held only for files THIS function created. A
+ * secret restored from a backup, written under a lax umask, or left group/other
+ * readable by an earlier version was used as-is — and anyone who can read it can
+ * forge a 30-day login cookie for any username. Two rules now:
+ *   - the byte length must be EXACTLY AUTH_SECRET_BYTES (`>=` accepted an
+ *     arbitrarily long secret, widening the key space the docs promise);
+ *   - the file is chmod-ed back to 0600 on the read path too (best effort — a
+ *     filesystem without chmod support still gets the creation mode).
  */
 export function loadAuthSecret(path: string): Buffer {
   const existing = readSecretText(path);
   if (existing !== null) {
     const decoded = Buffer.from(existing, "base64url");
-    if (decoded.length >= AUTH_SECRET_BYTES) return decoded;
+    if (decoded.length === AUTH_SECRET_BYTES) {
+      tightenSecretMode(path);
+      return decoded;
+    }
   }
   const secret = randomBytes(AUTH_SECRET_BYTES);
   writeFileSync(path, `${secret.toString("base64url")}\n`, { mode: 0o600 });
@@ -111,5 +124,20 @@ function readSecretText(path: string): string | null {
     return text === "" ? null : text;
   } catch {
     return null;
+  }
+}
+
+/**
+ * W9230 (W9206-15): force 0600 on an EXISTING secret file.
+ *
+ * Best effort on purpose: a filesystem without chmod support (or a file owned
+ * by another user) must not make the login gate unusable — the creation mode is
+ * then the only protection, exactly as before this change.
+ */
+function tightenSecretMode(path: string): void {
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    // See above: the read still succeeds, the mode is merely not tightened.
   }
 }

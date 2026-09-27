@@ -74,7 +74,16 @@ export function registerHealth(app: Hono, deps: Deps, table: RouteTable): string
   const status = table.get("get_status");
   app.on(status.method, status.honoPath, (c) => {
     const asked = c.req.query("session");
-    const session = asked === undefined || asked === "" ? activeSession(deps) : asked;
+    const raw = asked === undefined || asked === "" ? activeSession(deps) : asked;
+    // W9230 (W9206-45): resolve to the CANONICAL id BEFORE any per-session
+    // lookup. `modeOfSession` / `sessionModelCovered` / `activeGrantCaps` all
+    // resolve internally, but `isBusy(session)` was handed the RAW query value
+    // — so `?session=<ws>%2Fse%20ss` reported `busy:false` for a session that
+    // was actually mid-turn (the W815-5 class of bug: the write guards were all
+    // fixed, this read path was missed). An unresolvable id keeps the historical
+    // behaviour (it is passed through; every reader already tolerates it).
+    const resolved = raw === null ? null : deps.sessions.resolve(raw);
+    const session = resolved !== null && resolved.ok ? resolved.value.id : raw;
     const line = deps.runtime.statusline(session);
     return c.json({
       ...line,

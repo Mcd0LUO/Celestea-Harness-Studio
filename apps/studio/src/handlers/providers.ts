@@ -58,16 +58,21 @@ function registerUpsert(app: Hono, deps: Deps, table: RouteTable): string {
     // W815-7: a PRESENT but wrongly-typed `models` is a 400. It used to fall
     // through as `undefined`, which the store reads as "absent" and therefore
     // CLEARS the list — only an absent/null field may clear (docs/pitfalls P1b).
-    if (models !== undefined && models !== null && !Array.isArray(models)) {
-      return failJson(c, 400, "models must be an array");
-    }
+    if (models !== undefined && models !== null && !Array.isArray(models)) return failJson(c, 400, "models must be an array");
+    // W9230 (W9206-44): a PRESENT but wrongly-typed `api_key` is a 422, not a silent
+    // "keep the stored key" — `api_key` is the ONE keep-on-default field, so coercing a
+    // non-string to `null` made `api_key: 123` look accepted while the OLD credential
+    // stayed in place (a silent no-op on a secret). Kept on the same line count as the
+    // code it replaces: docs/pitfalls.md pins a line anchor into this file.
+    const apiKey = strField(c, body, "api_key");
+    if (!apiKey.ok) return apiKey.response;
     const res = deps.providers.upsert({
       id: typeof body["id"] === "string" ? body["id"] : undefined,
       name: typeof body["name"] === "string" ? body["name"] : undefined,
       note: typeof body["note"] === "string" ? body["note"] : undefined,
       base_url: typeof body["base_url"] === "string" ? body["base_url"] : undefined,
       request_format: typeof body["request_format"] === "string" ? body["request_format"] : undefined,
-      api_key: typeof body["api_key"] === "string" ? body["api_key"] : null,
+      api_key: apiKey.value,
       models: Array.isArray(models) ? (models as Array<Record<string, unknown>>) : undefined,
     });
     if (!res.ok) return storeFail(c, res);

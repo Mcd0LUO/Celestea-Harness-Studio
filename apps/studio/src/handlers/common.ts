@@ -108,6 +108,28 @@ function mediaTypeOf(c: Context): string {
 }
 
 /**
+ * W9230 (W9206-13 / W9206-38): the ceiling on a JSON request body.
+ *
+ * There was NO bound at all: every route buffered `await c.req.text()` into
+ * memory before validating anything, so an unauthenticated `/auth/login` (not
+ * under the token gate) or any `/api/*` route could be handed an arbitrarily
+ * large body and OOM the process. 1 MiB is far above every legitimate JSON
+ * payload this host takes (config, providers, prompts, grants, session tools,
+ * permissions, display plugins); the ONE route that legitimately exceeds it is
+ * `POST /api/turn`, which passes its own attachment-derived budget.
+ */
+export const DEFAULT_JSON_BODY_BYTES = 1024 * 1024;
+
+/**
+ * W9230: the refusal of an over-long body. `content-length` is checked FIRST so
+ * an oversize body is refused before a single byte is buffered; the post-read
+ * check is the belt-and-braces half for a chunked request (no Content-Length).
+ */
+function bodyTooLarge(c: Context, maxBytes: number): Response {
+  return failJson(c, 413, `request body is over the ${maxBytes}-byte limit`);
+}
+
+/**
  * Read a JSON object body. The retired backend's rejections are mirrored:
  * missing body -> 415, unparsable -> 400, non-object -> 422.
  *
@@ -117,12 +139,20 @@ function mediaTypeOf(c: Context): string {
  * because no CORS headers are served. The terminal's raw-text input route
  * deliberately does NOT come through here (it has its own reader).
  */
-export async function readJsonBody(c: Context, required = true): Promise<BodyRead> {
+export async function readJsonBody(c: Context, required = true, maxBytes = DEFAULT_JSON_BODY_BYTES): Promise<BodyRead> {
+  // W9230 (W9206-13/38): refuse an over-long body from its declared length BEFORE
+  // buffering it (see DEFAULT_JSON_BODY_BYTES for why this exists at all).
+  const declared = Number.parseInt(c.req.header("content-length") ?? "", 10);
+  if (Number.isFinite(declared) && declared > maxBytes) return { ok: false, response: bodyTooLarge(c, maxBytes) };
   const raw = await c.req.text();
   if (raw.trim() === "") {
     if (required) return { ok: false, response: failJson(c, 415, "request body required") };
     return { ok: true, body: {} };
   }
+  // A chunked request carries no Content-Length: the same ceiling is re-applied
+  // to the bytes actually read (UTF-16 code units here, which is a LOWER bound on
+  // the byte count — safe in the conservative direction).
+  if (raw.length > maxBytes) return { ok: false, response: bodyTooLarge(c, maxBytes) };
   if (mediaTypeOf(c) !== "application/json") {
     return { ok: false, response: failJson(c, 415, "content-type must be application/json") };
   }

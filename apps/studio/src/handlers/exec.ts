@@ -25,7 +25,7 @@ import { effectiveGrantsOf } from "../runtime/engine-grants.js";
 import { nowSec } from "../store/grants-service.js";
 import { sessionWorkspaceOf, type ResolvedSession } from "../store/sessions.js";
 import { errText } from "../store/result.js";
-import { activeSession, failJson, readJsonBody, strField, type Deps } from "./common.js";
+import { activeSession, failJson, numField, readJsonBody, strField, type Deps } from "./common.js";
 
 /** The structured refusal when this session's preset denies the shell. */
 export const SHELL_DENIED_CODE = "shell_denied";
@@ -128,6 +128,12 @@ export function registerExec(app: Hono, deps: Deps, table: RouteTable): string[]
     if (!sessionField.ok) return sessionField.response;
     const workdirField = strField(c, body.body, "workdir");
     if (!workdirField.ok) return workdirField.response;
+    // W9230 (W9206-43): `numField`, not a bare `typeof === "number"`. A bare
+    // typeof accepts `Infinity` (`1e999` in JSON parses to it), which used to
+    // fall through to the sandbox and come back as a 400 instead of the
+    // documented 422 "field 'timeout_ms' must be a number".
+    const timeoutField = numField(c, body.body, "timeout_ms");
+    if (!timeoutField.ok) return timeoutField.response;
 
     const command = readCommand(body.body);
     if (typeof command !== "string") return failJson(c, 422, command.error);
@@ -150,7 +156,7 @@ export function registerExec(app: Hono, deps: Deps, table: RouteTable): string[]
       const run = await sandbox.run({
         command,
         ...(workdirField.value === undefined ? {} : { workdir: workdirField.value }),
-        ...(typeof body.body["timeout_ms"] === "number" ? { timeoutMs: body.body["timeout_ms"] as number } : {}),
+        ...(timeoutField.value === undefined ? {} : { timeoutMs: timeoutField.value }),
       });
       return c.json({
         ok: true,

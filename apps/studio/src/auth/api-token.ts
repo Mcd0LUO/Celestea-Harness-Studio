@@ -55,13 +55,31 @@ function hostOf(bind: string): string {
   return raw;
 }
 
+/**
+ * W9230 (W9206-12): an IPv4 dotted-quad inside 127.0.0.0/8, and nothing else.
+ *
+ * The old test was a STRING PREFIX (`startsWith("127.")`), which is not an
+ * address test at all: `127.evil.com` and `127.0.0.1.evil.com` both matched, so
+ * `--bind 127.evil.com` with no token started the server — the "a non-loopback
+ * bind is refused without a token" rule (this module's whole point) was skipped
+ * by a DNS name that resolves anywhere. A real address has exactly four numeric
+ * octets, each 0..255, and the first is 127.
+ */
+function isLoopbackV4(host: string): boolean {
+  const parts = host.split(".");
+  if (parts.length !== 4 || parts[0] !== "127") return false;
+  return parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+}
+
 /** true only for an address that cannot be reached from another host. */
 export function isLoopbackBind(bind: string): boolean {
   const host = hostOf(bind);
-  if (host === "localhost" || host === "::1" || host === "127.0.0.1") return true;
-  if (host.startsWith("127.")) return true;
-  // IPv4-mapped IPv6 loopback (::ffff:127.0.0.1).
-  if (host.startsWith("::ffff:127.")) return true;
+  if (host === "localhost" || host === "::1") return true;
+  // W9230 (W9206-12): 127.0.0.0/8 — by OCTETS, never by string prefix.
+  if (isLoopbackV4(host)) return true;
+  // IPv4-mapped IPv6 loopback (::ffff:127.0.0.1) — the mapped part is an address
+  // too, so it goes through the same dotted-quad test.
+  if (host.startsWith("::ffff:")) return isLoopbackV4(host.slice("::ffff:".length));
   return false;
 }
 

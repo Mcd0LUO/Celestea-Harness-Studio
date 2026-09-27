@@ -29,6 +29,7 @@ import {
   authCookie,
   cookieValue,
   createFailureLimiter,
+  isLoopbackBind,
   loadAuthSecret,
   loginPage,
   LOGIN_OK_PAGE,
@@ -155,8 +156,42 @@ function prefersJson(c: Context): boolean {
   return type.includes("json") || accept.includes("application/json");
 }
 
-/** The client IP nginx reports, else the (local) caller is one bucket. */
+/**
+ * W9230 (W9206-09): the peer's real socket address, or null when the adapter
+ * does not expose one (tests build a Request without a socket).
+ *
+ * `@hono/node-server` passes the raw `IncomingMessage` as `c.env.incoming`;
+ * the socket's `remoteAddress` is the one value an HTTP client cannot choose.
+ */
+function peerAddress(c: Context): string | null {
+  const incoming = (c.env as { incoming?: { socket?: { remoteAddress?: string | null } } } | undefined)?.incoming;
+  const address = incoming?.socket?.remoteAddress;
+  return typeof address === "string" && address !== "" ? address : null;
+}
+
+/**
+ * The client IP for the failure limiter.
+ *
+ * W9230 (W9206-09): `X-Real-IP` / `X-Forwarded-For` used to be trusted
+ * UNCONDITIONALLY. Both are ordinary request headers, so an attacker could send
+ * a fresh value per request and never fill the `ip:` bucket — the per-IP limit
+ * was decorative — or, in the other direction, name a VICTIM's address to lock
+ * that victim out. They are now honoured ONLY when the request actually arrived
+ * from a loopback peer (the documented nginx front, which terminates the
+ * connection on the same host). Any other peer is bucketed by its own socket
+ * address, which it cannot forge.
+ *
+ * A peer that exposes no socket at all (an in-process test harness, a future
+ * adapter) keeps the historical single `local` bucket: the limiter still works,
+ * it is just shared, which is exactly the pre-W9206 behaviour.
+ */
 function clientIp(c: Context): string {
+  const peer = peerAddress(c);
+  if (peer === null) return "local";
+  // W9230: reuse the ONE address test (auth/api-token.ts) rather than a second
+  // prefix check — a socket address and a --bind value must agree on what
+  // "loopback" means.
+  if (!isLoopbackBind(peer)) return peer;
   const real = c.req.header("x-real-ip");
   if (real !== undefined && real.trim() !== "") return real.trim();
   const forwarded = c.req.header("x-forwarded-for");
@@ -164,7 +199,7 @@ function clientIp(c: Context): string {
     const first = forwarded.split(",")[0]?.trim();
     if (first !== undefined && first !== "") return first;
   }
-  return "local";
+  return peer;
 }
 
 function pageResponse(body: string, status: number, extra: Record<string, string> = {}): Response {

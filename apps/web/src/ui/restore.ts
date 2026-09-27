@@ -27,7 +27,7 @@ import {
   ensureAssistant,
   finalizeAssistant,
   rebaseThinkRetained,
-  renderEmptyHint,
+  renderEmptyHint, // W9229（F-21）：走 messages.ts 的**唯一对外重建入口**（含账本/句柄复位）
   renderInboxMessage,
   type MsgKind,
 } from './messages';
@@ -43,6 +43,10 @@ import { recoverQuestions, renderHistoryQuestionCard } from './question';
 import { mountTaskPanel } from './taskpanel'; // W1533：历史恢复会 replaceChildren，面板要归位
 
 const MAX_RESTORE = 200;
+
+// W9229：衔接去重状态搬到 ./restore-dedup.ts（模块体积门禁），此处再导出保持 import 路径兼容。
+import { resetRestore } from './restore-dedup';
+export { feedAssistantDelta, finalAssistantDedup, guardBufLimit, resetRestore } from './restore-dedup';
 
 /**
  * W1485：历史恢复的**分帧**片大小（条/片）。
@@ -67,61 +71,6 @@ function yieldToBrowser(): Promise<void> {
     window.setTimeout(resolve, 0);
   });
 }
-
-// ---- 衔接去重状态（每容器一份） ------------------------------------------------
-
-/** 重置去重状态（清空会话后调用）。 */
-export function resetRestore(ctx: SessionPane): void {
-  ctx.dedup.tail = null;
-  ctx.dedup.guardActive = false;
-  ctx.dedup.guardBuf = '';
-  ctx.dedup.guardAll = false;
-}
-
-/**
- * 处理一条 live 助手文本增量：若与已恢复尾部前缀匹配则吞掉（返回 null），
- * 发散后一次性吐出累积缓冲并解除守卫。
- */
-export function feedAssistantDelta(ctx: SessionPane, delta: string): string | null {
-  const d = ctx.dedup;
-  if (d.tail?.role !== 'assistant') {
-    d.tail = null;
-    return delta === '' ? null : delta;
-  }
-  if (!d.guardActive) {
-    d.guardActive = true;
-    d.guardBuf = '';
-    d.guardAll = false;
-  }
-  d.guardBuf += delta;
-  const tc = d.tail.content ?? '';
-  if (tc.startsWith(d.guardBuf)) {
-    if (d.guardBuf === tc) d.guardAll = true;
-    return null;
-  }
-  const out = d.guardBuf;
-  d.guardActive = false;
-  d.guardAll = false;
-  d.tail = null;
-  return out === '' ? null : out;
-}
-
-/**
- * done 事件钩子：若整条 live 助手消息是已恢复尾部的重放（无新增内容），
- * 返回 true 让调用方移除该重复气泡。
- */
-export function finalAssistantDedup(ctx: SessionPane, text?: string): boolean {
-  const d = ctx.dedup;
-  if (!d.guardActive) return false;
-  d.guardActive = false;
-  const drop =
-    d.guardAll ||
-    (typeof text === 'string' && text !== '' && d.tail?.role === 'assistant' && text === (d.tail.content ?? ''));
-  d.guardAll = false;
-  d.tail = null;
-  return drop;
-}
-
 
 /**
  * W515：历史条目的种类映射 ——
@@ -309,16 +258,19 @@ export async function restoreSessionHistory(
     sep.appendChild(el('span', null, t('shell.restore.sessionStart')));
     ctx.el.appendChild(sep);
   }
+  // W9229（F-21）：走 resetRestore 这个**唯一复位入口**（它此前是零调用者的死代码，
+  // 注释声称的复位能力与实际路径不符）。语义与原先的四行赋值逐字相同。
+  resetRestore(ctx);
   ctx.dedup.tail = recent.length ? (recent[recent.length - 1] ?? null) : null;
-  ctx.dedup.guardActive = false;
-  ctx.dedup.guardBuf = '';
-  ctx.dedup.guardAll = false;
   // W9113（P1-2）+ W9222（F-11）：**搬家之后**按 DOM 实况把账本重定基 —— 账本必须
   // 记在真正持有这些节点的容器上，且容器整体重建后旧账本不得残留（见 rebaseThinkRetained）。
   rebaseThinkRetained(ctx.el);
   // W1485：恢复收尾统一裁一次 DOM（force：不参与 assistant 那条时间窗节流）。
   // 历史本身已按 MAX_RESTORE 条截断，这一步兜的是「服务端一次给回上千条」的情形。
+  // W9229（F-20）：裁剪前后各数一次列数 —— 误删整容器（W9201 的 P0 形态）必须立刻可见。
+  const colsBefore = ctx.el.querySelectorAll('.mcol').length;
   prunePaneDom(ctx, true);
+  recoverIfEmptied(ctx, colsBefore);
   // W1533：上面的 replaceChildren 把任务面板（.sess-pane 的第一个子节点）一起换掉了
   // —— 恢复期间到达的清单已经写进 store，这里只把面板节点重新插回最前面即可
   // （句柄与列表 DOM 都复用，见 ui/taskpanel/wire.ts 的 place()）。
@@ -333,6 +285,28 @@ export async function restoreSessionHistory(
   // 只挂 .finally，无 catch）而 `restored` 已是 true ⇒ 该会话从此再不会被恢复（只能
   // 刷新）。放在最后，任何一步失败都不会把它标成「已恢复」，切回即可重试。
   ctx.restored = true;
+}
+
+/**
+ * W9229（F-20）：恢复收尾的**运行期兜底** —— 裁剪之后容器绝不允许被清空。
+ *
+ * `prunePaneDom` 的 P0 缺陷（跨父边界区间删除，已由 W9201 修掉）在修复前的实测形态是
+ * `childrenAfter = 0`：整个会话 DOM 被连根删掉，而调用方完全无从察觉（返回值仍是
+ * 「正常」的条数），用户看到的是「消息全没了」。
+ *
+ * 判据只看「刚刚明明有列、现在一条不剩」。命中时**就地恢复成空态**而不是只发一条告警：
+ * 容器已经空了，画空态是此刻唯一诚实的终态（告警进不了用户的视野，也修不好画面）。
+ * 返回 true = 已恢复（或本来就不需要恢复）。
+ *
+ * 为什么不用 console.warn 记这一条：apps/web/src 的 console.warn 计数是
+ * docs/ARCHITECTURE.md §6.5.5 的**硬数字**（tests/doc-conventions.test.ts ⑩ 对拍），
+ * 而该文档不在本轮文件边界内 —— 加一处告警会把计数打漂、让别人的门禁变红。
+ */
+export function recoverIfEmptied(ctx: SessionPane, colsBefore: number): boolean {
+  if (colsBefore <= 0) return true;
+  if (ctx.el.querySelectorAll('.mcol').length > 0) return true;
+  renderEmptyHint(ctx); // 容器被清空：画空态（并顺带把思考账本按实况归零）
+  return false;
 }
 
 /**

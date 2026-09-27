@@ -88,6 +88,26 @@ export function resetMessages(ctx: SessionPane): void {
 export const RENDER_DEBOUNCE = 12;
 
 /**
+ * W9229（F-14）：对本 tick **新建**的节点跑增强遍，而不是对整条消息。
+ *
+ * 为什么需要一层包装：`runEnhancers(container: Element)` 的合同是「传包住目标的容器」
+ * （见 ui/enhance/registry.ts 的注释：querySelectorAll 匹配不到容器自身），而类型是
+ * Element —— DocumentFragment 不在合同里。所以把新节点先挂进一个**临时 div** 跑增强，
+ * 再把子节点原样搬进目标 fragment：节点身份不变（只是换了父），增强结果（hljs 的
+ * innerHTML 写回、code-extras 的 .code-wrap 包裹）全部随节点一起搬走，行为等价。
+ *
+ * 收益：每个节拍的固定成本从「整条消息里全部 pre code 的 querySelectorAll + 属性读」
+ * 降到「本 tick 新增节点」——一条已固化 50 个代码块的消息在流式期间不再每 12–50ms
+ * 扫一次全量（审计 F-14 的实测形态）。
+ */
+function runEnhancersOnFragment(frag: DocumentFragment): void {
+  const scope = document.createElement('div');
+  while (frag.firstChild !== null) scope.appendChild(frag.firstChild);
+  runEnhancers(scope);
+  while (scope.firstChild !== null) frag.appendChild(scope.firstChild);
+}
+
+/**
  * 渲染文本段（W301 + W514 每容器独立节拍）—— **实时与重放走同一个函数、同一条分支**。
  *
  * W895-R：分区用**边界哨兵**而不是节点引用记账（见 view.ts 的 StreamDom 注释）。
@@ -119,10 +139,18 @@ function renderTextView(ctx: SessionPane, view: AssistantView): void {
   // ★ 用 DocumentFragment 一次性插入（每 tick 至多 1 次 DOM 变更）：
   //   W867 的门禁按「.content 上的变更调用次数」计重排，逐节点插入会把
   //   一次合并渲染变成 N 次 —— 那是真实的性能回退，不是测试口径问题。
+  // ★ W9229（F-14）：把增强遍的**作用域收窄到本 tick 新建的节点**。
+  // 原先每个节拍都对**整条消息**跑 runEnhancers，于是一条已固化 50 个代码块的
+  // 消息在流式期间每 12–50ms 付一次「全量 pre code 的 querySelectorAll + 属性读」的常数。
+  // 做法：先对**离屏 fragment**跑增强（querySelectorAll 对 DocumentFragment 有效，code-extras
+  // 的 wrap 也在 fragment 内部完成），再整体插入 —— 插入后节点身份不变，行为等价。
+  // reset 时仍对整条 content 跑：那时 stable 区是**全量重建**，新建节点就是全部。
+  const runOn = parts.reset ? view.content : null;
   if (parts.reset || parts.stableDeltaHtml) {
     const stableHtml = parts.reset ? parts.stableHtml : parts.stableDeltaHtml;
     const frag = document.createDocumentFragment();
     for (const n of htmlToNodes(stableHtml)) frag.appendChild(n);
+    if (runOn === null) runEnhancersOnFragment(frag);
     view.content.insertBefore(frag, d.boundary);
   }
 
@@ -134,6 +162,7 @@ function renderTextView(ctx: SessionPane, view: AssistantView): void {
   }
   const tailFrag = document.createDocumentFragment();
   for (const n of htmlToNodes(parts.tailHtml)) tailFrag.appendChild(n);
+  if (runOn === null) runEnhancersOnFragment(tailFrag);
   view.content.appendChild(tailFrag);
 
   // 超长提示行：节点**跨节拍复用**（尾部区每 tick 重建，新建的话每帧都会造一个
@@ -158,11 +187,21 @@ function renderTextView(ctx: SessionPane, view: AssistantView): void {
   }
 
   // W895：渲染后的增强遍走注册缝（内置 hljs + math 仍在此链上，顺序不变）。
-  runEnhancers(view.content);
+  if (runOn !== null) runEnhancers(runOn);
   autoscrollView(ctx, view); // W867：离屏（历史恢复）不写滚动位
-  // W1485：消息容器的 DOM 上限。**只对已挂载的容器做**（离屏的历史恢复由 restore.ts
-  // 收尾统一裁一次）—— 在离屏容器里逐条数节点是纯浪费，且那时列数还没定型。
-  if (view.root.isConnected !== false) prunePaneDom(ctx);
+  // W1485：消息容器的 DOM 上限。
+  //
+  // ★ W9229（F-26）：判据从「view.root 已挂载」改成「**会话容器本身也已脱离宿主**时
+  //   照样裁」。原注释说「离屏的历史恢复由 restore.ts 收尾统一裁一次」是对的，但它
+  //   顺带漏掉了另一类 isConnected===false：容器已被 evictIfNeeded / dropPane 摘掉、
+  //   而 worker 还在跑、SSE 增量继续到达的会话 —— 那恰恰是最可能无界增长的一类
+  //   （用户切走了、容器淘汰了、没人再管它的 DOM）。restore.ts 只在**恢复**时裁一次，
+  //   覆盖不到这条持续增量路径。
+  //
+  //   两条判据的区别正是这两类：恢复窗口期 view.root 在离屏 off 里（false），而
+  //   **ctx.el 仍挂在宿主上**（true）⇒ 不裁，维持原优化；容器被淘汰时两者都是 false
+  //   ⇒ 裁。所以不需要往 SessionPane 上加新字段。
+  if (view.root.isConnected !== false || ctx.el.isConnected === false) prunePaneDom(ctx);
   railSync(ctx);
 }
 

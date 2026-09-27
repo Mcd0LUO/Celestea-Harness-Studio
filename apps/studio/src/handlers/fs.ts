@@ -120,14 +120,19 @@ export function listDirectory(path: string): { entries: FsListEntry[]; truncated
   if (!isBrowsablePath(path)) return { error: "path '" + path + "' must be absolute" };
   const read = readDirectory(path);
   if ("error" in read) return read;
-  const entries: FsListEntry[] = [];
-  for (const entry of read.entries) {
-    if (entry.name.startsWith(".")) continue;
-    entries.push(describeEntry(path, entry.name, entry));
-  }
-  entries.sort(compareEntries);
-  const truncated = entries.length > MAX_DIR_ENTRIES;
-  return { entries: entries.slice(0, MAX_DIR_ENTRIES), truncated };
+  // W9230 (W9206-39): ORDER FIRST, THEN TRUNCATE, THEN STAT.
+  //
+  // MAX_DIR_ENTRIES bounds the RESPONSE, not the WORK. The old order described
+  // (i.e. lstat-ed) EVERY entry — including dot-names it was about to hide —
+  // and only then sorted and sliced, so a 100k-entry directory cost 100k
+  // synchronous stats on the main thread to return 200 rows. A dirent already
+  // carries `isDirectory()` and the name, which is everything the ordering
+  // needs, so the cap is applied before the first `lstatSync`.
+  const visible = read.entries.filter((entry) => !entry.name.startsWith("."));
+  visible.sort((a, b) => compareDirents(a, b));
+  const truncated = visible.length > MAX_DIR_ENTRIES;
+  const kept = visible.slice(0, MAX_DIR_ENTRIES);
+  return { entries: kept.map((entry) => describeEntry(path, entry.name, entry)), truncated };
 }
 
 function describeEntry(dir: string, name: string, dirent: Dirent): FsListEntry {
@@ -145,9 +150,15 @@ function describeEntry(dir: string, name: string, dirent: Dirent): FsListEntry {
   return { name, type, size, mtime };
 }
 
-function compareEntries(a: FsListEntry, b: FsListEntry): number {
-  const aDir = a.type === "dir" ? 0 : 1;
-  const bDir = b.type === "dir" ? 0 : 1;
+/**
+ * W9230 (W9206-39): the ordering over RAW dirents, so the cap can be applied
+ * before any `lstatSync`. The classification is the same one `describeEntry`
+ * uses (`dirent.isDirectory()`, never a followed symlink), so the resulting
+ * order is byte-identical to the previous sort over described entries.
+ */
+function compareDirents(a: Dirent, b: Dirent): number {
+  const aDir = a.isDirectory() ? 0 : 1;
+  const bDir = b.isDirectory() ? 0 : 1;
   if (aDir !== bDir) return aDir - bDir;
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 }

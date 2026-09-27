@@ -22,6 +22,27 @@ export interface AttachmentView {
   kind?: 'image' | 'text';
 }
 
+/**
+ * W9229（F-18）：文档里仍引用某条 objectURL 的附件气泡数。
+ *
+ * 同一条 URL 有两个消费者：待发条的缩略图与**已发送气泡**里的附件网格（`attachmentItem`
+ * 的 <img src> 与放大浮层的 <img src>）。清空/切换待发区时，只有**没人再引用**的 URL
+ * 才能吊销 —— 否则历史气泡会变成碎图。计数是那个判据的可观测面（可机械断言，
+ * 不是「某个函数被调用过」）。
+ */
+export function bubbleRefCount(url: string): number {
+  if (url === '') return 0;
+  const root = typeof document === 'undefined' ? null : document;
+  if (root === null) return 0;
+  // 比 getAttribute('src') 而不是 img.src：后者是**解析后**的绝对地址，而 blob: 的
+  // 解析行为在各实现间不一致（同一条 URL 可能读回不同字符串）。
+  let n = 0;
+  for (const node of Array.from(root.querySelectorAll('.attach-grid img.attach-thumb, .attach-lightbox img.attach-lightbox-img'))) {
+    if (node.getAttribute('src') === url) n += 1;
+  }
+  return n;
+}
+
 export function renderAttachmentGrid(views: readonly AttachmentView[]): HTMLElement {
   const grid = el('div', 'attach-grid');
   for (const v of views) grid.appendChild(attachmentItem(v));

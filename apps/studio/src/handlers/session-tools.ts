@@ -19,7 +19,7 @@ import type { RouteTable } from "../routes.js";
 import { effectiveGrantsOf } from "../runtime/engine-grants.js";
 import { nowSec } from "../store/grants-service.js";
 import { errText } from "../store/result.js";
-import { readSessionTools, writeSessionTools } from "../store/session-tools.js";
+import { MAX_SESSION_DISABLED_TOOLS, readSessionTools, writeSessionTools } from "../store/session-tools.js";
 import { failJson, readJsonBody, storeFail, type Deps } from "./common.js";
 
 /** The frozen response body of both endpoints (one shape, one construction). */
@@ -59,6 +59,13 @@ function registerPutSessionTools(app: Hono, deps: Deps, table: RouteTable): stri
     }
     if (raw.some((name) => (name as string).trim() === "")) {
       return failJson(c, 422, "field 'disabled' must not contain an empty tool name");
+    }
+    // W9230 (W9206-21): the list is BOUNDED. It had no ceiling at all, so a
+    // single authenticated PUT with 200000 names was accepted and persisted,
+    // making every later read/write and every per-turn deny-union O(n). 422,
+    // like the sibling caps (preset toolDeny / grant scope).
+    if (raw.length > MAX_SESSION_DISABLED_TOOLS) {
+      return failJson(c, 422, `field 'disabled' holds more than ${MAX_SESSION_DISABLED_TOOLS} tool names`);
     }
     try {
       writeSessionTools(resolved.value.dir, resolved.value.id, raw as string[], nowSec(deps.grants));

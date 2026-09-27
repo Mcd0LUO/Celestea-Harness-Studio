@@ -46,12 +46,25 @@ function numericPatch(c: Parameters<typeof failJson>[0], body: JsonObject, patch
   const maxOut = numField(c, body, "max_output_tokens");
   if (!maxOut.ok) return maxOut.response;
   if (maxOut.value !== undefined) {
+    // W9230 (W9206-08): 0 = "unset" (the pre-existing convention) and anything
+    // below 0 is REFUSED. A negative token budget used to be accepted and
+    // stored, so GET /api/config echoed a value that can never take effect.
+    if (maxOut.value < 0) return failJson(c, 400, "max_output_tokens must be >= 0 (0 = unset)");
     if (maxOut.value > U32_MAX) return failJson(c, 400, "max_output_tokens must be <= u32::MAX");
     patch.max_output_tokens = maxOut.value === 0 ? null : Math.trunc(maxOut.value);
   }
   const ctxWindow = numField(c, body, "context_window");
   if (!ctxWindow.ok) return ctxWindow.response;
-  if (ctxWindow.value !== undefined) patch.context_window = Math.trunc(ctxWindow.value);
+  if (ctxWindow.value !== undefined) {
+    // W9230 (W9206-08): the context window has NO "unset" encoding (null means
+    // "use the deployment default", not "no window"), so 0 and negatives are
+    // both refused — the same discipline max_steps already follows. A negative
+    // value used to reach agentConfigFromProfile and the statusline, which
+    // reports window:0/source:"unknown" for it, leaving the UI showing a
+    // window the config file claimed was -5.
+    if (ctxWindow.value < 1) return failJson(c, 400, "context_window must be >= 1");
+    patch.context_window = Math.trunc(ctxWindow.value);
+  }
   const steps = numField(c, body, "max_steps");
   if (!steps.ok) return steps.response;
   if (steps.value !== undefined) {

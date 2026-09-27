@@ -7,8 +7,10 @@
  * no value at all is 500.
  */
 
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import type { RouteTable } from "../routes.js";
+import type { RuntimeAdapter } from "../runtime-adapter.js";
+import { errText } from "../store/result.js";
 import { failJson, readJsonBody, strField, storeFail, type Deps } from "./common.js";
 
 function registerSpawn(app: Hono, deps: Deps, table: RouteTable): string {
@@ -34,7 +36,7 @@ function registerSpawn(app: Hono, deps: Deps, table: RouteTable): string {
       const resolved = deps.sessions.require(session.value);
       if (!resolved.ok) return storeFail(c, resolved);
     }
-    const out = await deps.runtime.workerSpawn({
+    return spawnResponse(c, deps, {
       wid: wid.ok ? (wid.value as string) : "",
       brief: brief.ok ? (brief.value as string) : "",
       title: title.ok ? title.value : undefined,
@@ -42,11 +44,28 @@ function registerSpawn(app: Hono, deps: Deps, table: RouteTable): string {
       report_to: reportTo.ok ? reportTo.value : undefined,
       session: session.ok ? (session.value ?? null) : null,
     });
-    if (out.ok) return c.json({ ok: true, sessionId: out.sessionId, title: out.title, wid: out.wid });
-    if (out.error === undefined && out.value === undefined) return failJson(c, 500, "tool returned no value");
-    return failJson(c, 502, out.error ?? "worker spawn failed", out.value === undefined ? undefined : { value: out.value });
   });
   return route.id;
+}
+
+/**
+ * W9230 (W9206-41): dispatch `workerSpawn` with a structured answer on EVERY path.
+ *
+ * The engine seam reaches the fleet RPC and can THROW; without this catch the
+ * throw escaped to Hono's default `onError`, which answers
+ * `text/plain "Internal Server Error"` — violating the frozen `{ok:false,error}`
+ * convention every other handler keeps (and the client cannot parse it).
+ */
+async function spawnResponse(c: Context, deps: Deps, req: Parameters<RuntimeAdapter["workerSpawn"]>[0]): Promise<Response> {
+  let out: Awaited<ReturnType<RuntimeAdapter["workerSpawn"]>>;
+  try {
+    out = await deps.runtime.workerSpawn(req);
+  } catch (e) {
+    return failJson(c, 502, `worker spawn failed: ${errText(e)}`);
+  }
+  if (out.ok) return c.json({ ok: true, sessionId: out.sessionId, title: out.title, wid: out.wid });
+  if (out.error === undefined && out.value === undefined) return failJson(c, 500, "tool returned no value");
+  return failJson(c, 502, out.error ?? "worker spawn failed", out.value === undefined ? undefined : { value: out.value });
 }
 
 function registerSend(app: Hono, deps: Deps, table: RouteTable): string {

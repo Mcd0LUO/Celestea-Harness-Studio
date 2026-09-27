@@ -33,7 +33,21 @@ export function readJsonIfExists(path: string): ReadOutcome<unknown> {
   } catch (e) {
     return { exists: true, error: errText(e) };
   }
-  if (text.trim() === "") return { exists: true, value: undefined };
+  // W9230 (W9206-22): an EMPTY file is an ERROR, not an empty table.
+  //
+  // This used to return `{exists:true, value:undefined}`, which the two
+  // REGISTRY stores (workspaces / providers) read as "no rows" and then wrote
+  // back — so a truncated `workspaces.json` silently unregistered every
+  // workspace and a truncated `providers.json` (0600, plaintext API keys)
+  // silently deleted every key. Both modules already document "a malformed
+  // file is a HARD error (the unreadable registry is never overwritten with an
+  // empty one)"; an empty file is exactly that case and is now reported as one.
+  //
+  // The WARNING-style readers are unaffected in substance: prompts /
+  // permissions / grants / session-tools / display-plugins / session-meta all
+  // already branch on `error` and degrade to the same empty value they produced
+  // before, now with an accurate reason instead of "is not an object".
+  if (text.trim() === "") return { exists: true, error: "file is empty" };
   try {
     return { exists: true, value: JSON.parse(text) as unknown };
   } catch (e) {

@@ -217,7 +217,7 @@ async function inputTerminal(c: Context, terminals: TerminalRegistry): Promise<R
   // decides whether a write is safe; a stream that has ENDED is still
   // `destroyed === false` for a tick and would emit EPIPE.
   if (stdin === null || stdin.destroyed || !stdin.writable) {
-    return failJson(c, 409, "this terminal's input stream is closed", { code: TERMINAL_GONE_CODE });
+    return failJson(c, 409, "the terminal's input stream is already closed", { code: TERMINAL_GONE_CODE });
   }
   // Enter is a byte the CLIENT sends (\r), so inventing one here would break
   // every REPL: the same endpoint must carry 'p' and then '\r' separately.
@@ -229,12 +229,12 @@ async function inputTerminal(c: Context, terminals: TerminalRegistry): Promise<R
     // process-killing unhandled emit; this turns the same race into the
     // structured 409 the client can act on.
     if (stdin.destroyed || !stdin.writable) {
-      return failJson(c, 409, "this terminal's input stream is closed", { code: TERMINAL_GONE_CODE });
+      return failJson(c, 409, "the terminal's input stream is already closed", { code: TERMINAL_GONE_CODE });
     }
     try {
       stdin.write(Buffer.from(text, "utf8"));
     } catch {
-      return failJson(c, 409, "this terminal's input stream is closed", { code: TERMINAL_GONE_CODE });
+      return failJson(c, 409, "the terminal's input stream is already closed", { code: TERMINAL_GONE_CODE });
     }
     entry.touchedAt = Date.now();
   }
