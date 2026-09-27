@@ -10,15 +10,31 @@
  *   - `dangling_turns`  — how many turns the LOG leaves open right now. It is a
  *     judgement about the log (K4: the log is the truth), so it is counted from
  *     the events, using the same rule as `analyzeReplay().danglingTurns`;
+ *   - `unpaired_compaction` — the log's LAST `compaction_start` has no
+ *     `compaction_end` after it, i.e. a compaction REWROTE this log and never
+ *     finished. Also a judgement about the log (the same `events()`), and the
+ *     only surface docs/pitfalls.md P12's failure has ever had: W2020 moved the
+ *     closing append to the caller, so "rewrite landed, rebind failed" leaves
+ *     the pair open. The pre-compaction history is then gone from the log and
+ *     survives only in `cli-main.jsonl.precompact`;
  *   - `degraded`        — the log and the disk forked (`writeErrorCount>0`, G1-6);
  *   - `last_outcome`    — the phase of the LAST `turn_end` in the log, which is
  *     what "was the previous turn interrupted?" really asks.
  *
  * Nothing here composes an instance: a session with no live generation reports
  * the empty block (zeros, no turns) rather than waking an engine for a poll.
+ *
+ * W2022 — why the empty block answers `unpaired_compaction: false` and not
+ * `null`: this block describes the LIVE generation. It reads the sidecar next to
+ * a live log, but it never opens a log of its own (the statusline polls this
+ * endpoint every 2s; an unbounded log read per poll is load, not a diagnostic),
+ * so "no unpaired compaction" is asserted at exactly the strength the sibling
+ * `degraded: false` already is. The state becomes visible the moment the session
+ * is composed again — which is the moment an operator would look at it.
  */
 
 import { outcomePhase, type SessionEvent, type SessionLog } from "@celestea/core";
+import { hasUnpairedCompactionStart } from "@celestea/runtime";
 import { checkpointStoreOf, writeErrorCountOf } from "@celestea/session";
 
 /** The `recovery` block of `/api/status` (a pure addition, always present). */
@@ -28,6 +44,14 @@ export interface RecoveryView {
   recovered_turns: string[];
   /** `turn_start` rows without a `turn_end` right now. */
   dangling_turns: number;
+  /**
+   * True when the log's LAST `compaction_start` was never closed — a compaction
+   * rewrote this log and did not finish (P12). Not the same question as
+   * `dangling_turns`: that one is a TURN the engine repairs on boot, this one is
+   * a HISTORY REWRITE nothing repairs (`cli-main.jsonl.precompact` is the only
+   * rollback), and a P12 log can be perfectly closed turn-wise.
+   */
+  unpaired_compaction: boolean;
   /** True when the session log has refused a write (disk ≠ memory). */
   degraded: boolean;
   /** Phase of the log's last `turn_end` (null = the log has no closed turn). */
@@ -36,7 +60,7 @@ export interface RecoveryView {
 
 /** The empty block: no live instance, no checkpoint, no log. */
 export function emptyRecoveryView(session: string | null): RecoveryView {
-  return { session, recovered_turns: [], dangling_turns: 0, degraded: false, last_outcome: null };
+  return { session, recovered_turns: [], dangling_turns: 0, unpaired_compaction: false, degraded: false, last_outcome: null };
 }
 
 /** Build the block from the session's LIVE log (a checkpointed one, normally). */
@@ -50,6 +74,10 @@ export function recoveryViewOf(log: SessionLog | null | undefined, session: stri
     session,
     recovered_turns: repaired.map((r) => r.turn_id),
     dangling_turns: danglingOf(events),
+    // W2022: the P12 signal, from the SAME events the line above counts — the
+    // markers are log-structural rows, so they are in `events()` even though
+    // `deriveMessages()` projects them to nothing (see markers.ts).
+    unpaired_compaction: hasUnpairedCompactionStart(events),
     // The LIVE counter wins over the sampled one: it is the same number the log
     // itself reports right now, and a sticky `>0` in the sidecar keeps a past
     // fork visible even after a healthy restart (which is intended).

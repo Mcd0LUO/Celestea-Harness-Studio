@@ -71,6 +71,11 @@ describe("GET /api/status.recovery (E §1.3 P1 ②)", () => {
       session: SESSION,
       recovered_turns: ["turn-4"],
       dangling_turns: 0,
+      // W2022: a pure addition, so the key is here too. The log this test plants
+      // carries NO compaction marker at all (the production shape), and that is
+      // exactly why the value is false — see w2022-unpaired-visible.test.ts for
+      // the planted-marker directions.
+      unpaired_compaction: false,
       degraded: false,
       // The LOG is the truth (K4): its last turn_end is `completed`.
       last_outcome: "completed",
@@ -104,7 +109,7 @@ describe("GET /api/status.recovery (E §1.3 P1 ②)", () => {
   it("a session with no live instance answers the EMPTY block (a poll never composes)", async () => {
     const h = make({ sessions: { s1: turns(1) } });
     const status = await getJson(h.app, `/api/status?session=${encodeURIComponent(SESSION)}`);
-    expect(status.body["recovery"]).toEqual({ session: SESSION, recovered_turns: [], dangling_turns: 0, degraded: false, last_outcome: null });
+    expect(status.body["recovery"]).toEqual({ session: SESSION, recovered_turns: [], dangling_turns: 0, unpaired_compaction: false, degraded: false, last_outcome: null });
   });
 
   it("the checkpoint decorator is what makes the block real: a live turn writes it", async () => {

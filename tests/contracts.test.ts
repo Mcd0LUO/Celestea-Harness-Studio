@@ -353,6 +353,16 @@ describe("E-P0③ checkpoint + boot recovery (contract delta)", () => {
     const recovery = byId.get("get_status")?.response.fields.find((f) => f.name === "recovery");
     expect(String(recovery?.type)).toContain("recovered_turns:array<string>");
     expect(String(recovery?.type)).toContain("dangling_turns:integer");
+    // W2022: the same block now carries the P12 signal (the log's last
+    // `compaction_start` was never closed). SYNC, not a relaxation: the field is
+    // a pure addition on an EXISTING endpoint — `FROZEN_COUNTS` freezes endpoints
+    // (70), SSE events and tools, never response FIELDS — so this type literal is
+    // the only place the wire shape is written down, and it must name every key
+    // the server actually sends. Nothing was loosened to make room for it: the
+    // assertion is still an exact `toContain` on the type literal, plus a check
+    // that the note documents the new key.
+    expect(String(recovery?.type)).toContain("unpaired_compaction:boolean");
+    expect(String(recovery?.note)).toContain("unpaired_compaction");
     // capability 2-P0: `stale[]` / `orphans[]` on the EXISTING worker status.
     const worker = byId.get("get_worker_status")?.response.fields.map((f) => f.name) ?? [];
     expect(worker).toContain("stale");
