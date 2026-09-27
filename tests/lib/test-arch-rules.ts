@@ -40,6 +40,11 @@ export const WORKER_RULES: readonly NamedRule[] = Object.freeze([
     test: (c) => /half < vitestDefault \? half : undefined/.test(c),
   },
   {
+    name: "ci-not-throttled",
+    why: "核数不够多时不得设上限（4 核 CI 上把 3 降到 2 实测慢 49%），必须用 vitest 默认",
+    test: (c) => /cores >= MIN_CORES_TO_CAP && half < vitestDefault \? half : undefined/.test(c),
+  },
+  {
     name: "env-override",
     why: "必须支持 CELESTEA_TEST_WORKERS 显式覆盖",
     test: (c) => c.includes("CELESTEA_TEST_WORKERS"),

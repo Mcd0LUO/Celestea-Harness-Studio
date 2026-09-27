@@ -75,7 +75,7 @@ const TEST_WORKERS = (() => {
     const n = Number(raw);
     return Number.isFinite(n) && n > 0 ? Math.trunc(n) : undefined;
   }
-  // Default: HALF the cores — and only ever LOWER, never raise.
+  // Default: HALF the cores — but ONLY on a machine big enough to need the courtesy.
   //
   // vitest's own default is max(availableParallelism() - 1, 1) (NOT the core
   // count). Two earlier attempts here raised it on a 4-core runner and broke CI:
@@ -83,16 +83,23 @@ const TEST_WORKERS = (() => {
   //   v2  min(8, max(cores-1, 1))  -> theoretically equal, but CI started failing
   //                                    main.test.ts's SIGTERM case at that commit
   //                                    (unreproducible here: that suite SKIPS on Windows).
-  // So: emit a cap ONLY when it is strictly below vitest's default. When it is not,
-  // emit nothing — the config is then identical to having no cap, so CI cannot move.
+  // So the cap may only ever LOWER, never raise.
   //
-  //   32-core dev box -> default 31, half = 16 -> cap to 16
+  // ★ 但「只降」本身也会伤 CI —— 这是我第三版才发现的问题（W9224 实测）：
+  //   4 核 runner 上 vitest 默认 3，半核 = 2 ⇒ 我们把 CI 从 3 降到 2。
+  //   实测全量：2 workers **87.6 s** vs 3 workers **58.9 s** —— 慢 **49%**。
+  //   根因：这台机器是 CI（一次性容器），不是被人占用的开发机；把它压到 2
+  //   只是白白损失吞吐。半核上限的本意是「开发机核多时别把整机占满」。
+  //   所以加一道门槛：**核数不够多就不设上限**，直接用 vitest 的默认。
+  //
+  //   32-core dev box -> default 31, half = 16 -> cap to 16（机器仍可用）
   //    8-core laptop  -> default  7, half =  4 -> cap to  4
-  //    4-core CI      -> default  3, half =  2 -> cap to  2 (a LOWER, i.e. safer)
+  //    4-core CI      -> default  3, 不设上限 -> 用 3（与改动前一致，不再变慢）
+  const MIN_CORES_TO_CAP = 8;
   const cores = availableParallelism();
   const vitestDefault = Math.max(cores - 1, 1);
   const half = Math.max(Math.floor(cores / 2), 1);
-  return half < vitestDefault ? half : undefined;
+  return cores >= MIN_CORES_TO_CAP && half < vitestDefault ? half : undefined;
 })();
 
 const E2E = process.env.CELESTEA_E2E === "1";

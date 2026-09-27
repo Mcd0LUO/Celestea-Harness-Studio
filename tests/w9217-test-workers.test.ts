@@ -49,13 +49,13 @@ describe("W9217 · 测试并发上限只在真的降低时才设", () => {
   it("③ ★ 调包用例：删一条旧规则 + 加一条等价新规则、条数不变 ⇒ 必须变红", () => {
     // 真实调包：把「只降不升」判定换成一条**看起来等价**的规则（恒真），规则条数不变。
     const swapped = CONFIG.replace(
-      "return half < vitestDefault ? half : undefined;",
-      "return half; // SWAPPED: 去掉「只降不升」的闸门",
+      "return cores >= MIN_CORES_TO_CAP && half < vitestDefault ? half : undefined;",
+      "return half; // SWAPPED: 去掉「只降不升」与「CI 不降速」两道闸门",
     );
     expect(swapped, "前置：调包确实改了配置").not.toBe(CONFIG);
     // 条数不变 —— 「数条数」的门禁在这里会假绿。
     // 用**字面量**钉住条数（不能写 `expect(X.length).toBe(X.length)`，那是恒真的假断言）。
-    expect(WORKER_RULES.length, "规则条数必须被字面量钉住（删规则即红）").toBe(8);
+    expect(WORKER_RULES.length, "规则条数必须被字面量钉住（删规则即红）").toBe(9);
     // 按名判定必须抓到 only-lower 缺失。
     const missing = missingRules(WORKER_RULES, swapped);
     expect(missing, "★ 调包必须变红（按名抓到 only-lower 缺失）").toContain("only-lower");
