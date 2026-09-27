@@ -324,6 +324,11 @@
 
 /* 图片灯箱。 */
 .img-zoom {
+  /* W2007：值 60 保持不动，但**语义变了**。原本它与 .settings-page(旧 50) 的相对序
+     是「灯箱在上」；设置页提到 70 后变成「设置页在上」。这条变化**不可观测**：
+     灯箱 inset:0 铺满视口且盖住侧栏的「设置」入口 ⇒ 灯箱开着时点不到设置入口，
+     二者不可能由用户操作同时可见（真机 CDP 已确认入口不可命中）。
+     语义上灯箱是模态时刻，本该与 .modal-scrim 同层；本轮不改值，登记 LEGACY_MAGIC。 */
   position: fixed; inset: 0; z-index: 60;
   background: var(--c-overlay);
   display: flex; align-items: center; justify-content: center;
@@ -371,6 +376,9 @@
 }
 
 /* ---- 弹层 ---- */
+/* W2007：.modal 在本仓**已无调用点**（弹窗统一走 sessions.css 的 .modal-scrim；
+   grep 全仓无写入 class="modal" 的代码路径）。它的 50 保持原值不动 —— 改一条
+   **不可达**规则的值无法用任何真机路径证明无回归；登记进门禁的 LEGACY_MAGIC 表。 */
 .modal {
   position: fixed; inset: 0; z-index: 50;
   background: var(--c-overlay);

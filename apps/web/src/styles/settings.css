@@ -6,7 +6,12 @@
  * ============================================================================ */
 
 .settings-page {
-  position: fixed; inset: 0; z-index: 50;
+  /* W2007：原为裸魔数 50 —— 桌面端碰巧够用（#sidebar 是 position:static，不参与层叠），
+     移动端却低于 responsive.css 的抽屉（61）与遮罩（60），用户点「设置」后
+     会话树直接盖在设置页上（真机 390x844 复现，中心点命中 #sessionTree）。
+     改走 --z-settings(70)：高于抽屉(--z-drawer 61)与所有页内浮层，
+     仍低于二级弹窗(--z-modal 80) —— 从设置页里打开的弹窗照旧盖得住它。 */
+  position: fixed; inset: 0; z-index: var(--z-settings);
   background: var(--c-overlay);
   display: flex; align-items: flex-start; justify-content: center;
   padding: 34px 24px 24px;
