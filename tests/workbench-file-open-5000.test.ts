@@ -139,7 +139,12 @@ describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）'
     const srv = pagedServer(lines);
     const { wb } = await setup(srv.fetch);
     await clickFile(wb, 'big.ts');
-    await waitFor(() => shownLines() === 5000, 'the stream to finish (5000 lines)');
+    // ★ 必须传显式超时：waitFor 的默认上限是 5000ms，而本用例（5000 行 × ≈150 字符
+    //   = 750 KB 走分段流式 + hljs 分块高亮）**单条实测 7.8–11.3s**（见文件头注）——
+    //   默认 5s 会让它在机器有负载时**必红**（全量 check 里实测 9.2s 超时）。
+    //   30s 与 vitest.config.ts 的 testTimeout 同口径：既覆盖正常耗时，又保证
+    //   「真的坏了」依旧快速失败，而不是永远等下去。
+    await waitFor(() => shownLines() === 5000, 'the stream to finish (5000 lines)', 30_000);
     expect(q('.preview-degrade'), '★ 不许降级成「文件过大」').toBeNull();
     expect(shownLines(), '★ DOM 行数必须等于服务端 totalLines').toBe(5000);
     expect(shownText(), '★ 逐字节等于完整文件').toBe(expected);
