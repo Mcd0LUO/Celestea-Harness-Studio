@@ -9,7 +9,7 @@
 // ============================================================================
 import { el } from '../../utils/dom';
 import type { SessionPane } from '../viewctx';
-import { t } from '../../i18n';
+import { deviceCopy } from '../viewport'; // W2023：设备能力分流（唯一真源）
 
 /** W12：距底阈值（NN/G：只在真正接近底部时跟随，避免把读者拉回）。 */
 export const AT_BOTTOM_PX = 25;
@@ -97,7 +97,8 @@ export function renderEmptyHint(ctx: SessionPane): void {
   hint.appendChild(el('div', 'empty-mark', '◇'));
   hint.appendChild(el('div', 'empty-title', 'Celestea Studio'));
   hint.appendChild(
-    el('div', 'empty-sub', t('chat.empty.hint')),
+    // W2023：与 viewctx.buildEmptyHint 同一分流点（触摸设备没有 Shift 键）。
+    el('div', 'empty-sub', deviceCopy('chat.empty.hint', 'chat.empty.hintTouch')),
   );
   ctx.el.appendChild(hint);
   ctx.hint = hint;

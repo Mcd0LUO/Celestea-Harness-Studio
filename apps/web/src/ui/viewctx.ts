@@ -7,7 +7,7 @@
 // ============================================================================
 import { S } from '../state';
 import { el } from '../utils/dom';
-import { t } from '../i18n';
+import { deviceCopy, onInputCapabilityChange } from './viewport'; // W2023：设备能力分流（唯一真源）
 import type { StatusSnapshot } from '../types';
 import type { AssistantView, DedupState, ThinkSeg, ToolCardRef } from './view';
 import { newRenderCadence, type RenderCadence } from './messages/cadence'; // W867：渲染节拍字段族
@@ -85,9 +85,26 @@ function buildEmptyHint(): HTMLElement {
   hint.appendChild(el('div', 'empty-mark', '◇'));
   hint.appendChild(el('div', 'empty-title', 'Celestea Studio'));
   hint.appendChild(
-    el('div', 'empty-sub', t('chat.empty.hint')),
+    // W2023：空态引导同样按设备能力分流（触摸设备没有 Shift 键）。
+    el('div', 'empty-sub', deviceCopy('chat.empty.hint', 'chat.empty.hintTouch')),
   );
   return hint;
+}
+
+/**
+ * W2023：输入能力位翻转后重写**已画出**的空态引导文案。
+ *
+ * 为什么需要：空态是每个容器建容器时画一次的（buildEmptyHint / renderEmptyHint），
+ * 不跟着能力位走的话，DevTools 开关设备仿真后会留下旧文案 —— 而占位符那边已经
+ * 更新了，同一屏两处口径不一致。这里只改 .empty-sub 的 textContent：不重建节点
+ * （铁律 4/5），容器里若没有空态就什么都不做。
+ */
+function refreshEmptyHints(): void {
+  const text = deviceCopy('chat.empty.hint', 'chat.empty.hintTouch');
+  for (const pane of panes.values()) {
+    const sub = pane.hint?.querySelector<HTMLElement>('.empty-sub');
+    if (sub) sub.textContent = text;
+  }
 }
 
 /** 新建一个会话视图容器（离屏构建 → 单次挂载；不触碰其它容器）。 */
@@ -402,6 +419,8 @@ export function initViewCtx(): SessionPane {
   host = document.getElementById('messages');
   if (!host) throw new Error('missing element: #messages');
   initialized = true;
+  // W2023：设备输入能力位翻转 ⇒ 重写空态引导（与 inputbar 的占位符同一触发源）。
+  onInputCapabilityChange(refreshEmptyHints);
   const pane = activatePane(LOCAL_ID);
   const input = document.querySelector<HTMLTextAreaElement>('#input');
   if (input) {

@@ -35,6 +35,7 @@ import { mountCaretMirror, type CaretMirror } from './inputbar/caret-mirror'; //
 // W2016：输入框自增长的能力开关（field-sizing 支持时 autoGrow 是 no-op）。
 import { createAutoGrow, MAX_HEIGHT, type GrowFn } from './inputbar/grow';
 import { t } from '../i18n';
+import { deviceCopy, onInputCapabilityChange } from './viewport'; // W2023：设备能力分流（唯一真源）
 import { paintModeButton, paintSendButton } from './inputbar/button-labels';
 import { interceptKey as interceptCommandKey } from './commands'; // A3：命令补全框按键拦截
 export { refreshAttachmentTray }; // 既有调用方（chat.ts / send.ts / 测试）不变
@@ -64,9 +65,15 @@ export type InputMode = 'idle' | 'interject' | 'worker';
  */
 let autoGrow: GrowFn = () => {};
 
-/** 占位符（函数：语言切换后必须跟着变；W846 只说明输入行为，不重复状态词）。 */
+/**
+ * 占位符（函数：语言切换后必须跟着变；W846 只说明输入行为，不重复状态词）。
+ *
+ * W2023：空闲档是**唯一**提到 Shift+Enter 的档位（插话 / 排队 / worker 三档只说
+ * Enter 与 Ctrl/Cmd）。触摸设备没有 Shift 键 ⇒ 那条提示教不会用户任何东西，故按
+ * 设备能力换词；分流点唯一（ui/viewport.ts 的 deviceCopy），不在这里再判一次。
+ */
 function placeholderIdle(): string {
-  return t('chat.input.placeholderIdle');
+  return deviceCopy('chat.input.placeholderIdle', 'chat.input.placeholderIdleTouch');
 }
 function placeholderSteer(): string {
   return t('chat.input.placeholderSteer');
@@ -107,6 +114,24 @@ export function setSubmitMode(mode: SubmitMode): void {
 /** 两条车道互切（小切换按钮 / Ctrl+Enter 之外的入口）。 */
 export function toggleSubmitMode(): void {
   setSubmitMode(submitMode === 'steer' ? 'queue' : 'steer');
+}
+
+/**
+ * 当前模式该显示的占位符（**唯一**的「模式 × 车道 → 文案」映射）。
+ *
+ * W2023：抽出来是因为写占位符现在有两个触发源（模式/车道变化、输入能力变化）。
+ * 原来这段三元表达式同时写在 renderSubmitUi 与 setInputMode 里 —— 再给能力变化加
+ * 第三个副本，正是本仓复盘 §1.4「同一个判定抄三遍必漏一处」要防的事。
+ */
+function placeholderFor(mode: InputMode): string {
+  if (mode === 'worker') return placeholderWorker();
+  if (mode === 'interject') return submitMode === 'steer' ? placeholderSteer() : placeholderQueue();
+  return placeholderIdle();
+}
+
+/** 按当前模式重写占位符（装配时与能力位变化后都走这里）。 */
+function paintPlaceholder(): void {
+  if (inputEl) inputEl.placeholder = placeholderFor(inputMode);
 }
 
 /** 车道相关 UI 重绘（切换按钮 / 占位符 / 发送按钮文案）——只改文案与 class。 */
@@ -166,6 +191,15 @@ export function initInputBar(h: InputBarHandlers): void {
     caret = null;
   }
   initAttachmentEntries(input, bar);
+  // W2023：**装配时就要按设备能力写一次**。index.html 的 data-i18n-placeholder 只是
+  // JS 起来之前那一帧的兜底，而它只能填一个 key（桌面版）—— 不在这里重写，触摸设备
+  // 会一直显示「Shift+Enter 换行」直到第一次 setInputMode()，正是本轮要修的缺陷。
+  paintPlaceholder();
+  // W2023：输入能力位翻转（DevTools 设备仿真开关 / 二合一插拔鼠标）⇒ 重算占位符。
+  // 只重画文案，不动 DOM、不动模式（铁律 4/5）。
+  onInputCapabilityChange(() => {
+    if (inputEl) inputEl.placeholder = placeholderFor(inputMode);
+  });
   renderSubmitUi();
   window.setTimeout(() => autoGrow(), 0);
   window.setTimeout(() => caret?.sync(), 0);
@@ -214,14 +248,7 @@ export function setInputMode(mode: InputMode): void {
   }
   if (modeBtn) modeBtn.classList.toggle('hidden', mode !== 'interject');
   if (input) {
-    input.placeholder =
-      mode === 'worker'
-        ? placeholderWorker()
-        : mode === 'interject'
-          ? submitMode === 'steer'
-            ? placeholderSteer()
-            : placeholderQueue()
-          : placeholderIdle();
+    input.placeholder = placeholderFor(mode); // W2023：唯一映射（见 placeholderFor）
     input.readOnly = false; // 三种模式都可打字（草稿保活）
   }
   renderSubmitUi();

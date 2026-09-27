@@ -25,6 +25,9 @@ export const chat = {
   'chat.rail.centerNear': '第 {n} 轮附近（视口中间）',
   'chat.msg.system': '系统',
   'chat.empty.hint': '在下方输入消息开始对话 · Enter 发送 · Shift+Enter 换行',
+  // W2023：触摸设备**没有 Shift 键** —— 教它按 Shift 等于没教（真机实测：软键盘
+  // Enter 的 shiftKey 恒为 false，按下去只会发送）。故触摸档只陈述 Enter 的行为。
+  'chat.empty.hintTouch': '在下方输入消息开始对话 · Enter 发送',
   'chat.user.you': '你',
   'chat.user.steering': '插话',
   'chat.user.queued': '排队',
@@ -231,6 +234,8 @@ export const chat = {
   'chat.wb.term.notStarted': '终端没有打开',
   'chat.wb.term.retry': '重试',
   'chat.input.placeholderIdle': '输入消息，Enter 发送，Shift+Enter 换行',
+  // W2023：触摸档（无物理 Shift 键）。选取见 ui/viewport.ts 的 isTouchInput。
+  'chat.input.placeholderIdleTouch': '输入消息，Enter 发送',
   'chat.input.placeholderSteer': 'Enter 插话（下一步送达）· Ctrl/Cmd+Enter 排队（下一回合送达）',
   'chat.input.placeholderQueue': 'Enter 排队（本轮结束后送达）· Ctrl/Cmd+Enter 插话（下一步送达）',
   'chat.input.placeholderWorker': '对 worker 说点什么（送入它的收件箱，它空闲时会开新一轮）',
