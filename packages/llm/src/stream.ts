@@ -13,7 +13,11 @@
  *   * the terminal event is exactly one of done / failed / interrupted — an
  *     idle stall yields failed{kind:"timeout"}, a mid-stream decode error
  *     failed{kind:"stream"}, and a stream that ends without [DONE] yields
- *     interrupted. Never a fake done (R1).
+ *     interrupted. Never a fake done (R1);
+ *   * W2017: a provider that stopped on the token cap (`finish_reason:"length"`)
+ *     is reported as `done.truncated === true`. The turn still ends as done —
+ *     a truncated answer IS an answer, and "the budget ran out" is not a
+ *     transport failure — but the fact is no longer invisible.
  */
 
 import type http from "node:http";
@@ -22,6 +26,7 @@ import { StringDecoder } from "node:string_decoder";
 import { streamIdleTimeoutMessage } from "./errors.js";
 import { SseDecoder, type SseFrame } from "./sse/frames.js";
 import {
+  isTruncationFinishReason,
   parseArguments,
   parseRawChunk,
   parseStreamError,
@@ -45,6 +50,13 @@ interface ToolCallAcc {
 export class TurnAccumulator {
   #text = "";
   #usage: Usage | null = null;
+  /**
+   * W2017: latched once the provider says it stopped on the token cap. Latched
+   * (never cleared) on purpose: the reason arrives on the LAST delta frame and
+   * a later frame carrying "stop" would be the provider contradicting itself —
+   * the turn is still the prefix that ran out of budget.
+   */
+  #truncated = false;
   readonly #calls = new Map<number, ToolCallAcc>();
 
   /** Fold one decoded chunk in; returns the live events it produced. */
@@ -62,6 +74,7 @@ export class TurnAccumulator {
       for (const fragment of choice.toolCalls) this.#addFragment(fragment);
     }
     if (chunk.usage !== undefined) this.#usage = chunk.usage;
+    if (isTruncationFinishReason(chunk.finishReason)) this.#truncated = true;
     return events;
   }
 
@@ -76,6 +89,11 @@ export class TurnAccumulator {
   /** The last seen provider usage (usage-only final frame or last chunk). */
   get usage(): Usage | null {
     return this.#usage;
+  }
+
+  /** W2017: true when the provider reported `finish_reason:"length"`. */
+  get truncated(): boolean {
+    return this.#truncated;
   }
 
   /** The assembled assistant turn (text first, then tool calls by index). */
@@ -252,7 +270,15 @@ export async function* streamEvents(
     yield { kind: "interrupted" };
     return;
   }
-  yield { kind: "done", message: turn.doneMessage() };
+  // W2017: the truncation fact rides the terminal event. It is ADDITIVE — the
+  // key is written only when the provider actually reported "length", so a
+  // stream without the reason yields the byte-identical `{kind,message}` it
+  // always did, and a decorator that rebuilds the event (retry/fallback) must
+  // copy the key explicitly to keep the fact alive.
+  const message = turn.doneMessage();
+  yield turn.truncated
+    ? { kind: "done", message, truncated: true }
+    : { kind: "done", message };
 }
 
 /** Map a body-read failure onto its terminal event (R1: never a fake done). */

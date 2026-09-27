@@ -36,6 +36,17 @@ export interface RawChunk {
   choices: RawChoiceDelta[];
   /** Provider-reported usage, when the chunk carries some. */
   usage?: Usage;
+  /**
+   * W2017: the provider's own `choices[].finish_reason`, verbatim, when the
+   * chunk carries one. Absent for every chunk that does not — which is most of
+   * them, and every chunk of a provider that never sends the field.
+   *
+   * The value is deliberately NOT normalized here (the raw wire vocabulary is
+   * kept: "stop" | "length" | "tool_calls" | "content_filter" | ...), so a
+   * consumer needing a wider classification than [isTruncationFinishReason]
+   * still has the fact.
+   */
+  finishReason?: string;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -68,6 +79,42 @@ export function extractReasoning(chunk: unknown): string | undefined {
     if (reasoning !== undefined && reasoning !== "") parts.push(reasoning);
   }
   return parts.length === 0 ? undefined : parts.join("");
+}
+
+/**
+ * W2017: the FIRST non-empty `choices[].finish_reason` of one payload, or
+ * undefined when the payload carries none.
+ *
+ * "First" is a deliberate choice, not an accident: `n > 1` is the only way a
+ * payload has two reasons at once, and the harness always sends `n = 1`. The
+ * value is returned verbatim (no normalization) so the caller can tell "length"
+ * from "stop"; blank strings and non-string values are "absent", never "".
+ */
+export function finishReasonOf(chunk: unknown): string | undefined {
+  if (!isRecord(chunk)) return undefined;
+  const choices = chunk["choices"];
+  if (!Array.isArray(choices)) return undefined;
+  for (const choice of choices) {
+    if (!isRecord(choice)) continue;
+    const reason = str(choice["finish_reason"]);
+    if (reason !== undefined && reason !== "") return reason;
+  }
+  return undefined;
+}
+
+/**
+ * W2017: true for the ONE finish_reason the harness must not ignore — the
+ * provider stopped because the output hit the request's token cap, so whatever
+ * arrived is a PREFIX (a half sentence, a half JSON tool-call argument).
+ *
+ * "length" is OpenAI's documented value and the one the repo has observed live
+ * (docs/feature-multimodal-attachments/01-evidence.md:104). The comparison is
+ * case-insensitive and trimmed because gateways do not all forward the string
+ * byte-identically; every other value ("stop", "tool_calls", "content_filter",
+ * a value from a future provider, ...) and an ABSENT reason are false.
+ */
+export function isTruncationFinishReason(reason: string | undefined): boolean {
+  return reason !== undefined && reason.trim().toLowerCase() === "length";
 }
 
 /** Parse one tool_calls array entry into a fragment. */
@@ -118,6 +165,7 @@ export function parseRawChunk(data: string): RawChunk | undefined {
   if (!isRecord(value)) return undefined;
 
   const reasoning = extractReasoning(value);
+  const finishReason = finishReasonOf(value);
   const usage = parseUsage(value);
   const choices: RawChoiceDelta[] = [];
   const rawChoices = value["choices"];
@@ -128,10 +176,24 @@ export function parseRawChunk(data: string): RawChunk | undefined {
     }
   }
 
-  if (reasoning === undefined && choices.length === 0 && usage === undefined) return undefined;
+  // W2017: a finish_reason-only frame (the provider's LAST frame often carries
+  // the reason with an empty delta) is a fact, not noise — dropping it here is
+  // exactly how a truncated turn used to become invisible.
+  if (
+    reasoning === undefined &&
+    choices.length === 0 &&
+    usage === undefined &&
+    finishReason === undefined
+  ) {
+    return undefined;
+  }
   const chunk: RawChunk = { choices };
   if (reasoning !== undefined) chunk.reasoning = reasoning;
   if (usage !== undefined) chunk.usage = usage;
+  // Only ever set when the wire carried it: an absent finish_reason must leave
+  // the key OFF the object (no `finishReason: undefined`), so a consumer that
+  // enumerates keys sees exactly what the provider sent.
+  if (finishReason !== undefined) chunk.finishReason = finishReason;
   return chunk;
 }
 
