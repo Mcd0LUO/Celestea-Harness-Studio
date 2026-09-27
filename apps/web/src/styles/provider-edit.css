@@ -75,7 +75,7 @@
   opacity: 1;
 }
 .prov-effort-kill:focus-visible {
-  outline: 2px solid var(--c-accent-ring);
+  outline: 2px solid var(--c-focus-ring);
   outline-offset: 1px;
   border-radius: var(--r-sm);
 }
@@ -100,7 +100,7 @@
   padding: 4px 14px; cursor: pointer;
 }
 .prov-modality-chip:hover { border-color: var(--c-accent-ring); color: var(--c-text-1); }
-.prov-modality-chip:focus-visible { outline: 2px solid var(--c-accent-ring); outline-offset: 1px; }
+.prov-modality-chip:focus-visible { outline: 2px solid var(--c-focus-ring); outline-offset: 1px; }
 /* 「支持」= 实心强调 + 对勾，不让颜色单独承载语义（可访问性）。 */
 .prov-modality-chip.on {
   background: var(--c-accent-soft); border-color: var(--c-accent-ring);

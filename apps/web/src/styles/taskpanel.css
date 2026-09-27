@@ -35,7 +35,7 @@
   border: none; background: none; padding: 0;
   color: var(--c-text-2); font: inherit; text-align: left; cursor: pointer;
 }
-.tp-head:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--c-accent-ring); border-radius: var(--r-sm); }
+.tp-head:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--c-focus-ring); border-radius: var(--r-sm); }
 .tp-chev {
   flex: 0 0 auto; color: var(--c-text-3); font-size: 9px; line-height: 1;
   transition: transform .12s ease;

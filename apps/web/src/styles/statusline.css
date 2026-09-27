@@ -176,7 +176,7 @@
   background: var(--c-accent-soft);
 }
 .sl-model:focus-visible, .sl-effort:focus-visible, .sl-mode:focus-visible {
-  outline: 1px solid var(--c-accent-ring);
+  outline: 1px solid var(--c-focus-ring);
   outline-offset: 1px;
 }
 
@@ -421,7 +421,7 @@
   color: var(--c-text-1);
 }
 .sl-mode-btn:focus-visible {
-  outline: 1px solid var(--c-accent-ring);
+  outline: 1px solid var(--c-focus-ring);
   outline-offset: 1px;
 }
 .sl-mode-btn.hidden { display: none; }

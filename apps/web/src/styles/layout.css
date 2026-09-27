@@ -319,7 +319,7 @@ body.resizing { cursor: col-resize; user-select: none; }
      · 鼠标点击也可见（`:focus-visible` 只覆盖键盘），符合「输入框是当前输入目标」的直觉。
    inset 让环画在框内，不改变外部几何、也不会被 .chat-shell 的圆角裁掉。 */
 #inputbar:focus-within {
-  box-shadow: inset 0 0 0 1px var(--c-accent-ring);
+  box-shadow: inset 0 0 0 1px var(--c-focus-ring);
 }
 /* W847：图片入口收进输入框内联 —— .input-box 承担原 #input 的 flex 槽位，
    #btnAttach 绝对定位在框内左下角（出流 ⇒ 不改变 #inputbar 行宽）。 */
