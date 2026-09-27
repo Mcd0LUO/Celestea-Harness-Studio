@@ -10,14 +10,26 @@
  *   - `compactSession` compacts `<dir>/cli-main.jsonl`, and when an instance is
  *     live it is EVICTED first and composed again afterwards: the compaction
  *     rewrites the file behind the log's descriptor, so reusing the old instance
- *     would keep serving the pre-compaction history from memory. W825 P0: when
+ *     would keep serving the pre-compaction history from memory. W2020: that
+ *     rebuild is also what CLOSES the compaction's marker pair — the trailing
+ *     `compaction_end` is written only once the rebind succeeded, so a rebind
+ *     failure leaves an unpaired `compaction_start` on disk (P12's named
+ *     failure, which was invisible while the append lived in `runCompaction`).
+ *     W825 P0: when
  *     `evict` REFUSES (a pinned instance with live worker work, or a busy one)
  *     the log is NOT rewritten at all — no orphaned descriptor, no false
  *     `rebound` — and `rebound:true` is reported only for a verified rebuild.
  */
 
 import { join } from "node:path";
-import { keyOfSession, runCompaction, type SessionRuntimeRegistry, type Summarizer } from "@celestea/runtime";
+import {
+  installCompactionEnd,
+  keyOfSession,
+  runCompaction,
+  type CompactionResult,
+  type SessionRuntimeRegistry,
+  type Summarizer,
+} from "@celestea/runtime";
 import { EngineError, type ClearOutcome, type CompactOutcome } from "../runtime-adapter.js";
 import { TurnBusyError } from "@celestea/runtime";
 import { SESSION_LOG_NAME, type SessionTarget } from "./engine-session.js";
@@ -70,15 +82,29 @@ export async function compactSession(deps: SessionLifecycleDeps, session: string
       return { compacted: false, note: PINNED_NOTE, session, rebound: false };
     }
   }
-  const result = await runCompactionOf(deps, join(target.dir, SESSION_LOG_NAME));
+  const logPath = join(target.dir, SESSION_LOG_NAME);
+  const result = await runCompactionOf(deps, logPath);
   let rebound = false;
-  if (before !== null) {
-    const after = deps.registry.ensure(session, target.dir);
-    // rebound is a FACT, not a promise: only a genuinely NEW runtime counts. A
-    // refused evict returns above, so this can never claim a rebuild that did
-    // not happen.
-    rebound = result.compacted && after.runtime !== before.runtime;
+  try {
+    if (before !== null) {
+      const after = deps.registry.ensure(session, target.dir);
+      // rebound is a FACT, not a promise: only a genuinely NEW runtime counts. A
+      // refused evict returns above, so this can never claim a rebuild that did
+      // not happen.
+      rebound = result.compacted && after.runtime !== before.runtime;
+    }
+  } catch (e) {
+    // W2020: THE P12 FAILURE. The log has already been rewritten (its history
+    // now survives only in `cli-main.jsonl.precompact`) and the engine could
+    // not be rebound onto it. Returning here — before the pair is closed — is
+    // the whole point of moving the end marker out of `runCompaction`: the log
+    // keeps an UNPAIRED `compaction_start`, so this half-finished state is
+    // distinguishable from an ordinary session instead of looking complete.
+    throw new EngineError(`重绑引擎失败：${e instanceof Error ? e.message : String(e)}`);
   }
+  // Only a VERIFIED rebind (or no live instance to rebind at all) closes the
+  // pair. A skip writes nothing: see [installCompactionEnd].
+  installCompactionEnd(result, logPath, result.writeEndMarker);
   return {
     compacted: result.compacted,
     ...(result.compacted && result.kept_turns !== null ? { kept_turns: result.kept_turns } : {}),
@@ -89,7 +115,7 @@ export async function compactSession(deps: SessionLifecycleDeps, session: string
 }
 
 /** A compaction failure is an ENGINE error (HTTP 500), never a host-side crash. */
-async function runCompactionOf(deps: SessionLifecycleDeps, logPath: string): Promise<{ compacted: boolean; kept_turns: number | null; note: string }> {
+async function runCompactionOf(deps: SessionLifecycleDeps, logPath: string): Promise<CompactionResult> {
   try {
     return await runCompaction({ logPath, summarize: deps.summarizer() });
   } catch (e) {

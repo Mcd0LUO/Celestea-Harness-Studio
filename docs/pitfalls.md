@@ -138,7 +138,7 @@ originalId: p?.id                          // 打开编辑器时记录
 - **重绑失败不回滚日志**：重写成功之后才做重绑，之后的失败会保留已压缩的日志，唯一恢复途径是 `.precompact`；
 - `.precompact` **从不自动清理**；
 - 摘要失败时**不要**把 api key 带进错误串（已有 `redact`，别绕过它）；
-- **有活跃 worker 工作的会话会被 pin，压缩直接跳过**（`apps/studio/src/runtime/session-lifecycle.ts:29-36` 的 `PINNED_NOTE`）。
+- **有活跃 worker 工作的会话会被 pin，压缩直接跳过**（`apps/studio/src/runtime/session-lifecycle.ts:40-48` 的 `PINNED_NOTE`）。
 
 ---
 
@@ -193,7 +193,7 @@ originalId: p?.id                          // 打开编辑器时记录
 **事实**：`POST /api/clear` 清空目标会话日志 + 轮号归零。
 
 - **有** busy 409 守卫：turn 进行中时返回 409 `a turn is already running`，且**不会**截断在飞轮次的日志（`apps/studio/src/handlers/dialog.ts:272-289`；测试 `apps/studio/src/runtime/turnbusy-identity.test.ts`）。
-- **没有**备份；**不**动 `session.json`；**不**影响 worker 会话（`apps/studio/src/runtime/session-lifecycle.ts:46-53` 只清目标那一个实例）。
+- **没有**备份；**不**动 `session.json`；**不**影响 worker 会话（`apps/studio/src/runtime/session-lifecycle.ts:58-66` 只清目标那一个实例）。
 
 **正确做法**：把它当"破坏性操作"——前端已有二次确认；API 使用者（脚本、e2e）在生产实例上**不要**调它。要清空历史又保留回滚，先手工 `cp cli-main.jsonl cli-main.jsonl.bak`。
 
@@ -206,6 +206,12 @@ originalId: p?.id                          // 打开编辑器时记录
 | `POST /api/sessions/{id}/compact` | 先原子重写日志 → 再重绑引擎 | 重绑失败**日志保持压缩后状态**，只有 `.precompact` 能回滚（`packages/runtime/src/compact/rewrite.ts:21`） |
 | session / workspace rename | 先移目录 → 再写 `session.json` 的 title | 写 title 失败会**回滚目录移动**（`apps/studio/src/store/session-ops.ts:78-89`）；回滚本身再失败才报 `rollback failed` |
 
+**W2020：重绑失败现在可检测**。压缩的配对标记 `compaction_start` / `compaction_end` 由**两步**写下：`start` 随原子重写落盘（`packages/runtime/src/compact/run.ts`），
+`end` 则由**调用方**在重绑成功之后才写（`installCompactionEnd`，见 `apps/studio/src/runtime/session-lifecycle.ts`）。
+所以"重写成功但重绑失败"会在日志里留下**未配对的 start** —— `hasUnpairedCompactionStart` 为真，
+半途状态从此与正常会话可区分；在此之前 `end` 在 `runCompaction` 内部就写完了，重绑失败留下的日志**看起来是完整的**。
+跳过分支（历史不足）**不写任何标记**：它没有开过配对，写 `end` 只会产生孤儿 `end`。
+
 新增任何"换绑"路径时，明确写出失败回滚语义，并加测试。
 
 ---
@@ -215,7 +221,7 @@ originalId: p?.id                          // 打开编辑器时记录
 | 误记 | 事实 |
 |---|---|
 | `GET /api/health` 的 `bind` 是常量 | 是**实际监听地址**：服务起监听后回写，跟随 `--bind`/`--port`（`--port 0` 报真实端口）；仅在无服务器的组合（测试）里才停留在 `DEFAULT_BIND`（`apps/studio/src/handlers/health.ts:4-8`） |
-| `POST /api/clear` 会清空 worker 会话 | 不会，只清目标那一个实例（`apps/studio/src/runtime/session-lifecycle.ts:46-53`） |
+| `POST /api/clear` 会清空 worker 会话 | 不会，只清目标那一个实例（`apps/studio/src/runtime/session-lifecycle.ts:58-66`） |
 | `GET /api/fs/browse` 受 `CELESTEA_TOOL_ROOTS` 限制 | **不受**；`roots` 字段只是建议起点（`apps/studio/src/handlers/fs.ts:19`） |
 | 改 `apps/web/src/**` 要重启后端 | **不用**，`pnpm build` 即可（静态资源每次读磁盘，`apps/studio/src/static.ts:99`） |
 | 前端还在监听 `context` 事件 | 不再监听：`context` 不可发射，已从 `EVENT_NAMES` 移除，并有门禁 `apps/web/tools/check-sse-events.mjs` 盯着（`apps/web/src/sse.ts:63-79`） |

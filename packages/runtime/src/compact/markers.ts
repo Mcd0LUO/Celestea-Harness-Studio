@@ -20,22 +20,33 @@
  *     mutate the log on a compaction that later fails (e.g. the summarizer
  *     throws), which is a behaviour change for a diagnostic.
  *
- *   - `compaction_end` is APPENDED after `rewriteAtomic` returned, and the
- *     append is fsynced. Only when it has landed is the pair complete.
+ *   - `compaction_end` is APPENDED, and the append is fsynced. Only when it has
+ *     landed is the pair complete. W2020: the append is performed by the CALLER
+ *     (via [installCompactionEnd]) once every step the compaction still owed has
+ *     succeeded — in production, after the engine has been rebound onto the new
+ *     log. It used to run inside [runCompaction] right after the rename.
  *
  * The detectable state is therefore exactly: **a log whose last
  * `compaction_start` has no `compaction_end` after it** — the rewrite landed
  * but the compaction never reached completion (the process died in that window,
- * or the end append itself failed). In that state the caller never received a
- * success answer, yet the pre-compaction history is already gone from the log
- * and survives only in `cli-main.jsonl.precompact`.
+ * the end append itself failed, or — W2020 — the caller's rebind failed). In
+ * that state the caller never received a success answer, yet the pre-compaction
+ * history is already gone from the log and survives only in
+ * `cli-main.jsonl.precompact`.
  *
- * HONEST SCOPE — what this CANNOT see: the end marker is written by
- * [runCompaction] right after the rewrite, so a failure in the CALLER's later
- * steps (the engine rebind in `session-lifecycle.ts`) happens after the pair is
- * already complete and is NOT observable here. Detecting that would require the
- * end marker to be written by the caller once the rebind has succeeded — a
- * lifecycle-level change, deliberately out of this task's boundary.
+ * WHAT THE MOVED APPEND BUYS (W2020): the window the unpaired start describes is
+ * now the WHOLE post-rewrite operation rather than just the rename. The failure
+ * docs/pitfalls.md P12 names — `registry.ensure` refusing to recompose the
+ * engine after the log was replaced — is inside it, so that half-finished state
+ * is finally distinguishable from an ordinary session. Before the move the pair
+ * was already closed when the rebind ran, so the rebind's failure left a log
+ * that looked COMPLETE.
+ *
+ * HONEST SCOPE — what this still CANNOT see: a failure AFTER the rebind returned
+ * (i.e. after [installCompactionEnd] ran) is outside the window by construction;
+ * the compaction genuinely completed at that point, so there is nothing to
+ * report. And the detector is a pure log reader: it says "an unpaired start
+ * exists", never which of the window's steps failed.
  *
  * The markers carry no fields (the tag is the payload), are never emitted by the
  * engine, and project to nothing in every consumer, so an existing log replays
@@ -71,6 +82,10 @@ export function compactionEndEvent(): CompactionEndEvent {
  * for a compaction the caller was told had succeeded, which would destroy the
  * only meaning the marker has; the caller instead gets the error, and the
  * unpaired start it leaves behind is a truthful description of what happened.
+ *
+ * W2020: this is the DEFAULT writer for [installCompactionEnd] and is no longer
+ * called by [runCompaction] itself — the timing moved to the caller, the bytes
+ * did not.
  */
 export function appendCompactionEnd(logPath: string): void {
   const fd = openSync(logPath, "a");

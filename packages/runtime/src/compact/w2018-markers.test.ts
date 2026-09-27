@@ -9,7 +9,9 @@
  *   2. the start row is installed by the SAME atomic rewrite as the compacted
  *      history, so it can never appear without it;
  *   3. a compaction that dies between the rewrite and the end append leaves an
- *      UNPAIRED start, and that is exactly what the detector reports;
+ *      UNPAIRED start, and that is exactly what the detector reports (W2020
+ *      moved that append to the caller, so the window now also covers the
+ *      rebind — the dedicated gates for that live in w2020-rebind.test.ts);
  *   4. the markers do NOT change what any existing consumer sees — the log is
  *      byte-identical apart from the two marker rows, and the model-visible
  *      projection is untouched.
@@ -31,10 +33,16 @@ import {
   compactionMarkers,
   compactionStartEvent,
   hasUnpairedCompactionStart,
+  installCompactionEnd,
   parseEventLog,
   runCompaction,
   serializeEventLog,
 } from "./index.js";
+
+/** W2020: the end marker is the CALLER's step now — close the pair explicitly. */
+function closePair(out: Awaited<ReturnType<typeof runCompaction>>, path: string): void {
+  installCompactionEnd(out, path, out.writeEndMarker);
+}
 
 /** One complete turn (start + user + assistant + end). */
 function turn(n: number): SessionEvent[] {
@@ -96,6 +104,7 @@ describe("W2018 · a successful compaction leaves a PAIRED, correctly ordered lo
     const path = writeLog(logOf(12));
     const out = await runCompaction({ logPath: path, summarize: () => Promise.resolve("摘要正文") });
     expect(out.compacted).toBe(true);
+    closePair(out, path);
 
     const written = parseEventLog(readFileSync(path, "utf8"));
     const census = compactionMarkers(written);
@@ -114,9 +123,9 @@ describe("W2018 · a successful compaction leaves a PAIRED, correctly ordered lo
       written.findIndex((e) => e.type === "turn_end"),
     );
 
-    // The start marker is part of the log the rewrite produced: result.events is
-    // the on-disk log, so a marker that never reached the file would show here.
-    expect(out.events).toEqual(written);
+    // W2020: result.events is the log the REWRITE produced — the pair-closing
+    // end row is the caller's step, so it is absent here and present on disk.
+    expect(written).toEqual([...(out.events ?? []), { type: "compaction_end" }]);
   });
 
   it("installs the start marker ATOMICALLY, inside the rewritten log", async () => {
@@ -130,7 +139,7 @@ describe("W2018 · a successful compaction leaves a PAIRED, correctly ordered lo
         seen.push([...events]);
         writeFileSync(path, serializeEventLog(events));
       },
-      append: (p) => appendCompactionEnd(p),
+      writeEndMarker: (p) => appendCompactionEnd(p),
     });
     expect(seen).toHaveLength(1);
     // The start row was already present in the ATOMIC write — not appended after.
@@ -148,8 +157,10 @@ describe("W2018 · an interrupted compaction is detectable", () => {
       logPath: path,
       summarize: () => Promise.resolve("摘要正文"),
       // The REAL rewrite runs (so the .precompact backup genuinely exists);
-      // only the end append dies — the crash window this task is about.
-      append: () => {
+      // only the pair-closing end append dies — the crash window this task is
+      // about. W2020: the append is the caller's step, so the crash is modelled
+      // by never reaching it (the seam is never invoked) — same durable state.
+      writeEndMarker: () => {
         throw new Error("模拟：end 标记写入前进程死亡");
       },
     }).catch(() => undefined);
@@ -167,21 +178,21 @@ describe("W2018 · an interrupted compaction is detectable", () => {
 
   it("propagates an end-append failure instead of claiming success", async () => {
     const path = writeLog(logOf(12));
-    await expect(
-      runCompaction({
-        logPath: path,
-        summarize: () => Promise.resolve("摘要正文"),
-        append: () => {
-          throw new Error("磁盘写入失败");
-        },
-      }),
-    ).rejects.toThrow("磁盘写入失败");
+    const out = await runCompaction({ logPath: path, summarize: () => Promise.resolve("摘要正文") });
+    // W2020: the failure surfaces at the CALLER's pair-closing step, and it must
+    // not be swallowed there either — the log keeps the unpaired start.
+    const failing = { ...out, writeEndMarker: (): void => {
+      throw new Error("磁盘写入失败");
+    } };
+    expect(() => closePair(failing, path)).toThrow("磁盘写入失败");
+    expect(hasUnpairedCompactionStart(parseEventLog(readFileSync(path, "utf8")))).toBe(true);
   });
 
   it("does NOT flag a clean log, a completed compaction, or a later turn", async () => {
     expect(hasUnpairedCompactionStart(logOf(3))).toBe(false);
     const path = writeLog(logOf(12));
-    await runCompaction({ logPath: path, summarize: () => Promise.resolve("摘要正文") });
+    const out = await runCompaction({ logPath: path, summarize: () => Promise.resolve("摘要正文") });
+    closePair(out, path);
     const after = parseEventLog(readFileSync(path, "utf8"));
     expect(hasUnpairedCompactionStart(after)).toBe(false);
     // A turn appended after the compaction must not resurrect the signal.
@@ -199,7 +210,8 @@ describe("W2018 · an interrupted compaction is detectable", () => {
 describe("W2018 · the markers do not change what existing consumers see", () => {
   it("★ leaves the model-visible projection byte-identical", async () => {
     const path = writeLog(logOf(12));
-    await runCompaction({ logPath: path, summarize: () => Promise.resolve("摘要正文") });
+    const out = await runCompaction({ logPath: path, summarize: () => Promise.resolve("摘要正文") });
+    closePair(out, path);
     const written = parseEventLog(readFileSync(path, "utf8"));
     // Same events with the two markers stripped == what the projection sees.
     const stripped = written.filter((e) => e.type !== "compaction_start" && e.type !== "compaction_end");
@@ -219,7 +231,8 @@ describe("W2018 · the markers do not change what existing consumers see", () =>
 
   it("keeps the kept turns byte-identical apart from renumbering", async () => {
     const path = writeLog(logOf(12));
-    await runCompaction({ logPath: path, summarize: () => Promise.resolve("摘要正文") });
+    const out = await runCompaction({ logPath: path, summarize: () => Promise.resolve("摘要正文") });
+    closePair(out, path);
     const written = parseEventLog(readFileSync(path, "utf8"));
     // Skip the trailing end marker, then take the last surviving turn's rows.
     const keptTail = written.slice(-(turn(0).length + 1), -1);

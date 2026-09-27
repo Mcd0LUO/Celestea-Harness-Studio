@@ -4,9 +4,10 @@
  *
  * One call is: read -> parse -> threshold -> summarize -> plan -> atomic rewrite
  * (W2018/B1: the rewrite installs a leading `compaction_start` marker inside the
- * same atomic rename, and a trailing `compaction_end` is appended once it
- * returned — see ./markers.ts for why that placement is the only one that can
- * make an interrupted compaction detectable).
+ * same atomic rename; W2020 moved the trailing `compaction_end` OUT of this
+ * function — the caller closes the pair with [installCompactionEnd] only after
+ * its own post-rewrite work succeeded. See ./markers.ts for why that placement
+ * is the only one that can make a REBIND failure detectable).
  * Every branch is explicit and observable, because the HTTP layer has to answer
  * three different ways:
  *   - `compacted:false` (at/below [COMPACT_THRESHOLD] complete turns) is a
@@ -30,7 +31,7 @@ import {
   planCompaction,
   selectTurns,
 } from "./plan.js";
-import { appendCompactionEnd, compactionEndEvent, compactionStartEvent } from "./markers.js";
+import { appendCompactionEnd, compactionStartEvent } from "./markers.js";
 import { rewriteAtomic } from "./rewrite.js";
 import type { Summarizer } from "./summarize.js";
 import { renderTranscript } from "./transcript.js";
@@ -46,8 +47,11 @@ export interface CompactionInput {
   /** Injection seams for tests (defaults: real fs). */
   readText?: (path: string) => string;
   write?: (path: string, events: readonly SessionEvent[]) => void;
-  /** W2018/B1: the post-rewrite end-marker append (default: real fs + fsync). */
-  append?: (path: string) => void;
+  /**
+   * W2020: how the pair-closing end append lands. The CALLER owns the timing
+   * (see [installCompactionEnd]); this only decides the bytes.
+   */
+  writeEndMarker?: (path: string) => void;
 }
 
 export interface CompactionResult {
@@ -63,11 +67,23 @@ export interface CompactionResult {
   /** Complete turns found in the log BEFORE the decision. */
   turns_before: number;
   /**
-   * The NEW LOG exactly as it was written (W2018/B1: the leading
-   * `compaction_start` and the trailing `compaction_end` included), or null
-   * when nothing was compacted.
+   * The log THIS CALL REWROTE (W2018/B1: the leading `compaction_start`
+   * included), or null when nothing was compacted.
+   *
+   * W2020: this is NOT "the log as it now is on disk". The trailing
+   * `compaction_end` is written by the caller, after its own work succeeded, so
+   * it is deliberately ABSENT here rather than being a row this call never
+   * wrote. See [installCompactionEnd].
    */
   events: SessionEvent[] | null;
+  /**
+   * The append seam that CLOSES this compaction's pair, carried out of the call
+   * so the caller can hand the very same seam to [installCompactionEnd]. It is
+   * present only when `compacted === true` (the skip branch opens no pair), and
+   * it carries the test seam rather than the real fs so a caller never has to
+   * re-decide which writer to use.
+   */
+  writeEndMarker?: (path: string) => void;
 }
 
 /** JSONL text -> events; blank lines are padding, a torn tail stops parsing. */
@@ -91,8 +107,35 @@ function readLog(input: CompactionInput): string {
 }
 
 /**
+ * W2020: close the pair that [runCompaction]'s rewrite opened.
+ *
+ * Call this with the result of the rewrite, AFTER every step the compaction
+ * still owed (in production: the engine rebind in `session-lifecycle.ts`) has
+ * succeeded. If that step fails, the end marker is never written and the log
+ * keeps an UNPAIRED `compaction_start` — the durable signature
+ * [hasUnpairedCompactionStart] reads, which is exactly the P12 failure that was
+ * invisible while this append lived inside [runCompaction].
+ *
+ * The skip branch (`compacted: false`) writes NOTHING: a short history opens no
+ * pair, so an end there would be an ORPHAN end, not a completion. That is why
+ * this takes the RESULT and not just a path — a caller cannot turn it into an
+ * orphan end by forgetting a branch.
+ */
+export function installCompactionEnd(
+  result: Pick<CompactionResult, "compacted">,
+  logPath: string,
+  writeEndMarker: (path: string) => void = appendCompactionEnd,
+): void {
+  if (!result.compacted) return;
+  writeEndMarker(logPath);
+}
+
+/**
  * Run one compaction. Throws on read/summarize/write failure; returns the
  * skipped branch when the history is too short to be worth a summary request.
+ *
+ * W2020: a successful return means "the log has been REWRITTEN", not "the
+ * compaction is complete" — the caller still owes [installCompactionEnd].
  */
 export async function runCompaction(input: CompactionInput): Promise<CompactionResult> {
   const keep = input.keep ?? COMPACT_KEEP_TURNS;
@@ -111,20 +154,24 @@ export async function runCompaction(input: CompactionInput): Promise<CompactionR
   // self-defeating: the rename replaces that file, destroying the marker.
   const rewritten: SessionEvent[] = [compactionStartEvent(), ...planned];
   (input.write ?? rewriteAtomic)(input.logPath, rewritten);
-  // The end marker lands only AFTER the rename returned, so a log whose last
-  // start has no end is the durable signature of a compaction that died in
-  // between (docs/pitfalls.md P12). A failure here propagates: the caller must
-  // not be told "compacted" while the log says otherwise.
-  (input.append ?? appendCompactionEnd)(input.logPath);
+  // W2020: the end marker is NOT appended here. This function is only the
+  // REWRITE half of the operation; the caller still has to rebind the engine,
+  // and a pair closed before that step cannot describe that step's failure. The
+  // caller closes it through [installCompactionEnd] once the rebind succeeded,
+  // so an unpaired start now covers the WHOLE window (docs/pitfalls.md P12)
+  // instead of only the rename.
   const kept = selectTurns(events, keep, head);
   return {
     compacted: true,
     kept_turns: Math.min(kept.head.length + kept.tail.length, turns),
     note: compactNote(keep, head),
     turns_before: turns,
-    // The log AS IT NOW IS on disk, both markers included — so the existing
-    // "parsed file equals result.events" invariant keeps holding
-    // (w2011-headtail.test.ts pins it).
-    events: [...rewritten, compactionEndEvent()],
+    // What THIS CALL wrote: the start marker and the compacted history, exactly
+    // the byte string the atomic rewrite installed. The end row reaches the FILE
+    // later, written by the caller, so it is not claimed here.
+    events: rewritten,
+    // Hand the caller the seam that closes the pair, so it neither re-decides
+    // the writer nor has to import the fs default itself.
+    writeEndMarker: input.writeEndMarker ?? appendCompactionEnd,
   };
 }
