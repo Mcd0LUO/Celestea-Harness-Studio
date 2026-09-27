@@ -33,7 +33,7 @@ import {
 } from '../../plugins';
 import type { ClientPluginDescriptor } from '../../plugins';
 import { el, need } from '../../utils/dom';
-import { applyValues, buildConfigPanel, syncPanelHeight, type PluginPanelState } from './config-panel';
+import { applyValues, buildConfigPanel, type PluginPanelState } from './config-panel';
 import { fetchHostPlugins, type HostPluginRow } from './host';
 import { t } from '../../i18n';
 
@@ -70,7 +70,6 @@ function chevron(): SVGSVGElement {
 function clientRow(
   d: ClientPluginDescriptor,
   status: (text: string, ok: boolean) => void,
-  onPanelLayout: (state: PluginPanelState) => void,
 ): { entry: HTMLElement; row: HTMLElement; panel: HTMLElement; state: PluginPanelState; content: HTMLElement } {
   const entry = el('div', 'plug-entry');
   entry.dataset['id'] = d.id;
@@ -85,7 +84,7 @@ function clientRow(
       // 失败 ⇒ 把控件拨回**服务端真值**（内存镜像没动），并如实说明。
       applyValues(built.content, clientPluginConfigValues(d.id));
       status(r.text, r.ok);
-      onPanelLayout(built.state);
+      // W2010：配置项值变化不再需要重算面板高度 —— 展开态是 max-content，会自己长。
     })();
   });
   const state = built.state;
@@ -210,7 +209,7 @@ function buildLibrary(setStatus: (t: string, ok: boolean) => void): HTMLElement 
   const byId = new Map<string, RowEntry>();
   for (const d of all) {
     const g = groups.find((x) => x.cat === d.category) ?? groups[0]!;
-    const built = clientRow(d, setStatus, (state) => syncPanelHeight(state));
+    const built = clientRow(d, setStatus);
     const entry: RowEntry = { d, row: built.row, panel: built.panel, state: built.state, content: built.content, cat: g.cat };
     rows.push(entry);
     byId.set(d.id, entry);

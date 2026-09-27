@@ -3,6 +3,9 @@
 //   （W748 从 ui/providers.ts 拆出；纯搬运，DOM/类名/文案/事件未改）。
 //   面板 DOM 每个提供商行只构建一次，展开/收起只切 class + max-height 过渡
 //   （铁律 4），禁止删除重建；层级栈句柄在列表整体刷新前统一释放。
+//   W2010：高度**全部由 CSS 给**（settings.css 的 .prov-inline 基态 max-height:0、
+//   展开态 max-height:max-content）—— 本文件不再有 style.maxHeight / scrollHeight /
+//   offsetHeight 任何一个写点，也不再需要 onLayout 回调。
 // ============================================================================
 import { api } from '../../api';
 import type { ProviderInfo } from '../../types';
@@ -39,14 +42,6 @@ export function releasePanels(): void {
   livePanels.clear();
 }
 
-/** 内容增高后重算 max-height（展开态若为 none 则无需处理）。 */
-function syncPanelHeight(state: PanelState): void {
-  if (!state.open) return;
-  const h = state.inner.style.maxHeight;
-  if (h === 'none' || h === '') return;
-  state.inner.style.maxHeight = state.inner.scrollHeight + 'px';
-}
-
 function expandPanel(state: PanelState): void {
   if (state.open) return;
   state.open = true;
@@ -55,8 +50,8 @@ function expandPanel(state: PanelState): void {
   state.tr.classList.add('expanded');
   state.tr.setAttribute('aria-expanded', 'true');
   state.panelTr.classList.add('open');
-  // 先量出内容高度再过渡（max-height 过渡，铁律 4：只切 class，不重建 DOM）
-  state.inner.style.maxHeight = state.inner.scrollHeight + 'px';
+  // W2010：只切 class（铁律 4），不再量内容高度、不再写 style.maxHeight ——
+  // 展开终值是 settings.css 的 .prov-panel-row.open .prov-inline { max-height: max-content }。
   state.overlay = pushOverlay(() => collapsePanel(state));
 }
 
@@ -69,15 +64,14 @@ function collapsePanel(state: PanelState): void {
     popOverlay(state.overlay);
     state.overlay = null;
   }
-  // 展开完成时 maxHeight 已置 'none'：先固定当前高度并强制回流，再归零 → 收起动画生效
-  if (state.inner.style.maxHeight === 'none') {
-    state.inner.style.maxHeight = state.inner.scrollHeight + 'px';
-    void state.inner.offsetHeight;
-  }
+  // W2010：这里原先的「先固定当前高度 + void offsetHeight 强制回流，再归零」hack
+  // **不再需要**，已删。它存在的前提是展开态被 JS 写成 max-height:'none'（关键字），
+  // 关键字无法参与过渡、必须先量成 px；现在展开态是 CSS 的 max-content，收起时
+  // 0 ↔ max-content 两端都由 CSS 声明，浏览器自己就能从当前高度补间。
+  // 收起动画仍生效：真机几何序列见报告（chrome151 采到连续中间 clientHeight）。
   state.panelTr.classList.remove('open');
   state.tr.classList.remove('expanded');
   state.tr.setAttribute('aria-expanded', 'false');
-  state.inner.style.maxHeight = '0px';
 }
 
 function togglePanel(state: PanelState): void {
@@ -145,15 +139,8 @@ export function renderProviderRow(
       void refreshRow(host, tr, payload.id);
     },
     onCancel: () => collapsePanel(state),
-    onLayout: () => syncPanelHeight(state),
   });
   inner.appendChild(refs.root);
-
-  // 展开完成 → 解除高度约束（内容随后增高不再被裁切）
-  inner.addEventListener('transitionend', (e) => {
-    if (e.target !== inner || e.propertyName !== 'max-height') return;
-    if (state.open) inner.style.maxHeight = 'none';
-  });
 
   // 点击行本体（非交互控件）→ 原地展开/收起
   tr.addEventListener('click', (e) => {
@@ -168,7 +155,6 @@ export function renderProviderRow(
     tr.classList.add('expanded');
     tr.setAttribute('aria-expanded', 'true');
     panelTr.classList.add('open');
-    inner.style.maxHeight = 'none';
     state.overlay = pushOverlay(() => collapsePanel(state));
   }
 

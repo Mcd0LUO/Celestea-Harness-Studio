@@ -121,6 +121,12 @@
 .prov-table {
   width: 100%; border-collapse: collapse;
   font-size: 12.5px;
+  /* W2010：interpolate-size 是**可继承**属性 —— 写在这张表上，后代 .prov-inline
+     （行内面板的高度过渡承载者）的 computed 即为 allow-keywords，无需写 :root
+     （tokens.css 由架构师独占）。作用：让 max-height 能从 0 补间到 max-content；
+     不支持的引擎忽略它、直接落到终值（瞬时展开，功能不丢）。
+     完整论证与反例见 provider-edit.css 顶部「W2010」整段。 */
+  interpolate-size: allow-keywords;
 }
 .prov-table th, .prov-table td {
   padding: 7px 10px;
@@ -172,6 +178,13 @@
 .prov-panel-row.open .prov-inline {
   opacity: 1;
   visibility: visible;
+  /* W2010：展开终值走**内在尺寸** —— JS 不再量高、不再写 max-height（原 8 个写点已删）。
+     ★ 无条件写，**不加 @supports (interpolate-size: allow-keywords) 守卫**：
+     实测 FF 155 / WebKit 26.6 的 CSS.supports 为 false，加了守卫这条整条失效、
+     max-height 停在基态 0px ⇒ 内容**永久不可见**（clientHeight = 0）。
+     max-content 本身就是「不支持就瞬时到位」的安全降级；interpolate-size 只决定
+     要不要补间。理由与反例见 provider-edit.css 顶部「W2010」整段。 */
+  max-height: max-content;
   transition: max-height .24s ease, opacity .2s ease, visibility 0s linear 0s;
 }
 .prov-inline .prov-form {

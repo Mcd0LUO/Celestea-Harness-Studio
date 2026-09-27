@@ -3,8 +3,9 @@
 // ----------------------------------------------------------------------------
 // 形状与交互照抄「模型提供商」的行内面板（ui/providers/panel.ts 的 renderProviderRow）：
 //   · 面板 DOM 每行只构建**一次**，展开/收起只切 class + max-height 过渡；
-//   · 展开时按内容实测高度写入 inner 的 max-height，过渡结束后置 'none'
-//     （内容随后增高不再被裁切）—— 这就是 `onLayout` 那一步；
+//   · W2010 起高度**全部由 CSS 给**（plugins.css 的 .plug-panel-inner 基态
+//     max-height:0、展开态 max-height:max-content）—— 本文件不再有 style.maxHeight /
+//     scrollHeight / offsetHeight 任何一个写点，`syncPanelHeight` / `onLayout` 一并删除；
 //   · 不重建列表、不整树重绘。
 //
 // ★ 渲染器**不认识任何具体插件**：它只按描述里的 kind（bool/enum/text/number）
@@ -134,33 +135,23 @@ export function applyValues(box: HTMLElement, values: PluginConfigValues): void 
   }
 }
 
-/** 内容增高后重算 max-height（展开态若已是 none 则无需处理）——同 providers 的 syncPanelHeight。 */
-export function syncPanelHeight(state: PluginPanelState): void {
-  if (!state.open) return;
-  const h = state.inner.style.maxHeight;
-  if (h === 'none' || h === '') return;
-  state.inner.style.maxHeight = state.inner.scrollHeight + 'px';
-}
-
 function expandPanel(state: PluginPanelState): void {
   if (state.open) return;
   state.open = true;
   state.toggle.setAttribute('aria-expanded', 'true');
+  // W2010：只切 class，不再量内容高度、不再写 style.maxHeight —— 展开终值是
+  // plugins.css 的 .plug-panel.open .plug-panel-inner { max-height: max-content }。
   state.panel.classList.add('open');
-  state.inner.style.maxHeight = state.inner.scrollHeight + 'px';
 }
 
 function collapsePanel(state: PluginPanelState): void {
   if (!state.open) return;
   state.open = false;
   state.toggle.setAttribute('aria-expanded', 'false');
-  // 展开完成时 maxHeight 已置 'none'：先固定当前高度并强制回流，再归零 → 收起动画生效
-  if (state.inner.style.maxHeight === 'none') {
-    state.inner.style.maxHeight = state.inner.scrollHeight + 'px';
-    void state.inner.offsetHeight;
-  }
+  // W2010：原「先固定当前高度 + void offsetHeight 强制回流，再归零」hack 已删 ——
+  // 它只是为了绕开展开态的 max-height:'none'（关键字不参与过渡）。现在两端都是
+  // CSS 声明的 0 / max-content，浏览器自己就能从当前高度补间。
   state.panel.classList.remove('open');
-  state.inner.style.maxHeight = '0px';
 }
 
 export function togglePanel(state: PluginPanelState): void {
@@ -195,11 +186,6 @@ export function buildConfigPanel(
   toggle.addEventListener('click', (e) => {
     e.stopPropagation(); // 展开控件不触发行本体的其它行为
     togglePanel(state);
-  });
-  // 展开完成 → 解除高度约束（内容随后增高不再被裁切）
-  inner.addEventListener('transitionend', (e) => {
-    if (e.target !== inner || (e as TransitionEvent).propertyName !== 'max-height') return;
-    if (state.open) inner.style.maxHeight = 'none';
   });
   return { state, toggle, panel, content };
 }
