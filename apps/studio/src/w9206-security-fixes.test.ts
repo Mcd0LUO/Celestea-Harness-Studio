@@ -122,26 +122,40 @@ describe("W9206-35 · a dead stdin must never take the process down", () => {
    */
   async function writeToDeadChild(withListener: boolean): Promise<{ code: number | null; stderr: string }> {
     const { spawn } = await import("node:child_process");
+    // W9224 · 让「写 → EPIPE」变成**因果确定**，而不是靠定时器粒度赌出来。
+    //
+    // 旧写法：循环写 60 次（每次 setTimeout(0)），写完立刻 process.exit(0)。
+    // 它赌的是「循环比子进程活得久」，而这个赌注**跨平台不成立**：
+    //   · Windows：setTimeout(0) 实际 ~15ms ⇒ 60 轮 ≈ 900ms > 子进程的 50ms
+    //     ⇒ 子进程先退出、且有写正在飞 ⇒ EPIPE ⇒ 非零退出（用例绿）；
+    //   · Linux：setTimeout(0) ~1ms ⇒ 循环赶在子进程退出前跑完
+    //     ⇒ process.exit(0) **抢在 EPIPE 之前** ⇒ 退出码 0 ⇒ 用例红
+    //     （ubuntu 两个 CI job 实测红：expected +0 not to be +0）。
+    // 与 w833-adapter-payload 的 CI 事故同源：粗粒度定时器掩盖了 bug。
+    //
+    // ★ 关键语义（本机实测）：EPIPE 只在「**子进程还活着时写满了管道，
+    //   随后子进程退出**」这条路径上抛。若等子进程退出**之后**再写，
+    //   stdin 已被 destroy，write() 直接返回 false 而**不报错**（退出码 0）——
+    //   那样这条用例就变成永真了。所以必须「边写边等它退出」。
+    //
+    // 做法：固定间隔持续写，直到子进程退出。写发生在它活着的时候，管道被填满，
+    // 退出时必然有写落在死管道上 ⇒ 无监听器 ⇒ 未处理 EPIPE。
+    // 与定时器粒度无关（间隔只影响写多少次，不影响「必然有写在飞」）。
     const script = [
       "const { spawn } = require('node:child_process');",
       "const c = spawn('sh', ['-c', 'sleep 0.05'], { stdio: ['pipe','pipe','pipe'] });",
       "c.stdout.on('data', () => {});",
       withListener ? "c.stdin.on('error', () => {});" : "",
-      "(async () => {",
-      "  for (let i = 0; i < 60; i++) {",
-      withListener ? "    if (c.stdin.destroyed || !c.stdin.writable) break;" : "    if (c.stdin.destroyed) break;",
-      "    const chunk = Buffer.alloc(65536, 120);",
-      withListener ? "    try { c.stdin.write(chunk); } catch { break; }" : "    c.stdin.write(chunk);",
-      // Write IMMEDIATELY (no delay) with a full pipe buffer, so a write is still
-      // in flight when the child exits. The earlier version wrote 1 byte every
-      // 2 ms; under full-suite load the 60-iteration loop could finish BEFORE the
-      // 50 ms child exited, so no write ever hit a dead pipe and the process
-      // exited 0 — the assertion below then failed. Measured: 2/20 runs took that
-      // path; 0/15 with this shape. A real flake, not a slow machine.
-      "    await new Promise((r) => setTimeout(r, 0));",
-      "  }",
-      "  process.exit(0);",
-      "})();",
+      "const chunk = Buffer.alloc(65536, 120);",
+      "const t = setInterval(() => {",
+      withListener
+        ? "  try { c.stdin.write(chunk); } catch { /* 由 error 监听器接管 */ }"
+        : "  c.stdin.write(chunk);",
+      "}, 5);",
+      "c.on('exit', () => {",
+      "  clearInterval(t);",
+      withListener ? "  setTimeout(() => process.exit(0), 100);" : "  setTimeout(() => {}, 300);",
+      "});",
     ].filter((line) => line !== "").join("\n");
     return new Promise((resolve) => {
       const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "ignore", "pipe"] });

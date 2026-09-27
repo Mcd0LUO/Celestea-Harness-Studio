@@ -72,11 +72,28 @@ describe("W833 B8/F5: start frame source key", () => {
 
 describe("W833 B8/F7: no-arg cancel targets the most recently active session", () => {
   it("cancels the newest busy session, leaving the older one", async () => {
-    const h = make({ sessions: { s1: [], s2: [] }, llm: { script: [{ text: "x".repeat(1600) }], deltaMs: 3, chunkChars: 100 } });
+    // W9224 · 用 `hold` 把 s1 的忙状态**钉住**，而不是靠 deltaMs 赌时长。
+    //
+    // 为什么必须改：本用例要证的是「无参 cancel() 取消**最近活跃**的会话，
+    // 且**不动**另一个仍然忙的会话」。原实现靠
+    // `deltaMs: 3, chunkChars: 100`（16 帧）造一个「够长」的忙窗口 —— 但真实定时器
+    // 粒度随平台变：Windows 实测 setTimeout(3) ≈ 14–17ms（窗口 ~280ms），
+    // Linux 精确 3ms（窗口 **~48ms**）。用例在 activate(s2) 前固定睡 60ms，
+    // 于是 Linux 上 s1 的轮次**已经结束**，line 92 的
+    // `expect(isBusy(s1)).toBe(true)` 必然失败 —— ubuntu 两个 CI job 真实红过。
+    // 本机（Windows）5/5 全绿正是因为粗粒度定时器把窗口撑大了。
+    let releaseS1: (() => void) | undefined;
+    const s1Held = new Promise<void>((resolve) => {
+      releaseS1 = resolve;
+    });
+    const h = make({
+      sessions: { s1: [], s2: [] },
+      llm: { script: [{ text: "x".repeat(1600), hold: s1Held }, { text: "x".repeat(1600) }], deltaMs: 3, chunkChars: 100 },
+    });
     await activate(h, "sample-ws/s1");
     const first = await h.app.request("/api/turn", jsonRequest("POST", { input: "one" }));
     expect(first.status).toBe(202);
-    await new Promise((r) => setTimeout(r, 60));
+    // 这里不再需要 sleep：s1 被 hold 钉住，忙状态是**确定的**。
     await activate(h, "sample-ws/s2");
     const second = await h.app.request("/api/turn", jsonRequest("POST", { input: "two" }));
     expect(second.status).toBe(202);
@@ -89,9 +106,11 @@ describe("W833 B8/F7: no-arg cancel targets the most recently active session", (
     const deadline = Date.now() + 5_000;
     while (engine.isBusy("sample-ws/s2") && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
     expect(engine.isBusy("sample-ws/s2")).toBe(false);
+    // s1 仍然被 hold 钉着 ⇒ 这条断言现在是**确定的**，与平台定时器粒度无关。
     expect(engine.isBusy("sample-ws/s1")).toBe(true);
 
     engine.cancel("sample-ws/s1");
+    releaseS1?.();
     await waitIdle(h);
   }, 30_000);
 });

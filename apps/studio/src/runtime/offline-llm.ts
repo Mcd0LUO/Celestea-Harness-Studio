@@ -43,6 +43,20 @@ export interface OfflineStep {
   fail?: string;
   /** Answer with a torn stream (the `interrupted` terminal state). */
   interrupted?: boolean;
+  /**
+   * W9224 · **确定性地**把这一轮钉在「忙」状态，直到这个 Promise resolve。
+   *
+   * 为什么需要：`deltaMs` 是**真实定时器**，而真实定时器的粒度**随平台不同**
+   * （本机 Windows 实测 `setTimeout(3)` ≈ 14–17ms；Linux 精确 3ms）。用
+   * 「帧数 × deltaMs」造一个「够长」的忙窗口，等于把测试押在跨平台不确定性上：
+   * 同一份配置在 Windows 上忙 ~280ms、在 Linux 上只忙 ~48ms，于是
+   * 「睡 60ms 后断言仍然忙」在 Windows 绿、在 Linux 红 —— 这是 W9220 引入的
+   * **真实 CI 事故**（ubuntu 两个 job 变红，w833-adapter-payload.test.ts:92）。
+   *
+   * `hold` 把「忙窗口」与「平台定时器粒度」解耦：断言从
+   * 「赌它还没跑完」变成「我控制它什么时候跑完」。
+   */
+  hold?: Promise<void>;
 }
 
 export interface OfflineLlmOptions {
@@ -151,6 +165,22 @@ async function* emit(frames: readonly StreamEvent[], delayMs: number): LlmStream
   }
 }
 
+/**
+ * W9224 · 若该步给了 `hold`，先等它被释放，再按 `deltaMs` 产帧。
+ *
+ * 与 `deltaMs` 的分工：`deltaMs` 决定「帧与帧之间等多久」（真实时间）；
+ * `hold` 决定「这一轮什么时候开始产出」（由测试显式释放）。
+ * 需要「这一轮必须还在忙」的用例应当用 hold，而不是靠 deltaMs 赌时长。
+ */
+async function* emitHeld(
+  frames: readonly StreamEvent[],
+  delayMs: number,
+  hold: Promise<void> | undefined,
+): LlmStream {
+  if (hold !== undefined) await hold;
+  yield* emit(frames, delayMs);
+}
+
 /** Build the deterministic offline engine LLM. */
 export function createOfflineLlm(opts: OfflineLlmOptions = {}): OfflineLlm {
   const chunk = Math.max(1, opts.chunkChars ?? 24);
@@ -171,7 +201,8 @@ export function createOfflineLlm(opts: OfflineLlmOptions = {}): OfflineLlm {
     generate(req: ModelRequest): Promise<LlmStream> {
       calls += 1;
       opts.onRequest?.(req);
-      return Promise.resolve(emit(stepFrames(stepFor(req), req, chunk), delayMs));
+      const step = stepFor(req);
+      return Promise.resolve(emitHeld(stepFrames(step, req, chunk), delayMs, step.hold));
     },
   };
 }
