@@ -12,6 +12,7 @@
  */
 
 import { userMessage, type Llm, type LlmStream, type ModelRequest } from "@celestea/core";
+import { bounded } from "@celestea/tools";
 import { COMPACT_SYSTEM_PROMPT, SUMMARY_MAX_TOKENS, SUMMARY_TIMEOUT_MS } from "./transcript.js";
 
 /** Turns a transcript into a summary; throws on failure. */
@@ -30,17 +31,18 @@ export function summaryRequest(model: string, transcript: string, system = COMPA
   return { model, system, messages: [userMessage(transcript)], tools: [], max_tokens: SUMMARY_MAX_TOKENS, temperature: null };
 }
 
-/** Reject when `promise` does not settle within `ms` (whole-call timeout). */
-export async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${what} timeout after ${ms}ms`)), ms);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
+/**
+ * Reject when `promise` does not settle within `ms` (whole-call timeout).
+ *
+ * W2014: the race itself now lives in the ONE deadline primitive. This stays a
+ * local wrapper on purpose — it is part of THIS package public surface (the
+ * runtime barrel re-exports it), and what it adds over the primitive is the
+ * `what` label naming the OPERATION in the message. That label is the
+ * caller-facing half of DSH's capability-owned timeout `code`: it is what
+ * lets a reader tell the generate deadline from the stream-read deadline below.
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  return bounded(promise, ms, { mode: "throw", error: () => new Error(`${what} timeout after ${ms}ms`) });
 }
 
 /** Concatenate the text deltas; `failed` / `interrupted` / empty are errors. */

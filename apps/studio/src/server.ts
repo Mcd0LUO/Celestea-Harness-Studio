@@ -19,6 +19,7 @@ import { assertBindIsSafe } from "./auth/api-token.js";
 import { engineLlmView } from "./runtime/llm-assembly.js";
 import type { RealRuntimeAdapter } from "./runtime/real-runtime-adapter.js";
 import { autowakeEnabled, ENV_AUTOWAKE } from "@celestea/runtime";
+import { bounded } from "@celestea/tools";
 
 /** Env knob: drain window before leftover sockets are cut. */
 export const ENV_DRAIN_MS = "CELESTEA_SHUTDOWN_DRAIN_MS";
@@ -148,16 +149,13 @@ export function startStudioServer(options: StudioServerOptions): StudioServerHan
   if (options.crashNet !== false) installCrashNet(log);
 
   async function within(work: Promise<void> | void, ms: number): Promise<void> {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const deadline = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, ms);
-    });
     try {
-      await Promise.race([Promise.resolve(work), deadline]);
+      // W2014: the deadline RESOLVES, it does not reject — a step that ran out of
+      // budget is not an error here. Only `work` itself rejecting reaches the
+      // catch, which is exactly the distinction the hand-rolled version made.
+      await bounded(Promise.resolve(work), ms, { mode: "resolve", value: () => undefined });
     } catch (e) {
       log(`teardown step failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      if (timer !== null) clearTimeout(timer);
     }
   }
 

@@ -40,7 +40,7 @@ import { whichSync } from "../sandbox/probe.js";
 import { cpuExceededFailure as cpuKillFailure, isCpuSignal } from "./cpu-kill.js";
 import { newRunState, type ChildTermination, type RunBudget, type RunState } from "./run-state.js";
 import { deriveCpuSecFromWallClock } from "../sandbox/limits.js";
-import { TIMED_OUT, withTimeout } from "../sandbox/async.js";
+import { bounded, TIMED_OUT, withTimeout } from "../sandbox/async.js";
 import { readCapped, REAP_GRACE_MS } from "../sandbox/launch.js";
 import { ToolFailure } from "../tool-failure.js";
 import {
@@ -267,17 +267,8 @@ async function executeProgram(ctx: BrokerContext, run: ProgramRun, state: RunSta
   // 300s) or a reply write parked on a full pipe lives INSIDE pumpLines, where
   // the reader's own deadline cannot be consulted; this timer kills the child
   // and records code=timeout no matter which await the pump is parked on.
-  let wallTimer: NodeJS.Timeout | undefined;
   let timedOut = false;
   let pumpError: unknown = null;
-  const wallFired = new Promise<void>((resolve) => {
-    wallTimer = setTimeout(() => {
-      timedOut = true;
-      if (state.infraError === null) state.infraError = timeoutMessage(child, timeoutMs, state);
-      child.kill();
-      resolve();
-    }, timeoutMs);
-  });
   const pump = pumpLines(ctx, child, timeoutMs, state).catch((error: unknown) => {
     // Park the rejection: after the wall clock has already won, the pump may
     // still fail (its write lands on a destroyed stdin) and must not surface as
@@ -285,9 +276,19 @@ async function executeProgram(ctx: BrokerContext, run: ProgramRun, state: RunSta
     pumpError = error;
   });
   try {
-    await Promise.race([pump, wallFired]);
+    // W2014: the wall clock is a POLICY, not a throw. Winning the race means
+    // "the budget is spent": record it, kill the child, and fall through to the
+    // SAME settle/render path a natural exit takes — `settleChild` below still
+    // owns the reap, and the `code=timeout` verdict is read back out of `state`.
+    await bounded(pump, timeoutMs, {
+      mode: "resolve",
+      value: () => {
+        timedOut = true;
+        if (state.infraError === null) state.infraError = timeoutMessage(child, timeoutMs, state);
+        child.kill();
+      },
+    });
   } finally {
-    clearTimeout(wallTimer);
     endStdin(child.stdin);
   }
   if (pumpError !== null && !timedOut) {
