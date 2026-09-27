@@ -569,7 +569,7 @@
 }
 .msg.think-seg .think-head:hover::before { opacity: 0; }
 .msg.think-seg .think-head:focus-visible {
-  outline: 1px solid var(--c-accent-ring); outline-offset: 2px; border-radius: var(--r-sm);
+  outline: 1px solid var(--c-focus-ring); outline-offset: 2px; border-radius: var(--r-sm);
 }
 /* 折叠箭头：与图标盒同心，hover / 键盘聚焦时淡入（DisclosureRow 的 100ms 交叉淡入）；
    折叠态另有「思考已折叠，点击展开」占位行，状态不靠箭头单独承担。

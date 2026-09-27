@@ -59,7 +59,7 @@ button { font: inherit; }
 }
 .btn:hover { background: var(--c-surface-raised); border-color: var(--c-border-strong); }
 .btn:disabled { opacity: .4; cursor: default; }
-.btn:focus-visible { outline: 2px solid var(--c-accent-ring); outline-offset: 1px; }
+.btn:focus-visible { outline: 2px solid var(--c-focus-ring); outline-offset: 1px; }
 
 .btn-accent {
   background: var(--c-accent);

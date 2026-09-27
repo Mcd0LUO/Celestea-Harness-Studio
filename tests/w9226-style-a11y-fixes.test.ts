@@ -16,8 +16,15 @@
  *
  * 取值一律从 CSS **解析**出来算，不把期望值抄一遍（抄一遍就变成自证）——
  * 与 apps/web/src/theme-claude.test.ts 同一口径。
+ *
+ * W2006 增补：焦点环的非文本对比度（WCAG 2.4.11 / 1.4.11，>= 3:1）。同一纪律：
+ *   ① 焦点环的**取值与「谁指向它」都从 styles/*.css 解析出来**，不写死期望值；
+ *   ② rgba() 必须按 alpha **合成**到底色上再算 —— 1.4.11 判的是屏幕上的真实像素；
+ *   ③ 断言必须覆盖**全部四套配色**（mono 浅/深、claude 浅/深），且每套都必须
+ *      **自己**定义焦点环 —— claude 浅色若漏定义会继承到 mono 的黑环，
+ *      在那个米白底上恰好也能过 3:1，只有「每套都得自己定义」这条能抓到。
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -190,7 +197,10 @@ describe('W9226 · F7 composer 聚焦可见指示', () => {
 
   it('layout.css 声明了 #inputbar:focus-within 的 box-shadow 环', () => {
     const d = decls(layout(), '#inputbar:focus-within');
-    expect(d.get('box-shadow'), '聚焦环是这条修复的全部内容').toMatch(/inset\s+0\s+0\s+0\s+1px\s+var\(--c-accent-ring\)/);
+    // W2006：token 由 --c-accent-ring（一个 token 三用：9 处焦点环 + 32 处 border +
+    // 15 处 box-shadow + 1 处 ::selection）换成**焦点环专用**的 --c-focus-ring。
+    // 环本身（inset 0 0 0 1px）一字未动，换的只是它引用的 token。
+    expect(d.get('box-shadow'), '聚焦环是这条修复的全部内容').toMatch(/inset\s+0\s+0\s+0\s+1px\s+var\(--c-focus-ring\)/);
   });
 
   it('没有别的规则声明 #inputbar 本体的 box-shadow（同/更高特异性不得重置聚焦环）', () => {
@@ -288,5 +298,186 @@ describe('W9226 · F5 未知 i18n key 不得写出 undefined 字面量', () => {
     expect(got).not.toBe('');
     expect(got).not.toBe('undefined');
     host.remove();
+  });
+});
+
+
+/* ==========================================================================
+ * W2006 · 焦点环的非文本对比度（WCAG 2.4.11 / 1.4.11：>= 3:1）
+ * --------------------------------------------------------------------------
+ * 缺陷：mono 的焦点环是 rgba(0,0,0,0.28) / rgba(255,255,255,0.32)，
+ *   合成到 --c-bg 上分别只有 1.986:1 / 2.910:1（架构师实测，本文件复算一致）。
+ * 修法（取舍见 results/W2006-focus-ring-a11y.md）：焦点环从
+ *   --c-accent-ring（一个 token 三用：9 处焦点环 + 32 处 border + 15 处
+ *   box-shadow + 1 处 ::selection）里**分家**出来，改用专用 token；
+ *   47 处装饰用法一字不动 —— 把装饰描边一起加深是设计变更，不是修 bug。
+ *
+ * 本分区守四条不变量，全部**从 CSS 解析**、不抄期望值：
+ *   ① 每一套配色都必须**自己**定义焦点环色（漏一套 ⇒ 继承别套的值）；
+ *   ② 焦点环对四种真实底色合成后 >= 3:1（rgba 必须按 alpha 合成再算）；
+ *   ③ 焦点环声明**不得**再引用装饰 token（否则「分家」名存实亡）；
+ *   ④ 装饰外观与 ::selection 一字未动（改它们才是设计变更）。
+ * ======================================================================== */
+const FOCUS_TOKEN = '--c-focus-ring';
+/** 装饰 token：焦点环不得再引用（③）。 */
+const DECOR_TOKENS = ['--c-accent-ring', '--interactive-accent-ring'] as const;
+/** 焦点环可能落在的四种真实底色（页面底 / 卡片 / 次级面 / 代码底）。 */
+const RING_SURFACES = ['--bg-base', '--bg-layer-1', '--bg-layer-3', '--bg-code'] as const;
+
+/**
+ * 解析颜色 -> [r,g,b,a]。支持 #rgb / #rrggbb / #rrggbbaa / rgb() / rgba()。
+ * 为什么必须解析 alpha：1.4.11 判的是**屏幕上的真实像素**，
+ * rgba(0,0,0,0.45) 画在 #fafafa 上是 rgb(143,143,143)，不是黑色。
+ */
+function parseColor(v: string): [number, number, number, number] {
+  const s = v.trim();
+  const hex = /^#([0-9a-f]{3,8})$/i.exec(s);
+  if (hex) {
+    let h = hex[1] as string;
+    if (h.length === 3 || h.length === 4) h = h.split('').map((c) => c + c).join('');
+    if (h.length !== 6 && h.length !== 8) throw new Error('bad hex: ' + v);
+    const n = parseInt(h.slice(0, 6), 16);
+    const a = h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1;
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255, a];
+  }
+  const fn = /^rgba?\(([^)]+)\)$/i.exec(s);
+  if (fn) {
+    const p = (fn[1] as string).split(/[,\/]/).map((x) => x.trim()).filter((x) => x !== '');
+    if (p.length < 3) throw new Error('bad rgb(): ' + v);
+    return [Number(p[0]), Number(p[1]), Number(p[2]), p.length > 3 ? Number(p[3]) : 1];
+  }
+  throw new Error('unsupported color syntax: ' + v);
+}
+
+/** 半透明前景按 alpha 合成到不透明背景上（WCAG 1.4.11 的实际呈现色）。 */
+function composite(fg: string, bg: string): string {
+  const [r, g, b, a] = parseColor(fg);
+  const [br, bgc, bb] = parseColor(bg);
+  const mix = (c: number, d: number): number => Math.round(c * a + d * (1 - a));
+  return '#' + [mix(r, br), mix(g, bgc), mix(b, bb)].map((c) => c.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * 扫 styles/ 下全部 CSS，取出**真实的焦点指示器声明**：
+ * 选择器含 :focus，属性是 outline / box-shadow，且值不是 none。
+ * 为什么扫全部文件而不是列一张表：列一张表就是抄一遍期望值 —— 表会漏掉
+ * 「后来人新加的焦点环」（这正是 .chatcol-resizer:focus-visible::after 的处境：
+ * 它是 tabIndex=0 的真实 tab 停靠点，此前的审计清单里就没有它）。
+ */
+interface FocusRule { file: string; selector: string; value: string; tokens: string[] }
+function focusIndicators(): FocusRule[] {
+  const out: FocusRule[] = [];
+  for (const f of readdirSync(STYLES).filter((n) => n.endsWith('.css')).sort()) {
+    const text = stripComments(cssText(f));
+    for (const m of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = (m[1] ?? '').trim().replace(/\s+/g, ' ');
+      if (!/:focus/.test(selector)) continue;
+      for (const d of (m[2] ?? '').split(';')) {
+        const i = d.indexOf(':');
+        if (i < 0) continue;
+        const prop = d.slice(0, i).trim();
+        const value = d.slice(i + 1).trim();
+        if (prop !== 'outline' && prop !== 'box-shadow') continue;
+        if (value === 'none' || value === '') continue;
+        const tokens = [...value.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/g)].map((x) => x[1] as string);
+        out.push({ file: f, selector, value, tokens });
+      }
+    }
+  }
+  return out;
+}
+const FOCUS_RULES = focusIndicators();
+
+/** 每套配色「自己」的那几个块 —— 用来判「本套是否自己定义了焦点环色」。 */
+const OWN_BLOCKS: ReadonlyArray<readonly [string, Record<string, string>[], readonly string[]]> = [
+  ['mono 浅', [vars(block(TOKENS, ':root {')), vars(block(TOKENS, ':root,'))], [':root {', ':root,']],
+  ['mono 深', [vars(block(TOKENS, '[data-theme="dark"]'))], ['[data-theme="dark"]']],
+  ['claude 浅', [vars(block(CLAUDE.slice(0, CLAUDE_MEDIA), '[data-theme="claude"]'))], ['claude 浅色块']],
+  ['claude 深', [vars(block(CLAUDE.slice(CLAUDE_MEDIA), '[data-theme="claude"]'))], ['claude 深色块']],
+];
+
+describe('W2006 · 焦点环非文本对比度（四套配色 × 四种底色 >= 3:1）', () => {
+  it('对比度算法自检：合成是真的按 alpha 算（半透明叠底 = 屏幕上的真实像素）', () => {
+    expect(composite('rgba(0,0,0,0.5)', '#ffffff'), '黑 50% 叠白 = 中灰').toBe('#808080');
+    expect(composite('rgba(0,0,0,0.5)', '#fafafa'), '黑 50% 叠页面底').toBe('#7d7d7d');
+    // 本次修复的两个实际取值（报告里的 3.307:1 / 4.514:1 就是这两个合成色算出来的）
+    expect(composite('rgba(0,0,0,0.45)', '#fafafa'), '本次修复的 mono 浅焦点环').toBe('#8a8a8a');
+    expect(composite('rgba(255,255,255,0.45)', '#131313'), '本次修复的 mono 深焦点环').toBe('#7d7d7d');
+    expect(composite('#000000', '#ffffff'), '不透明色叠底不得被改动（alpha=1 时合成是恒等）').toBe('#000000');
+    expect(composite('#123456', '#ffffff'), '不透明色叠底不得被改动').toBe('#123456');
+    // 已知锚点：架构师实测的旧值 1.986:1 / 2.910:1，本文件必须复算得出同一个数
+    expect(contrast(composite('rgba(0, 0, 0, 0.28)', '#fafafa'), '#fafafa')).toBeCloseTo(1.986, 3);
+    expect(contrast(composite('rgba(255, 255, 255, 0.32)', '#131313'), '#131313')).toBeCloseTo(2.91, 2);
+  });
+
+  it('每一套配色都**自己**定义了焦点环色（漏一套 ⇒ 继承别套的值）', () => {
+    // 为什么单列这条：claude 浅色若删掉自己的定义，会经 alias 继承到 mono 的
+    // rgba(0,0,0,0.45)，在那个米白底上恰好也能过 3:1 —— 只有「必须自己定义」
+    // 这条能抓到「删掉一套配色定义」这个变异。
+    for (const [name, blocks, where] of OWN_BLOCKS) {
+      const own = blocks.some((b) => b[FOCUS_TOKEN] !== undefined || b['--interactive-focus-ring'] !== undefined);
+      expect(own, name + ' 没有在 ' + where.join(' / ') + ' 里定义焦点环色').toBe(true);
+    }
+  });
+
+  it('焦点环取值与装饰 token 分家（不是把装饰 token 加深了事）', () => {
+    expect(resolve(MONO, FOCUS_TOKEN), 'mono 浅的焦点环不得等于装饰环').not.toBe(resolve(MONO, '--c-accent-ring'));
+    expect(resolve(MONO_DARK, FOCUS_TOKEN)).not.toBe(resolve(MONO_DARK, '--c-accent-ring'));
+    // 装饰环的四个历史取值必须一字未动（动了才是设计变更）
+    expect(vars(block(TOKENS, ':root,'))['--interactive-accent-ring']).toBe('rgba(0, 0, 0, 0.28)');
+    expect(vars(block(TOKENS, '[data-theme="dark"]'))['--interactive-accent-ring']).toBe('rgba(255, 255, 255, 0.32)');
+    expect(vars(block(CLAUDE.slice(0, CLAUDE_MEDIA), '[data-theme="claude"]'))['--interactive-accent-ring']).toBe('#d5734f');
+  });
+
+  it('每一套配色下，焦点环对四种底色合成后都 >= 3:1', () => {
+    for (const [name, table] of THEMES) {
+      const raw = resolve(table, FOCUS_TOKEN);
+      for (const bg of RING_SURFACES) {
+        const bgv = resolve(table, bg);
+        const shown = composite(raw, bgv);
+        const r = contrast(shown, bgv);
+        expect(r, name + '：焦点环 ' + raw + ' 在 ' + bg + ' ' + bgv + ' 上合成 ' + shown + ' = ' + r.toFixed(3) + ':1')
+          .toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it('四套配色都必须有焦点环 token（解析得到，不是 undefined 兜底）', () => {
+    for (const [name, table] of THEMES) {
+      expect(() => resolve(table, FOCUS_TOKEN), name).not.toThrow();
+    }
+  });
+
+  it('每个真实的焦点指示器都指向焦点环 token（不是 --c-accent-ring）', () => {
+    expect(FOCUS_RULES.length, '扫描必须真的扫到焦点指示器（防解析器被改坏后空集假绿）').toBeGreaterThanOrEqual(15);
+    const bad: string[] = [];
+    for (const rule of FOCUS_RULES) {
+      for (const t of rule.tokens) {
+        if ((DECOR_TOKENS as readonly string[]).includes(t)) bad.push(rule.file + ' | ' + rule.selector + ' | ' + rule.value);
+      }
+    }
+    expect(bad, '焦点指示器不得再引用装饰 token').toEqual([]);
+  });
+
+  it('焦点指示器引用的 token 在四套配色下都定义得出来（没有悬空引用）', () => {
+    const bad: string[] = [];
+    for (const rule of FOCUS_RULES) {
+      for (const t of rule.tokens) {
+        for (const [name, table] of THEMES) {
+          try { resolve(table, t); } catch { bad.push(name + ' :: ' + t + ' (' + rule.file + ' | ' + rule.selector + ')'); }
+        }
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('装饰外观一字未动：::selection 仍用 --c-accent-ring（改它才是设计变更）', () => {
+    expect(decls(stripComments(cssText('base.css')), '::selection').get('background')).toBe('var(--c-accent-ring)');
+    // 装饰引用总数不得因为本次修复而减少（分家不是删除）
+    let deco = 0;
+    for (const f of readdirSync(STYLES).filter((n) => n.endsWith('.css'))) {
+      for (const m of stripComments(cssText(f)).matchAll(/var\(\s*--(?:c-|interactive-)accent-ring\s*\)/g)) { void m; deco++; }
+    }
+    expect(deco, '装饰用法（border / box-shadow / ::selection）数量不得下降').toBeGreaterThanOrEqual(45);
   });
 });

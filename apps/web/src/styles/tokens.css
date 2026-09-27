@@ -198,6 +198,20 @@
   --interactive-accent-strong: var(--s-black);
   --interactive-accent-soft: rgba(0, 0, 0, 0.055);
   --interactive-accent-ring: rgba(0, 0, 0, 0.28);
+  /* W2006：**焦点环专用** token —— 与 --interactive-accent-ring（装饰描边）分家。
+     为什么必须分：WCAG 1.4.11「非文本对比度」要求焦点指示器对自己所在的底色
+     >= 3:1，而 --interactive-accent-ring 同时被 47 处**装饰**用法引用
+     （border / box-shadow / ::selection）。把它加深到 0.42 达标，等于顺手改掉
+     47 处装饰外观 —— 那是设计变更，不是修 bug。
+     实算（WCAG 2.1 相对亮度，合成色 = rgba 叠在底色上）：
+       · 0.28 在 --c-bg #fafafa 上 => rgb(180,180,180) = 1.986:1  FAIL
+       · 0.42 在 #fafafa 上 = 3.020、在 #f4f4f4 上 = 2.979 —— 卡线，且
+         **--bg-layer-3 / --bg-code 两个真实底色上不达标**（焦点环画在卡片/代码底
+         上的情形是真实存在的），故 0.42 不够。
+       · 0.45 在四个真实底色上 = 3.307 / 3.363 / 3.310 / 3.310 —— 全部 >= 3:1
+         且留出余量（不卡线，避免以后底色微调就红）。
+     取 0.45 而不是 0.42 是**可复核的计算结果**，不是手感。 */
+  --interactive-focus-ring: rgba(0, 0, 0, 0.45);
   --interactive-accent-fg: var(--s-white);
   --interactive-bg-hover: var(--s-gray-50);
   --overlay: rgba(17, 17, 17, 0.4);
@@ -220,6 +234,7 @@
   --c-accent-strong: var(--interactive-accent-strong);
   --c-accent-soft: var(--interactive-accent-soft);
   --c-accent-ring: var(--interactive-accent-ring);
+  --c-focus-ring: var(--interactive-focus-ring);
   --c-accent-fg: var(--interactive-accent-fg);
   --c-bg: var(--bg-base);
   --c-surface: var(--bg-layer-1);
@@ -277,6 +292,11 @@
   --interactive-accent-strong: #ffffff;
   --interactive-accent-soft: rgba(255, 255, 255, 0.08);
   --interactive-accent-ring: rgba(255, 255, 255, 0.32);
+  /* W2006：深色焦点环同 0.45（浅色同一个 alpha 值在深底上更强，因为白叠深底的
+     合成距离更大）。实算：0.32 在 --c-bg #131313 上 = 2.910:1 FAIL；
+     0.40 在四个真实底色上 3.807 / 3.806 / 3.713 / 3.832（也达标，但深浅两套
+     用同一个 alpha 更容易被人记住与复核），0.45 = 4.348 / 4.272 / 4.152 / 4.300。 */
+  --interactive-focus-ring: rgba(255, 255, 255, 0.45);
   --interactive-accent-fg: #131313;
   --interactive-bg-hover: #2a2a2a;
   --overlay: rgba(0, 0, 0, 0.55);

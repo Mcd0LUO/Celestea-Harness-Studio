@@ -46,7 +46,7 @@
   background: var(--c-accent-soft);
 }
 .sl-grant:focus-visible {
-  outline: 1px solid var(--c-accent-ring);
+  outline: 1px solid var(--c-focus-ring);
   outline-offset: 1px;
 }
 /* 已授予：橙实心盾 */
@@ -204,7 +204,7 @@
   background: var(--c-accent-soft);
   border-color: var(--c-accent-ring);
 }
-.grant-preset:focus-visible { outline: 1px solid var(--c-accent-ring); outline-offset: 1px; }
+.grant-preset:focus-visible { outline: 1px solid var(--c-focus-ring); outline-offset: 1px; }
 .grant-preset:disabled { opacity: .5; cursor: default; }
 /* 等效授权已生效：显示已生效态（仍可点击 = 幂等重复授予，只会刷新到期时间） */
 .grant-preset.on {

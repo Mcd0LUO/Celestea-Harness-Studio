@@ -105,7 +105,7 @@
   transition: background .12s ease, border-color .12s ease, color .12s ease;
 }
 .ws-strip-back:hover { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-accent-fg); }
-.ws-strip-back:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--c-accent-ring); }
+.ws-strip-back:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--c-focus-ring); }
 .ws-strip-unlinked { pointer-events: auto; color: var(--c-text-3); font-size: 10px; white-space: nowrap; }
 
 /* 窄屏降级：≤1024px 时左侧空白带已容不下 chip（正文列贴边）→ 整条隐藏，正文优先。

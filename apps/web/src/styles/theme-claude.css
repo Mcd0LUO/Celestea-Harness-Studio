@@ -70,7 +70,18 @@
   --interactive-accent-strong: #8a3f1f;
   --interactive-accent-soft: rgba(168, 80, 42, 0.09);
   --interactive-accent-ring: #d5734f;  /* 官方 Orange #d97757 提深 1 档 —— 官方值在米白底只有 2.96:1，
-                                          差一点没到 WCAG 非文本 3:1；本值 3.12:1 且色相不变 */
+                                          差一点没到 WCAG 非文本 3:1；本值 3.12:1 且色相不变。
+                                          W2006：本 token 自此只服务**装饰**用法（border / ::selection），
+                                          焦点环改用下面的 --interactive-focus-ring。 */
+  /* W2006（WCAG 2.4.11 / 1.4.11）：焦点环专用 token。为什么浅深不同值：
+     焦点指示器必须对自己所在的**每一种**底色 >= 3:1，而「品牌装饰色浅深同值」
+     是另一件事 —— 一个 token 表达两件事，才会出现「要么不达标、要么改掉设计」。
+     实算（WCAG 2.1 相对亮度；claude 浅色四个真实底色 #faf9f5 / #ffffff /
+     #f2f0e9 / #f2f0e9）：#d5734f = 3.117 / 3.284 / 2.880 / 2.880 —— 页面底达标，
+     但**卡片次级面与代码底上不达标**（2.88）。同色相提深一档 #d16b46 后
+     = 3.377 / 3.558 / 3.120 / 3.120，四种底色全部 >= 3:1，色相偏移仅 1.20°
+     （官方 #d97757 的色相 14.77°，#d5734f 16.12°，#d16b46 15.97°）。 */
+  --interactive-focus-ring: #d16b46;
   --interactive-accent-fg: #ffffff;
   --interactive-bg-hover: #f2f0e9;
   --overlay: rgba(20, 20, 19, 0.4);
@@ -130,7 +141,11 @@
     --interactive-accent: #e08a66;
     --interactive-accent-strong: #f0a184;
     --interactive-accent-soft: rgba(224, 138, 102, 0.14);
-    --interactive-accent-ring: #d5734f;  /* 与浅色同一个 focus 指示色，深底 5.08:1 */
+    --interactive-accent-ring: #d5734f;  /* 装饰位：与浅色同值（品牌色，故意不随深浅变） */
+    /* W2006：焦点环在深底上沿用同一个橙 —— 实测 4.20~5.51:1（四个底色
+       #1f1e1b / #262521 / #2e2d29 / #171614 = 5.076 / 4.671 / 4.197 / 5.506），
+       深色下**不需要**再加深，故浅深两套焦点环取值不同、且各自都是实测结果。 */
+    --interactive-focus-ring: #d5734f;
     --interactive-accent-fg: #262521;
     --interactive-bg-hover: #2e2d29;
     --overlay: rgba(0, 0, 0, 0.55);

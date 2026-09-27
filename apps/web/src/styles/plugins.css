@@ -53,7 +53,7 @@
   padding: 5px 9px;
 }
 .plug-search-input:focus-visible {
-  outline: 1px solid var(--interactive-accent-ring);
+  outline: 1px solid var(--interactive-focus-ring);
   outline-offset: 1px;
 }
 .plug-count {
@@ -181,7 +181,7 @@
   border-color: var(--interactive-accent);
 }
 .plug-switch-input:focus-visible + .plug-switch-track {
-  outline: 1px solid var(--interactive-accent-ring);
+  outline: 1px solid var(--interactive-focus-ring);
   outline-offset: 1px;
 }
 .plug-switch-input:disabled + .plug-switch-track {
@@ -243,7 +243,7 @@
   background: var(--bg-layer-3);
 }
 .plug-expand:focus-visible {
-  outline: 1px solid var(--interactive-accent-ring);
+  outline: 1px solid var(--interactive-focus-ring);
   outline-offset: 1px;
 }
 /* ★ 折叠的高度约束必须落在**同一个**被 JS 驱动 max-height 的元素上：
@@ -310,7 +310,7 @@
 .plug-cfg-enum:focus-visible,
 .plug-cfg-text:focus-visible,
 .plug-cfg-number:focus-visible {
-  outline: 1px solid var(--interactive-accent-ring);
+  outline: 1px solid var(--interactive-focus-ring);
   outline-offset: 1px;
 }
 .plug-cfg-empty {
