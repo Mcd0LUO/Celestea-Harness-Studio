@@ -106,7 +106,10 @@ describe('W2010 ② 展开终值是 max-content，且没有 @supports 守卫', (
 
   it('★ 绝不使用 calc-size()（同实测：FF/WebKit 内容永久不可见）', () => {
     for (const f of ['src/styles/settings.css', 'src/styles/plugins.css', 'src/styles/provider-edit.css']) {
-      expect(read(f).includes('calc-size('), f + ' 不得使用 calc-size()').toBe(false);
+      // 禁的是**用法**不是**提及**：本仓注释会引用被禁写法做说明（provider-edit.css 顶部
+      // 那段 W2010 论证就点名了 calc-size()），所以先剥注释再判 —— 否则「写清楚为什么
+      // 不能用」反而把门禁搞红，下一个人只会把解释删掉。
+      expect(code(read(f)).includes('calc-size('), f + ' 不得使用 calc-size()').toBe(false);
     }
   });
 });
