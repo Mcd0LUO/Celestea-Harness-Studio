@@ -58,7 +58,7 @@ if (text === "") return errorOnly(c, 400, "input must not be empty");
 export interface WireMessage { role: string; content: string | null; … }
 ```
 
-`mapMessage`（`:57-86`）对 system/user/tool 一律 `collectMessageText(msg.content)`；`collectMessageText`（`packages/llm/src/seam.ts:140-145`）只把 `type==="text"` 的块按 `
+`mapMessage`（`:57-86`）对 system/user/tool 一律 `collectMessageText(msg.content)`；`collectMessageText`（`packages/llm/src/seam.ts:163-168`）只把 `type==="text"` 的块按 `
 ` 拼接，**非 text 块被静默丢弃**。
 
 ### 1.5 前端：零附件入口
