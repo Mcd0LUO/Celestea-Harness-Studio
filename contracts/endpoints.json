@@ -265,7 +265,7 @@
       "errors": [],
       "notes": [
         "KeepAlive enabled; bus capacity 512; slow clients get event `status` payload {phase:'lagged',hint:'slow client, skipped events',statusline:{...}} and the stream continues.",
-        "Event names (8): text, thinking, tool, tool_result, turn_end, done, status, compact. See contracts/sse-events.json."
+        "Event names (10): see contracts/sse-events.json for the authoritative list."
       ],
       "probe": {
         "checked": true,
