@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseSessionJsonl } from "@celestea/session";
 import { COMPACT_HEAD_TURNS, COMPACT_KEEP_TURNS, compactNote, serializeEventLog } from "@celestea/runtime";
+import { bounded, idle } from "@celestea/tools";
 import { SESSION_LOG_NAME } from "../runtime/engine-session.js";
 import type { SseEventName } from "@celestea/core";
 import { compareBytes, compareJson, note, type Finding } from "./compare.js";
@@ -66,7 +67,9 @@ export async function runTurn(host: ReplayHost, input: string): Promise<{ status
     for (;;) {
       const left = deadline - Date.now();
       if (left <= 0) break;
-      const frame = await Promise.race([sub.next(), delay(left)]);
+      // W2014: TOTAL clock — `left` is the REMAINING budget, so every pass shares
+      // one 10s deadline instead of getting a fresh one.
+      const frame = await bounded(sub.next(), left, { mode: "resolve", value: () => null });
       if (frame === null) break;
       const payload = (frame.envelope.payload ?? {}) as Record<string, unknown>;
       frames.push({ event: frame.event, turn: frame.envelope.turn, payload });
@@ -147,7 +150,8 @@ export async function captureSseWire(host: ReplayHost, frames: readonly WireFram
     for (const frame of frames.slice(i, target)) host.studio.services.bus.emit(frame.event as SseEventName, frame.turn, frame.payload, session);
     const deadline = Date.now() + timeoutMs;
     while (parseWire(wire).length < target && Date.now() < deadline) {
-      const chunk = await Promise.race([reader.read(), delay(300).then(() => null)]);
+      // W2014: IDLE clock — a fresh 300ms per `read()`, bounded by the outer deadline.
+      const chunk = await idle(reader.read(), 300, { mode: "resolve", value: () => null });
       if (chunk === null || chunk.done === true) break;
       wire += decoder.decode(chunk.value);
     }
@@ -228,7 +232,7 @@ export async function compactFindings(host: ReplayHost, id: string, dir: string)
   const sub = host.studio.services.bus.subscribe();
   const res = await host.app.request(`/api/sessions/${encodeURIComponent(id)}/compact`, { method: "POST" });
   const body = (await res.json()) as Record<string, unknown>;
-  const frame = await Promise.race([sub.next(), delay(2_000)]);
+  const frame = await bounded(sub.next(), 2_000, { mode: "resolve", value: () => null });
   sub.close();
   const after = readFileSync(logPath, "utf8");
   return expectedCompactLog(beforeEvents, "", 4) === null

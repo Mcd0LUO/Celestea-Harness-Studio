@@ -34,7 +34,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { SandboxChild } from "@celestea/core";
-import { resolveShellKind, shellQuote, whichSync } from "@celestea/tools";
+import { bounded, resolveShellKind, shellQuote, whichSync } from "@celestea/tools";
 
 /** Structured refusal codes (mirrors the `shell_denied` convention in exec.ts). */
 export const TERMINAL_UNAVAILABLE_CODE = "terminal_unavailable";
@@ -213,19 +213,18 @@ async function reapBounded(entry: TerminalEntry, graceMs: number): Promise<void>
 /**
  * Race `promise` against a deadline; `true` when it settled in time.
  *
- * Local on purpose: `@celestea/tools` does not export its `withTimeout`, and the
- * alternative — widening that package's public surface for one call site — is
- * worse than these few lines. The timer is always cleared, so an already-settled
- * child never leaves a stray handle that would keep the process alive.
+ * W2014: the race is now the shared deadline primitive. The `settled` mapping above
+ * stays local because it is THIS function's contract (a rejected wait counts as
+ * settled, so a dead child is never SIGKILLed twice) — the primitive supplies the
+ * clock, not the meaning of "settled". Its timer is always cleared, so an
+ * already-settled child never leaves a stray handle behind.
  */
 function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
-  let timer: NodeJS.Timeout | undefined;
-  const deadline = new Promise<boolean>((resolve) => {
-    timer = setTimeout(() => resolve(false), ms);
-  });
+  // A REJECTION is also "it settled": the child is gone either way, and the
+  // SIGKILL escalation must not fire for a wait that already finished.
   const settled = promise.then(
     () => true,
     () => true,
   );
-  return Promise.race([settled, deadline]).finally(() => clearTimeout(timer));
+  return bounded(settled, ms, { mode: "resolve", value: () => false });
 }

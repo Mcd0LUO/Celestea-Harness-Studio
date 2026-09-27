@@ -17,6 +17,7 @@
     "@celestea/agent-loop": "workspace:*",
     "@celestea/core": "workspace:*",
     "@celestea/session": "workspace:*",
+    "@celestea/tools": "workspace:*",
     "@celestea/workers": "workspace:*"
   },
   "license": "MIT",

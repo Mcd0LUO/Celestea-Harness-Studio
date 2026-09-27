@@ -46,7 +46,7 @@
  *   process/buffers.ts   capped ring buffers / tails                            (process.rs)
  *   sandbox/config.ts    sandbox knobs + shell invocation + env allowlist       (sandbox.rs)
  *   sandbox/child.ts     SandboxChild over node:child_process                   (sandbox.rs)
- *   sandbox/async.ts     timeout race + bounded poll
+ *   sandbox/async.ts     the ONE deadline primitive (bounded/idle) + bounded poll
  *   sandbox/userspace.ts userspace-lite Sandbox implementation (P2c: real isolation)
  *   sandbox/fake-sandbox.ts  scripted FakeSandbox test double (seam replaceability)
  *   builtin.ts           the six builtin tools, sharing one sandbox + registry  (builtin.rs)
@@ -268,6 +268,20 @@ export {
   type RunCodeLanguageName,
 } from "./platform/quote.js";
 export { taskkillTree } from "./sandbox/child.js";
+
+// --- deadlines (W2014: the ONE race-against-a-timer primitive) ----------------
+export {
+  bounded,
+  delay,
+  idle,
+  TIMED_OUT,
+  withTimeout,
+  type DeadlinePolicy,
+  type ResolvePolicy,
+  type SentinelPolicy,
+  type ThrowPolicy,
+  type TimeoutResult,
+} from "./sandbox/async.js";
 
 // --- testing capability gates (W885: visible skips instead of bare platform checks)
 export {

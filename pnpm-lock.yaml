@@ -131,6 +131,9 @@ importers:
       '@celestea/session':
         specifier: workspace:*
         version: link:../session
+      '@celestea/tools':
+        specifier: workspace:*
+        version: link:../tools
       '@celestea/workers':
         specifier: workspace:*
         version: link:../workers
