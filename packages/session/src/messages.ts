@@ -82,6 +82,12 @@ export function sessionEventToMessage(ev: SessionEvent): StudioMessage | null {
       if (ev.surface !== undefined) out.tool_surface = ev.surface;
       return out;
     }
+    // W2018 (B1): the compaction markers are structural, like turn_start /
+    // turn_end — they must NOT become transcript rows (a marker is not something
+    // the user or the model said). Null keeps projectMessages byte-identical.
+    case "compaction_start":
+    case "compaction_end":
+      return null;
     // W783 §7: the two host-side question rows. The Studio projection is the
     // per-event transcript surface the UI replays, so a parked question and its
     // answer stay visible there (an unanswered row is how a restart looks).

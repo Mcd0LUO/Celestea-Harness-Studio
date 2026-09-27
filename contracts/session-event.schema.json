@@ -341,9 +341,35 @@
             }
           },
           "additionalProperties": true
+        },
+        {
+          "title": "compaction_start",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "compaction_start"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "title": "compaction_end",
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "compaction_end"
+            }
+          },
+          "additionalProperties": true
         }
       ],
-      "note": "W783 added user_question/user_answer (7 -> 9 variants). They are ADDITIVE rows: the engine never emits them, the host does, and a reader that does not know them treats the row as a torn tail exactly as before."
+      "note": "W783 added user_question/user_answer (7 -> 9 variants); W2018 (B1) added the field-free compaction_start/compaction_end markers (9 -> 11). Both are ADDITIVE rows: the engine never emits them, the host does, and a reader that does not know them treats the row as a torn tail exactly as before. The markers carry NO fields -- the tag is the payload."
     }
   },
   "type": "object",

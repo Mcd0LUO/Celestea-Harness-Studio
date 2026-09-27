@@ -83,8 +83,14 @@ describe("POST /api/sessions/{id}/compact", () => {
     sub.close();
 
     const parsed = parseSessionJsonl(readSessionLog(h, "s12"));
-    expect(parsed.events.map((e) => e.type).slice(0, 4)).toEqual(["turn_start", "user_message", "assistant_message", "turn_end"]);
-    const head = parsed.events[1];
+    // W2018/B1: the log now OPENS with the compaction_start marker (written by
+    // the same atomic rewrite) and CLOSES with compaction_end. This HTTP-level
+    // test is the end-to-end proof that both markers really reach the file —
+    // it asserts their position around the compacted history, not just presence.
+    expect(parsed.events[0]).toEqual({ type: "compaction_start" });
+    expect(parsed.events[parsed.events.length - 1]).toEqual({ type: "compaction_end" });
+    expect(parsed.events.map((e) => e.type).slice(1, 5)).toEqual(["turn_start", "user_message", "assistant_message", "turn_end"]);
+    const head = parsed.events[2];
     expect(head?.type === "user_message" ? head.text.startsWith("【上下文压缩】") : false).toBe(true);
     expect(head?.type === "user_message" ? head.text : "").toContain("digest");
     const kept = parsed.events.filter((e) => e.type === "turn_start").map((e) => (e.type === "turn_start" ? e.id : ""));

@@ -230,10 +230,11 @@ describe("contracts/session-event.schema.json", () => {
   const s = loadSessionEventSchema();
   const defs = s["$defs"] as Record<string, { oneOf: unknown[] }>;
 
-  // W783: 7 -> 9 (user_question / user_answer).
-  it("declares the 9 SessionEvent variants", () => {
+  // W783: 7 -> 9 (user_question / user_answer); W2018/B1: 9 -> 11
+  // (the field-free compaction_start / compaction_end markers).
+  it("declares the 11 SessionEvent variants", () => {
     expect(defs["SessionEvent"]?.oneOf).toHaveLength(SESSION_EVENT_TYPES.length);
-    expect(SESSION_EVENT_TYPES).toHaveLength(9);
+    expect(SESSION_EVENT_TYPES).toHaveLength(11);
   });
 
   it("declares the 5 TurnOutcome states", () => {
@@ -413,9 +414,9 @@ describe("E-P0③ checkpoint + boot recovery (contract delta)", () => {
     const defs = s["$defs"] as Record<string, { oneOf: Array<{ const?: string }> }>;
     expect(TURN_OUTCOMES).toContain("interrupted");
     expect(defs["TurnOutcome"]?.oneOf).toHaveLength(5);
-    // W783 appended the two host-side question variants; interrupted legality is
-    // unaffected.
-    expect(defs["SessionEvent"]?.oneOf).toHaveLength(9);
+    // W783 appended the two host-side question variants, W2018/B1 the two
+    // compaction markers; interrupted legality is unaffected.
+    expect(defs["SessionEvent"]?.oneOf).toHaveLength(11);
   });
 });
 
