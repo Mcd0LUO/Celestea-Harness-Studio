@@ -50,6 +50,16 @@ export function renderDefaultPicker(container: HTMLElement, host: ProviderListHo
     for (const m of p.models ?? []) {
       const o = document.createElement('option');
       o.value = m.id;
+      // W9228（W9225/W9227 跨格线索 C4 · W9202 审计 P1-4）：模型 id 在 provider
+      // 之间**不唯一**（生产里 `deepseek-flash` 同时挂在网关与「基元」下），而
+      // option 的 value 只放 m.id ⇒ 两个同名模型产生两个 value 相同的 option，
+      // 用户在界面上分不出选的是哪一个，change 时也只发 model —— 后端
+      // （handlers/providers.ts 的 provider_id 缺省分支）便取**第一个**列出该 id 的
+      // provider，并把它自己的 base_url 一起切成端点。这里把两个真实身份挂到
+      // option 上，change 时把 provider_id 作为 api.setDefaultModel 的第二参发出
+      // （api 层与后端**早已支持**，缺的只有这一处）。
+      o.dataset.providerId = p.id;
+      o.dataset.model = m.id;
       o.textContent = (p.name || p.id) + ' / ' + m.id;
       known.add(m.id);
       sel.appendChild(o);
@@ -58,20 +68,24 @@ export function renderDefaultPicker(container: HTMLElement, host: ProviderListHo
   if (getDefaultModel() !== null && !known.has(getDefaultModel() ?? '')) {
     const o = document.createElement('option');
     o.value = getDefaultModel() ?? '';
+    o.dataset.model = getDefaultModel() ?? ''; // 兜底行没有 provider 身份，但 model 必须有
     o.textContent = t('settings.providers.defaultNotInList', { model: getDefaultModel() ?? '' });
     sel.appendChild(o);
   }
   sel.value = getDefaultModel() ?? '';
   const msg = el('span', 'prov-default-msg');
   sel.addEventListener('change', () => {
-    const v = sel.value;
-    if (!v) return;
+    const chosen = sel.selectedOptions[0];
+    const model = chosen?.dataset.model ?? '';
+    if (!model) return;
+    // 兜底行（不在列表的默认项）没有 data-provider-id ⇒ 不发明身份，按旧契约只发 model。
+    const providerId = chosen?.dataset.providerId ?? '';
     msg.textContent = t('settings.providers.applyingDefault');
     msg.className = 'prov-default-msg';
     void api
-      .setDefaultModel(v)
+      .setDefaultModel(model, providerId === '' ? undefined : providerId)
       .then(() => {
-        setDefaultModel(v);
+        setDefaultModel(model);
         msg.textContent = t('settings.providers.defaultApplied');
         msg.className = 'prov-default-msg ok';
         void host.loadProviders();

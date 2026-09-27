@@ -12,7 +12,7 @@
  * maps onto HTTP 503, so the adapter itself stays about the HTTP contract.
  */
 
-import { createUsageTracker, DefaultAgentLoop, withRepetitionPerturbation } from "@celestea/agent-loop";
+import { createUsageTracker, DefaultAgentLoop, withRepetitionPerturbation, type RepetitionDiagnostics } from "@celestea/agent-loop";
 import { listSkills, memoryContextOf, readLayers, renderSkillCatalog, type Llm, type PendingInjection, type Sandbox, type SessionEvent, type SessionLog, type Tool, type ToolGuard } from "@celestea/core";
 import { createSessionInbox, type SessionInbox, type TurnContextRow } from "@celestea/runtime";
 import {
@@ -58,6 +58,15 @@ import { withAttachments } from "./attachments-llm.js";
 export const MAX_LIVE_SESSIONS = 4;
 export const MAX_CONCURRENT_TURNS = 2;
 export const SESSION_IDLE_TTL_MS = 15 * 60 * 1_000;
+
+/**
+ * W9228 (W9225 F-09): the repetition guard's sidecar names, INSIDE the session
+ * directory — the same "carried along by trash/archive/delete" rule the
+ * attachment store follows. Declared here (the composer owns the session dir)
+ * so the two paths can never drift from the loop that writes them.
+ */
+export const REPETITION_LOG_NAME = "repetitions.jsonl";
+export const REPETITION_COPY_DIRNAME = "repetitions";
 
 /**
  * Per-session injection wiring the host supplies (placement over SSE, W515 §2).
@@ -334,11 +343,26 @@ export class SessionComposer {
       loopFactory: (bindings) => {
         // W806: the turn boundary is the ONLY place the disclosed set may move.
         engine.tools.disclosure.beginTurn();
+        // W9228 (W9225 F-09): the repetition guard's diagnostics sink. Until now
+        // NOTHING in production passed `repetitionDiagnostics`, so
+        // `CollapseDriver.log()` returned on its first line for every conviction
+        // and the module's promise ("the ONLY surviving record of what was
+        // discarded", repetition-recovery.ts) was never kept: a collapse dropped
+        // the whole attempt with no `repetitions.jsonl` line and no copy.
+        // `sessionId` rides along so the line names the session instead of null.
+        //
+        // `holdbackChars` is deliberately NOT set here — see the cross-grid note
+        // below. Its default 0 is the honest pre-holdback behaviour (the cut lands
+        // at the conviction point), and enabling it needs a fix in
+        // `packages/agent-loop` that is outside this file's writable scope.
+        const diagnostics = this.repetitionDiagnosticsFor(dir);
         return new DefaultAgentLoop(bindings.config, {
           signal: bindings.signal,
           sink: bindings.sink,
           usage,
           ...(bindings.injections === undefined ? {} : { injections: bindings.injections }),
+          ...(diagnostics === null ? {} : { repetitionDiagnostics: diagnostics }),
+          sessionId,
         });
       },
       workers: this.workerWiring(sessionId, profile),
@@ -353,6 +377,43 @@ export class SessionComposer {
     questionHolder.runtime = composed;
     runCodeHolder.runtime = composed; // W1467: same late binding for sub-call rows
     return composed;
+  }
+
+  /**
+   * W9228 (W9225 F-09): the repetition guard's diagnostics sink of ONE session
+   * generation, or null for a generation with no directory (the detached
+   * face): a session-less turn has nowhere to write, and inventing a path would
+   * scatter sidecars across the process CWD.
+   *
+   * Both names live INSIDE the session directory, so archive / trash / delete
+   * carry the evidence along exactly like `attachments/` does — a conviction
+   * record that survives the session it describes is the whole point.
+   *
+   * ## Why `holdbackChars` is NOT set here (the reason this is not a one-liner)
+   *
+   * `RepetitionDiagnostics` also carries `holdbackChars`, which makes the cut
+   * land on the true onset instead of at the (later) conviction point. The
+   * audit's suggested fix passed it. Measured here (`results/w9228-probe-holdback.ts`,
+   * a 4 960-char HEALTHY burst through the real `ThinkingBuffer`):
+   *
+   *     holdback=0    → persisted 4960 / pushed 4960   (完整)
+   *     holdback=2400 → persisted 2560 / pushed 4960   (LOST 2400)
+   *
+   * i.e. on the HEALTHY path the trailing `holdbackChars` of every reasoning
+   * burst are never released: `releaseAfterStream` calls `thinking.flush()`,
+   * and `flush()` only releases `held - holdbackChars` (`thinking.ts:101`).
+   * The only caller that would release the remainder is the TRUNCATE arm of
+   * `repetition-cut.ts`, which a healthy turn never reaches. Turning it on from
+   * here would silently truncate the tail of every normal turn's reasoning —
+   * strictly worse than the defect being fixed. `holdbackChars` therefore stays
+   * at its default 0, and the missing flush is registered as a cross-grid clue.
+   */
+  private repetitionDiagnosticsFor(dir: string | null): RepetitionDiagnostics | null {
+    if (dir === null) return null;
+    return {
+      logPath: join(dir, REPETITION_LOG_NAME),
+      copyDir: join(dir, REPETITION_COPY_DIRNAME),
+    };
   }
 
   /**
