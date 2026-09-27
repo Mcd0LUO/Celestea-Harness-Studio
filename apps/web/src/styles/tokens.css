@@ -148,6 +148,10 @@
   /* W765：响应式与触控（语义 token；媒体查询条件本身不能用变量，断点数值只登记在
      styles/responsive.css 顶部表格里，这里放可复用的**尺寸**） */
   --tap-min: 44px; /* 触控目标最小边长（WCAG 2.5.5 / iOS HIG 一致取 44） */
+  /* W2024：WCAG 2.2 SC 2.5.8（AA）的**下限** 24px。与 --tap-min 是两个不同的量：
+     --tap-min 是「触摸档我们要做到多舒服」（44），本 token 是「任何档位都不得低于
+     多少」（24，合规线）。组件层要表达「至少合规」时用它，不要写死 24。 */
+  --tap-hit: 24px;
   --topbar-h-mobile: 56px; /* 移动端顶栏固定高：抽屉/遮罩的起点与它对齐 */
   --drawer-w: min(86vw, 320px); /* 移动端会话抽屉宽度 */
   --safe-b: env(safe-area-inset-bottom, 0px); /* iOS 底部安全区（viewport-fit=cover） */
