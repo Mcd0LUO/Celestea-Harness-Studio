@@ -11,6 +11,7 @@
 | `lib/backend.mjs` | **确定性假后端**：真 EventSource / 真 SSE 帧，帧时序由 `/__control/burst` 驱动 |
 | `lib/server.mjs` | 静态服务器（早期版本，保留） |
 | `lib/app.mjs` | 装配 + `waitFor` / `control` |
+| `lib/cleanup.mjs` | **进程收尾登记**（W2021）：信号下同步 kill Chrome / 释放端口，再等异步收尾 |
 | `lib/probe.mjs` | 注入页面的只读探针：rAF 帧节拍 + LoAF 归因 + MutationObserver |
 | `lib/scenario.mjs` | 场景公共件（动态 import 应用模块、取 pane、发突发） |
 | `lib/stats.mjs` | 中位数/p95/max、原始 JSON 与 markdown 表落盘 |
@@ -20,6 +21,7 @@
 | `cases/q4-memory.mjs` | 问题 4：CDP 堆指标 + 持有者计数 + 分配归因 |
 | `verify.mjs` | 复核既有声明（DOM 上限 / ops / oversize / cadence / think 预算） |
 | `focus-*.mjs` | 焦点复现（每个对应报告里一条结论） |
+| `cases/w2021-signal-stub.mjs` | **门禁专用探针**（不是测量场景）：起 app 后等着被发信号 |
 | `run.mjs` | 总入口：`node scripts/perf/run.mjs q1 q2 q3 q4` |
 
 ## 前置：冻结检出 + Vite 转换服务
@@ -80,6 +82,32 @@ node scripts/perf/focus-think-ledger.mjs         # thinkBudget 账本漂移
 ```
 
 原始数据与表格落到 `results/perf-w9111/`（gitignored）。
+
+## 被信号杀死时不留垃圾（W2021）
+
+**修复前的现场**：`timeout 115 node scripts/perf/run.mjs q1` 之后 backend 端口随进程消失，
+但 **Chrome 是 spawn 出来的独立进程** —— 它被 init 收养后继续活着，继续占着 CDP 端口
+（`ss -ltnp` 里仍是 `chrome-headless`）与 `$TEMP/w9111-chrome-*` profile 目录。下一次测量
+就撞 `listen EADDRINUSE` / CDP 连不上，而报错指向 `node:net`，看不出根因。
+
+**根因**：Node 的 SIGTERM/SIGINT 默认行为是**立即退出** —— 不跑 `finally`、不跑
+`process.on('exit')`。所以每个 case 里的 `finally { await app.close(); }` 在信号下**永远不执行**。
+
+**现在的形状**：
+
+- `lib/cleanup.mjs` 维护一张**活跃实例**登记表。`boot()` 起来后登记、`close()` 完注销
+  ⇒ 信号到达时表里恰好是「还活着」的实例（0/1/2 个都对），既不漏也不重复关。
+- 信号处理器里**先同步做关键动作**（`child.kill()` / `server.close()` 都同步释放资源），
+  再**有上限地**等异步部分（profile 删除），上限（2s）到了就退出。
+- 退出码 = `128 + signum`（SIGTERM → 143、SIGINT → 130），与 shell 口径一致；
+  **第二次信号**立即退出，不再等。
+- `chrome.close()` / `backend.close()` / `app.close()` 都**幂等**：正常路径的 `finally` 与
+  信号路径的 drain 拿到的是同一次收尾，重复调用不抛错。
+- 登记表为空时**摘掉**信号处理器 ⇒ **正常路径（跑完自己收尾）与改动前逐字同形**，
+  不多做任何工作、不影响测量口径。
+
+回归门禁：`tests/w2021-perf-signal-cleanup.test.ts`（起真 app + 真 Chrome，发 SIGTERM，
+断言端口可再 bind / 无孤儿 Chrome / profile 已删 / 退出码 143）。**不依赖 Vite**。
 
 ## 环境变量
 

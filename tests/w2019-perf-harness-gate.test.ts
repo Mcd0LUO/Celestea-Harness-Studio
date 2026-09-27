@@ -91,6 +91,8 @@ const BOOT_SCRIPTS = [
   "cases/q2-virtual.mjs",
   "cases/q3-mutation.mjs",
   "cases/q4-memory.mjs",
+  // W2021：门禁专用探针（不是测量场景），但它同样 boot 后端 ⇒ 同样必须走 ports.mjs。
+  "cases/w2021-signal-stub.mjs",
 ];
 
 function read(rel: string): string {
@@ -207,7 +209,7 @@ describe("W2019 ③ · 端口：每个脚本的端口都能被环境变量覆盖
     }
   });
 
-  it("11 个起后端的脚本都走 ports.mjs，**没有任何一个**再写死 3788/9333", () => {
+  it("所有起后端的脚本都走 ports.mjs，**没有任何一个**再写死 3788/9333", () => {
     const offenders: string[] = [];
     for (const rel of BOOT_SCRIPTS) {
       const src = read(rel);
@@ -246,6 +248,19 @@ describe("W2019 ④ · 防复发：README 登记 + 零依赖 + profile 不落仓
       }
     }
     expect(offenders, "不得引入第三方依赖（README：零依赖）").toEqual([]);
+  });
+
+  it("★ 进程收尾登记仍在：boot() 登记、信号处理器存在（W2021 删掉即泄漏 Chrome）", () => {
+    // 起因：信号下 Node 不跑 finally，每个 case 的 `finally { await app.close(); }` 形同虚设 ——
+    // Chrome 变孤儿并继续占着 CDP 端口。这条断言只查**结构仍在**（真正的行为断言在
+    // tests/w2021-perf-signal-cleanup.test.ts：起真 app 发 SIGTERM 再看端口）。
+    const cleanup = read("lib/cleanup.mjs");
+    for (const signal of ["SIGTERM", "SIGINT"]) {
+      expect(cleanup, "cleanup.mjs 必须接管 " + signal).toContain(signal);
+    }
+    expect(cleanup, "信号处理器里必须真的做收尾").toContain("drainCleanup");
+    expect(read("lib/app.mjs"), "boot() 必须把实例登记进收尾表").toContain("registerCleanup");
+    expect(read("run.mjs"), "run.mjs 必须 import 收尾模块（异常路径兜底）").toContain("closeAllRegistered");
   });
 
   it("浏览器 profile 只落 $TEMP：不得把 profile 目录写进仓库", () => {

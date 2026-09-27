@@ -189,6 +189,7 @@ export async function startBackend(o) {
   });
 
   await new Promise((resolve) => server.listen(o.port, '127.0.0.1', resolve));
+  let closePromise = null;
   return {
     server,
     state,
@@ -196,7 +197,13 @@ export async function startBackend(o) {
     emit,
     hits: () => state.hits,
     reset: () => { state.hits = []; },
-    close: () => new Promise((r) => server.close(() => r())),
+    // 幂等（W2021）：第二次调用返回同一个 Promise（Node 的 server.close() 重复调用会报
+    // ERR_SERVER_NOT_RUNNING）。★ `server.close()` 本身是**同步释放监听端口**的，回调只等
+    // 存量连接 —— 所以信号处理器里不 await 它也**不会**把端口漏给下一个进程。
+    close: () => {
+      if (closePromise === null) closePromise = new Promise((r) => server.close(() => r()));
+      return closePromise;
+    },
   };
 }
 
