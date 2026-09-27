@@ -15,6 +15,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { at, doc, Ev, type ElLike } from './lib/w795-dom.js';
+// W9225：用 until 取代 sleep —— 等条件成立，不等一个猜出来的时长。
+import { until } from '../apps/studio/src/wait.test-util.js';
 
 interface InputLike extends ElLike {
   checked: boolean;
@@ -150,7 +152,7 @@ describe('W9202 ① system_prompt 只在改过时才提交（保存不得钉死�
   it('没改过 ⇒ patch 不含 system_prompt（与 max_retries 同一口径）', async () => {
     expect(sysArea()?.value, '表单初值 = 服务端组装结果').toBe('ASSEMBLED-PROMPT');
     saveBtn().dispatchEvent(new Ev('click', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => lastPatch !== null, 'the config patch to be sent');
     expect(lastPatch).not.toBeNull();
     expect('system_prompt' in lastPatch!, '未改不得回传：否则后端把它钉成内存覆盖值').toBe(false);
     expect('max_retries' in lastPatch!, '同批口径：未改也不带').toBe(false);
@@ -159,14 +161,14 @@ describe('W9202 ① system_prompt 只在改过时才提交（保存不得钉死�
   it('改过 ⇒ patch 带新值', async () => {
     (sysArea() as InputLike).value = 'MY OWN PROMPT';
     saveBtn().dispatchEvent(new Ev('click', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => lastPatch?.['system_prompt'] === 'MY OWN PROMPT', 'the patch to carry the new prompt');
     expect(lastPatch?.['system_prompt']).toBe('MY OWN PROMPT');
   });
 
   it('清空 ⇒ patch 带空串（后端据此清除覆盖，回落注册表组装）', async () => {
     (sysArea() as InputLike).value = '';
     saveBtn().dispatchEvent(new Ev('click', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => lastPatch?.['system_prompt'] === '', 'the empty prompt to be sent');
     expect(lastPatch?.['system_prompt'], '空串必须真的发出去').toBe('');
   });
 });

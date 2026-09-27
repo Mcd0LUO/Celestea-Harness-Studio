@@ -39,7 +39,8 @@
     "verify:win": "tsx scripts/verify-windows.ts",
     "check:serial": "pnpm typecheck && pnpm lint && pnpm lint:arch && pnpm check:tmpdir && pnpm test && pnpm check:web",
     "test:changed": "vitest run --changed",
-    "test:related": "vitest related"
+    "test:related": "vitest related",
+    "check:sleep": "node scripts/check-sleep-debt.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",

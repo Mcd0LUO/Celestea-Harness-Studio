@@ -17,6 +17,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// W9225：等条件成立，不等一个猜出来的时长。
+import { until } from "../apps/studio/src/wait.test-util.js";
 
 interface ClassList {
   add(c: string): void;
@@ -253,7 +255,8 @@ describe("W789 · 新建会话弹窗回车提交（7）", () => {
     key(card, { key: "Enter" }); // 事件从非输入控件冒泡上来：同样不提交
     expect(posts).toHaveLength(0);
     key(title, { key: "Enter" });
-    await new Promise((r) => setTimeout(r, 20));
+    // W9225：等创建请求真的发出（原来是睡 20ms 赌它够）。
+    await until(() => posts.length > 0, "the create-session POST to be sent");
     expect(posts).toHaveLength(1);
     expect(JSON.parse(posts[0]?.body ?? "{}")).toEqual({ workspace: null, title: "回车标题" });
   });
@@ -433,7 +436,8 @@ describe("W789 · 权限面板：唯一滚动层 + 内联上限 + 自身滚动�
     expect(tops).toEqual([]);
     // 页面级滚动 → 仍然重新落位（面板跟随盾牌）
     doc.dispatchEvent(new Ev("scroll"));
-    await new Promise((r) => setTimeout(r, 40));
+    // W9225：等重新落位真的发生（原来是睡 40ms 赌它够）。
+    await until(() => tops.length > 0, "the page-level scroll to re-place the panel");
     expect(tops.length).toBeGreaterThan(0);
     position.detachPositionNow();
   });

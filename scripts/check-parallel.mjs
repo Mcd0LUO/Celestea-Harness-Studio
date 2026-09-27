@@ -49,6 +49,10 @@ const GATES = [
     cmd: "node scripts/check-test-tmpdir.mjs",
   },
   {
+    name: "check:sleep",
+    cmd: "node scripts/check-sleep-debt.mjs",
+  },
+  {
     name: "test",
     cmd: "pnpm exec vitest run",
   },

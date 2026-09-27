@@ -11,6 +11,8 @@
  * 仍未覆盖：真实浏览器的观感与像素级几何（见报告「诚实边界」）。
  */
 import { readFileSync } from "node:fs";
+// W9225：用 until 取代 sleep —— 等条件成立，不等一个猜出来的时长。
+import { until } from '../apps/studio/src/wait.test-util.js';
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -193,7 +195,7 @@ describe("W790 · item 3 行为：一键切换到任一运行中会话（W514 �
     expect(chips[0]?.title).toContain("切换到");
 
     chips[0]?.click(); // 一键切换
-    await new Promise((r) => setTimeout(r, 10));
+    await until(() => ctx.activeSessionId() === "ws/s2", 'the chip click to switch the active session');
     expect(ctx.activeSessionId()).toBe("ws/s2");
     expect(ctx.paneOf("ws/s2")?.el.hidden).toBe(false);
     expect(ctx.paneOf("ws/s1")?.el.hidden).toBe(true);

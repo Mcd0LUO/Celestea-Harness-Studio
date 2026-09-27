@@ -5,6 +5,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { at, doc, Ev, flush, reply, resetHarness, type ElLike } from './lib/w795-dom.js';
+// W9225：等条件成立，不等一个猜出来的时长。
+import { until } from '../apps/studio/src/wait.test-util.js';
 
 interface FsBrowserMod { openFsBrowser(opts: { title: string; confirmLabel: string; busyLabel: string; onPick: (p: string) => void }): void }
 
@@ -41,7 +43,8 @@ describe('目录选择器 · win32 面包屑', () => {
     const rootBtn = doc.querySelector('.ws-fs-crumb') as ElLike;
     rootBtn.dispatchEvent(new Ev('click', { bubbles: true }));
     await flush();
-    await new Promise((r) => setTimeout(r, 20));
+    // W9225：等根按钮那次导航真的打出去（原来是睡 20ms 赌它够）。
+    await until(() => calls[calls.length - 1] === 'C:\\', 'the root crumb click to load C:\\');
     expect(calls[calls.length - 1]).toBe('C:\\');
   });
 

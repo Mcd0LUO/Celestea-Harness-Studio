@@ -14,6 +14,8 @@
  *   真实 index.html / styles 原文）。像素级几何由 headless Blink 实测（见报告）。
  */
 import { readFileSync } from "node:fs";
+// W9225：用 until 取代 sleep —— 等条件成立，不等一个猜出来的时长。
+import { until } from '../apps/studio/src/wait.test-util.js';
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -241,7 +243,7 @@ describe("W846 · 运行态文案只出现一次（真实模块）", () => {
     expect(chips.map((c) => c.textContent)).toEqual(["乙会话"]);
     expect(chips[0]?.title).toContain("切换到");
     chips[0]?.click();
-    await new Promise((r) => setTimeout(r, 10));
+    await until(() => ctx.activeSessionId() === "ws/s2", 'the chip click to switch the active session');
     expect(ctx.activeSessionId()).toBe("ws/s2");
     expect(ctx.paneOf("ws/s2")?.el.hidden).toBe(false);
   });

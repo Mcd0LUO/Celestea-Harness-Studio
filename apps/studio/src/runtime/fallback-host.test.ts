@@ -15,6 +15,8 @@ import { assistantText, statusError, userMessage } from "@celestea/llm";
 import type { Llm, StreamEvent } from "@celestea/core";
 import type { Profile } from "@celestea/runtime";
 import { createFallbackWiring, type FallbackFrame } from "./fallback-host.js";
+// W9225：等条件成立，不等一个猜出来的时长。
+import { until } from "../wait.test-util.js";
 
 const roots: string[] = [];
 function tempDir(): string {
@@ -192,8 +194,10 @@ describe("W833 B8/F4: fallback audit pending is bounded", () => {
     // delivery is parked on the gate, so the ledger holds exactly that one.
     expect(wiring.pendingCount()).toBeGreaterThan(0);
     release();
-    const deadline = Date.now() + 2_000;
-    while (wiring.pendingCount() > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
+    // W9225：等「待投递台账真的清空」，不等一个猜出来的时长。
+    // 原来的写法已经是轮询（不是裸 sleep），换成 until 只是去掉手写 deadline
+    // —— 语义相同，但超时信息里带上了在等什么。
+    await until(() => wiring.pendingCount() === 0, "the pending ledger to drain", 2_000);
     expect(wiring.pendingCount()).toBe(0);
   });
 });

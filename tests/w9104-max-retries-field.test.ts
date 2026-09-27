@@ -10,6 +10,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { at, doc, Ev, reply, resetHarness, type ElLike } from './lib/w795-dom.js';
+// W9225：用 until 取代 sleep —— 等条件成立，不等一个猜出来的时长。
+import { until } from '../apps/studio/src/wait.test-util.js';
 
 interface ConfigMod {
   loadConfig(opts?: { refresh?: boolean }): Promise<void>;
@@ -137,7 +139,7 @@ describe('W9104 · 通用配置页「自动重试次数」', () => {
     const input = retryInput()!;
     input.value = '3';
     saveBtn().dispatchEvent(new Ev('click', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => lastPatch !== null, 'the config patch to be sent');
     expect(lastPatch).not.toBeNull();
     expect(lastPatch!['max_retries']).toBe(3);
   });
@@ -146,7 +148,7 @@ describe('W9104 · 通用配置页「自动重试次数」', () => {
     const cfg = (await import(/* @vite-ignore */ at('ui/config.ts'))) as ConfigMod;
     await cfg.loadConfig({ refresh: true });
     saveBtn().dispatchEvent(new Ev('click', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => lastPatch !== null, 'the config patch to be sent');
     expect(lastPatch).not.toBeNull();
     expect('max_retries' in lastPatch!).toBe(false);
   });
@@ -157,7 +159,7 @@ describe('W9104 · 通用配置页「自动重试次数」', () => {
     const input = retryInput()!;
     input.value = '9';
     saveBtn().dispatchEvent(new Ev('click', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 20));
+    await until(() => lastPatch?.['max_retries'] === 9, 'the clamped retry value to be sent');
     expect(lastPatch!['max_retries'], '前端不得静默夹到 3').toBe(9);
   });
 });

@@ -10,6 +10,8 @@
  * Still NOT covered here: CSS layout/visuals (jsdom applies no stylesheet).
  */
 import { dirname, join } from "node:path";
+// W9225：用 until 取代 sleep —— 等条件成立，不等一个猜出来的时长。
+import { until } from '../apps/studio/src/wait.test-util.js';
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -134,7 +136,7 @@ describe("W784 question card in a real DOM", () => {
     const custom = sel(pane, ".q-custom-input");
     if (custom) { custom.value = "补充一句：先按 B 做"; custom.dispatchEvent(new Ev("input")); }
     click(sel(pane, ".q-submit"));
-    await new Promise((r) => setTimeout(r, 10));
+    await until(() => calls.length > 0, 'the answer POST to be sent');
     expect(calls[0]?.url).toBe("/api/questions/q-1/answer");
     expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({
       answers: [{ id: "mode", selected: ["方案 B"], custom: "补充一句：先按 B 做" }],
@@ -153,7 +155,7 @@ describe("W784 question card in a real DOM", () => {
     const first = all(pane, ".q-opt-input")[0];
     if (first) { first.checked = true; first.dispatchEvent(new Ev("change")); }
     click(sel(pane, ".q-submit"));
-    await new Promise((r) => setTimeout(r, 10));
+    await until(() => sel(pane, ".q-card")?.dataset.state === "closed", 'the card to reach its closed terminal');
     expect(sel(pane, ".q-card")?.dataset.state).toBe("closed");
   });
 });

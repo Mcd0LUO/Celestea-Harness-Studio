@@ -18,6 +18,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createOfflineLlm } from "./offline-llm.js";
 import { createRealRuntimeAdapter } from "./real-runtime-adapter.js";
+// W9225：等条件成立，不等一个猜出来的时长。
+import { until } from "../wait.test-util.js";
 
 const CONFIG = JSON.stringify({
   version: 1,
@@ -96,8 +98,8 @@ describe("W833 B8/F4: adapter shutdown flushes the fallback audit", () => {
       resultsDir: join(out, "worker-results"),
     });
 
-    const deadline = Date.now() + 3_000;
-    while (hits === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
+    // W9225：等审计 POST 真的到达，不等一个猜出来的时长。
+    await until(() => hits > 0, "the in-flight audit POST to arrive", 3_000);
     expect(hits).toBeGreaterThanOrEqual(1); // one target_unavailable POST in flight
 
     let settled = false;
