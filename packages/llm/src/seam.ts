@@ -85,10 +85,33 @@ export type {
  *      decision record, not a worker's bounded cut.
  * Until then the delta is this single member: everything else is derived from
  * core's union, so a variant added in core appears here automatically.
+ *
+ * W2017 adds a SECOND widening, for the same reason and with the same shape:
+ * core's `done` is `{ kind, message }` and cannot carry the provider's own
+ * `finish_reason`, so a turn the provider cut off on the token cap
+ * (`finish_reason:"length"`) used to be indistinguishable from a finished one —
+ * an HTTP 200, a half sentence, and no hint anywhere.
+ *
+ *   { kind: "done"; message: Message; truncated?: true }
+ *
+ * `truncated` is OPTIONAL and its type is the literal `true`, never `boolean`:
+ *   * absent  = the provider reported no truncation (every provider that never
+ *               sends `finish_reason`, and every ordinary `"stop"` turn) — the
+ *               event is byte-identical to what this seam produced before, so
+ *               no existing consumer can observe a difference;
+ *   * `true`  = the provider reported `finish_reason:"length"`; whatever arrived
+ *               is a PREFIX, and a half-written tool-call argument is a string.
+ * A `false` value is deliberately unrepresentable: it would put a new key on
+ * every ordinary turn and make "not truncated" a payload change.
+ *
+ * Producers: `stream.ts` (the only place the wire is read). It rides through
+ * `retry.ts` / `fallback.ts` untouched because both forward the terminal event
+ * verbatim, so the fact survives a re-issued or re-targeted turn.
  */
 export type StreamEvent =
-  | Exclude<CoreStreamEvent, { kind: "failed" }>
-  | { kind: "failed"; kindOf: "generate" | "stream" | "timeout"; message: string };
+  | Exclude<CoreStreamEvent, { kind: "failed" } | { kind: "done" }>
+  | { kind: "failed"; kindOf: "generate" | "stream" | "timeout"; message: string }
+  | { kind: "done"; message: Message; truncated?: true };
 
 /**
  * A request DRAFT — what a DIRECT caller of this provider may pass: every field

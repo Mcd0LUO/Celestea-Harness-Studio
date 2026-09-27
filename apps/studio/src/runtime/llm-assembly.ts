@@ -16,6 +16,10 @@
  * field, and a provider stream-idle failure (`kindOf: "timeout"`) is reported
  * as core's `"stream"` terminal — the message keeps the `llm timeout:` prefix,
  * so the distinction survives in the transcript.
+ *
+ * W2017: the bridge is also where a token-cap truncation becomes OBSERVABLE
+ * (`reportTruncation`, an audit line). See the doc on [bridgeProviderLlm] for
+ * why the notice is an audit line and not an SSE frame.
  */
 
 import {
@@ -92,8 +96,36 @@ function coreEvent(event: ProviderEvent): StreamEvent {
 }
 
 /** Re-yield a provider stream as a core stream. */
-async function* coreStream(stream: ProviderStream): LlmStream {
-  for await (const event of stream) yield coreEvent(event);
+async function* coreStream(stream: ProviderStream, onTruncated: (() => void) | null): LlmStream {
+  for await (const event of stream) {
+    if (event.kind === "done" && event.truncated === true) onTruncated?.();
+    yield coreEvent(event);
+  }
+}
+
+/**
+ * W2017: the audit line for a turn the provider cut off on the token cap.
+ *
+ * WHY HERE, and not on the SSE bus: `contracts/sse-events.json` is FROZEN and
+ * every key of every frame is validated against it (`tests/contract-parity.test.ts`
+ * -> `checkPayload`); a new key on an existing event is a hard violation, so a
+ * user-visible notice would need a contract change plus a decision record —
+ * neither of which is a worker's bounded cut. The audit channel is the one that
+ * IS open (the exact precedent is W804/W855's image downgrade, which reports
+ * through `console.warn` for the same reason: "the session log keeps its frozen
+ * event vocabulary").
+ *
+ * `finish_reason` is the provider's own statement, never a guess: the line says
+ * the OUTPUT WAS CUT, so a half sentence or a half JSON tool-call argument is
+ * expected rather than a finished answer. It carries no prompt, no body and no
+ * credential — the model id and the reason only (§4.4 discipline).
+ */
+export function reportTruncation(model: string, warn: (line: string) => void = (l) => console.warn(l)): void {
+  warn(
+    "[W2017] llm output truncated by max_tokens model=" +
+      (model === "" ? "-" : model) +
+      ' finish_reason="length" (the answer is a PREFIX; a half-written tool-call argument is expected)',
+  );
 }
 
 /**
@@ -101,18 +133,36 @@ async function* coreStream(stream: ProviderStream): LlmStream {
  * every event is copied field by field. Shared by [liveEngineLlm] and by the
  * fallback decorator (E §4 P1), so a fallback turn is bridged exactly once and
  * the two paths cannot drift.
+ *
+ * W2017: `model` and `onTruncated` are OPTIONAL — the bridge's default
+ * behaviour is byte-for-byte the pre-W2017 one (a plain field-by-field copy).
+ * The truncation report fires at most once per turn and only when the provider
+ * actually said `finish_reason:"length"`; a provider that never sends the field
+ * cannot reach it.
  */
-export function bridgeProviderLlm(inner: ProviderLlm): Llm {
+export function bridgeProviderLlm(
+  inner: ProviderLlm,
+  opts: { model?: string; onTruncated?: (model: string) => void } = {},
+): Llm {
+  const onTruncated =
+    opts.onTruncated === undefined ? null : (): void => opts.onTruncated?.(opts.model ?? "");
   return {
     async generate(req: ModelRequest): Promise<LlmStream> {
-      return coreStream(await inner.generate(req));
+      return coreStream(await inner.generate(req), onTruncated);
     },
   };
 }
 
 /** The live provider behind the core `Llm` seam. */
-export function liveEngineLlm(profile: Profile, env: NodeJS.ProcessEnv): Llm {
-  return bridgeProviderLlm(createLiveLlm(llmProfileOf(profile), env));
+export function liveEngineLlm(
+  profile: Profile,
+  env: NodeJS.ProcessEnv,
+  onTruncated?: (model: string) => void,
+): Llm {
+  return bridgeProviderLlm(createLiveLlm(llmProfileOf(profile), env), {
+    model: profile.model,
+    ...(onTruncated === undefined ? {} : { onTruncated }),
+  });
 }
 
 /**
@@ -121,7 +171,12 @@ export function liveEngineLlm(profile: Profile, env: NodeJS.ProcessEnv): Llm {
  * own credential and its own three timeout tiers (§4.2.1 "三档超时语义逐字不变").
  * Only env var NAMES travel here; the value is resolved inside `createLiveLlm`.
  */
-export function liveEngineLlmFor(base: Profile, target: LlmTarget, env: NodeJS.ProcessEnv): Llm {
+export function liveEngineLlmFor(
+  base: Profile,
+  target: LlmTarget,
+  env: NodeJS.ProcessEnv,
+  onTruncated?: (model: string) => void,
+): Llm {
   return liveEngineLlm(
     {
       ...base,
@@ -130,16 +185,24 @@ export function liveEngineLlmFor(base: Profile, target: LlmTarget, env: NodeJS.P
       api_key_env: target.apiKeyEnv ?? base.api_key_env,
     },
     env,
+    onTruncated,
   );
 }
 
-/** The engine's `Llm` for this generation: live, or the offline test seam. */
+/**
+ * The engine's `Llm` for this generation: live, or the offline test seam.
+ *
+ * W2017: the LIVE path reports a token-cap truncation through `onTruncated`
+ * (default: the audit line of [reportTruncation]). The OFFLINE seam is
+ * deterministic and never truncates, so it has nothing to report.
+ */
 export function createEngineLlm(
   profile: Profile,
   env: NodeJS.ProcessEnv,
   mode: LlmMode = resolveLlmMode(env),
+  onTruncated: (model: string) => void = (model) => reportTruncation(model),
 ): Llm {
-  return mode === "offline" ? createOfflineLlm() : liveEngineLlm(profile, env);
+  return mode === "offline" ? createOfflineLlm() : liveEngineLlm(profile, env, onTruncated);
 }
 
 /** Secret-free description of the live adapter (startup logging / diagnostics). */
