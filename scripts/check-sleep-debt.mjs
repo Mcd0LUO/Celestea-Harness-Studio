@@ -70,7 +70,22 @@ for (const file of files()) {
     const isExpect = /\bexpect\(/.test(next);
     const isAbsence = ABSENCE_ASSERTIONS.some((re) => re.test(next));
     if (isExpect && !isAbsence) {
-      failures.push({ file, line: i + 1, next: next.trim() });
+      failures.push({ file, line: i + 1, next: next.trim(), kind: "sleep→assert-exists" });
+      continue;
+    }
+    // W9225 补充规则（我第一版漏掉的形态）：sleep 之后紧跟**文件系统读取**，
+    // 而下一句是断言。这是「等某个东西被写出来」的另一种写法，同样是赌时长。
+    // 真实案例：recovery-view.test.ts:113 —— 睡 50ms 后 readFileSync(checkpoint.json)
+    // 再断言，门禁第一版只看向下一行，所以漏了它。
+    const READ_RE = /\b(readFileSync|existsSync|readdirSync|statSync)\s*\(/;
+    if (READ_RE.test(next)) {
+      for (let k = j + 1; k <= j + 2 && k < lines.length; k += 1) {
+        const after = lines[k] ?? "";
+        if (/\bexpect\(/.test(after)) {
+          failures.push({ file, line: i + 1, next: next.trim(), kind: "sleep→read→assert" });
+          break;
+        }
+      }
     }
   }
 }
@@ -79,7 +94,7 @@ if (failures.length > 0) {
   console.error("\n✗ 测试用 sleep 赌时长（W9225）：sleep 之后紧跟着「断言存在」的 expect。\n");
   for (const f of failures) {
     console.error("  " + f.file + ":" + f.line);
-    console.error("      sleep 后紧跟：" + f.next.slice(0, 90));
+    console.error("      [" + f.kind + "] 后紧跟：" + f.next.slice(0, 90));
   }
   console.error("\n  为什么这是错的：sleep 表达「大概够了吧」，而真实定时器粒度随平台变");
   console.error("  （Windows ~15ms、Linux 精确）—— 本仓已有两个 ubuntu CI 事故由此而来。");

@@ -16,6 +16,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { getJson, jsonRequest, type StudioHarness } from "../harness.test-util.js";
 import { activate, makeEngineHarness, turns, type EngineHarnessOptions } from "./test-util.js";
+// W9225：用 until 取代 sleep。
+import { untilAsync } from "../wait.test-util.js";
 
 const harnesses: StudioHarness[] = [];
 const SESSION = "sample-ws/s1";
@@ -110,12 +112,20 @@ describe("GET /api/status.recovery (E §1.3 P1 ②)", () => {
     await activate(h, SESSION);
     const res = await h.app.request("/api/turn", jsonRequest("POST", { input: "hi", session: SESSION }));
     expect(res.status).toBe(202);
-    await new Promise((r) => setTimeout(r, 50));
-    const onDisk = JSON.parse(readFileSync(join(h.workspace, "s1", "checkpoint.json"), "utf8")) as Record<string, unknown>;
+    // W9225：原来是睡 50ms 赌「这一轮已经跑完」。这是**赌时长**，改成等**真正的条件**。
+    // ★ 注意：不能只等 checkpoint.json 出现 —— 它在轮次**进行中**就会被写，
+    //   而这里要断言的是轮次**已结束**（`last_outcome === "completed"`）。
+    //   （我第一版就只等了文件存在，测试立刻红 —— 因为它读到的还是进行中的快照。）
+    const checkpointPath = join(h.workspace, "s1", "checkpoint.json");
+    const recoveryOutcome = async (): Promise<unknown> => {
+      const body = (await getJson(h.app, `/api/status?session=${encodeURIComponent(SESSION)}`)).body;
+      return (body["recovery"] as Record<string, unknown> | undefined)?.["last_outcome"];
+    };
+    await untilAsync(async () => (await recoveryOutcome()) === "completed", "the turn to finish (last_outcome=completed)");
+    const onDisk = JSON.parse(readFileSync(checkpointPath, "utf8")) as Record<string, unknown>;
     expect(onDisk["completed"]).toBeUndefined();
     expect(onDisk["session"]).toBe(SESSION);
     expect((onDisk["lanes"] as Record<string, unknown>)["next_turn"]).toEqual([]);
-    const status = await getJson(h.app, `/api/status?session=${encodeURIComponent(SESSION)}`);
-    expect((status.body["recovery"] as Record<string, unknown>)["last_outcome"]).toBe("completed");
+    expect(await recoveryOutcome()).toBe("completed");
   });
 });
