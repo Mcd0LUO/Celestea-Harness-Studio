@@ -8,6 +8,9 @@
 // ============================================================================
 import { need } from '../utils/dom';
 import { t } from '../i18n';
+// W2023：MOBILE_QUERY / isMobileViewport 的**唯一真源**（原先是本文件私有，现提到
+// ui/viewport.ts —— 输入提示也要按设备能力换文案，判定不许有第二份，见该文件头注）。
+import { isMobileViewport, MOBILE_QUERY } from './viewport';
 
 const STORAGE_COLLAPSED = 'celestea-studio.sidebar-collapsed';
 const STORAGE_WIDTH = 'celestea-studio.sidebar-width';
@@ -118,16 +121,9 @@ export function initSidebar(): void {
   initDrawer(btn);
 }
 
-/** 移动端断点（与 styles/responsive.css 的 mobile 档一致）。 */
-const MOBILE_QUERY = '(max-width: 640px)';
-
-function isMobileViewport(): boolean {
-  try {
-    return window.matchMedia(MOBILE_QUERY).matches;
-  } catch {
-    return window.innerWidth <= 640;
-  }
-}
+// W2023：MOBILE_QUERY / isMobileViewport 提到 ui/viewport.ts（**唯一真源**）——
+// 输入提示也要按设备能力换文案，判定不能有第二份（本仓复盘 §1.4）。此处改为再导出，
+// 既有导入方（含测试）零改动。
 
 /**
  * 抽屉：只在移动端生效。桌面端的 collapsed 状态（localStorage 持久）不参与抽屉判定，

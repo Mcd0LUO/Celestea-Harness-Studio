@@ -25,6 +25,8 @@ export const chat = {
   'chat.rail.centerNear': 'Near turn {n} (viewport center)',
   'chat.msg.system': 'System',
   'chat.empty.hint': 'Type a message below to start · Enter to send · Shift+Enter for a new line',
+  // W2023: touch devices have no Shift key — teaching Shift there teaches nothing.
+  'chat.empty.hintTouch': 'Type a message below to start · Enter to send',
   'chat.user.you': 'You',
   'chat.user.steering': 'Interjection',
   'chat.user.queued': 'Queued',
@@ -231,6 +233,8 @@ export const chat = {
   'chat.wb.term.notStarted': 'The terminal did not open',
   'chat.wb.term.retry': 'Retry',
   'chat.input.placeholderIdle': 'Type a message; Enter to send, Shift+Enter for a new line',
+  // W2023: touch lane (no physical Shift key). Selection: ui/viewport.ts isTouchInput.
+  'chat.input.placeholderIdleTouch': 'Type a message; Enter to send',
   'chat.input.placeholderSteer': 'Enter to interject (delivered at the next step) · Ctrl/Cmd+Enter to queue (delivered on the next turn)',
   'chat.input.placeholderQueue': 'Enter to queue (delivered after this turn) · Ctrl/Cmd+Enter to interject (delivered at the next step)',
   'chat.input.placeholderWorker': 'Say something to the worker (it goes into its inbox; a new turn starts when it is idle)',
