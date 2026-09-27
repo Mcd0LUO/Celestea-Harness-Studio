@@ -11,6 +11,8 @@ import { t } from '../i18n';
 import type { StatusSnapshot } from '../types';
 import type { AssistantView, DedupState, ThinkSeg, ToolCardRef } from './view';
 import { newRenderCadence, type RenderCadence } from './messages/cadence'; // W867：渲染节拍字段族
+// W2016：输入框自增长的能力开关（支持 field-sizing 时写草稿不再量高）。
+import { createAutoGrow, MAX_HEIGHT } from './inputbar/grow';
 
 /** 未解析/无会话 id 时的占位容器（旧后端的单会话行为）。 */
 export const LOCAL_ID = '';
@@ -205,12 +207,17 @@ function readInputValue(): string {
   return input ? input.value : '';
 }
 
+/**
+ * 把草稿写回输入框。W2016：高度复位改走 ui/inputbar/grow.ts 的能力开关 ——
+ * 支持 `field-sizing: content` 的引擎上它是 no-op（高度由 CSS 给），不支持的引擎上
+ * 仍是原来的「auto → 量 scrollHeight → 写 px」。原先这里硬编码的 240 与
+ * ui/inputbar.ts 的 MAX_HEIGHT 是同一口径的两份副本，现统一取 MAX_HEIGHT。
+ */
 function writeInputValue(v: string): void {
   const input = document.querySelector<HTMLTextAreaElement>('#input');
   if (!input) return;
   input.value = v;
-  input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, 240) + 'px';
+  createAutoGrow(input, { maxHeight: MAX_HEIGHT })();
 }
 
 /** 是否「贴底」（4px 容差）：贴底者切回后继续跟随最新，否则原样恢复滚动位。 */

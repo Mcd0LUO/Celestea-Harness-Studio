@@ -37,6 +37,8 @@ import './styles/taskpanel.css'; // 任务面板（todo list）
 import './styles/provider-edit.css'; // 提供商模型输入输出类型
 import './styles/theme-claude.css'; // Claude Code 风格色卡
 import './styles/usage.css'; // W9103 设置页「使用统计」（摘要条 / 热力图 / 趋势图）
+// W2016：输入框自增长（#input 的 field-sizing 守卫；不支持时由 ui/inputbar/grow.ts 回落）。
+import './styles/field-sizing.css';
 
 import { api } from './api';
 import { connectSse, initChat } from './chat';
