@@ -11,6 +11,7 @@
 // ============================================================================
 import { bootApp, pageModule, PANE_EXPR, control, readSummary } from '../lib/scenario.mjs';
 import { saveRaw, mdTable, fmt } from '../lib/stats.mjs';
+import { backendPort, cdpPort } from '../lib/ports.mjs';
 
 const BUILD_COLS = [
   'const M = window.__W9111M.messages;',
@@ -61,7 +62,7 @@ function toolBurstFrames(turn) {
 }
 
 export async function q3() {
-  const app = await bootApp({ port: 3788, cdpPort: 9333 });
+  const app = await bootApp({ port: backendPort(), cdpPort: cdpPort() });
   const scenarios = {};
   try {
     await pageModule(app.page, 'messages', '/src/ui/messages.ts');

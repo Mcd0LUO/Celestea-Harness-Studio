@@ -10,6 +10,7 @@
 // ============================================================================
 import { bootApp, pageModule, PANE_EXPR, control, readSummary, readLoafByInvoker } from './lib/scenario.mjs';
 import { saveRaw, mdTable, fmt } from './lib/stats.mjs';
+import { backendPort, cdpPort } from './lib/ports.mjs';
 
 /** 页内：DOM / 持有者计数。 */
 const COUNTS = [
@@ -23,7 +24,7 @@ const COUNTS = [
 async function counts(page) { return page.eval('(function(){ ' + COUNTS + ' })()'); }
 
 export async function verify() {
-  const app = await bootApp({ port: 3788, cdpPort: 9333 });
+  const app = await bootApp({ port: backendPort(), cdpPort: cdpPort() });
   const out = {};
   try {
     await pageModule(app.page, 'messages', '/src/ui/messages.ts');

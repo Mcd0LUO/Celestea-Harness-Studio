@@ -14,6 +14,7 @@
 // ============================================================================
 import { bootApp, pageModule, PANE_EXPR } from '../lib/scenario.mjs';
 import { saveRaw, mdTable, fmt, mm } from '../lib/stats.mjs';
+import { backendPort, cdpPort } from '../lib/ports.mjs';
 
 /** 造一轮：用户消息 + 文本 + 工具卡 + 结果（走应用自己的渲染函数）。 */
 const ONE_ROUND = [
@@ -72,7 +73,7 @@ async function sample(app, label, round) {
 }
 
 export async function q4() {
-  const app = await bootApp({ port: 3788, cdpPort: 9333 });
+  const app = await bootApp({ port: backendPort(), cdpPort: cdpPort() });
   const samples = [];
   try {
     await pageModule(app.page, 'messages', '/src/ui/messages.ts');

@@ -15,6 +15,7 @@
 // ============================================================================
 import { bootApp, pageModule, PANE_EXPR, control, readSummary, readTopLoaf } from './lib/scenario.mjs';
 import { saveRaw, mdTable, fmt } from './lib/stats.mjs';
+import { backendPort, cdpPort } from './lib/ports.mjs';
 
 const COUNTS = [
   'const ctx = ' + PANE_EXPR + ';',
@@ -37,7 +38,7 @@ function framesFor(steps, gapMs, turn) {
 }
 
 export async function focusToolRate() {
-  const app = await bootApp({ port: 3788, cdpPort: 9333 });
+  const app = await bootApp({ port: backendPort(), cdpPort: cdpPort() });
   const rows = [];
   try {
     const STEPS = 300;

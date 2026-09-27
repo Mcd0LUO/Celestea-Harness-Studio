@@ -1,8 +1,32 @@
 // scripts/perf/lib/app.mjs — 装配：起确定性假后端 + Chrome，导航到冻结前端。
 import { launchChrome } from './chrome.mjs';
 import { startBackend, SESSION_ID } from './backend.mjs';
+import { repoRootFrom } from './repo-root.mjs';
 
-export const DEFAULT_REPO = process.env.W9111_REPO ?? 'C:/Users/lenovo/AppData/Local/Temp/perf-w9111/repo';
+/**
+ * 冻结检出根。`W9111_REPO` 覆盖优先；未设时**从本文件位置推导**仓根
+ * （`scripts/perf/lib/app.mjs` → 上溯到含 `package.json` 的目录）。
+ *
+ * 为什么不再写死 `C:/Users/lenovo/AppData/Local/Temp/perf-w9111/repo`：那是作者那台
+ * Windows 的临时目录，换机器/换 OS 就是个不存在的路径，而报错发生在"静态服务器 404 →
+ * 页面里没有 .sess-pane"这种下游位置，看不出根因。推导失败时返回 `null`（不编造）。
+ *
+ * ★ 推导出的仓根是**活工作树**，而 README 要求正式测量跑在 `git archive` 导出的冻结
+ *   检出上（否则并发改动会让数字不可复现）。所以走回落时打一条警告，让"忘了设
+ *   W9111_REPO"这件事**看得见**，而不是悄悄换了测量对象。
+ */
+export function resolveRepo(env = process.env, importMetaUrl = import.meta.url) {
+  const override = env.W9111_REPO;
+  if (override !== undefined && override.trim() !== '') return override;
+  const derived = repoRootFrom(importMetaUrl);
+  if (derived !== null) {
+    process.stderr.write('[perf] W9111_REPO 未设置，使用推导出的仓根（活工作树）：' + derived +
+      '\n[perf] 正式测量请设 W9111_REPO=<git archive 导出的冻结检出>（README §前置）\n');
+  }
+  return derived;
+}
+
+export const DEFAULT_REPO = resolveRepo();
 export const DEFAULT_VITE = process.env.W9111_VITE ?? 'http://127.0.0.1:3787';
 export { SESSION_ID };
 
@@ -15,7 +39,11 @@ export { SESSION_ID };
  * @param {string} [o.initScript] 每个新文档执行前的注入脚本
  */
 export async function boot(o) {
-  const webRoot = (o.repo ?? DEFAULT_REPO) + '/apps/web';
+  const repo = o.repo ?? DEFAULT_REPO;
+  if (repo === null) {
+    throw new Error('repo root not found：设 W9111_REPO=<冻结检出根>（推导：从 scripts/perf/lib 上溯含 package.json 的目录）');
+  }
+  const webRoot = repo + '/apps/web';
   const backend = await startBackend({
     port: o.port,
     webRoot,
