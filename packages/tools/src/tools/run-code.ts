@@ -115,8 +115,14 @@ function runCodeDesc(maxTimeoutMs: number): string {
     "DEFAULT LANGUAGE: TypeScript, run by Node with native type stripping (no build step) — only ERASABLE TypeScript is allowed: " +
     "no `enum`, no `namespace`, no parameter properties, no `declare`; plain JavaScript always works. " +
     'Pass language: "python" for Python instead. ' +
-    "Write the program as a `function main()` body (an indented body is wrapped for you), or as a complete script that defines main; " +
-    "main() MAY be async and its resolved value (lossless JSON) is the final result. " +
+    // W2012: the form is chosen by INTENT, not indentation. A bare statement list is the
+    // common case and used to fail 114/114 times (the runner found no `main`); it is now
+    // wrapped too, so the contract must say so or the model keeps indenting for nothing.
+    "Write the program as a PLAIN SCRIPT (a bare sequence of statements — a main-less script is wrapped for you, " +
+    "so `return` at top level works) or as a complete script that defines `main`; an indented body is also wrapped (legacy). " +
+    "`main()` MAY be async and its resolved value (lossless JSON) is the final result. " +
+    "A leading `import` block is hoisted above the wrapper so it stays at module scope. " +
+    "A program that ends the process itself (exit 0) is a success, not a failure. " +
     "Inside the program the SDK exposes four synchronous bridges dispatched through the normal guarded tool pipeline: " +
     "tools.read_file({path}) / tools.write_file({path, content}) / tools.list_dir({path}) / tools.run_shell({command}) " +
     "(Python: tools.read_file(path=...) etc.); a denied or failed sub-call raises ToolCallError (catch it and continue). " +
@@ -125,7 +131,12 @@ function runCodeDesc(maxTimeoutMs: number): string {
     "intermediate sub-call results are recorded in the session log but context-retained (the model sees only the final value). " +
     "Hard limits: ≤" + MAX_SUB_CALLS + " sub-calls (the next one errors), wall clock ≤" + maxTimeoutMs + "ms (timeout_ms, default " + DEFAULT_TIMEOUT_MS + "; the ceiling is CELAESTEA_RUN_CODE_MAX_TIMEOUT_MS), " +
     "sub-call output ledger ≤" + MAX_SUB_OUTPUT_BYTES + " bytes (truncated with a warning). " +
-    "The child's CPU limit (RLIMIT_CPU) follows this run's wall clock, so raising timeout_ms raises the CPU budget with it; a CPU-cap kill is reported as cpu_exceeded. " +
+    "The child's CPU limit (RLIMIT_CPU) follows this run's wall clock, so raising timeout_ms raises the CPU budget with it; a CPU-cap kill is reported as cpu_exceeded; " +
+    // W2012: a program the interpreter REJECTS must not be reported as `aborted`
+    // (the timeout/infrastructure vocabulary) — that mislabel is what sent a model
+    // hunting for a transport bug that did not exist.
+    "the interpreter rejecting the program itself is reported as program_syntax (with the interpreter's own error text, " +
+    "e.g. `Expected '}', got '<eof>'`), and a missing entry point / failed import as program_error — neither is `aborted`. " +
     "No network; the same sandbox as run_shell (bwrap/raw/userspace + rlimits)."
   );
 }
