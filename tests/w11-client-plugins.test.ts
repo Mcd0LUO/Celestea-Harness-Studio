@@ -48,11 +48,11 @@ interface LsLike {
   clear(): void;
 }
 
-/** W9108：全部客户端插件（2 内置增强 + 2 提示 + 4 可选增强）。 */
+/** W9108：全部客户端插件（2 内置增强 + 2 提示 + 4 可选增强）。W2013：+1 正文文件链接。 */
 const ALL_IDS = [
   'builtin.hljs', 'builtin.math',
   'display.codeCopy', 'display.codeExtras', 'display.csvTable', 'display.imageZoom',
-  'hint-text-card', 'rail-preview',
+  'hint-text-card', 'rail-preview', 'builtin.fileLink',
 ];
 
 const STYLES = join(WEB, 'src', 'styles');
@@ -145,7 +145,7 @@ afterEach(() => {
 });
 
 describe('W859 设置页「插件」· 客户端插件真实热开关', () => {
-  it('① 列出全部客户端插件（2 内置增强 + 2 提示 + 4 增强），开关默认开，且与真实注册表一致', async () => {
+  it('① 列出全部客户端插件（2 内置增强 + 2 提示 + 5 增强），开关默认开，且与真实注册表一致', async () => {
     const hints = await openPlugins();
     const rows = qa('#settingsPlugins .plug-row');
     // W895-L：插件库**按分类分组**渲染，所以 DOM 顺序 = 分类顺序（不再是登记表顺序）。
@@ -158,6 +158,7 @@ describe('W859 设置页「插件」· 客户端插件真实热开关', () => {
       '代码高亮',
       '图片灯箱',
       '数学公式',
+      '正文文件链接',
       '预览卡片',
       '文字卡片',
       '表格视图',

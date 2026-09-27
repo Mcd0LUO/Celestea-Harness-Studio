@@ -21,6 +21,7 @@ import { CODE_COPY_ID, codeCopyEnhancer } from '../ui/enhance/code-copy';
 import { CODE_EXTRAS_ID, CODE_FOLD_LINES, codeExtrasEnhancer, setCodeFoldLines } from '../ui/enhance/code-extras';
 import { CSV_TABLE_ID, csvTableEnhancer } from '../ui/enhance/csv-table';
 import { IMAGE_ZOOM_ID, imageZoomEnhancer } from '../ui/enhance/image-zoom';
+import { FILE_LINK_ID, fileLinkEnhancer } from '../ui/enhance/file-link';
 import { HLJS_ENHANCER_ID, MATH_ENHANCER_ID, hljsEnhancer, mathEnhancer } from '../ui/enhance/builtin';
 import type { Enhancer } from '../ui/enhance/registry';
 import { readNumber, type PluginConfigSpec, type PluginConfigValues } from './config';
@@ -167,6 +168,17 @@ export function clientPlugins(): readonly ClientPluginDescriptor[] {
       kind: 'enhancer',
       category: 'media',
       create: () => imageZoomEnhancer(),
+    },
+    // W2013（A.5）：正文里的文件路径 ⇒ 已有预览面板。category 选 interaction：
+    // 它不改「内容怎么读」，而是加一个**动作**（点路径 ⇒ 打开面板）。
+    {
+      id: FILE_LINK_ID,
+      label: t('plugins.desc.fileLink.label'),
+      hint: t('plugins.desc.fileLink.hint'),
+      hot: true,
+      kind: 'enhancer',
+      category: 'interaction',
+      create: () => fileLinkEnhancer(),
     },
   ];
 }
