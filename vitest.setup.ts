@@ -68,10 +68,24 @@ function sweepOrphaned(): void {
   }
 }
 
+// W9224（纯提速，行为不变）：清扫**每个进程只做一次**。
+//
+// 原实现把 sweepOrphaned() 放在 per-file 的守卫里：每个测试文件都要
+// readdirSync(整个系统 tmp) + 对每个 celestea-test-tmp-* statSync 一次。
+// 本机实测：系统 tmp 有 9300+ 条目、其中 100+ 是我们的目录 ⇒ 单次清扫 ~11ms，
+// 406 个文件 ≈ **4.5 CPU·s** 的纯重复劳动。
+// 而它的语义本来就是「清掉**上一轮**运行留下的孤儿」（SWEEP_AGE_MS = 1 小时，
+// 见上），跟「本进程第几个文件」无关 —— 每个进程做一次完全等价。
+// 独立哨兵（不复用 CELESTEA_TEST_TMPDIR，后者在 afterAll 会被删掉）。
+const SWEPT = "CELESTEA_TEST_SWEPT";
+if (process.env[SWEPT] === undefined) {
+  process.env[SWEPT] = "1";
+  sweepOrphaned();
+}
+
 // Guard against re-entry (e.g. an outer runner that already redirected us):
 // never nest our directory inside one we made.
 if (process.env["CELESTEA_TEST_TMPDIR"] === undefined) {
-  sweepOrphaned();
   try {
     testTmp = mkdtempSync(join(tmpdir(), "celestea-test-tmp-"));
     process.env["CELESTEA_TEST_TMPDIR"] = testTmp;
