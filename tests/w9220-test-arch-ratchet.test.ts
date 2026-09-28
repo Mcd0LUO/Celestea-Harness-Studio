@@ -52,7 +52,8 @@ describe("W9220 · vmThreads 执行架构", () => {
     expect(swapped, "前置：调包确实改了配置").not.toBe(CONFIG);
     // 条数不变 —— 「数条数」的门禁在这里会假绿。
     // 用**字面量**钉住条数（不能写 `expect(X.length).toBe(X.length)`，那是恒真的假断言）。
-    expect(POOL_RULES.length, "规则条数必须被字面量钉住（删规则即红）").toBe(6);
+    // W2031：6 → 7（新增 fd-global-forks-native-include）。条数必须显式更新，删规则即红。
+    expect(POOL_RULES.length, "规则条数必须被字面量钉住（删规则即红）").toBe(7);
     const missing = missingRules(POOL_RULES, swapped);
     expect(missing, "★ 顶层 execArgv 必须被抓到").toContain("no-top-level-execargv");
     expect(describeMissing(POOL_RULES, swapped)).toContain("no-top-level-execargv");
@@ -65,10 +66,18 @@ describe("W9220 · vmThreads 执行架构", () => {
     expect(missing, "★ 主池退回 forks 必须被抓到").toContain("vm-pool");
   });
 
-  it("⑤ forks 兜底集合必须非空，且三类文件都被真的兜住", () => {
+  it("⑤ forks 兜底集合必须非空，且四类文件都被真的兜住", () => {
     expect(CONFIG, "必须声明 CHDIR_FILES").toMatch(/const CHDIR_FILES = \["packages\/tools\/src\/guard\/w824-guard\.test\.ts"\]/);
     expect(CONFIG, "必须声明 GC_FILES").toMatch(/const GC_FILES = \["packages\/workers\/src\/tools\.test\.ts"\]/);
     expect(CONFIG, "必须声明 URL_SHIM_FILES").toMatch(/const URL_SHIM_FILES = \["tests\/frontend-r3-b5-attachments-dom\.test\.ts"\]/);
+    // W2031：第四类 —— 断言进程级 fd 状态（/proc/self/fd、fd 计数）的文件。
+    // 它们必须在 vm 池被排除，且被 native（forks）project 收走；否则要么假红，要么静默零采集。
+    expect(CONFIG, "必须声明 FD_GLOBAL_FILES").toMatch(
+      /const FD_GLOBAL_FILES = \[\s*"packages\/tools\/src\/sandbox\/bwrap\.test\.ts",\s*"packages\/runtime\/src\/lifecycle-r3\.test\.ts",\s*\]/
+    );
+    expect(CONFIG, "FD_GLOBAL_FILES 必须被 native project include").toMatch(
+      /include: \[\.\.\.CHDIR_FILES, \.\.\.URL_SHIM_FILES, \.\.\.FD_GLOBAL_FILES\]/
+    );
   });
 
   it("⑥ 顶层不得有 execArgv（worker 线程拒绝 --expose-gc 的直接护栏）", () => {

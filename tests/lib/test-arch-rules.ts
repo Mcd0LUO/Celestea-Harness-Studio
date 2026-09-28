@@ -99,8 +99,21 @@ export const POOL_RULES: readonly NamedRule[] = Object.freeze([
   },
   {
     name: "forks-fallback-nonempty",
-    why: "forks 兜底集合不得为空（chdir / gc / URL 垫片三类文件必须真的被兜住）",
-    test: (c) => /FORKS_ONLY = \[\.\.\.CHDIR_FILES, \.\.\.GC_FILES, \.\.\.URL_SHIM_FILES\]/.test(c),
+    why: "forks 兜底集合不得为空（chdir / gc / URL 垫片 / 进程级 fd 四类文件必须真的被兜住）",
+    // W2031：新增第四类 FD_GLOBAL_FILES（断言 /proc/self/fd 与 fd 计数的文件）。
+    // 四类**逐一具名**，少一类即红 —— 这比「集合非空」有牙：删掉任一类仍非空，但这里会红。
+    test: (c) =>
+      /FORKS_ONLY = \[\.\.\.CHDIR_FILES, \.\.\.GC_FILES, \.\.\.URL_SHIM_FILES, \.\.\.FD_GLOBAL_FILES\]/.test(c),
+  },
+  {
+    name: "fd-global-forks-native-include",
+    why: "进程级 fd 断言的文件必须真的被某个 forks project 采集（只排除不 include ⇒ 静默零采集）",
+    // ★ 这条守的是「文件被排除出 vm 池、却没有 project 收它」——那会让文件**静默消失**，
+    //   比假红更糟（门禁变绿但少测）。include 与 exclude 必须同时提到这一类。
+    test: (c) =>
+      /include: \[\.\.\.CHDIR_FILES, \.\.\.URL_SHIM_FILES, \.\.\.FD_GLOBAL_FILES\]/.test(c) &&
+      /"packages\/tools\/src\/sandbox\/bwrap\.test\.ts"/.test(c) &&
+      /"packages\/runtime\/src\/lifecycle-r3\.test\.ts"/.test(c),
   },
   {
     name: "real-backend-serial",

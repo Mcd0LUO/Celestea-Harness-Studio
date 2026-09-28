@@ -154,8 +154,34 @@ const CHDIR_FILES = ["packages/tools/src/guard/w824-guard.test.ts"];
 const GC_FILES = ["packages/workers/src/tools.test.ts"];
 /** vmThreads 下 URL/objectURL 垫片语义不同：单独跑 3/3 稳定失败，故退回 forks。 */
 const URL_SHIM_FILES = ["tests/frontend-r3-b5-attachments-dom.test.ts"];
+/**
+ * W2031 · 断言**进程级共享状态**的文件：`/proc/self/fd`（fd 表）与 fd 计数。
+ *
+ * 为什么必须走 forks：vmThreads 是**同一个进程的多个 worker 线程**（隔离的是 VM 上下文，
+ * 不是进程）。实测（W2031 最小实验，两个文件同时在跑）：两个测试文件里的 `process.pid`
+ * **完全相同**，且一个文件持有 40 个 fd 时，另一个文件 `readdirSync("/proc/self/fd").length`
+ * 从 36 涨到 **72** —— 同一张进程级 fd 表。
+ *
+ * ⇒ 两类假红（本机 28 核、默认 13 workers 实测）：
+ *   ① `bwrap.test.ts:239`：`handle.dispose()` 只关了**本文件**的 fd，但**另一个 vm 上下文**
+ *      可能**恰好复用了同一个 fd 号** ⇒ `/proc/self/fd/<n>` 依然存在 ⇒ 断言假红；
+ *   ② `lifecycle-r3.test.ts:121/134`：`fdCount()` 是**整进程**计数，别的文件开 fd 会让
+ *      差值 `> 1` ⇒ 断言假红。
+ *
+ * 实测（修复前 10 次全量 `vitest run`）：6 次红，其中 **2 次**是这两条 fd 断言
+ * （bwrap 1 次、lifecycle-r3 1 次），**每次只有 1 个测试失败、其余 3780 通过**，
+ * 且**单独跑这两个文件 100% 绿** ⇒ 纯并发假红，不是代码缺陷。
+ *
+ * forks 池每个文件**独立进程** ⇒ fd 表与 fd 计数不再被别的文件干扰，断言一字不改。
+ * ★ 这两个文件的断言**绝不能**弱化成「不依赖具体 fd 号」：本文件钉的就是
+ * 「dispose() 之后那个 fd 真的关了」，弱化即失去覆盖。
+ */
+const FD_GLOBAL_FILES = [
+  "packages/tools/src/sandbox/bwrap.test.ts",
+  "packages/runtime/src/lifecycle-r3.test.ts",
+];
 /** 必须走 forks 的文件总集（vm 池显式排除它们，避免重复采集）。 */
-const FORKS_ONLY = [...CHDIR_FILES, ...GC_FILES, ...URL_SHIM_FILES];
+const FORKS_ONLY = [...CHDIR_FILES, ...GC_FILES, ...URL_SHIM_FILES, ...FD_GLOBAL_FILES];
 
 export default defineConfig({
   test: {
@@ -224,11 +250,11 @@ export default defineConfig({
         resolve: { alias },
         test: {
           name: "native",
-          // process.chdir() 与 URL 垫片在 vmThreads 下不可用/语义不同，
-          // 这几个文件退回真实的子进程（forks）。
+          // process.chdir()、URL 垫片、以及**进程级 fd 断言**在 vmThreads 下
+          // 不可用/语义不同，这些文件退回真实的子进程（forks）。
           pool: "forks",
           setupFiles: [r("./vitest.setup.ts")],
-          include: [...CHDIR_FILES, ...URL_SHIM_FILES],
+          include: [...CHDIR_FILES, ...URL_SHIM_FILES, ...FD_GLOBAL_FILES],
           testTimeout: 30_000,
         },
       },
