@@ -497,6 +497,34 @@ function checkoutPathProblems(p: string, text: string): string[] {
   return problems;
 }
 
+/**
+ * ⑪ 的判据：\`docs/pitfalls.md\` 的**索引表与正文条目必须一一对应**。
+ *
+ * 为什么补这条：本文件 ①/②/③/⑦ 覆盖的是 \`docs/**\` 的**文件级**登记（哪篇文档在不在
+ * 地图里），看不见单篇文档**内部**的索引。实测（W2049）：把 \`pitfalls.md\` 索引表里的
+ * 一行删掉，本文件 13 条断言**全绿** —— 索引表是那个文件的入口，漂了没有任何门禁看得见。
+ * 这里按「一个事实一个家」补在文档门禁里，而不是另造一套。
+ */
+function pitfallIndexProblems(): string[] {
+  const lines = readFileSync(join(DOCS, 'pitfalls.md'), 'utf8').split('\n');
+  const start = lines.findIndex((l) => l.trim() === '## 索引');
+  const end = lines.findIndex((l, i) => i > start && l.trim() === '---');
+  const indexed = new Set<string>();
+  for (const line of lines.slice(start + 1, end === -1 ? undefined : end)) {
+    const m = /^\|\s*(P\d+[a-z]?)\s*\|/.exec(line);
+    if (m !== null) indexed.add(m[1]!);
+  }
+  const sections = new Set<string>();
+  for (const line of lines) {
+    const m = /^##\s+(P\d+[a-z]?)\b/.exec(line);
+    if (m !== null) sections.add(m[1]!);
+  }
+  const problems: string[] = [];
+  for (const id of sections) if (!indexed.has(id)) problems.push('正文有 ' + id + '，索引表里没有');
+  for (const id of indexed) if (!sections.has(id)) problems.push('索引表有 ' + id + '，正文里没有');
+  return problems;
+}
+
 describe('文档不变量 · 规模与机器事实', () => {
   it('④ 任何文档单篇 ≤ 700 行（超了就拆进同名子目录）', () => {
     const over = [...activeDocs(), ...archiveDocs()]
@@ -595,5 +623,9 @@ describe('文档不变量 · 规模与机器事实', () => {
 
   it('⑩ ARCHITECTURE.md 的 console.warn / console.log 计数由 apps/web/src 派生', () => {
     expect(consoleClaimProblems(), '散文里的计数漂了；数字必须来自被数的那个东西').toEqual([]);
+  });
+
+  it('⑪ pitfalls.md 的索引表与正文条目一一对应', () => {
+    expect(pitfallIndexProblems(), '踩坑档案的索引与正文分叉了').toEqual([]);
   });
 });
