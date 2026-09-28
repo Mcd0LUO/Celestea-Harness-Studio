@@ -98,7 +98,12 @@ describe.skipIf(!h.nodeReady)("W2012 · every program form runs (real Node, real
     expect(out.value).toEqual({ form: "async" });
   });
 
-  it("top-level await without main is still a script (not wrapped)", async () => {
+  it("a top-level await that ALSO defines main is a script (main is the reason, not the await)", async () => {
+    // W2063: this case's title used to say "top-level await without main is still
+    // a script (not wrapped)" — but the program below DOES define main, so the
+    // await was never what selected the script form here. It is a script because
+    // of `const main`, which is an independent and still-correct rule. The
+    // assertion is unchanged; only the reason in the title/comment was wrong.
     const out = await run(tool(), "w2012-await", {
       code: "const value = await Promise.resolve({ form: 'tla' });\nconst main = async () => value;\n",
     });

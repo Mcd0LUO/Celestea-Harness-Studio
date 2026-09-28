@@ -407,7 +407,11 @@ export function hoistLeadingImports(code: string): HoistedImports {
     if (line.trim() === "") continue;
     if (!/^import\b/.test(line)) break;
     if (!isSingleLineImport(line)) {
-      note = "a multi-line or dynamic import cannot be hoisted safely; it stays inside the wrapped body (use a top-level await, or call main(), to run this program as a script)";
+      // W2063: the advice used to be "use a top-level await, or call main(), to
+      // run this program as a script". A top-level await no longer selects the
+      // script form (the wrapper is async), so it is no longer a way out: the
+      // remaining one is to define and call main().
+      note = "a multi-line or dynamic import cannot be hoisted safely; it stays inside the wrapped body (define and call main() to run this program as a script)";
       break;
     }
     imports.push(line);
