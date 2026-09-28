@@ -19,7 +19,7 @@ import { assertBindIsSafe } from "./auth/api-token.js";
 import { engineLlmView } from "./runtime/llm-assembly.js";
 import type { RealRuntimeAdapter } from "./runtime/real-runtime-adapter.js";
 import { autowakeEnabled, ENV_AUTOWAKE } from "@celestea/runtime";
-import { bounded } from "@celestea/tools";
+import { bounded, TIMED_OUT } from "@celestea/tools";
 
 /** Env knob: drain window before leftover sockets are cut. */
 export const ENV_DRAIN_MS = "CELESTEA_SHUTDOWN_DRAIN_MS";
@@ -107,6 +107,24 @@ function logListeningBanner(info: {
   );
 }
 
+/**
+ * How ONE teardown step ended. Three states, not two: a step that was abandoned
+ * at its deadline and a step that THREW are different facts, and collapsing them
+ * would make the log lie in a new way (reporting a failure as a timeout).
+ */
+type StepOutcome = "settled" | "timed-out" | "failed";
+
+/**
+ * The ONE line a teardown step gets: the historical success text verbatim, or
+ * the honest non-success. `ok` is passed in so the normal path stays
+ * byte-identical to the W742 contract (see the W2029 report §2④).
+ */
+function stepLine(name: string, outcome: StepOutcome, ms: number, ok: string): string {
+  if (outcome === "settled") return ok;
+  if (outcome === "timed-out") return `${name} TIMED OUT after ${ms}ms — it may not have finished (reported, never silent)`;
+  return `${name} FAILED — see the "teardown step failed" line above`;
+}
+
 /** Boot the studio HTTP server; returns a handle whose `stop` is the teardown. */
 export function startStudioServer(options: StudioServerOptions): StudioServerHandle {
   const env = options.env ?? process.env;
@@ -148,14 +166,28 @@ export function startStudioServer(options: StudioServerOptions): StudioServerHan
   // W9206-35: installed once the logger exists (the net reports through it).
   if (options.crashNet !== false) installCrashNet(log);
 
-  async function within(work: Promise<void> | void, ms: number): Promise<void> {
+  /**
+   * Run ONE teardown step under a deadline and report HOW it ended.
+   *
+   * W2014 semantics are preserved VERBATIM: the deadline still RESOLVES, it does
+   * not reject — a step that ran out of budget is not an error here, and only
+   * `work` itself rejecting reaches the catch. That is load-bearing, not
+   * cosmetic: `stopTraffic` shares this helper, and a throw on timeout would
+   * abort the whole exit path mid-teardown.
+   *
+   * W2029 defect A: the outcome used to be DISCARDED, so the caller printed the
+   * success line whether the step finished or was abandoned at the deadline —
+   * an operator reading the log could not tell "the audit reached disk" from
+   * "we gave up waiting for it". The returned outcome is that missing
+   * distinction; it changes no control flow, only what the caller can say.
+   */
+  async function within(work: Promise<void> | void, ms: number): Promise<StepOutcome> {
     try {
-      // W2014: the deadline RESOLVES, it does not reject — a step that ran out of
-      // budget is not an error here. Only `work` itself rejecting reaches the
-      // catch, which is exactly the distinction the hand-rolled version made.
-      await bounded(Promise.resolve(work), ms, { mode: "resolve", value: () => undefined });
+      const raced = await bounded(Promise.resolve(work), ms, { mode: "resolve", value: () => TIMED_OUT });
+      return raced === TIMED_OUT ? "timed-out" : "settled";
     } catch (e) {
       log(`teardown step failed: ${e instanceof Error ? e.message : String(e)}`);
+      return "failed";
     }
   }
 
@@ -171,17 +203,27 @@ export function startStudioServer(options: StudioServerOptions): StudioServerHan
 
   async function stop(signal: string): Promise<void> {
     if (stopping) {
-      log(`${signal} again — exiting now (in-flight work is dropped)`);
+      // W2029 defect B: this used to say "exiting now (in-flight work is
+      // dropped)" while doing neither — the first drain kept running and the
+      // process stayed up for up to drainMs + teardownMs. The log lied to the
+      // operator. It now describes what this call actually does: nothing but
+      // report. Forcing a real exit here is NOT safe in this process — the
+      // in-flight work is the engine teardown, i.e. the session logs being
+      // closed and flushed (see the W742 order above); killing it would trade a
+      // slow shutdown for a torn one. Escalation stays systemd's job
+      // (TimeoutStopUSec + KillSignal); this line tells the operator it is now
+      // the only thing left that can end the process.
+      log(`${signal} again — already draining (in-flight teardown continues; this call does not exit early)`);
       return;
     }
     stopping = true;
     log(`${signal} received — draining (grace ${drainMs}ms)`);
     await stopTraffic();
     log("traffic stopped (listener closed, leftover sockets cut)");
-    await within(services.grants.audit.flush(), drainMs);
-    log("audit flushed");
-    await within(engine.shutdown?.(), teardownMs);
-    log("engine stopped (workers settled, session logs closed) — loop may drain");
+    const audit = await within(services.grants.audit.flush(), drainMs);
+    log(stepLine("audit flush", audit, drainMs, "audit flushed"));
+    const engineStep = await within(engine.shutdown?.(), teardownMs);
+    log(stepLine("engine teardown", engineStep, teardownMs, "engine stopped (workers settled, session logs closed) — loop may drain"));
   }
 
   return {
