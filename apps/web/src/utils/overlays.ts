@@ -8,7 +8,14 @@
 //   方案：全局只注册一个 document keydown 监听；每层浮层打开时 push 自己的
 //   close 函数，Esc 只调用栈顶一层的 close。层自己关闭（按钮/保存成功）时
 //   调 popOverlay(handle) 把该层从栈里摘掉，保证栈序与视觉层级一致。
+//
+// ★ W2036（IME）：组合会话中的 Esc 是输入法的「取消组合」，不是「关掉这层浮层」。
+//   本文件是**全仓唯一**的 document 级 Esc 监听 ⇒ 漏了守卫，任何压栈的浮层（命令补全框、
+//   设置页、预览面板…）都会在用户取消候选词时被关掉。真机实测（桌面 1440x900）：
+//   打 '/' ⇒ 补全框出现 ⇒ 拼音组合中按 Esc ⇒ 补全框消失（改动前）；加守卫后补全框仍在。
+//   判据复用 ui/ime.ts 的 isImeKey（唯一真源），见下方 onKeydown。
 // ============================================================================
+import { isImeKey } from '../ui/ime'; // W2036：组合中的 Esc 是「取消组合」，不是「关浮层」
 
 /** 一层浮层的句柄：用于精准摘除该层（不用猜栈顶）。 */
 export interface OverlayHandle {
@@ -42,6 +49,10 @@ function removeEntry(entry: Entry): boolean {
 /** 唯一的 Esc 监听：只关闭栈顶一层。 */
 function onKeydown(e: KeyboardEvent): void {
   if (e.key !== 'Escape') return;
+  // ★ W2036：组合会话中 isComposing 对**所有**按键都为 true，Esc 也不例外 ——
+  // 那一次 Esc 的归属是输入法（取消组合 / 收起候选窗），不是这一层浮层。
+  // 位置在 topEntry() 之前：组合中的 Esc 连「栈顶是谁」都不该问（零副作用）。
+  if (isImeKey(e)) return;
   const top = topEntry();
   if (!top) return;
   e.preventDefault();
