@@ -143,7 +143,7 @@ function startRunner(args: string[]): Runner {
   child.stdout.on("data", (b) => { stdout += String(b); });
   child.stderr.on("data", (b) => { stderr += String(b); });
   const exit = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
-    child.on("exit", (code, signal) => resolve({ code, signal }));
+    child.on("close", (code, signal) => resolve({ code, signal }));
   });
   return { child, out: () => stdout, err: () => stderr, exit };
 }
