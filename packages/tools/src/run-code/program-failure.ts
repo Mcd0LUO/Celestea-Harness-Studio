@@ -97,14 +97,89 @@ function findMarker(stderrText: string, markers: readonly string[]): string | nu
  * because that is the part that says WHAT is missing; the full stderr follows in
  * the run's render, so nothing is swallowed.
  */
-function syntaxFailure(language: RunCodeLanguage, evidence: string): ProgramFailure {
+function syntaxFailure(language: RunCodeLanguage, evidence: string, userCode: string | null): ProgramFailure {
   return {
     kind: PROGRAM_SYNTAX_CODE,
     message:
       "the program is not valid " + language + " — the interpreter rejected it before main() ran: " +
       evidence + " (a missing closing brace/bracket or an unterminated block is the usual cause; " +
-      "the full interpreter output is below)",
+      "the full interpreter output is below)" + braceHint(language, userCode),
   };
+}
+
+/**
+ * When the program looks brace-unbalanced, say so AND give the way out.
+ *
+ * Why this exists (2026-09-28, a real production report): a model wrote
+ *
+ *     function main() {
+ *       ...
+ *       return { ... };      <- the closing `}` of main() is missing
+ *
+ * The engine classified it correctly as `program_syntax`, but the message only
+ * quoted Node's own `Expected '}', got '<eof>'` — which is true and useless at
+ * the same time. The model retried the same shape three times, then reported the
+ * tool as non-deterministic. Two facts were missing from the message:
+ *
+ *   1. HOW MANY braces are missing (a count is actionable; "the usual cause" is
+ *      not);
+ *   2. that the whole problem is AVOIDABLE — a plain statement list (no
+ *      `function main() {`) is wrapped by the engine, so there is no wrapper to
+ *      brace-balance at all. That is the recommended form, and the model had no
+ *      way to learn it from the failure.
+ *
+ * The count is a cheap brace/paren/bracket depth over the USER'S text. It is
+ * deliberately only a HINT: strings, comments and template literals can contain
+ * braces, so this never claims to be a parser — it fires only when the depth is
+ * clearly positive, and stays silent otherwise (the interpreter's own text
+ * remains the evidence).
+ */
+function braceHint(language: RunCodeLanguage, userCode: string | null): string {
+  if (userCode === null) return "";
+  const depth = netBracketDepth(userCode);
+  if (depth <= 0) return "";
+  const unit = depth === 1 ? "1 unclosed" : depth + " unclosed";
+  const pairs = language === "python" ? "bracket" : "brace/bracket";
+  return (
+    " — ★your program has " + unit + " " + pairs + ": it is missing " +
+    (depth === 1 ? "a closing" : "closing") + " " + (language === "python" ? "bracket/paren" : "brace") +
+    (depth === 1 ? "" : "s") + ". ★If you wrote `function main() { ...`, DROP that wrapper and the matching " +
+    "`}`: send a plain statement list ending in `return <value>` instead — the engine wraps it for you, so " +
+    "there are no braces left for you to balance."
+  );
+}
+
+
+/** Net `{[( ` depth of a program; 0 when balanced, positive when unclosed. */
+export function netBracketDepth(code: string): number {
+  let depth = 0;
+  let inLine = false;
+  let inBlock = false;
+  let quote: string | null = null;
+  for (let i = 0; i < code.length; i += 1) {
+    const ch = code[i]!;
+    const next = code[i + 1];
+    if (inLine) {
+      if (ch === "\n") inLine = false;
+      continue;
+    }
+    if (inBlock) {
+      // A block comment's braces are prose, not code: \`/* { */\` must not count.
+      if (ch === "*" && next === "/") { inBlock = false; i += 1; }
+      continue;
+    }
+    if (quote !== null) {
+      if (ch === "\\") { i += 1; continue; }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "/" && next === "/") { inLine = true; i += 1; continue; }
+    if (ch === "/" && next === "*") { inBlock = true; i += 1; continue; }
+    if (ch === '"' || ch === "'" || ch === "`") { quote = ch; continue; }
+    if (ch === "{" || ch === "[" || ch === "(") depth += 1;
+    else if (ch === "}" || ch === "]" || ch === ")") depth -= 1;
+  }
+  return depth;
 }
 
 /** The `program_error` failure for the engine's own entry-point guards. */
@@ -137,10 +212,14 @@ function importFailure(evidence: string): ProgramFailure {
  * Python's import errors. `null` is a real answer — a bare death with no
  * evidence stays `aborted` instead of being blamed on the model.
  */
-export function classifyProgramFailure(language: RunCodeLanguage, stderrText: string): ProgramFailure | null {
+export function classifyProgramFailure(
+  language: RunCodeLanguage,
+  stderrText: string,
+  userCode: string | null = null,
+): ProgramFailure | null {
   if (stderrText.trim() === "") return null;
   const syntax = findMarker(stderrText, language === "python" ? PYTHON_SYNTAX_MARKERS : NODE_SYNTAX_MARKERS);
-  if (syntax !== null) return syntaxFailure(language, syntax);
+  if (syntax !== null) return syntaxFailure(language, syntax, userCode);
   const noMain = findMarker(stderrText, [...NO_MAIN_MARKERS, BAD_MAIN_MARKER]);
   if (noMain !== null) return entryFailure(noMain);
   if (language === "python") {

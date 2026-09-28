@@ -118,8 +118,10 @@ function runCodeDesc(maxTimeoutMs: number): string {
     // W2012: the form is chosen by INTENT, not indentation. A bare statement list is the
     // common case and used to fail 114/114 times (the runner found no `main`); it is now
     // wrapped too, so the contract must say so or the model keeps indenting for nothing.
-    "Write the program as a PLAIN SCRIPT (a bare sequence of statements — a main-less script is wrapped for you, " +
-    "so `return` at top level works) or as a complete script that defines `main`; an indented body is also wrapped (legacy). " +
+    "★PREFER a PLAIN SCRIPT: a bare sequence of statements ending in `return <value>` — it is wrapped into " +
+    "`async function main()` for you, so you do NOT write the wrapper and you do NOT need to balance its braces. " +
+    "A complete script that defines `main` yourself is still accepted, but then ITS braces are yours to balance " +
+    "(an unbalanced one is a program_syntax error); an indented body is also wrapped (legacy). " +
     "`main()` MAY be async and its resolved value (lossless JSON) is the final result. " +
     "A leading `import` block is hoisted above the wrapper so it stays at module scope. " +
     "A program that ends the process itself (exit 0) is a success, not a failure. " +
@@ -163,7 +165,7 @@ export function runCodeSpec(maxTimeoutMs: number = DEFAULT_MAX_TIMEOUT_MS): Tool
         code: {
           type: "string",
           description:
-            "Program source in the chosen language: a \`function main()\` body (an indented body is wrapped for you) or a complete script that defines main. The engine injects the SDK preamble (tools bridge + protocol).",
+            "Program source in the chosen language. RECOMMENDED: a bare sequence of statements ending in `return <value>` — the engine wraps it into `async function main()` for you (do NOT write the wrapper; there are no braces for you to balance). Also accepted: a complete script that defines `main` yourself, in which case you own its braces. The engine injects the SDK preamble (tools bridge + protocol).",
         },
         timeout_ms: {
           type: "integer",

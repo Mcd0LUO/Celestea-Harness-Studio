@@ -34,9 +34,11 @@ export const RUN_CODE_SDK_TS = `// =============================================
 //                     {"__error__": "<message>"} (uncaught exception)
 //
 // Contract:
-//   - Write the program as a BODY (a quick script: plain statements ending in
+//   - ★PREFER a BODY (a quick script: plain statements ending in
 //     \`return <value>\` - it is wrapped into \`async function main()\` for you,
-//     indentation not required), or as a complete script that defines main.
+//     indentation not required, and there are NO wrapper braces for you to
+//     balance). A complete script that defines main yourself also works, but
+//     then ITS braces are yours - an unbalanced one is a syntax error.
 //     Leading \`import\` lines are hoisted above the wrapper (an import statement
 //     cannot live inside a function body). main() MAY be async: the harness
 //     awaits it. Its resolved value (lossless JSON) is the result.

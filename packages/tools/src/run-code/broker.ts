@@ -73,6 +73,17 @@ export interface BrokerContext {
    * vs CPython's `SyntaxError`). Defaults to TypeScript, the shipped default.
    */
   language?: RunCodeLanguage;
+  /**
+   * The user's own source, recorded at assembly time (W2062).
+   *
+   * Why it lives on the context instead of being read back from disk: the
+   * classifier runs in `finally` AFTER `script.cleanup()` may already have
+   * removed the file, and the file on disk is the ASSEMBLED program (SDK
+   * preamble + user code + runner) — the brace hint must count the USER's
+   * braces, not the SDK's. Kept per-run (never module-level) because two
+   * `run_code` calls can overlap in one process.
+   */
+  programSource?: string;
 }
 
 /** One parsed sub-call request from the child. */
@@ -110,6 +121,7 @@ export async function brokerRun(ctx: BrokerContext, args: unknown): Promise<Tool
   // workspace. The sandbox config owns that absolute path; the interpreter is
   // invoked with the absolute path so no cwd-relative lookup is involved.
   ctx.language = source.language;
+  ctx.programSource = source.code;
   const script = await placeProgram(ctx.sandbox.config.programDir, source);
   const state = newRunState();
   state.cpuSec = cpuSec;
@@ -636,7 +648,11 @@ function completedSilently(state: RunState): boolean {
 function classifiedMessage(ctx: BrokerContext, state: RunState): string | null {
   const settled = state.settle;
   if (settled === null || settled.stderrText.trim() === "") return null;
-  const failure = classifyProgramFailure(ctx.language ?? DEFAULT_RUN_CODE_LANGUAGE, settled.stderrText);
+  const failure = classifyProgramFailure(
+    ctx.language ?? DEFAULT_RUN_CODE_LANGUAGE,
+    settled.stderrText,
+    ctx.programSource ?? null,
+  );
   if (failure === null) return null;
   return runCodeFailure(failure.kind, failure.message).message;
 }
