@@ -1,6 +1,9 @@
 // ============================================================================
-// ui/inputbar.ts — 输入栏（单一职责）：textarea 自动增高、Enter 发送、
+// ui/inputbar.ts — 输入栏（单一职责）：textarea 自动增高、Enter 行为、
 // 发送/取消按钮状态。业务逻辑通过回调交给 chat.ts。
+//
+// W2028（触摸端换行）：Enter 的行为整段在 ./inputbar/newline.ts（触摸=换行 /
+//   桌面=发送 / enterkeyhint），本文件只提供车道与重绘回调。
 //
 // W514 多会话 / 插话契约：
 //   - 运行中**不再禁用发送**：Enter/发送 = 注入运行中的轮次（不新开轮）；
@@ -37,7 +40,8 @@ import { createAutoGrow, MAX_HEIGHT, type GrowFn } from './inputbar/grow';
 import { t } from '../i18n';
 import { deviceCopy, onInputCapabilityChange } from './viewport'; // W2023：设备能力分流（唯一真源）
 import { paintModeButton, paintSendButton } from './inputbar/button-labels';
-import { interceptKey as interceptCommandKey } from './commands'; // A3：命令补全框按键拦截
+// W2028：Enter 行为（触摸=换行 / 桌面=发送）+ enterkeyhint，唯一判定在 ./inputbar/newline.ts。
+import { bindEnterKey } from './inputbar/newline';
 export { refreshAttachmentTray }; // 既有调用方（chat.ts / send.ts / 测试）不变
 
 /**
@@ -75,11 +79,15 @@ let autoGrow: GrowFn = () => {};
 function placeholderIdle(): string {
   return deviceCopy('chat.input.placeholderIdle', 'chat.input.placeholderIdleTouch');
 }
+// W2028：运行中两档同样按设备能力分流 —— 触摸端 Enter 是**换行**，再教「Enter 插话 /
+// Enter 排队」就是教错了键（与 W2023 删掉 Shift 提示同一条理由）。触摸端只指发送键
+// （它是触摸端唯一的发送路径）；Ctrl/Cmd+Enter 仍可用，但不在这里广告（触摸设备没有
+// Ctrl 键，说了也按不出来）。分流点仍是 deviceCopy 一处。
 function placeholderSteer(): string {
-  return t('chat.input.placeholderSteer');
+  return deviceCopy('chat.input.placeholderSteer', 'chat.input.placeholderSteerTouch');
 }
 function placeholderQueue(): string {
-  return t('chat.input.placeholderQueue');
+  return deviceCopy('chat.input.placeholderQueue', 'chat.input.placeholderQueueTouch');
 }
 /** W866：worker 会话可输入，占位符说明**会送到哪里**。 */
 function placeholderWorker(): string {
@@ -169,17 +177,17 @@ export function initInputBar(h: InputBarHandlers): void {
     h.send(input.value, submitMode);
   });
   modeBtn?.addEventListener('click', () => toggleSubmitMode());
-  input.addEventListener('keydown', (e) => {
-    if (interceptCommandKey(e)) return; // A3：补全框先消费 ↑↓/Enter/Tab/Esc
-    if (e.key !== 'Enter' || e.shiftKey) return;
-    e.preventDefault();
-    // Ctrl/Cmd+Enter = 另一条车道（两态都要可直达，不必先切按钮）
-    const lane: SubmitMode = e.ctrlKey || e.metaKey
-      ? submitMode === 'steer'
-        ? 'queue'
-        : 'steer'
-      : submitMode;
-    h.send(input.value, lane);
+  // W2028：Enter 的判定/插入在 ./inputbar/newline.ts（触摸=换行、桌面=发送）。
+  // 这里只把「车道」与「重绘」交给它 —— 插入换行是程序化改值，必须自己补一次
+  // 自增高 + 假光标同步（原生输入走的是下面的 input 事件）。
+  bindEnterKey(input, {
+    send: h.send,
+    lane: () => submitMode,
+    other: () => (submitMode === 'steer' ? 'queue' : 'steer'),
+    afterEdit: () => {
+      autoGrow();
+      caret?.sync();
+    },
   });
   // 传闭包而不是 autoGrow 本身：装配后 autoGrow 才被赋值（上面那行）。
   input.addEventListener('input', () => autoGrow());
@@ -196,7 +204,8 @@ export function initInputBar(h: InputBarHandlers): void {
   // 会一直显示「Shift+Enter 换行」直到第一次 setInputMode()，正是本轮要修的缺陷。
   paintPlaceholder();
   // W2023：输入能力位翻转（DevTools 设备仿真开关 / 二合一插拔鼠标）⇒ 重算占位符。
-  // 只重画文案，不动 DOM、不动模式（铁律 4/5）。
+  // 只重画文案，不动 DOM、不动模式（铁律 4/5）。W2028：enterkeyhint 的同步在
+  // ./inputbar/newline.ts 里（它与 Enter 行为同源，不在这里再写一遍）。
   onInputCapabilityChange(() => {
     if (inputEl) inputEl.placeholder = placeholderFor(inputMode);
   });

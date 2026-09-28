@@ -138,7 +138,11 @@
           <!-- W867（追加）：附件收纳展示夹 —— 由 ui/inputbar.ts 注入到 .input-box 内，
                **绝对定位浮在输入框上方**（出流）⇒ 展开/收起都不改变 #input 宽度。 -->
           <div class="input-box">
-            <textarea id="input" rows="2" data-i18n-placeholder="chat.input.placeholderIdle" spellcheck="false"></textarea>
+            <!-- W2028：enterkeyhint 是**软键盘回车键上的字**，必须与 Enter 的真实行为同源
+                 （触摸端 Enter = 换行 ⇒ enter；桌面 = 发送 ⇒ send）。这里的静态值只是 JS
+                 起来之前那一帧的兜底，装配时由 ui/inputbar 按设备能力重写
+                 （ui/inputbar/newline.ts 的 enterKeyHint()），能力位翻转时再写一次。 -->
+            <textarea id="input" rows="2" data-i18n-placeholder="chat.input.placeholderIdle" enterkeyhint="send" spellcheck="false"></textarea>
           </div>
           <!-- W1512：发送与终止是**同一个控件的两种状态**（照 DSH）：空闲 = 发送（↑），
                运行中 = 终止（■）。为什么合并：原先终止键挂在 statusline 右端，窄屏下被
