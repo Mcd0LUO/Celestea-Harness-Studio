@@ -203,6 +203,27 @@ describe("W1484 · /api/events teardown is a plain HTTP connection (no upgraded-
 
     live.server.closeAllConnections();
     await waitFor("the subscription to be released", () => live.bus.subscriberCount() === 0);
+    // ★ W2038: the TWO facts above are INDEPENDENT, and the subscription is the
+    // earlier of the two. Releasing it needs no I/O at all: the socket destroy
+    // ends the response, the ReadableStream is cancelled, and Hono's
+    // `onAbort` -> `sub.close()` runs on a microtask/nextTick. Seeing the
+    // CLIENT-side close needs one more hop — the FIN must be READ off the wire
+    // (an I/O poll), and only then does the socket emit "close".
+    //
+    // Measured (W2038 probe-11, 1500 cuts under pinned-core load, both facts
+    // timestamped per-socket): the release lands ~0.19ms after the cut and the
+    // client close ~0.19ms after the release — and in all 1500 runs the client
+    // close came SECOND. The ORDER is deterministic; only the DELAY varies, and
+    // that is what the bare `expect` tripped on: in 2/1500 runs the assertion
+    // fired 0.6–10.8ms BEFORE the close event landed. It is a race in the TEST,
+    // not a leak: the subscription is gone by then, which is C's whole point.
+    //
+    // The client close is still asserted — it is just awaited for the same way
+    // every other fact in this suite is (A/B/E all `waitFor` it). Waiting for
+    // it here is NOT a weakening: the subscription assertion above already
+    // passed, so this cannot mask a leak, and a socket that never closes still
+    // fails, only as a timeout instead of an instant red.
+    await waitFor("the client socket to observe the cut", () => client.closed());
     expect(client.closed()).toBe(true);
   }, 30_000);
 
