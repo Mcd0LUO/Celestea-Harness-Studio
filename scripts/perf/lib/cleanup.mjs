@@ -22,6 +22,19 @@
 //      `close()` 另有「已在关闭」标志兜底，重复调用返回同一个 Promise（不抛错）。
 //   ④ 不改变测量语义：**没登记任何实例时不安装信号处理器**（登记表空了就摘掉）—— 正常
 //      路径（跑完 → 各 case 的 finally 关掉 → 登记表空）与改动前逐字同形，不打印、不占句柄。
+//   ⑤ W2037：**收尾窗口里退出码归本模块所有**。信号处理器不能 await（见 ①），所以从
+//      「收到信号」到「process.exit(128+n)」之间有一段**最长为 FORCE_EXIT_MS 的窗口**，
+//      进程仍在跑普通代码。若这段窗口里有代码抛出（典型：被收尾的 Chrome 已死，于是
+//      某个在途的 CDP 调用 reject —— 探针的顶层 `await boot(...)` 就是这样），Node 的
+//      默认行为是**立即以 1 退出**，抢在挂起的 process.exit(143) 之前。后果有两个，都不轻：
+//        · 退出码变成 1（与「被信号打死」的 signal≠null 也区分不开，日志里看不出根因）；
+//        · 收尾的**异步尾巴被腰斩**（close() 里「等 300ms 再 rmSync(profileDir)」跑不到）
+//          ⇒ profile 目录真的留在 $TEMP 里 —— 正是本模块开头承诺「无论怎么退出都不留」的东西。
+//      修法：drain 一开始就装一道 uncaughtException 守卫（**只在收尾窗口内**存在），
+//      把窗口内的异常**记录 + 打印**后吞掉，让收尾跑完、让 process.exit(128+n) 说了算。
+//      ★ 为什么是 uncaughtException 而不是 unhandledRejection：实测（W2037 最小实验）
+//        顶层 `await` 的拒绝**不走** unhandledRejection —— Node 在模块求值阶段把它直接
+//        升级成 uncaughtException。只装后者时进程仍以 1 退出。
 // ============================================================================
 import { constants } from 'node:os';
 
@@ -40,6 +53,9 @@ let installed = null;
 /** 是否已经在收尾（第二次信号 = 不再等，立即退出）。 */
 let draining = false;
 
+/** 收尾守卫是否已装（门禁用：正常路径必须为 false —— 没收到信号就不该动异常语义）。 */
+let drainGuardInstalled = false;
+
 /**
  * 信号 → 退出码：`128 + signum`，与 shell 的 `timeout` / `$?` 口径一致
  * （SIGTERM → 143、SIGINT → 130）。查不到的信号给 1（不编造 0：0 会被当成成功）。
@@ -57,6 +73,40 @@ export function activeCleanupCount() {
 /** 信号收尾是否已挂上（门禁用：未登记实例时必须是 false，否则正常路径被动了手脚）。 */
 export function isSignalCleanupInstalled() {
   return installed !== null;
+}
+
+/** 是否正在信号收尾（此刻进程的退出码已归本模块所有，见 ⑤）。 */
+export function isDraining() {
+  return draining;
+}
+
+/** 收尾守卫是否已装（门禁用：正常路径必须是 false）。 */
+export function isDrainGuardInstalled() {
+  return drainGuardInstalled;
+}
+
+/**
+ * ★ W2037：装一道**只在收尾窗口内**存在的 uncaughtException 守卫。
+ *
+ * 为什么需要：信号处理器不能 await（见 ①），所以「收到信号」与「process.exit(128+n)」
+ * 之间有一段最长 FORCE_EXIT_MS 的窗口，进程仍在跑普通代码。窗口里任何一处抛出，Node
+ * 默认会**立即以 1 退出**，抢走退出码、并把收尾的异步尾巴腰斩（profile 留在 $TEMP）。
+ * 装上守卫 ⇒ 异常被记录 + 打印，收尾照跑，退出码仍按信号口径。
+ *
+ * ★ 只在 handleSignal() 里装（信号真的到了才装）：正常路径的异常语义**一字不改**。
+ * ★ 不静默：异常原文与栈照样打到 stderr（诊断信息只增不减）。
+ */
+function installDrainGuard() {
+  if (drainGuardInstalled) return;
+  drainGuardInstalled = true;
+  process.on('uncaughtException', onDrainUncaughtException);
+}
+
+function onDrainUncaughtException(err) {
+  try {
+    process.stderr.write('[perf] 收尾期间出现未捕获异常（退出码仍按信号口径，收尾继续）：\n' +
+      ((err && err.stack) || String(err)) + '\n');
+  } catch { /* stderr 关了也要继续收尾 */ }
 }
 
 function uninstallSignalCleanup() {
@@ -88,6 +138,9 @@ export function handleSignal(signal) {
     return;
   }
   draining = true;
+  // ★ W2037：先装守卫再收尾 —— 收尾会杀掉 Chrome，窗口里在途的 CDP 调用随即 reject，
+  //   没有守卫的话它会以 exit(1) 抢走下面那个 process.exit(code)。
+  installDrainGuard();
   try { process.stderr.write('[perf] 收到 ' + signal + '：正在收尾（Chrome / 端口 / profile）…\n'); } catch { /* stderr 关了也要收尾 */ }
   const pending = drainCleanup();
   const deadline = new Promise((resolve) => setTimeout(resolve, FORCE_EXIT_MS));
