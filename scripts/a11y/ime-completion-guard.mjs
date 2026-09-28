@@ -152,6 +152,98 @@ await sleep(350);
 console.log('  composing 状态: ' + JSON.stringify(await page.eval(STATE)));
 console.log('  shot: ' + await page.screenshot('results/w2036-' + TAG + '-composing.png'));
 
+// ─── W2036 返工：另两处 document 级 Esc（清点全仓共 3 处，此前只覆盖补全框这一处） ───
+// 这两处的状态是各自模块的**局部量**（抽屉的 open / 提示卡的 hovered），不在这条浮层栈上，
+// 所以它们是**独立**的缺陷点，必须各自纳入审计 —— 只测补全框会漏掉它们。
+console.log('======== 侧栏抽屉 + 提示卡（全仓另两处 document 级 Esc） ========');
+
+/** 触摸端骨架：点 #btnSidebar 开抽屉 → 聚焦真实搜索框。 */
+async function armDrawer() {
+  await page.eval("document.getElementById('btnSidebar').click()");
+  await sleep(250);
+  await page.eval("(function(){ var i=document.querySelector('.ws-search-input'); if(i) i.focus(); return true; })()");
+  return page.eval(DRAWER_STATE);
+}
+/**
+ * 桌面：给一个真实锚点登记 hint 并 focus 它（onFocusIn 直接弹卡，不等停留）。
+ *
+ * ★ 必须走 ui/hint/index.ts（= main.ts:102 的 initHints 用的**同一个**模块实例），
+ *   不能直接 import card.ts —— 实测那样拿到的是**未装配**的实例（hintsMounted()=false、
+ *   提供者表为空）⇒ 卡永远弹不出来 ⇒ 用例变成假绿（本轮实测踩到，已修）。
+ */
+async function armHint() {
+  const ready = await page.evalAsync([
+    "window.__h = await import('/src/ui/hint/index.ts');",
+    "if (!window.__h.hintsMounted()) window.__h.initHints();",
+    "return window.__h.hintsMounted() && window.__h.hintPlugins().length > 0;",
+  ].join(""));
+  if (!ready) throw new Error('hint 引擎未装配或没有提供者 ⇒ 该用例会假绿，直接失败');
+  // ★ 焦点必须留在 #input（组合事件只会送进**已聚焦**的那个元素）：
+  //   若先 focus 锚点再 imeSetComposition，浏览器会把焦点搬到 textarea ⇒ 触发
+  //   focusout ⇒ hideHint() ⇒ 卡被**焦点变化**撤掉，而不是被 Esc 撤掉（假红）。
+  //   本轮实测踩到过这个假红，故这里显式先聚焦 #input。
+  // ★ 弹卡走**真实指针路径**（pointerover → onOver → hoverHint → 150ms 停留 → show），
+  //   不用 focus 路径 —— 后者会夺走 #input 的焦点，正是上面那条假红的来源。
+  await page.eval([
+    "(function(){",
+    "  var i = document.getElementById('input'); if (i) i.focus();",
+    "  var b = document.getElementById('btnSidebar');",
+    "  b.setAttribute('data-hint', 'W2036 审计');",
+    "  b.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }));",
+    "  return true;",
+    "})()",
+  ].join(""));
+  await sleep(500); // 引擎缺省停留 150ms，留足余量
+  const st = await page.eval(HINT_STATE);
+  if (!st.card) throw new Error('hint 卡没弹出来 ⇒ 后续断言会假绿，直接失败');
+  return st;
+}
+
+const DRAWER_STATE = "(function(){ var b=document.getElementById('btnSidebar'); var a=document.getElementById('app');"
+  + " return { drawerOpen: a ? a.classList.contains('drawer-open') : null, ariaExpanded: b ? b.getAttribute('aria-expanded') : null,"
+  + "   focus: document.activeElement ? (document.activeElement.className || document.activeElement.tagName) : null }; })()";
+const HINT_STATE = "(function(){ var c = window.__h ? window.__h.hintCardEl() : null;"
+  + " return { card: !!c, text: c ? c.textContent : null }; })()";
+
+/** 通用用例：新文档 → arm → 按键 → 读 after。 */
+async function runSite(label, setup, read, press2, expect) {
+  await page.navigate(ORIGIN + '/');
+  await waitFor("return document.querySelector('.sess-pane:not([hidden])') !== null;", 'pane');
+  const origin = await page.eval('performance.timeOrigin');
+  const before = await setup();
+  await press2();
+  await sleep(300);
+  const after = await page.eval(read);
+  const trusted = (await page.eval('performance.timeOrigin')) === origin;
+  const ok = expect(after, before);
+  RESULTS.push({ label, trusted, ok, before, after });
+  console.log('[' + label + '] trusted=' + trusted + ' ' + (ok ? 'PASS' : 'FAIL'));
+  console.log('   before: ' + JSON.stringify(before));
+  console.log('   after : ' + JSON.stringify(after));
+  return ok;
+}
+
+// 触摸端 390x844：抽屉只在移动端生效
+await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'pointer', value: 'coarse' }, { name: 'width', value: '390px' }] });
+for (const [kind, text] of [['composing', 'zhongwen'], ['ime229', ''], ['plain', '']]) {
+  const label = '侧栏抽屉 · ' + (kind === 'plain' ? '普通 Esc（对照：必须仍收抽屉）' : kind + ' 的 Esc（不许收抽屉）');
+  await runSite(label, armDrawer, DRAWER_STATE,
+    () => press(kind, text, 'Escape', 27, 'Escape'),
+    kind === 'plain' ? (a) => a.drawerOpen === false : (a) => a.drawerOpen === true);
+}
+
+// 桌面：提示卡
+await page.send('Emulation.clearDeviceMetricsOverride');
+await page.send('Emulation.setEmulatedMedia', { features: [] });
+for (const [kind, text] of [['composing', 'zhongwen'], ['ime229', ''], ['plain', '']]) {
+  const label = '提示卡 · ' + (kind === 'plain' ? '普通 Esc（对照：必须仍撤卡）' : kind + ' 的 Esc（不许撤卡）');
+  await runSite(label, armHint, HINT_STATE,
+    () => press(kind, text, 'Escape', 27, 'Escape'),
+    kind === 'plain' ? (a) => a.card === false : (a) => a.card === true);
+}
+
 console.log('======== 汇总（' + TAG + '） ========');
 for (const r of RESULTS) console.log((r.ok && r.trusted ? 'PASS ' : 'FAIL ') + r.label);
 console.log('consoleErrors=' + consoleErrors.length + ' ' + JSON.stringify(consoleErrors));

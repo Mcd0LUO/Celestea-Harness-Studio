@@ -314,3 +314,97 @@ describe("W2036 · 浮层栈：组合中的 Esc 不许关掉任何一层", () =>
     expect(popupVisible(), "非组合 Esc 仍关补全框").toBe(false);
   });
 });
+
+// ───── ⑤ 另两处 document 级 Esc（W2036 返工：清点全仓共 3 处，此前只修了 1 处） ─────
+// 架构师复核指出「全仓唯一」是错的。真机复现：触摸端 390x844，点 #btnSidebar 开抽屉、
+// 在 .ws-search-input 里派发 isComposing:true 的 Esc ⇒ aria-expanded true→false（抽屉被误关）。
+// 这两处的状态是各自模块的局部量（不在浮层栈上）⇒ 各加同一行守卫，不并入 overlays。
+describe("W2036 · 侧栏抽屉：组合中的 Esc 不许收起抽屉", () => {
+  /** 触摸端骨架 + 装配真 initSidebar（抽屉只在移动端生效）。 */
+  async function bootDrawer(): Promise<{ app: ElLike; btn: ElLike }> {
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: q.includes("max-width"), // isMobileViewport() ⇒ true（抽屉生效）
+      media: q,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    vi.stubGlobal("innerWidth", 390);
+    const sb = (await import(/* @vite-ignore */ at("ui/sidebar.ts"))) as unknown as { initSidebar(): void };
+    sb.initSidebar();
+    const app = doc.getElementById("app") as ElLike;
+    const btn = doc.getElementById("btnSidebar") as ElLike;
+    btn.dispatchEvent(new Ev("click", { bubbles: true })); // 开抽屉
+    return { app, btn };
+  }
+  const drawerOpen = (): boolean => (doc.getElementById("app") as ElLike).classList.contains("drawer-open");
+  const expanded = (): string | null => (doc.getElementById("btnSidebar") as ElLike).getAttribute("aria-expanded");
+
+  it("前置：点汉堡 ⇒ 抽屉打开、aria-expanded=true", async () => {
+    await bootDrawer();
+    expect(drawerOpen(), "抽屉已开").toBe(true);
+    expect(expanded()).toBe("true");
+  });
+
+  for (const [label, init] of IME_FORMS) {
+    it(label + " 的 Esc：★ 抽屉必须仍然开着（本工单的第二处 gap）", async () => {
+      await bootDrawer();
+      const e = new KB("keydown", { key: "Escape", bubbles: true, cancelable: true, ...init });
+      doc.body.dispatchEvent(e);
+      expect(drawerOpen(), "★ 组合中 Esc 归输入法，不许收抽屉").toBe(true);
+      expect(expanded(), "★ aria-expanded 不许翻成 false").toBe("true");
+    });
+  }
+
+  it("非组合 Esc 逐字不变：仍收起抽屉", async () => {
+    await bootDrawer();
+    doc.body.dispatchEvent(new KB("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(drawerOpen(), "非组合 Esc 仍关抽屉").toBe(false);
+    expect(expanded()).toBe("false");
+  });
+});
+
+describe("W2036 · 提示卡：组合中的 Esc 不许撤卡", () => {
+  /** 装配真引擎 + 一个认领 hint 的锚点，focus 它让卡弹出（走 onFocusIn 真路径）。 */
+  async function bootHint(): Promise<{ cardText(): string | null }> {
+    const card = (await import(/* @vite-ignore */ at("ui/hint/card.ts"))) as unknown as {
+      mountHints(): void; setHint(el: unknown, text: string | null): void; hintCardEl(): unknown;
+    };
+    const reg = (await import(/* @vite-ignore */ at("ui/hint/registry.ts"))) as unknown as {
+      registerHintPlugin(p: unknown): void;
+    };
+    const builtin = (await import(/* @vite-ignore */ at("ui/hint/builtin.ts"))) as unknown as {
+      textCardPlugin(): unknown;
+    };
+    card.mountHints();
+    reg.registerHintPlugin(builtin.textCardPlugin());
+    const anchor = doc.getElementById("btnSidebar") as ElLike;
+    card.setHint(anchor, "IME 审计");
+    anchor.dispatchEvent(new Ev("focusin", { bubbles: true })); // 键盘路径直接弹
+    return {
+      cardText: () => {
+        const c = card.hintCardEl() as { textContent: string | null } | null;
+        return c ? c.textContent : null;
+      },
+    };
+  }
+
+  it("前置：focus 带 hint 的锚点 ⇒ 卡片弹出", async () => {
+    const h = await bootHint();
+    expect(h.cardText(), "卡片已弹").toContain("IME 审计");
+  });
+
+  for (const [label, init] of IME_FORMS) {
+    it(label + " 的 Esc：★ 卡片必须仍在（组合中撤卡同样语义错）", async () => {
+      const h = await bootHint();
+      doc.body.dispatchEvent(new KB("keydown", { key: "Escape", bubbles: true, cancelable: true, ...init }));
+      expect(h.cardText(), "★ 组合中 Esc 归输入法，不许撤提示卡").toContain("IME 审计");
+    });
+  }
+
+  it("非组合 Esc 逐字不变：仍撤卡", async () => {
+    const h = await bootHint();
+    doc.body.dispatchEvent(new KB("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(h.cardText(), "非组合 Esc 仍撤卡").toBeNull();
+  });
+});
+
