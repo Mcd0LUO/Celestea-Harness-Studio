@@ -268,6 +268,32 @@ button,
 
 /* ------------------------------------------- 3) 触摸设备：hover 的等价物 */
 
+/* ------------------------------------------------- 2.7 文件预览：窄屏回到覆盖式抽屉
+ *
+ * W2058：预览在桌面/平板是**停靠侧栏**（#main 让出右侧一条带，正文真变窄 —— 见
+ * preview.css 的头注）。但 ≤640px 的视口只有 390px 宽，让不出 min(560px, 46vw) 那条
+ * 带（46vw ≈ 179px，正文会被压到 211px，连一行代码都放不下）。
+ *
+ * ⇒ 窄屏**刻意退回覆盖式**：让位宽度归零，宿主改回贴右全高（position:fixed，
+ *   与改动前逐字一致）。这不是「没改干净」，而是「停靠要有地方可停」——
+ *   与 DSH 侧栏同一取舍（它的 sidebar-right 在窄屏也是覆盖式抽屉）。
+ *   判定法不变：窄屏下正文与面板**确实**重叠，但那条路径下用户看的就是面板本身
+ *   （抽屉语义），门禁只在**桌面视口**断言零重叠（见 tests/w2058-*）。
+ */
+@media (max-width: 640px) {
+  /* 不让位：正文吃满整宽（停靠会让正文窄到不可用） */
+  body.preview-open #main { padding-right: 0; }
+  /* 工作台也不再退让：窄屏下没有「让出来的那条带」，再退就会凭空留白 */
+  body.preview-open .wb-host { right: 0; }
+  .preview-host {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: var(--preview-w);
+  }
+}
+
 @media (hover: none) {
   /* 折叠 chevron 在桌面是 hover 才淡入；触摸端没有 hover → 常显（行首星形图标让位） */
   .msg.think-seg .think-head::before { opacity: 0; }

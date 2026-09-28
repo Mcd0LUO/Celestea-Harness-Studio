@@ -35,6 +35,7 @@ import { el } from '../../utils/dom';
 import { openFsBrowser, type FsBrowserUi } from '../fsbrowser';
 import { popOverlay, pushOverlay, type OverlayHandle } from '../../utils/overlays';
 import { runEnhancers } from '../enhance';
+import { NO_FOLD_ATTR, NO_FOLD_VALUE } from '../enhance/code-extras'; // W2058：预览退出代码块折叠
 import { renderPreview } from './renderers';
 import { streamInto, type StreamFill } from './stream';
 import { createModeSwitch, type ModeSwitch, type PreviewView } from './modes';
@@ -176,16 +177,45 @@ function buildActions(panel: HTMLElement): void {
   panel.appendChild(actions);
 }
 
+/**
+ * W2058：把宿主挂进 **#main**（停靠侧栏的定位包含块）。
+ *
+ * ★ 为什么必须挂 #main 而不是 document.body（改动前就是 body）：
+ *   `.preview-host` 现在是 `position:absolute; left:100%`，它靠「#main 的内边距盒」
+ *   定位 —— 挂在 body 下的话包含块变成初始包含块（视口），`left:100%` 会把它推到
+ *   视口右缘**之外**（面板整个消失）。这是本轮最容易静默踩空的一处。
+ *   #main 在 rail.css 里已有 position:relative（灵动条/worker 条在用），无需新增。
+ *
+ * ★ 兜底：本仓部分测试夹具没有 #main，取不到时回落 body —— 此时定位包含块变回
+ *   视口，面板表现为改动前的覆盖式（**降级，不是白屏**）。
+ */
+function mountHost(h: HTMLElement): void {
+  const main = document.getElementById('main');
+  (main ?? document.body).appendChild(h);
+}
+
+/** 停靠让位的开关（body.preview-open ⇒ #main 让出 --preview-w；见 preview.css）。 */
+function setDocked(on: boolean): void {
+  document.body.classList.toggle('preview-open', on);
+}
+
 /** 只建一次：头（标题/路径/查看方式/关闭）+ 空 body + 动作行。 */
 function buildPanel(): void {
   const h = el('div', 'preview-host hidden');
   const panel = el('div', 'preview-panel');
   buildHead(panel);
   bodyEl = el('div', 'preview-body rendered');
+  // W2058：预览正文整体**退出代码块折叠**（用户原话「取消这个展开」）。
+  // ★ 为什么标在 body 上而不是逐个按钮去删：增强遍是「渲染后」才跑的，按钮由
+  //   code-extras 现造 —— 事后删按钮会让「折叠态」这个 class 与按钮的存在性分家
+  //   （将来谁重跑一遍增强，按钮又回来了）。标在容器上，则**任何**重跑都不会造它。
+  // ★ 作用域覆盖流式分段：stream.ts 的 .preview-seg 是 body 的**后代**，
+  //   code-extras 用 closest 判定 ⇒ 逐段与整篇两条路径都命中，无需各传开关。
+  bodyEl.setAttribute(NO_FOLD_ATTR, NO_FOLD_VALUE);
   panel.appendChild(bodyEl);
   buildActions(panel);
   h.appendChild(panel);
-  document.body.appendChild(h);
+  mountHost(h);
   host = h;
 }
 
@@ -354,6 +384,7 @@ export function openPreview(req: PreviewRequest): void {
   pathEl.textContent = req.candidate.path;
   pathEl.title = req.candidate.path;
   host.classList.remove('hidden');
+  setDocked(true); // W2058：让 #main 让出右侧一条带（停靠；窄屏由 CSS 归零）
   if (noteEl) {
     noteEl.textContent = '';
     noteEl.classList.add('hidden');
@@ -379,6 +410,7 @@ export function closePreview(): void {
     host.classList.add('hidden');
     if (bodyEl) bodyEl.replaceChildren();
   }
+  setDocked(false); // W2058：撤销让位（正文恢复整宽）
   currentLoad = null;
   dualView = false;
   modes?.setVisible(false);

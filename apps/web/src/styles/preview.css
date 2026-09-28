@@ -1,18 +1,60 @@
 /* ============================================================================
- * styles/preview.css — F2 文件侧边预览：右侧**覆盖式浮层**（不动 #layout）。
+ * styles/preview.css — F2 文件侧边预览：右侧**停靠侧栏**（W2058；不动 #layout）。
  *   代码/markdown/diff/图片 + 降级态；颜色全走 tokens.css 的 --c-* 令牌。
+ *
+ * ★ W2058（用户原话「借鉴 dsh 的同款侧边栏」）：本文件此前是**覆盖式浮层**
+ *   （position:fixed 铺在 #main 之上，正文被盖住）。现在改为**停靠**：
+ *   预览打开时 #main 让出右侧一条带，正文**真的变窄**（挤压，不是覆盖）。
+ *   对照 DSH 的 documentpreview 侧栏（@deepseek-ai/dsh-client-ui-sidebar-documentpreview
+ *   的 dhJKeW_preview / _header / _body）—— 它是与主内容并排的布局项，占布局。
+ *
+ *   为什么用「#main 让位」而不是把宿主塞进 flex 行：
+ *     本仓 #main 是 flex column，且 w871 断言 .chat-shell 的父节点**必须**是 #main、
+ *     w1462 断言 #statusbar 也必须是 #main 的直接子项 —— 改 #main 的子结构会同时
+ *     推翻两条既有门禁。让位（padding-right）零骨架改动，且**一处生效、全体让开**：
+ *     #messages / .chat-shell / #statusbar 一起变窄；.wb-host 是 #main 的绝对定位
+ *     子项，inset:0 解析的是**内边距盒** ⇒ 工作台右栏自动停到预览左侧，两者并存。
  * ============================================================================ */
 
+/* 停靠宽度（**单一真源**）：宿主宽度与 #main 的让位宽度读同一个值 ——
+   两处各写一份的话，改一处就会立刻错位成「盖住正文」。 */
+:root { --preview-w: min(560px, 46vw); }
+
 .preview-host {
-  position: fixed;
+  /* 绝对定位在 #main 内（宿主由 panel.ts 挂进 #main，见 mountHost）：
+     top/bottom:0 ⇒ 面板从 #main 顶起、贴到底。 */
+  position: absolute;
   top: 0;
-  right: 0;
   bottom: 0;
-  width: min(560px, 46vw);
+  /* ★ right:0 —— 绝对定位的包含块是 #main 的**内边距盒**（padding box），
+     而 padding box 的右缘 == 边框盒右缘（padding-right 只是把**内容盒**推左）。
+     ⇒ right:0 让面板恰好落进「padding-right 让出来的那条带」：
+        面板 = [边框盒右缘 − --preview-w, 边框盒右缘]
+        内容 = [内容盒左缘, 边框盒右缘 − --preview-w]
+     两者边界重合、**轴对齐矩形零重叠**（modes.ts 的判定法），与内容长度无关。
+     ★ 曾写错成 left:100%：那是「padding box 左缘 + padding box 宽」= 边框盒右缘，
+     面板会整个跑到 #main 右缘**之外**（真机实测面板消失，见报告「真机验证」）。
+     这里的教训是：padding box 的右缘**不会**因 padding-right 而内缩。 */
+  right: 0;
+  width: var(--preview-w);
   z-index: 35;
-  pointer-events: none; /* 面板之外的区域穿透，不挡正文交互 */
+  /* 宿主恒等于面板的盒子（width 一致、面板 height:100%），所以这条实际是空操作；
+     保留它是为了「宿主若因故比面板大，多出来的部分不挡正文交互」这条兜底语义。 */
+  pointer-events: none;
 }
 .preview-host.hidden { display: none; }
+
+/* 停靠让位：预览打开时 #main 让出右侧一条带（真·挤压，不是覆盖）。
+   窄屏例外见 responsive.css（390px 里让不出 560px）。 */
+body.preview-open #main { padding-right: var(--preview-w); }
+
+/* ★ 与**工作台右栏**共存（本仓既有能力，见 ui/workbench/state.ts 的 dock:'right'）：
+   两者都贴 #main 右缘 ⇒ 不处理就会重叠（预览 z-index 35 盖住工作台 24，工作台右栏
+   直接看不见）。而这两者**天然同屏**——文件管理器本身就是工作台的一个面板，用户正是
+   从它里面点开预览的。
+   ⇒ 预览占最右那条带，工作台整体退到它左侧（.wb-host 的 inset:0 改成让开一条）。
+   底部 dock（.wb-zone.bottom）一并收进来：它同样不该钻到预览底下。 */
+body.preview-open .wb-host { right: var(--preview-w); }
 /* 「已截断」标记（服务端说 truncated 时才显示；.hidden 由 base.css 的全局规则隐藏）。 */
 .preview-note {
   flex: 0 0 auto;
@@ -31,7 +73,9 @@
   flex-direction: column;
   background: var(--c-surface-raised);
   border-left: 1px solid var(--c-border-subtle);
-  box-shadow: var(--shadow-panel);
+  /* ★ W2058 删掉了 box-shadow：面板不再是浮在正文**之上**的浮层，而是与正文并排的
+     停靠栏 —— 阴影会画到左侧正文上，视觉上把「不覆盖」这条又说回去了。
+     分界改由上面那条 border-left（发丝线）承担，与 DSH 侧栏同一口径。 */
 }
 .preview-head {
   display: flex;
