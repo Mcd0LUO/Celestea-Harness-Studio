@@ -109,6 +109,31 @@ export function registerCleanup(fn) {
   return () => { registry.delete(fn); maybeUninstall(); };
 }
 
+/**
+ * ★ W2027：登记一个收尾，**并在它跑完后自动注销**（返回「手动注销」函数）。
+ *
+ * 为什么不能直接用 `registerCleanup(() => close().then(unregister))` 表达同一件事：
+ * 那样写会**派生一个新 Promise**（close() 本身是「同步 kill + 异步尾巴（等 300ms +
+ * 删 profile）」）。信号路径把登记表里每条收尾的返回值纳入等待，派生出来的那个比
+ * close() 本身晚一个微任务 settle —— 正常路径无所谓，但它是白白多出来的一跳。
+ * 这里在 `finally` 里注销：语义相同、不派生新 Promise。
+ *
+ * 幂等：注销函数可重复调用（Set.delete 本来就幂等）。
+ */
+export function adoptCleanup(fn) {
+  let unregister = null;
+  const run = () => {
+    const result = fn();
+    if (result && typeof result.then === 'function') {
+      return Promise.resolve(result).finally(() => { if (unregister !== null) unregister(); });
+    }
+    if (unregister !== null) unregister();
+    return result;
+  };
+  unregister = registerCleanup(run);
+  return unregister;
+}
+
 function maybeUninstall() {
   if (registry.size === 0) uninstallSignalCleanup();
 }

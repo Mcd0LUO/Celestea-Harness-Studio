@@ -12,12 +12,20 @@
 //   ③ Playwright 浏览器缓存（`~/.cache/ms-playwright/<browser>-<build>/…`，
 //      含 `chrome-headless-shell`）——**按目录名倒序**，新构建优先。
 // 查不到仍然返回 `null`（不编造路径），由 `launchChrome` 报错。
+//
+// ★ W2027（启动窗口的孤儿）：收尾登记从 `launchChrome` **返回之后**（app.mjs 里）
+//   提前到 **spawn() 之后的第一个 await 之前**（见下）。原来的窗口是「Chrome 进程已
+//   存在、但还没进收尾表」—— 这段时间里收到 SIGTERM，Node 直接退出，Chrome 被 init
+//   收养，继续占着 CDP 端口与 profile。窗口长度 = launchChrome 内部轮询
+//   /json/version 的时长（数百 ms ~ 数秒），所以它**必然**能被撞到。
 // ============================================================================
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Cdp, CdpPage, openCdp } from './cdp.mjs';
+import { adoptCleanup } from './cleanup.mjs';
+import { bootRaceSeam } from './boot-race-seam.mjs';
 
 /** 显式指定 Chrome 可执行文件的环境变量名（README「环境变量」表里也登记了它）。 */
 export const CHROME_ENV = 'W9111_CHROME';
@@ -94,7 +102,14 @@ export function findChrome({ env = process.env, playwright = playwrightCandidate
   return null;
 }
 
-/** 启动 Chrome，返回 { browser, page, close, port, profileDir }。 */
+/**
+ * 启动 Chrome，返回 { browser, page, close, unregister, port, profileDir, chromePath, version }。
+ *
+ * ★ W2027：**本函数在 spawn() 之后立刻把收尾登记进 cleanup.mjs**（第一个 await 之前）
+ *   ⇒ 从「Chrome 进程存在」那一刻起，任何时刻收到 SIGTERM 都不会留下孤儿。
+ *   返回值里的 `unregister` 是「注销这条登记」的句柄：调用方若要把收尾**接管**过去
+ *   （app.mjs 的复合 close 就是），必须用它把这条换掉，而不是再登记一条。
+ */
 export async function launchChrome(opts = {}) {
   const exe = opts.executablePath ?? findChrome();
   if (!exe) throw new Error('chrome not found（设 W9111_CHROME=<可执行文件> 或安装 Chrome/Playwright 浏览器）');
@@ -122,6 +137,40 @@ export async function launchChrome(opts = {}) {
   let stderr = '';
   child.stderr.on('data', (b) => { stderr += String(b); });
 
+  // ---- 收尾登记（W2027）：★ 必须在**第一个 await 之前**、且**无条件**发生 -------
+  // 为什么把 close 的定义搬到这里（原来是函数末尾）：登记要的是「关掉这个 child」的
+  // 能力，而它此刻已经具备（spawn 已返回 ⇒ pid 已知、profile 目录已建）。等到
+  // openCdp / Page.enable 都跑完再登记，中间那段就是孤儿窗口。
+  //
+  // ★ 为什么不是「在 app.mjs 里 let chromeRef = null 提前登记」：那个 ref 在
+  //   `chromeRef = chrome` 执行前仍是 null，窗口只是被挪了个位置、并没有关严
+  //   （而且收尾函数还要多一个 null 分支）。登记必须在**知道 child 的那一刻**做。
+  //
+  // ★ 为什么不是「让 app.mjs 与这里都登记」：close() 是**幂等**的，但幂等 ≠ 可以重复
+  //   登记 —— 登记表里若有两个指向同一个 Chrome 的收尾，信号到达时会跑两次，而
+  //   close() 的异步尾巴（等 300ms + 删 profile）**第二次也要再等一遍**，退出被拖长。
+  //   所以本函数是**唯一登记者**（登记表里最多一条），由 adoptCleanup 保证
+  //   「关完即注销」；app.mjs 那边改用 unregister() **移交**所有权，不再自己登记。
+  // `browser` 此刻还没连上（openCdp 在后面）。先给个空壳，让 close() 从这一行起就是
+  // **完整**的：kill child + 删 profile 都不依赖 CDP 连接，只有「关 ws」需要它。
+  // 连上之后 `browser` 被重新赋值，close() 闭包读的是同一个绑定 ⇒ 正常路径行为不变。
+  let browser = { close() { /* 还没连上：没有 ws 要关 */ } };
+  let closePromise = null;
+  const close = () => {
+    if (closePromise !== null) return closePromise;
+    closePromise = (async () => {
+      try { browser.close(); } catch { /* ignore */ }
+      try { child.kill(); } catch { /* ignore */ }
+      await new Promise((r) => setTimeout(r, 300));
+      if (!opts.keepProfile) { try { rmSync(profileDir, { recursive: true, force: true }); } catch { /* ignore */ } }
+    })();
+    return closePromise;
+  };
+  const unregister = adoptCleanup(close);
+  // 门禁专用检查点（tests/w2027-perf-boot-race.test.ts）：生产路径下
+  // bootRaceSeam() **立即返回 null**，不读全局、不写文件、不 await ⇒ 对启动序列零影响。
+  bootRaceSeam('chrome:spawned');
+
   const versionUrl = 'http://127.0.0.1:' + port + '/json/version';
   const deadline = Date.now() + (opts.startupTimeoutMs ?? 25000);
   let version = null;
@@ -133,11 +182,13 @@ export async function launchChrome(opts = {}) {
     await new Promise((r) => setTimeout(r, 150));
   }
   if (!version) {
-    child.kill();
+    // 起不来也要走**同一条**收尾（kill + 删 profile + 注销），而不是裸 child.kill()：
+    // 原来这条路径会把 profile 目录留在 $TEMP 里（与 W2021 修的是同一类泄漏）。
+    try { await close(); } catch { /* 收尾失败不掩盖下面这条更有用的错误 */ }
     throw new Error('chrome devtools endpoint never came up.\n' + stderr.slice(-2000));
   }
 
-  const browser = await openCdp(version.webSocketDebuggerUrl);
+  browser = await openCdp(version.webSocketDebuggerUrl);
   // flat 模式：所有 session 消息走同一条 ws。
   const { targetInfos } = await browser.send('Target.getTargets');
   let info = targetInfos.find((t) => t.type === 'page');
@@ -154,22 +205,11 @@ export async function launchChrome(opts = {}) {
   await page.send('Network.enable');
   await page.send('Performance.enable');
 
-  // 幂等（W2021）：close() 可能被走两次 —— 正常路径的 finally 一次、信号路径的 drain 一次。
-  // 返回**同一个** Promise，第二次调用不重复 kill、不重复删 profile、不抛错。
-  // ★ 关键：`browser.close()`（关 ws）与 `child.kill()` 都在**第一个 await 之前**同步发生 ——
-  //   信号处理器里不能 await，同步的 kill 才是「Chrome 一定不会变成孤儿」的保证。
-  let closePromise = null;
-  const close = () => {
-    if (closePromise !== null) return closePromise;
-    closePromise = (async () => {
-      try { browser.close(); } catch { /* ignore */ }
-      try { child.kill(); } catch { /* ignore */ }
-      await new Promise((r) => setTimeout(r, 300));
-      if (!opts.keepProfile) { try { rmSync(profileDir, { recursive: true, force: true }); } catch { /* ignore */ } }
-    })();
-    return closePromise;
-  };
-  return { browser, page, close, port, profileDir, chromePath: exe, version };
+  // close 与 unregister 已在 spawn 之后定义/登记（见上，W2027）：此处只返回它们。
+  // 幂等语义不变（W2021）：正常路径的 finally 与信号路径的 drain 拿到**同一个** Promise，
+  // 第二次调用不重复 kill、不重复删 profile、不抛错。
+  // `unregister` 交给调用方（app.mjs）：当这个 Chrome 的收尾被**别人接管**时注销本登记。
+  return { browser, page, close, unregister, port, profileDir, chromePath: exe, version };
 }
 
 export { Cdp, CdpPage, openCdp };
