@@ -13,6 +13,7 @@
 //   focusin/out  → 键盘可达同样给提示；Esc / pointerdown / 滚动 / 尺寸变化即撤卡
 // 宿主自算命中区的场景（rail 轨道是 pointer-events:none）用 hoverHint(el) 直驱。
 // ============================================================================
+import { isImeKey } from '../ime'; // W2036：组合中的 Esc 是「取消组合」，不是「撤提示卡」
 import { resolveHint, type HintHandle } from './registry';
 
 /** 提示文本挂在这个属性上（提供者只认属性、不认业务类名）。 */
@@ -217,6 +218,14 @@ export function mountHints(): void {
 }
 
 function onKey(e: Event): void {
+  // ★ W2036：组合会话里 isComposing 对**所有**按键都为 true，Esc 也不例外 ——
+  // 那一次 Esc 的归属是输入法（取消候选词 / 收起候选窗），不是这张提示卡。
+  // 危害比 sidebar 的抽屉小，但语义上同样错：用户想撤销输入，界面却替他撤了别的东西。
+  // ★ 为什么不能只靠「撤了也无所谓」：hideHint() 会把 hovered 清空，而 show() 有
+  //   「target !== hovered 则返回」的守卫 ⇒ 指针未离开前卡片不会自己回来
+  //   （真机实测：组合中 Esc ⇒ card:true → false 且不再重弹）。
+  // 判据复用 ui/ime.ts 的 isImeKey（唯一真源）。
+  if (isImeKey(e as KeyboardEvent)) return;
   if ((e as KeyboardEvent).key === 'Escape') hideHint();
 }
 

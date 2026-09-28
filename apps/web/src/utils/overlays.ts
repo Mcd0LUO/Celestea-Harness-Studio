@@ -1,5 +1,5 @@
 // ============================================================================
-// utils/overlays.ts — 浮层层级栈（Esc 关闭的唯一入口）
+// utils/overlays.ts — 浮层层级栈（**浮层**的 Esc 关闭入口；全仓另有 2 处 document 级 Esc，见文末）
 //
 //   问题：设置页、编辑弹窗、内联面板、确认框各自注册 document Esc 监听，
 //   按一次 Esc 会同时关掉多层（例如从设置页打开的提供商弹窗 → 关掉的是底层
@@ -8,7 +8,22 @@
 //   方案：全局只注册一个 document keydown 监听；每层浮层打开时 push 自己的
 //   close 函数，Esc 只调用栈顶一层的 close。层自己关闭（按钮/保存成功）时
 //   调 popOverlay(handle) 把该层从栈里摘掉，保证栈序与视觉层级一致。
+//
+// ★ W2036（IME）：组合会话中的 Esc 是输入法的「取消组合」，不是「关掉这层浮层」。
+//   漏了守卫，**任何压栈的浮层**（命令补全框、设置页、预览面板…）都会在用户取消候选词时
+//   被关掉。真机实测（桌面 1440x900）：打 '/' ⇒ 补全框出现 ⇒ 拼音组合中按 Esc ⇒
+//   补全框消失（改动前）；加守卫后补全框仍在。判据复用 ui/ime.ts 的 isImeKey，见 onKeydown。
+//
+// ★ 范围更正（W2036 返工，架构师复核）：本文件是**【浮层栈】这一层的** document 级 Esc
+//   入口 —— 它**不是**全仓唯一的 document 级 Esc。清点全仓共 3 个 document keydown 监听，
+//   且 3 个都处理 Escape（本文件 + 下面两处）；另外两处的状态是各自模块的**局部量**
+//   （不在这条栈上），故不并入本文件，而是各自加同一行守卫：
+//     · ui/sidebar.ts 的 initDrawer —— 移动端抽屉的 open（局部 let）
+//     · ui/hint/card.ts 的 onKey —— 提示卡的 hovered（局部量）
+//   三处共用 ui/ime.ts 的 isImeKey 判据（唯一真源），但**不共用一个 Esc 入口** ——
+//   硬把抽屉/提示塞进浮层栈会让「栈序 = 视觉层级」这条不变量失真。
 // ============================================================================
+import { isImeKey } from '../ui/ime'; // W2036：组合中的 Esc 是「取消组合」，不是「关浮层」
 
 /** 一层浮层的句柄：用于精准摘除该层（不用猜栈顶）。 */
 export interface OverlayHandle {
@@ -42,6 +57,10 @@ function removeEntry(entry: Entry): boolean {
 /** 唯一的 Esc 监听：只关闭栈顶一层。 */
 function onKeydown(e: KeyboardEvent): void {
   if (e.key !== 'Escape') return;
+  // ★ W2036：组合会话中 isComposing 对**所有**按键都为 true，Esc 也不例外 ——
+  // 那一次 Esc 的归属是输入法（取消组合 / 收起候选窗），不是这一层浮层。
+  // 位置在 topEntry() 之前：组合中的 Esc 连「栈顶是谁」都不该问（零副作用）。
+  if (isImeKey(e)) return;
   const top = topEntry();
   if (!top) return;
   e.preventDefault();

@@ -8,6 +8,7 @@
 // 铁律：离屏构建 + 单次 replaceChildren；不重建输入栏/背景；Esc 走 overlays 层级栈。
 // ============================================================================
 import { el } from '../../utils/dom';
+import { isImeKey, type ImeKeyLike } from '../ime'; // W2036：IME 组合判据（唯一真源，W2033 建立）
 import { popOverlay, pushOverlay, type OverlayHandle } from '../../utils/overlays';
 
 /** 一行补全项（命令 / 文件统一形状）。 */
@@ -119,8 +120,36 @@ export function hideCompletion(): void {
   }
 }
 
-/** ↑↓/Enter/Tab/Esc 的键盘处理；返回 true = 已消费（调用方不要走发送）。 */
-export function completionKey(e: { key: string; shiftKey?: boolean; preventDefault(): void }): boolean {
+/**
+ * 补全框读的按键事件（KeyboardEvent 的结构子集 ⇒ 纯函数可在 node 里直接断言）。
+ * W2036：把 IME 判据的两半（isComposing / keyCode）也登记进来 —— 它们必须是**本函数**
+ * 读得到的东西，否则守卫只能写在调用方，而调用方有两个（两处漏判的机会，见下）。
+ */
+export interface CompletionKeyLike extends ImeKeyLike {
+  key: string;
+  shiftKey?: boolean;
+  preventDefault(): void;
+}
+
+/**
+ * ↑↓/Enter/Tab/Esc 的键盘处理；返回 true = 已消费（调用方不要走发送）。
+ *
+ * ★ W2036：IME 组合中的按键**一律**不是给补全框的 —— 见函数第一行的守卫。
+ * 守卫放在**本函数**（引擎的键盘入口）而不是某一个调用方：本函数有两个独立的调用方
+ * （ui/commands/index.ts 里 installCommands 自注册的 keydown 监听、以及 interceptKey），
+ * 且 installCommands 在 main.ts 里**晚于** initInputBar 装配 ⇒ 它的监听器排在
+ * newline.ts 的 bindEnterKey **之后**，两条路都会走到这里。改在调用方只会修一半。
+ */
+export function completionKey(e: CompletionKeyLike): boolean {
+  // ★ W2036：组合会话里 isComposing 对**所有**按键都为 true（IME 正在处理这次按键），
+  // 所以这一行拦的不是「Enter」而是「整段组合会话」—— Enter(确认候选词) / ↑↓(翻候选页) /
+  // Esc(取消组合) / Tab 全都归输入法，补全框一个都不该抢。
+  // 判据用共享的 isImeKey：isComposing 的窗口是 (compositionstart, compositionend) 开区间，
+  // 而引擎可能先把 compositionend 交给脚本（WebKit bug 165004）⇒ 那一刻读到 false，
+  // keyCode 229 正是它的补集。★ 别在这里退回「只看 isComposing」。
+  // 位置在 completionVisible() **之前**：组合中的按键连「补全框可不可见」都不该问 ——
+  // 它根本不是给这个 UI 的（也顺带保证本函数对组合按键**零副作用**）。
+  if (isImeKey(e)) return false;
   if (!completionVisible()) return false;
   if (e.key === 'Escape') {
     e.preventDefault();

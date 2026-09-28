@@ -11,6 +11,7 @@ import { t } from '../i18n';
 // W2023：MOBILE_QUERY / isMobileViewport 的**唯一真源**（原先是本文件私有，现提到
 // ui/viewport.ts —— 输入提示也要按设备能力换文案，判定不许有第二份，见该文件头注）。
 import { isMobileViewport, MOBILE_QUERY } from './viewport';
+import { isImeKey } from './ime'; // W2036：组合中的 Esc 是「取消组合」，不是「关抽屉」
 
 const STORAGE_COLLAPSED = 'celestea-studio.sidebar-collapsed';
 const STORAGE_WIDTH = 'celestea-studio.sidebar-width';
@@ -152,6 +153,12 @@ function initDrawer(btn: HTMLButtonElement): void {
   });
   scrim?.addEventListener('click', () => setOpen(false));
   document.addEventListener('keydown', (e) => {
+    // ★ W2036：组合会话里 isComposing 对**所有**按键都为 true，Esc 也不例外 ——
+    // 那一次 Esc 的归属是输入法（取消候选词），不是这个抽屉。漏了这行，用户在
+    // 侧栏搜索框（.ws-search-input）里用中文输入法打字、按 Esc 想取消候选词，
+    // **整个抽屉会被收起来**（真机复现：触摸端 390x844，见交付报告）。
+    // 判据复用 ui/ime.ts 的 isImeKey（唯一真源），不在这里抄第二份。
+    if (isImeKey(e)) return;
     if (e.key === 'Escape' && open) setOpen(false);
   });
   // 点会话行 = 已经选好了会话 → 收起抽屉（触摸端没有「鼠标移开」这一步）
