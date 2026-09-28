@@ -188,8 +188,9 @@ function entryFailure(evidence: string): ProgramFailure {
     kind: PROGRAM_ERROR_CODE,
     message:
       "the program ran to its end without a usable entry point: " + evidence + " " +
-      "(write the program as a function body — plain statements ending in 'return <value>' — " +
-      "or as a complete script that defines main)",
+      "(★PREFER a plain script: bare statements ending in 'return <value>' — the engine wraps them " +
+      "into main() for you, so there is no wrapper to define or to brace-balance; a complete script " +
+      "that defines main yourself is still accepted)",
   };
 }
 

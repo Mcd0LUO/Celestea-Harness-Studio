@@ -142,28 +142,189 @@ export function definesEntryPoint(code: string, language: RunCodeLanguage): bool
 }
 
 /**
+ * One `await` / `import` / `export` WORD found at module top level by
+ * [scanModuleWords], with the two position facts the form rule needs.
+ */
+interface ModuleTopWord {
+  word: "await" | "import" | "export";
+  /** True when the word is the body of a brace-less arrow: `async () => await f()`. */
+  arrowBody: boolean;
+  /** The source text right after the word — where an `await` operand starts. */
+  after: string;
+}
+
+/** An identifier at the scanner cursor (sticky: matches at `lastIndex`, or not at all). */
+const IDENT = /[A-Za-z_$][\w$]*/y;
+
+/**
+ * Words that end in `(` without being a CALL. `for (`/`if (` are control-flow
+ * headers, and the rest cannot begin a top-level statement at all — mistaking
+ * one for a bare call would emit a program with a top-level `return` verbatim.
+ */
+const NON_CALL_HEADS = new Set([
+  "for", "if", "while", "switch", "catch", "return", "typeof", "new", "do",
+  "delete", "void", "with", "throw", "await", "yield", "case", "in", "of", "else",
+]);
+
+/** `await tools.<name>(…)` / `await tools[…]` — the engine's SYNCHRONOUS bridge. */
+const AWAITS_BRIDGE = /^\s*tools\s*[.[]/;
+/** `await import("x")` — a dynamic import is an EXPRESSION, not a module statement. */
+const AWAITS_DYNAMIC_IMPORT = /^\s*import\s*\(/;
+
+/** Past the end of a `//` comment (or the end of the program). */
+function skipLineComment(code: string, at: number): number {
+  const nl = code.indexOf("\n", at);
+  return nl < 0 ? code.length : nl;
+}
+
+/** Past the end of a block comment (an unterminated one swallows the rest). */
+function skipBlockComment(code: string, at: number): number {
+  const end = code.indexOf("*/", at + 2);
+  return end < 0 ? code.length : end + 2;
+}
+
+/**
+ * Past the closing quote of the string/template opened at `at`.
+ *
+ * A template is skipped WHOLE, `${…}` included: its interpolations are code, but
+ * treating them as such would need a real parser, and swallowing them only ever
+ * makes the scan MISS a top-level word — the conservative direction, because the
+ * program is then wrapped, and the wrapper hosts any `await`.
+ */
+function skipQuoted(code: string, at: number): number {
+  const quote = code[at]!;
+  let i = at + 1;
+  while (i < code.length) {
+    const ch = code[i]!;
+    if (ch === "\\") { i += 2; continue; }
+    if (ch === quote) return i + 1;
+    if (ch === "\n" && quote !== "`") return i;
+    i += 1;
+  }
+  return code.length;
+}
+
+/** Is the word at `at` the body of a brace-less arrow (`() => await f()`)? */
+function isArrowBody(code: string, at: number): boolean {
+  let i = at - 1;
+  while (i >= 0 && /\s/.test(code[i]!)) i -= 1;
+  if (code[i] !== ">") return false;
+  i -= 1;
+  while (i >= 0 && /\s/.test(code[i]!)) i -= 1;
+  return code[i] === "=";
+}
+
+/** Is the word at `at` a property name (`o.await`), i.e. not a keyword here? */
+function afterDot(code: string, at: number): boolean {
+  let i = at - 1;
+  while (i >= 0 && /\s/.test(code[i]!)) i -= 1;
+  return code[i] === ".";
+}
+
+/**
+ * Every `await` / `import` / `export` WORD at MODULE TOP LEVEL, in source order.
+ *
+ * Module top level means bracket depth 0 — so a loop body, a function body and an
+ * object literal are all excluded — and not the body of a brace-less arrow. The
+ * scan is character-based and skips strings, comments and templates, so the word
+ * `await` inside `'await x'` or `// await f()` is not a token and never counts.
+ *
+ * Boundaries (deliberate, and pinned by tests): a regex literal is NOT modelled
+ * (telling `/await/g` from a division needs a parser), so a keyword inside one
+ * still counts; a template's `${…}` is skipped, so a top-level word inside one is
+ * MISSED (the conservative direction).
+ */
+function scanModuleWords(code: string): ModuleTopWord[] {
+  const found: ModuleTopWord[] = [];
+  let depth = 0;
+  let i = 0;
+  while (i < code.length) {
+    const ch = code[i]!;
+    const next = code[i + 1];
+    if (ch === "/" && next === "/") { i = skipLineComment(code, i); continue; }
+    if (ch === "/" && next === "*") { i = skipBlockComment(code, i); continue; }
+    if (ch === '"' || ch === "'" || ch === "`") { i = skipQuoted(code, i); continue; }
+    if (ch === "{" || ch === "[" || ch === "(") { depth += 1; i += 1; continue; }
+    if (ch === "}" || ch === "]" || ch === ")") { depth = Math.max(0, depth - 1); i += 1; continue; }
+    IDENT.lastIndex = i;
+    const match = IDENT.exec(code);
+    const ident = match === null ? undefined : match[0];
+    if (ident === undefined) { i += 1; continue; }
+    if ((ident === "await" || ident === "import" || ident === "export") && depth === 0 && !afterDot(code, i)) {
+      found.push({
+        word: ident,
+        arrowBody: isArrowBody(code, i),
+        after: code.slice(i + ident.length, i + ident.length + 32),
+      });
+    }
+    i += ident.length;
+  }
+  return found;
+}
+
+/** A word only a MODULE may carry: an `import`/`export` STATEMENT (`import(` is an expression). */
+function isModuleOnlyWord(hit: ModuleTopWord): boolean {
+  if (hit.arrowBody) return false;
+  if (hit.word === "export") return true;
+  return hit.word === "import" && !/^\s*\(/.test(hit.after);
+}
+
+/**
+ * A top-level `await` that is EVIDENCE of module scope.
+ *
+ * The two exclusions are operands the wrapper hosts just as well, so awaiting
+ * them says nothing about where the program must run: the engine's own
+ * synchronous bridge (whose SDK text is literally "awaiting a value is free")
+ * and a dynamic `import(…)` expression. Every other operand — a real promise, a
+ * helper call, a timer — keeps the historical script treatment.
+ */
+function isModuleTopAwait(hit: ModuleTopWord): boolean {
+  return (
+    hit.word === "await" &&
+    !hit.arrowBody &&
+    !AWAITS_BRIDGE.test(hit.after) &&
+    !AWAITS_DYNAMIC_IMPORT.test(hit.after)
+  );
+}
+
+/**
  * Does this TypeScript program ALREADY run at module top level?
  *
  * These are the shapes that must not be wrapped, because wrapping them changes
- * their meaning (a top-level `await` becomes a syntax error inside a plain
- * function) or is plain illegal (a non-leading `import`). An `export` is a
- * statement only a module may carry, so a program that exports is a script by
- * construction. A bare top-level call at the first line is the documented
- * "complete script" habit (`main();`) and is honoured the same way.
+ * their meaning or is plain illegal. A program that exports, or that carries a
+ * non-leading `import` statement, is a module by construction; a genuine
+ * top-level `await` is the documented module-script habit; a bare call at the
+ * very first line is the documented "complete script" habit (`main();`).
+ *
+ * ## W2060: the decision is made on TOKENS, not on a regex over the whole text
+ *
+ * The previous rule was
+ *
+ *     if (/(?:^|[^\w$])(?:await|import|export)\b/.test(rest-of-program)) return true;
+ *
+ * which matched the WORD anywhere — inside a string, a comment, an object key,
+ * and (the production defect) inside a loop or a function body. A bare statement
+ * list that merely awaited something was therefore emitted verbatim as a
+ * "script", and its top-level `return` became
+ * `SyntaxError: Return statement is not allowed here` — even though the tool's
+ * own contract recommends exactly that shape and the SDK preamble promises that
+ * `await tools.<name>({…})` "is the same thing (awaiting a value is free)".
+ * [scanModuleWords] replaces the regex; [isModuleTopAwait] keeps the one `await`
+ * operand that is NOT evidence of module scope.
  */
 function startsAtModuleTop(code: string): boolean {
   const lines = splitProgramLines(code);
   const start = lines.findIndex((line) => line.trim() !== "");
   if (start < 0) return false;
-  const first = lines[start]!.trim();
-  if (/(?:^|[^\w$])(?:await|import|export)\b/.test(lines.slice(start + 1).join("\n"))) return true;
-  if (/^(?:import|export)\b/.test(first)) return true;
+  const words = scanModuleWords(code);
+  if (words.some(isModuleOnlyWord)) return true;
+  if (words.some(isModuleTopAwait)) return true;
   // A bare CALL at the very top is the documented "complete script" habit
-  // (`main();`). A `const`/`let`/`var` initializer may also CONTAIN a call —
-  // `const x = await f()` — so that is matched by the lookahead below instead of
-  // by this line, which must not mistake `const a = 1;` for a call.
-  if (/^[A-Za-z_$][\w$]*\s*\(/.test(first)) return true;
-  return /^(?:const|let|var)\b[^=]*=[^=]*\bawait\b/.test(first);
+  // (`main();`). A control-flow HEADER also ends in `(` but is not a call, and a
+  // `const`/`let`/`var` line is not one either — its initializer may CONTAIN a
+  // call, which is why this test is on the LINE SHAPE, not on `includes("(")`.
+  const head = /^([A-Za-z_$][\w$]*)\s*\(/.exec(lines[start]!.trim());
+  return head !== null && !NON_CALL_HEADS.has(head[1]!);
 }
 
 /** The whole-program classification: see the module header for the rule table. */
