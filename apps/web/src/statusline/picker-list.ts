@@ -20,10 +20,45 @@ import { t } from '../i18n'; // i18n P1-a
  */
 export function renderList(body: HTMLElement, kind: SwitchKind, cfg: ConfigInfo, host: PickerHost, hooks: ListHooks): void {
   if (kind === 'effort') {
-    renderEffortList(body, cfg.reasoning_effort ?? '', hooks);
+    renderEffortList(body, sessionTruthEffort(cfg, host), hooks);
     return;
   }
   renderModelList(body, cfg, host, hooks);
+}
+
+/**
+ * W2059：清单「当前模型」= **会话真值**，不是全局默认。
+ *
+ * 为什么必须分开：`cfg` 来自 GET /api/config，那是**全局默认**（config-shape.ts
+ * configView 读 deps.runtime.profile()）；而状态栏徽标的模型来自
+ * GET /api/status?session=<聚焦会话>，即会话实例的 profile（全局 base +
+ * session.json.model 覆盖）。旧写法 `cfg.model ?? host.snapshotModel` 的 `??`
+ * 右支**永不触发**（cfg.model 永远非空），于是带覆盖的会话打开选择器时高亮的是
+ * 全局默认 —— 用户看到的「切换了模型，显示的还是 deepseek」。
+ *
+ * 回落规则（两个方向都保留，不许只留一边）：
+ *   · 有聚焦会话（sessionId !== ''）⇒ 会话快照是会话真值；快照还没回来（首轮轮询
+ *     未到）时才退回全局，因为那时本地确实没有更好的来源。
+ *   · 无聚焦会话（旧单会话容器）⇒ 会话真值**就是**全局，cfg.model 优先。
+ */
+export function sessionTruthModel(cfg: ConfigInfo | null, host: PickerHost): string {
+  if (host.sessionId === '') return cfg?.model ?? host.snapshotModel ?? '';
+  return host.snapshotModel !== '' ? host.snapshotModel : (cfg?.model ?? '');
+}
+
+/**
+ * W2059：推理档位的「当前值」。
+ *
+ * 与模型不同：**档位没有会话级概念** —— session.json 只存 model（见
+ * runtime/session-compose.ts 的 sessionOverrides，只读 sessionModel 与
+ * sessionSystemPrompt），PUT /api/sessions/{id}/model 也只写 model。所以
+ * GET /api/config 的 reasoning_effort 对每个会话都是真值。
+ *
+ * 这里仍优先取状态栏快照里**已上报**的档位：用户点开弹层时，高亮必须与他正看着的
+ * 徽标一致；快照为 null（标准档 / 尚未轮询）时退回全局配置（全局是唯一真源）。
+ */
+export function sessionTruthEffort(cfg: ConfigInfo | null, host: PickerHost): string {
+  return host.snapshotEffort ?? cfg?.reasoning_effort ?? '';
 }
 
 /**
@@ -48,7 +83,7 @@ export function renderModelList(body: HTMLElement, cfg: ConfigInfo, host: Picker
 
   // ---- model：按提供商分组的树状清单（W262） ----
   const models = Array.isArray(cfg.available?.models) ? cfg.available.models : [];
-  const cur = cfg.model ?? host.snapshotModel;
+  const cur = sessionTruthModel(cfg, host);
   if (!models.length) {
     // 清单缺失 → 内联文本输入降级
     const row = el('div', 'sl-popup-textrow');
@@ -80,11 +115,17 @@ export function renderModelList(body: HTMLElement, cfg: ConfigInfo, host: Picker
   }
   // W750：当前生效项 = 后端标注的 active 行（同模型 + 同端点）。旧服务没有该
   // 字段时退回「按模型 id 匹配」；两者都没有 → 没有选中态，也不虚标。
-  const activeRow = models.find((m) => m.active === true) ?? null;
-  const sameId = models.find((m) => m.id === cur) ?? null;
+  //
+  // W2059：`active` 是**按全局 profile 标注**的 —— config-shape.ts 的
+  // availableModels() 用 deps.runtime.profile().model 与 baseUrlOf() 判定，
+  // 拿不到聚焦会话的覆盖。所以带覆盖的会话里它标的正是全局默认，直接信它就会把
+  // 高亮钉在 deepseek 上（用户报案的另一半）。有聚焦会话时改用会话真值匹配的那一
+  // 行；无聚焦会话时全局即真值，沿用后端 active（同模型 + 同端点，比裸 id 更准）。
+  const truthRow = models.find((m) => m.id === cur) ?? null;
+  const activeRow = host.sessionId === '' ? (models.find((m) => m.active === true) ?? null) : truthRow;
   const currentProviderId = (activeRow?.provider_id ?? '').trim();
   const isCurrent = (m: ModelInfo): boolean =>
-    activeRow !== null ? m.active === true : sameId !== null && m === sameId;
+    host.sessionId === '' && activeRow !== null ? m.active === true : m === truthRow;
   // 树状一级 = provider 显示名（后端已保证模型名未定义时取 id）。
   // W750：同一 provider id 的记录聚成一组（显示名可能重复/被改，用 id 做键），
   // 缺 provider 字段的记录（静态兜底目录 / 旧数据）归入「其他」组。

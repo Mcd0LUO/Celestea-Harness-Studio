@@ -651,7 +651,18 @@ class RealEngine implements RealRuntimeAdapter {
     const entry = this.registry.peek(session ?? null);
     if (entry !== null) return entry.runtime.statusline();
     // W755: a cold session measures nothing — `coldStatusline` owns that shape.
-    const profile = this.profileValue;
+    //
+    // W2059: the model must come from the SESSION's profile, not the process base.
+    // This used `this.profileValue` (the GLOBAL base), so a cold session carrying
+    // its own `session.json.model` reported the global default while
+    // `model_covered` was already true — the statusline badge showed
+    // `deepseek-flash` for a session whose real model was `glm-5.3-flash`, and it
+    // lasted until that session's first turn built an instance (every server
+    // restart re-created it). `composer.profileFor` is the ONE place a session's
+    // profile is decided (same reader the warm path and the next turn use), so the
+    // cold and warm answers can no longer disagree. `session === null` (the
+    // detached generation) resolves to the base profile exactly as before.
+    const profile = this.composer.profileFor(session ?? null);
     return coldStatusline({ ...profile, context_window: profile.context_window_tokens, now: this.now });
   }
 
