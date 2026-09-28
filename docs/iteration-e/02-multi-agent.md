@@ -107,7 +107,7 @@
 | B5 | `DONE` 行 + `setWorkerState("in-turn")` | 行状态仍 `DONE`（既有冻结语义不回退） | 现有用例延伸 |
 | B6 | 默认配置下 studio 运行 | `<workerBase>/registry.tsv` 的 `mtime` **不变**；写入目标 == 配置路径 | `apps/studio/src/runtime/real-runtime.test.ts` |
 | B7 | 契约 | `contracts/data-files/registry-tsv.schema.json` 的 round-trip 用例通过（新 token 不破坏序列化） | `tests/contracts.test.ts` |
-| B8 | 幂等重放（P2） | 对同一 wid 跑两次 `recoverOnBoot()` → 第二次零动作（无新行、无新回执、审计 0 行） | `packages/workers/src/registry.test.ts` |
+| B8 | 幂等重放（P2） | 对同一 wid 跑两次 `recoverOnBoot()` → 第二次零动作：**无新行、无新回执、无新 ACTION 审计行**。★注意口径：boot 的 **P0 汇总行 `worker_observed` 每轮必写**（它记录的是「这一轮观测到了什么」，与是否有动作无关），故「审计 0 行」只对 **ACTION** 审计行（`worker_recovered`）成立，对 boot 整体不成立。落点：`apps/studio/src/runtime/w2054-b8-idempotent.test.ts`（W2054 实测第二次为「终态行进 `frozen` 而非 `stale` ⇒ `applyRecovery` 遍历空集 ⇒ 返回 `[]`」） |
 
 ### 2.5 风险
 
@@ -154,7 +154,7 @@
 4. **wid 在表内是主键**：settled 行会**冻结** wid（§2.2.4 第 5 行），因此表落盘后**跨重启**用同一个 wid 再 spawn 会被 `spawn_worker` 拒绝（"wid already registered"）。P0 不改这条既有语义（B5 的冻结语义），补法是 P2 的"终态行 + 同 wid = 下一 attempt"，届时报告名/回执键都已就绪。
 5. **审计落地为本地 append-only**：`<data dir>/recovery-audit.jsonl`（与 `grants-audit.jsonl`/`fallbacks-audit.jsonl` 同纪律；平台 `POST /api/audit` best-effort，失败只记本地）。
 
-**证据**：B1/B1b/B4/B6/B7/B8 落 `packages/workers/src/registry.test.ts`、`packages/workers/src/receipt.test.ts`、`packages/runtime/src/worker-wiring.test.ts`、`apps/studio/src/runtime/worker-recovery.test.ts`；真机口径见 §2.4 逐条。
+**证据**：B1/B1b/B4/B6/B7 落 `packages/workers/src/registry.test.ts`、`packages/workers/src/receipt.test.ts`、`packages/runtime/src/worker-wiring.test.ts`、`apps/studio/src/runtime/worker-recovery.test.ts`；**B8 落 `apps/studio/src/runtime/w2054-b8-idempotent.test.ts`**（W2054：入口 `recoverWorkerTableOnBoot` 在 studio 侧，故门禁随入口走，不在 `packages/workers`）；真机口径见 §2.4 逐条。
 
 ---
 

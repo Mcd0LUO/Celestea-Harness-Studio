@@ -12,8 +12,13 @@
  *   - `worker_stale`      — a persisted worker row whose owning process is dead;
  *   - `worker_orphan`     — a RUNNING row whose `host=` session is gone;
  *   - `worker_observed`   — the boot sweep's summary line (always exactly one);
- *   - `worker_recovered`  — W1470 P2: a stale row was CLAIMED and settled
- *                           (`CELESTEA_WORKER_RECOVER=1` only; absent otherwise);
+ *   - `worker_recovered`  — W1470 P2: one line per ACTION the boot converger took
+ *                           on a stale row (`CELESTEA_WORKER_RECOVER=1` only; absent
+ *                           otherwise). `detail` carries `outcome=`, and the line is
+ *                           written for EVERY applied row — including
+ *                           `outcome=refused` (the row was NOT claimed: owned, frozen
+ *                           or another host's). "Recovered" here means "the converger
+ *                           reached a verdict", not "the row changed hands";
  *   - `session_repaired`  — a crashed turn was closed by appending ONE
  *                           `turn_end: interrupted` row (§1.2.3, R1-1).
  *
