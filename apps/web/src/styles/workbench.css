@@ -223,5 +223,7 @@
   color: var(--c-text-1);
 }
 .wb-url-open { border: 1px solid var(--c-border-strong); border-radius: var(--r-sm); padding: 3px 10px; color: var(--c-text-1); }
-.wb-url-external { margin-top: 4px; color: var(--c-accent); }
+/* W2057：出口常驻在 URL 行里（与「打开」同排）。★ 不能排在 .wb-frame 之后 ——
+   那个 frame 的高度是 calc(100% - 34px)，排在它后面的兄弟会被推出可视区。 */
+.wb-url-external { color: var(--c-accent); white-space: nowrap; }
 .wb-frame { width: 100%; height: calc(100% - 34px); min-height: 200px; border: 1px solid var(--c-border-subtle); border-radius: var(--r-sm); background: var(--c-layer-2); }

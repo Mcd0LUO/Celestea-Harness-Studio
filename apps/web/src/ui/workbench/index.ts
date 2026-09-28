@@ -5,10 +5,13 @@
 // ============================================================================
 import { installWorkbench } from './panel';
 import { installWorkbenchEntry } from './menu';
+import { installLinkOpen } from './link-open'; // W2057：正文外链 ⇒ 浏览器面板
 
 export { installWorkbench, installWorkbenchEntry };
 export { openPanel, closePanel, listPanels, setPanelDock, setPanelSize, onPanelsChange, resetPanels } from './state';
 export { toggleWorkbenchMenu, openWorkbenchPanel, closeWorkbenchMenu } from './menu';
+export { openUrlInPanel } from './open-url';
+export { installLinkOpen } from './link-open';
 export { renderWorkbench } from './panel';
 export type { PanelKind, DockSide, PanelState } from './state';
 
@@ -20,4 +23,8 @@ export function initWorkbench(): void {
   installed = true;
   installWorkbench();
   installWorkbenchEntry();
+  // W2057：正文外链的点击委托。挂在这里（而不是 main.ts）的理由：它是
+  // **工作台**的能力（出口是工作台面板），与面板系统同生同死；main.ts 是
+  // 装配清单，多一行 import 就够，不需要知道委托的存在。
+  installLinkOpen();
 }

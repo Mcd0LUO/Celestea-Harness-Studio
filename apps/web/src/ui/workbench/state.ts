@@ -34,6 +34,15 @@ function emit(): void {
   for (const cb of listeners) cb();
 }
 
+/**
+ * W2057：显式通知订阅者重画（渲染层只读本层，不反向写 —— 本出口让「改了
+ * `panel.data` 之后要重画」这件事不必靠调用方自己去 `emit` 一个假的尺寸变化）。
+ * 与 openPanel/closePanel 内部调的是**同一个** emit。
+ */
+export function notifyPanels(): void {
+  emit();
+}
+
 /** 订阅面板集合变化（返回取消订阅）。 */
 export function onPanelsChange(cb: () => void): () => void {
   listeners.add(cb);
@@ -73,8 +82,17 @@ export function defaultSize(dock: DockSide): number {
   return dock === 'right' ? 420 : 260;
 }
 
-/** 新建一个面板（同 kind 可多开）；返回新面板。 */
-export function openPanel(kind: PanelKind, dock: DockSide = 'right'): PanelState {
+/**
+ * 新建一个面板（同 kind 可多开）；返回新面板。
+ *
+ * ★ W2057：`data` 是**可选**的初始载荷，它在 emit() **之前**就写进面板。
+ *   为什么需要这个参数（真机抓到的顺序缺陷）：调用方原来只能「先 openPanel、
+ *   再 panel.data = …」，而 emit() 在 openPanel **内部**、返回之前就跑了 ——
+ *   订阅者（渲染层）因此会先看到一帧**没有 data** 的面板。对浏览器面板来说，
+ *   那一帧渲染出的是 current === ''（不导航），于是「第一次点外链」开出一个
+ *   空面板。把初始 data 收进本函数，面板**从被看到的第一帧起**就是完整的。
+ */
+export function openPanel(kind: PanelKind, dock: DockSide = 'right', data?: Record<string, unknown>): PanelState {
   seqCounter += 1;
   const n = panels.filter((p) => p.kind === kind).length + 1;
   const panel: PanelState = {
@@ -85,6 +103,7 @@ export function openPanel(kind: PanelKind, dock: DockSide = 'right'): PanelState
     size: defaultSize(dock),
     seq: 0,
   };
+  if (data !== undefined) panel.data = data;
   panels.push(panel);
   focused = panel.id;
   emit();
