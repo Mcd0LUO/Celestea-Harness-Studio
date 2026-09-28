@@ -98,7 +98,12 @@ describe.skipIf(!h.nodeReady)("W2012 · every program form runs (real Node, real
     expect(out.value).toEqual({ form: "async" });
   });
 
-  it("top-level await without main is still a script (not wrapped)", async () => {
+  it("a top-level await that ALSO defines main is a script (main is the reason, not the await)", async () => {
+    // W2063: this case's title used to say "top-level await without main is still
+    // a script (not wrapped)" — but the program below DOES define main, so the
+    // await was never what selected the script form here. It is a script because
+    // of `const main`, which is an independent and still-correct rule. The
+    // assertion is unchanged; only the reason in the title/comment was wrong.
     const out = await run(tool(), "w2012-await", {
       code: "const value = await Promise.resolve({ form: 'tla' });\nconst main = async () => value;\n",
     });
@@ -166,10 +171,16 @@ describe.skipIf(!h.nodeReady)("W2012 · a program that does not parse is code=pr
   });
 
   it("a top-level return in a SCRIPT (not a body) is named as invalid, not aborted", async () => {
-    // `const x = await …` is a script (module scope is where await is legal);
-    // the stray top-level `return` is then the interpreter's own complaint.
+    // W2063: the fixture used to be `const x = await Promise.resolve(1);` +
+    // `return x;`, on the premise that "module scope is where await is legal".
+    // That premise was FALSE — the wrapper is `async function main()`, so an
+    // `await` is legal there too — and such a program is now WRAPPED and RUNS
+    // (see w2063-await-not-script.test.ts). The INTENT of this case is unchanged
+    // and still needs a fixture that really is a script: an `export` statement
+    // is legal only at module top level, so this one still cannot be wrapped,
+    // and the stray top-level `return` is still the interpreter's own complaint.
     const { code, message } = await failure("w2012-toplevel-return", {
-      code: "const x = await Promise.resolve(1);\nreturn x;\n",
+      code: "export const x = 1;\nreturn x;\n",
     });
     expect(code).toBe("program_syntax");
     expect(message).toContain("Return statement is not allowed here");
@@ -190,10 +201,14 @@ describe.skipIf(!h.nodeReady)("W2012 · a program that does not parse is code=pr
   });
 
   it("a main-less SCRIPT names the missing entry point and is NOT aborted", async () => {
-    // This one reaches the runner (a top-level await is a legal script), so the
-    // child emits `__error__` and the broker reports that text verbatim — the
-    // point is that it says WHAT is missing instead of `code=aborted`.
-    const { code, message } = await failure("w2012-nomain", { code: "const x = await Promise.resolve(1);\n" });
+    // This one reaches the runner (an `export` statement is legal only at module
+    // top level, so the program is emitted verbatim), so the child emits
+    // `__error__` and the broker reports that text verbatim — the point is that it
+    // says WHAT is missing instead of `code=aborted`.
+    // W2063: the fixture used to be `const x = await Promise.resolve(1);`, on the
+    // same disproved "await ⇒ module scope" premise. An `export` is the shape
+    // that really cannot be wrapped; the assertions are unchanged.
+    const { code, message } = await failure("w2012-nomain", { code: "export const x = await Promise.resolve(1);\n" });
     expect(code).not.toBe("aborted");
     expect(message).toContain("without defining 'main'");
   });
@@ -264,8 +279,12 @@ describe("W2012 · programLayout decides form by what the program IS", () => {
     }
   });
 
-  it("a top-level await / export / bare call keeps the script treatment", () => {
-    expect(programLayout("const x = await f();\n", "typescript").form).toBe("script");
+  it("a top-level export / bare call keeps the script treatment", () => {
+    // W2063: the `const x = await f();` assertion that used to open this case was
+    // removed — its premise ("module scope is where await is legal") was false,
+    // because the wrapper is `async function main()`. That program is now a body
+    // and RUNS; see w2063-await-not-script.test.ts. The two that CANNOT be
+    // wrapped are untouched.
     expect(programLayout("export const a = 1;\n", "typescript").form).toBe("script");
     expect(programLayout("main();\n", "typescript").form).toBe("script");
   });

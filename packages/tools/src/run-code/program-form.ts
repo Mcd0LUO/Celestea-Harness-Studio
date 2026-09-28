@@ -26,10 +26,16 @@
  * | is a BODY (indented first line, or a Python `import`) | wrap     |
  * | anything else (non-indented, no `main`)               | wrap     |
  *
- * The only two things that still select "script" are the two that can only be
- * meant as a script: a `main` definition, and (TypeScript) a top-level
- * `await`/`import`/`export` or an explicit entry call — i.e. code that is
- * ALREADY valid at module top level and would break inside a function body.
+ * What still selects "script" is only what CANNOT be wrapped: a `main`
+ * definition, a TypeScript `export` STATEMENT, an `import` statement the hoist
+ * refused to lift, and the documented "complete script" habit of a bare call on
+ * the first line (`main();`).
+ *
+ * ★ A top-level `await` is NOT one of them (W2063). The wrapper is
+ * `async function main()` — see [wrapTypeScriptBody] — so an `await` is
+ * perfectly legal inside it. The rule that treated a genuine top-level await as
+ * script evidence rested on a comment calling the wrapper a "plain function";
+ * that premise was false, and the rule is gone. See [startsAtModuleTop].
  *
  * ## The one hard boundary: `import` must stay at module top level
  *
@@ -142,14 +148,18 @@ export function definesEntryPoint(code: string, language: RunCodeLanguage): bool
 }
 
 /**
- * One `await` / `import` / `export` WORD found at module top level by
- * [scanModuleWords], with the two position facts the form rule needs.
+ * One `import` / `export` WORD found at module top level by [scanModuleWords],
+ * with the two position facts the form rule needs.
+ *
+ * ★ `await` is deliberately NOT collected any more (W2063). It is not evidence
+ * of module scope: the wrapper is an ASYNC function, so a top-level await is
+ * legal inside it. See [startsAtModuleTop].
  */
 interface ModuleTopWord {
-  word: "await" | "import" | "export";
-  /** True when the word is the body of a brace-less arrow: `async () => await f()`. */
+  word: "import" | "export";
+  /** True when the word is the body of a brace-less arrow: `() => import("x")`. */
   arrowBody: boolean;
-  /** The source text right after the word — where an `await` operand starts. */
+  /** The source text right after the word — where an `import(` operand starts. */
   after: string;
 }
 
@@ -165,11 +175,6 @@ const NON_CALL_HEADS = new Set([
   "for", "if", "while", "switch", "catch", "return", "typeof", "new", "do",
   "delete", "void", "with", "throw", "await", "yield", "case", "in", "of", "else",
 ]);
-
-/** `await tools.<name>(…)` / `await tools[…]` — the engine's SYNCHRONOUS bridge. */
-const AWAITS_BRIDGE = /^\s*tools\s*[.[]/;
-/** `await import("x")` — a dynamic import is an EXPRESSION, not a module statement. */
-const AWAITS_DYNAMIC_IMPORT = /^\s*import\s*\(/;
 
 /** Past the end of a `//` comment (or the end of the program). */
 function skipLineComment(code: string, at: number): number {
@@ -204,7 +209,7 @@ function skipQuoted(code: string, at: number): number {
   return code.length;
 }
 
-/** Is the word at `at` the body of a brace-less arrow (`() => await f()`)? */
+/** Is the word at `at` the body of a brace-less arrow (`() => import("x")`)? */
 function isArrowBody(code: string, at: number): boolean {
   let i = at - 1;
   while (i >= 0 && /\s/.test(code[i]!)) i -= 1;
@@ -214,7 +219,7 @@ function isArrowBody(code: string, at: number): boolean {
   return code[i] === "=";
 }
 
-/** Is the word at `at` a property name (`o.await`), i.e. not a keyword here? */
+/** Is the word at `at` a property name (`o.import`), i.e. not a keyword here? */
 function afterDot(code: string, at: number): boolean {
   let i = at - 1;
   while (i >= 0 && /\s/.test(code[i]!)) i -= 1;
@@ -222,15 +227,19 @@ function afterDot(code: string, at: number): boolean {
 }
 
 /**
- * Every `await` / `import` / `export` WORD at MODULE TOP LEVEL, in source order.
+ * Every `import` / `export` WORD at MODULE TOP LEVEL, in source order.
  *
  * Module top level means bracket depth 0 — so a loop body, a function body and an
  * object literal are all excluded — and not the body of a brace-less arrow. The
  * scan is character-based and skips strings, comments and templates, so the word
- * `await` inside `'await x'` or `// await f()` is not a token and never counts.
+ * `import` inside `'import x'` or `// import x` is not a token and never counts.
+ *
+ * ★ `await` is NOT collected (W2063). It used to be, as evidence of module
+ * scope; that premise was false — the wrapper is an ASYNC function — so an
+ * `await` is now simply not a word this scanner has an opinion about.
  *
  * Boundaries (deliberate, and pinned by tests): a regex literal is NOT modelled
- * (telling `/await/g` from a division needs a parser), so a keyword inside one
+ * (telling `/import/g` from a division needs a parser), so a keyword inside one
  * still counts; a template's `${…}` is skipped, so a top-level word inside one is
  * MISSED (the conservative direction).
  */
@@ -250,7 +259,7 @@ function scanModuleWords(code: string): ModuleTopWord[] {
     const match = IDENT.exec(code);
     const ident = match === null ? undefined : match[0];
     if (ident === undefined) { i += 1; continue; }
-    if ((ident === "await" || ident === "import" || ident === "export") && depth === 0 && !afterDot(code, i)) {
+    if ((ident === "import" || ident === "export") && depth === 0 && !afterDot(code, i)) {
       found.push({
         word: ident,
         arrowBody: isArrowBody(code, i),
@@ -270,35 +279,44 @@ function isModuleOnlyWord(hit: ModuleTopWord): boolean {
 }
 
 /**
- * A top-level `await` that is EVIDENCE of module scope.
- *
- * The two exclusions are operands the wrapper hosts just as well, so awaiting
- * them says nothing about where the program must run: the engine's own
- * synchronous bridge (whose SDK text is literally "awaiting a value is free")
- * and a dynamic `import(…)` expression. Every other operand — a real promise, a
- * helper call, a timer — keeps the historical script treatment.
- */
-function isModuleTopAwait(hit: ModuleTopWord): boolean {
-  return (
-    hit.word === "await" &&
-    !hit.arrowBody &&
-    !AWAITS_BRIDGE.test(hit.after) &&
-    !AWAITS_DYNAMIC_IMPORT.test(hit.after)
-  );
-}
-
-/**
  * Does this TypeScript program ALREADY run at module top level?
  *
- * These are the shapes that must not be wrapped, because wrapping them changes
- * their meaning or is plain illegal. A program that exports, or that carries a
- * non-leading `import` statement, is a module by construction; a genuine
- * top-level `await` is the documented module-script habit; a bare call at the
- * very first line is the documented "complete script" habit (`main();`).
+ * Only shapes that CANNOT be wrapped are left here, plus the one documented
+ * habit. "Cannot be wrapped" is literal, not stylistic:
+ *
+ * - an `export` statement is legal ONLY at module top level. Inside a function
+ *   body it is a SyntaxError (`'import' and 'export' may only appear at the top
+ *   level`), so a program carrying one must be emitted verbatim.
+ * - an `import` STATEMENT is illegal inside a function body for the same reason.
+ *   A LEADING import never reaches this function (the hoist lifts it, see
+ *   [hoistLeadingImports]); what reaches here is a non-leading or multi-line one
+ *   the hoist refused, and emitting it verbatim is the only honest option.
+ * - a bare call at the very first line is the documented "complete script" habit
+ *   (`main();`). A control-flow HEADER also ends in `(` but is not a call, and a
+ *   `const`/`let`/`var` line is not one either — its initializer may CONTAIN a
+ *   call, which is why this test is on the LINE SHAPE, not on `includes("(")`.
+ *
+ * ★ W2063: `await` is NOT in this list, and its absence is the point.
+ *
+ * The rule removed here was "a top-level await whose operand is a real promise
+ * (not the engine's synchronous bridge) is evidence of module scope". Its stated
+ * justification was a comment claiming the wrapper is a "plain function", where
+ * a top-level `await` would be a syntax error. That justification was FALSE:
+ * the wrapper this module emits is `async function main()` ([wrapTypeScriptBody]),
+ * and a top-level `await` inside an async function is ordinary, legal code.
+ * Measured on the real broker (W2063): `const x = await Promise.resolve(7);`
+ * + `return x;` was emitted verbatim as a script and died with
+ * `SyntaxError: Return statement is not allowed here`, while the SAME program
+ * forced through the wrapper returned `7`. The rule therefore rejected working
+ * programs for a reason that never existed.
+ *
+ * The only two things it ever kept out of the wrapper that the wrapper cannot
+ * host are the two statements above; both are still handled, and both are
+ * pinned by tests.
  *
  * ## W2060: the decision is made on TOKENS, not on a regex over the whole text
  *
- * The previous rule was
+ * The rule before W2060 was
  *
  *     if (/(?:^|[^\w$])(?:await|import|export)\b/.test(rest-of-program)) return true;
  *
@@ -307,22 +325,14 @@ function isModuleTopAwait(hit: ModuleTopWord): boolean {
  * list that merely awaited something was therefore emitted verbatim as a
  * "script", and its top-level `return` became
  * `SyntaxError: Return statement is not allowed here` — even though the tool's
- * own contract recommends exactly that shape and the SDK preamble promises that
- * `await tools.<name>({…})` "is the same thing (awaiting a value is free)".
- * [scanModuleWords] replaces the regex; [isModuleTopAwait] keeps the one `await`
- * operand that is NOT evidence of module scope.
+ * own contract recommends exactly that shape. [scanModuleWords] replaced the
+ * regex; W2063 removed the last `await` operand from the rule entirely.
  */
 function startsAtModuleTop(code: string): boolean {
   const lines = splitProgramLines(code);
   const start = lines.findIndex((line) => line.trim() !== "");
   if (start < 0) return false;
-  const words = scanModuleWords(code);
-  if (words.some(isModuleOnlyWord)) return true;
-  if (words.some(isModuleTopAwait)) return true;
-  // A bare CALL at the very top is the documented "complete script" habit
-  // (`main();`). A control-flow HEADER also ends in `(` but is not a call, and a
-  // `const`/`let`/`var` line is not one either — its initializer may CONTAIN a
-  // call, which is why this test is on the LINE SHAPE, not on `includes("(")`.
+  if (scanModuleWords(code).some(isModuleOnlyWord)) return true;
   const head = /^([A-Za-z_$][\w$]*)\s*\(/.exec(lines[start]!.trim());
   return head !== null && !NON_CALL_HEADS.has(head[1]!);
 }
@@ -397,7 +407,11 @@ export function hoistLeadingImports(code: string): HoistedImports {
     if (line.trim() === "") continue;
     if (!/^import\b/.test(line)) break;
     if (!isSingleLineImport(line)) {
-      note = "a multi-line or dynamic import cannot be hoisted safely; it stays inside the wrapped body (use a top-level await, or call main(), to run this program as a script)";
+      // W2063: the advice used to be "use a top-level await, or call main(), to
+      // run this program as a script". A top-level await no longer selects the
+      // script form (the wrapper is async), so it is no longer a way out: the
+      // remaining one is to define and call main().
+      note = "a multi-line or dynamic import cannot be hoisted safely; it stays inside the wrapped body (define and call main() to run this program as a script)";
       break;
     }
     imports.push(line);

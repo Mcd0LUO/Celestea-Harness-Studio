@@ -245,10 +245,12 @@ tools = _Tools()
 /**
  * The program's FORM is decided by `program-form.ts` (W2012), not by layout:
  * a main-less program is wrapped whether or not it happens to be indented, and
- * only a program that genuinely runs at module top level (its own `main`, a
- * top-level `await`/`import`/`export`, a bare top-level call) keeps the
- * historical "complete script" treatment. See that module for the rule table and
- * for the one hard boundary (an `import` cannot live inside a function body).
+ * only a program that genuinely CANNOT be wrapped (its own `main`, an `export`
+ * statement, an `import` statement the hoist refused, a bare top-level call)
+ * keeps the historical "complete script" treatment. A top-level `await` is NOT
+ * one of those (W2063): the wrapper is `async function main()`, so the await is
+ * legal inside it. See that module for the rule table and for the one hard
+ * boundary (an `import` cannot live inside a function body).
  */
 export {
   DEFAULT_RUN_CODE_LANGUAGE,
