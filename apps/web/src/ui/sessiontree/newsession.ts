@@ -14,6 +14,7 @@ import { note } from './live';
 import { getWsList, setActiveSession } from './store';
 import { modeChoices } from '../mode/copy';
 import { buildCreateReq } from '../mode/create-req';
+import { isImeKey } from '../ime'; // W2033：组合中的 Enter 是「确认候选词」，不是「创建」
 import { t } from '../../i18n';
 
 /** 新建后需要重新载入侧栏（= 编排入口的 loadSessions）。 */
@@ -36,10 +37,14 @@ const TEXT_INPUT_TYPES: ReadonlySet<string> = new Set([
  *   · <select> 展开发挥选条目作用的 Enter、按钮上的 Enter 都不提交 —— 不做元素判型
  *     的话，键盘用户在「工作区 / 模型 / 工作方式」下拉里按 Enter 会被当成「创建」；
  *   · <textarea> 不算（多行输入框里 Enter 的默认语义是换行）。
+ * W2033：**IME 组合中（或 keyCode 229）的 Enter 不是提交** —— 标题多半是中文，
+ *   用户按 Enter 是在确认候选词；那一次按键属于输入法（判据在 ../ime，唯一真源）。
  * 纯函数：只读事件字段，不碰 DOM，可在 node 里直接断言。
  */
-export function isSubmitEnter(e: { key: string; shiftKey: boolean; target: unknown }): boolean {
+export function isSubmitEnter(e: { key: string; shiftKey: boolean; target: unknown; isComposing?: boolean; keyCode?: number }): boolean {
   if (e.key !== 'Enter' || e.shiftKey) return false;
+  // W2033：放在元素判型**之前** —— 组合中的 Enter 无论落在哪个控件上都不是「创建」。
+  if (isImeKey(e)) return false;
   const t = e.target as { tagName?: unknown; type?: unknown } | null;
   if (!t || typeof t.tagName !== 'string' || t.tagName.toUpperCase() !== 'INPUT') return false;
   const raw = typeof t.type === 'string' ? t.type.toLowerCase() : 'text';

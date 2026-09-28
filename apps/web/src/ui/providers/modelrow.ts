@@ -13,6 +13,7 @@ import { el } from '../../utils/dom';
 import type { EditorRefs, EffortChips } from './types';
 import { addModalityGroup, INPUT_DEFAULT, INPUT_MODALITIES, OUTPUT_DEFAULT, OUTPUT_MODALITIES } from './modalities';
 import { syncModelDividers } from './divider';
+import { isImeKey } from '../ime'; // W2033：组合中的 Enter 是「确认候选词」，不是「新增档位」
 import { t } from '../../i18n';
 
 /**
@@ -141,6 +142,8 @@ export function addModelRow(e: EditorRefs, id = '', name = ''): void {
     tierInput.focus();
   });
   tierInput.addEventListener('keydown', (ev: KeyboardEvent) => {
+    // W2033：IME 组合中的 Enter 属于输入法（档位名是自由字符串，可能含中文）。
+    if (isImeKey(ev)) return;
     if (ev.key === 'Enter') {
       ev.preventDefault();
       closeTierInput(true);

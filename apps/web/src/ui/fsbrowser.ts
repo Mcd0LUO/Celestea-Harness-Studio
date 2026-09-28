@@ -14,6 +14,7 @@ import { el } from '../utils/dom';
 import { popOverlay, pushOverlay, type OverlayHandle } from '../utils/overlays';
 import { t } from '../i18n';
 import { joinPath, rootOfPath, splitPath } from './fs-path'; // 平台路径（win32 盘符/UNC vs POSIX）
+import { isImeKey } from './ime'; // W2033：组合中的 Enter 是「确认候选词」，不是「跳到这个路径」
 
 /** 确认选目录时交给调用方的交互句柄。 */
 export interface FsBrowserUi {
@@ -184,6 +185,8 @@ export function openFsBrowser(opts: FsBrowserOpts): void {
     if (p) void loadDirs(p);
   });
   addrInput.addEventListener('keydown', (e) => {
+    // W2033：IME 组合中的 Enter 属于输入法（路径里可能有中文目录名）。
+    if (isImeKey(e)) return;
     if (e.key === 'Enter') goBtn.click();
   });
 
