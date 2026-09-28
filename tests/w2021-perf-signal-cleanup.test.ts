@@ -180,7 +180,7 @@ describe("W2021 ② · close() 幂等 + 端口立刻可再 bind（不需要 Chro
     children.push(child);
     let stdout = "";
     child.stdout.on("data", (b) => { stdout += String(b); });
-    const exit = new Promise<number | null>((resolve) => child.on("exit", (code) => resolve(code)));
+    const exit = new Promise<number | null>((resolve) => child.on("close", (code) => resolve(code)));
 
     await waitUntil("backend 起来", () => listenersOn(port).length > 0);
     child.kill("SIGUSR2");

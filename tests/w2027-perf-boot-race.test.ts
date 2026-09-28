@@ -297,7 +297,7 @@ function startProbe(script: string, env: Record<string, string>): Probe {
   child.stdout.on("data", (b) => { out += String(b); });
   child.stderr.on("data", (b) => { err += String(b); });
   const exit = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
-    child.on("exit", (code, signal) => resolve({ code, signal }));
+    child.on("close", (code, signal) => resolve({ code, signal }));
   });
   return { stdout: () => out, stderr: () => err, exit };
 }

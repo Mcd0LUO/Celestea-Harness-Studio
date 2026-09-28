@@ -163,7 +163,7 @@ describe("W9206-35 · a dead stdin must never take the process down", () => {
       child.stderr.on("data", (chunk: Buffer) => {
         stderr += String(chunk);
       });
-      child.on("exit", (code: number | null) => resolve({ code, stderr }));
+      child.on("close", (code: number | null) => resolve({ code, stderr }));
     });
   }
 

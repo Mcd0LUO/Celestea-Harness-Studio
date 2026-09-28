@@ -196,7 +196,7 @@ describe("RUN_CODE_SDK_TS over a REAL pipe (W774)", () => {
         child.kill("SIGKILL");
         reject(new Error("the SDK hung on EOF instead of throwing"));
       }, 15_000);
-      child.on("exit", (exit) => {
+      child.on("close", (exit) => {
         clearTimeout(killer);
         resolve(exit);
       });

@@ -57,7 +57,7 @@ function startStudio(): Running {
   const push = (chunk: Buffer): void => void (text += chunk.toString("utf8"));
   child.stdout?.on("data", push);
   child.stderr?.on("data", push);
-  const exit = new Promise<number | null>((resolve) => child.on("exit", (code) => resolve(code)));
+  const exit = new Promise<number | null>((resolve) => child.on("close", (code) => resolve(code)));
   return { child, output: () => text, exit };
 }
 
