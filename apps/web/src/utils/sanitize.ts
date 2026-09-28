@@ -20,6 +20,12 @@
 //        · URL：href/src 只允许 http(s) / mailto / tel 与相对路径，
 //          javascript: / data: / vbscript: / blob: / file: 一律剔除
 //          （先剥掉控制字符与空白再判 scheme，防 java\tscript: 绕过）；
+//        · W2051：<a> 的**打开方式**在这里落定 —— 会离开当前文档的 href 补上
+//          target=_blank + rel="noopener noreferrer"（判定与理由见 utils/link-target.ts）。
+//          放在消毒期而不是事件委托期：只有在这里才同时覆盖**全部**进 DOM 的路径
+//          （正文流式/历史恢复、引用卡、预览面板的 markdown），且流式每节拍重跑
+//          整条链时属性天然幂等；一个 body 级 click 委托则会漏掉引用卡
+//          （ui/messages/user.ts 不走 runEnhancers）与一切非消息容器。
 //        · class/id：只保留安全字符集（hljs 的 hljs-*、language-*、
 //          marked 的 task-list-item 等均不受影响）；
 //        · 注释 / CDATA / PI / doctype：一律丢弃。
@@ -38,6 +44,7 @@
 //   · 不保留内联 style / <style> / data: 图片（安全优先）；
 //   · 不做 URL 域名白名单（内网 UI，链接可点即视为可接受风险）。
 // ============================================================================
+import { LINK_REL, LINK_TARGET, linkOpensInNewTab } from './link-target';
 import { renderMarkdown } from './markdown';
 
 /** 允许保留的元素（其余元素：解包或整体丢弃）。 */
@@ -85,7 +92,9 @@ const GLOBAL_ATTRS = new Set<string>(['class', 'id', 'title', 'dir', 'lang']);
 
 /** 按标签追加允许的属性。 */
 const TAG_ATTRS: Record<string, string[]> = {
-  a: ['href'],
+  // W2051：target/rel 只作**输入**接受 —— 值由 scrubAttrs 统一改写（见 applyLinkTarget），
+  // 不可信 HTML 自带的 target/rel 一律被覆盖，不是被信任。
+  a: ['href', 'target', 'rel'],
   img: ['src', 'alt', 'width', 'height'],
   ol: ['start', 'reversed', 'type'],
   li: ['value'],
@@ -304,6 +313,13 @@ function scrubAttrs(el: Element, tag: string): void {
         break;
     }
   }
+  if (tag === 'a') {
+    // W2051：<a> 的打开方式在**消毒期**落定（唯一真源 utils/link-target.ts）。
+    // 放在循环**之后**、读最终 href：属性在源码里的先后顺序不影响结果，且
+    // 「本来就没有 href」的 <a> 也会被清掉 target/rel（循环根本不会访问到它们）。
+    // 循环里 href 已过 safeUrl，这里读到的就是那个已判定的值 —— 两条判定不会分叉。
+    applyLinkTarget(el, el.getAttribute('href'));
+  }
   if (tag === 'input') {
     // 任务清单复选框：只读、不可提交 —— 不保留任何可交互 / 可提交语义
     if ((el.getAttribute('type') ?? '').toLowerCase() !== 'checkbox') {
@@ -313,6 +329,24 @@ function scrubAttrs(el: Element, tag: string): void {
     el.setAttribute('type', 'checkbox');
     el.setAttribute('disabled', '');
   }
+}
+
+/**
+ * W2051：按 href 决定 <a> 的 target/rel（策略与理由见 utils/link-target.ts）。
+ *
+ * `target`/`rel` 在 TAG_ATTRS 里是**输入**：不可信 HTML 自带的这两个属性因此
+ * 不会被循环剔掉，而是留到这里被**无条件改写** —— 无论原文写了什么
+ * （`target="_self"`、`rel="opener"`、`target="_top"`），出口只可能是下面两种
+ * 之一。`href` 为 null（没有 / 被 safeUrl 剔除）时两个属性一并清掉。
+ */
+function applyLinkTarget(el: Element, href: string | null): void {
+  if (href === null || !linkOpensInNewTab(href)) {
+    el.removeAttribute('target');
+    el.removeAttribute('rel');
+    return;
+  }
+  el.setAttribute('target', LINK_TARGET);
+  el.setAttribute('rel', LINK_REL);
 }
 
 /** 解包元素：子节点顶替它的位置，元素本身移除（子节点须已消毒）。 */
