@@ -39,6 +39,7 @@ import {
 } from './store';
 import type { TreeHost } from './types';
 import { sortSessions, truncateName } from './util';
+import { markRowButton } from '../roving'; // W2053：会话行的键盘通道（共享内核）
 import { t } from '../../i18n';
 
 export function renderToolbar(host: TreeHost, container: HTMLElement, mount: HTMLElement = container): void {
@@ -119,6 +120,13 @@ export function renderLeaf(host: TreeHost, container: HTMLElement, s: SessionInf
   const displayName = s.title || truncateName(id) || t('shell.tree.unnamed');
   const name = el('span', 'sess-leaf-name', displayName);
   leaf.appendChild(name);
+  // W2053：行**只有一个 click 监听**、tabIndex === -1 ⇒ 键盘用户既选不中也打不开
+  // （真机实测：focus() 之后 activeElement 仍是 <body>，Tab 整圈跳过全部会话行）。
+  // 走 ui/roving.ts 的共享内核（与 W2040 的 .wb-row 同一条通道）。
+  // ★ 名字取**可见标题这同一个变量**（WCAG 2.5.3 Label in Name：无障碍名要含可见
+  //   标签原文）。不靠内容取名 —— 行里还住着 worker 计数徽标与 ⋯ 字形，真机 AX
+  //   实测内容取名会得到「main W2 ⋯」，把菜单按钮的字形读进了行名里。
+  markRowButton(leaf, displayName);
   const kidCount = getWorkersByParent().get(id) ?? 0;
   if (kidCount > 0) {
     const badge = el('span', 'sess-worker-count', 'W' + kidCount);

@@ -50,6 +50,7 @@ import {
 } from './sessiontree/store';
 import type { TreeHost } from './sessiontree/types';
 import { isWorkerSession, matchesQuery, parentOf, workerSessions, workerSigOf, wsNameOf } from './sessiontree/util';
+import { bindRoving } from './roving'; // W2053：会话行的键盘通道（共享内核）
 // W866：会话页左上角的「本会话 worker 快捷条」（与侧栏 Worker 组分工见该模块注释）
 import { updateWorkerStrip } from './worker-strip';
 import {
@@ -168,6 +169,13 @@ function renderTree(container: HTMLElement, countEl: HTMLElement | null): void {
   if (!rendered) {
     tree.appendChild(el('div', 'side-note', getSearchQuery() ? t('shell.sessions.noMatch') : t('shell.sessions.empty')));
   }
+  // W2053：会话行的键盘通道。挂在 **.ws-tree**（所有工作区分组的公共祖先）上 ——
+  // 方向键因此在**整棵树**里连续移动（跨工作区），这才是会话树该有的手感；而停靠点
+  // 仍然只有一个（resetStops 只让第一个**够得着**的行进序列：折叠组里的行无法聚焦，
+  // 真机实测，故不占停靠点）。
+  // ★ 必须挂在 tree（每次渲染新建的节点）上，不能挂在 container 上：container 是
+  //   常驻节点，每次 loadTreeInto 再挂一遍就是 N 个 keydown 监听 ⇒ 按一次 ↓ 走 N 步。
+  bindRoving(tree);
   off.appendChild(tree);
 
   // 批量勾选模式：底部操作条

@@ -164,6 +164,11 @@
 /* ---- 行内联编辑面板（第 26 轮 W256：点行本体原地展开；max-height 过渡，不重建 DOM） ---- */
 .prov-table tbody tr.prov-row { cursor: pointer; }
 .prov-table tbody tr.prov-row.expanded { background: var(--c-accent-soft); }
+/* W2053：提供商表行的键盘焦点环（与 .wb-row / .sess-leaf 同一行）。
+   ★ 为什么在 <tr> 上用 outline：真机实测（chrome151，border-collapse:collapse 的表），
+   outline 沿**整行**的 border box 画出（739x56）、outline-offset:-2px 把环收进行内
+   ⇒ 行高不变；box-shadow 在 table-row 上按单元格分别画，视觉上是断线。 */
+.prov-table tbody tr.prov-row:focus-visible { outline: 2px solid var(--c-focus-ring); outline-offset: -2px; }
 .prov-table tbody tr.prov-panel-row { background: transparent; }
 .prov-table tbody tr.prov-panel-row:hover { background: transparent; }
 .prov-table tbody tr.prov-panel-row > td { padding: 0; border-top: none; }
