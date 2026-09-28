@@ -243,10 +243,39 @@ export class Statusline implements PickerHost, ModeHost {
     }
   }
 
-  /** Merge any partial snapshot (e.g. health model / POST /api/config 响应). */
-  merge(partial: StatusSnapshot): void {
-    this.snapshot = { ...this.snapshot, ...partial };
+  /**
+   * W2059：**权威**写本会话当前模型（轮询 / SSE / picker 的乐观、成功回声与回滚）。
+   * 与 merge 的唯一区别：这里允许覆盖已有 model —— 调用方拿的就是**会话真值**
+   * （/api/status?session= 的 model，或刚写成功的会话级目标值）。
+   */
+  setModel(model: string): void {
+    this.snapshot = { ...this.snapshot, model };
     this.render();
+  }
+
+  /**
+   * Merge any partial snapshot (e.g. health model / POST /api/config 响应).
+   *
+   * W2059：`model` 在本方法里是**兜底**而非权威 —— 快照里已有非空 model 时一律不覆盖。
+   * 为什么：唯一的外部调用方是 main.ts 的 refreshHealthChip，而 /api/health 的 model
+   * 是**全局默认**（handlers/health.ts 读 deps.runtime.profile()），不是聚焦会话的模型；
+   * 切换成功后它会把刚画对的会话模型打回全局值（用户报案：「切换了新的模型，显示的还是
+   * deepseek」），直到下一次 2s 轮询才纠正。会话/全局的权威模型写入走 setModel()。
+   */
+  merge(partial: StatusSnapshot): void {
+    const next = { ...this.snapshot, ...partial };
+    if (partial.model !== undefined && (this.snapshot.model ?? '') !== '') next.model = this.snapshot.model;
+    this.snapshot = next;
+    this.render();
+  }
+
+  /**
+   * W2059：把一份乐观/回滚视图写进状态栏。model 走 **setModel**（权威）——merge
+   * 已把 model 降级为「兜底，不覆盖会话真值」，用它写切换结果徽标不会更新。
+   */
+  private applyPatchView(view: StatusSnapshot): void {
+    if (view.model !== undefined) this.setModel(view.model);
+    if (view.reasoning_effort !== undefined) this.merge({ reasoning_effort: view.reasoning_effort });
   }
 
   /** SSE done 事件钩子：存在 409 挂起的快速切换补丁时自动重试一次。 */
@@ -259,16 +288,18 @@ export class Statusline implements PickerHost, ModeHost {
     // W795 乐观：本轮已结束 ⇒ 同一帧内先把补丁画进状态栏（终态），请求在后台跑；
     // 失败再把模型/档位退回原值并说明原因（不再有「正在应用切换…」这类占位文案）。
     const prev = revertPointOf({ model: this.snapshotModel, effort: this.snapshotEffort });
-    this.merge(optimisticPatchView(patch));
+    this.applyPatchView(optimisticPatchView(patch));
     void api
       .saveConfig(patch)
       .then((d) => {
-        this.merge({ model: d.model, reasoning_effort: d.reasoning_effort });
+        // ★W2059（缺陷 3）：与 picker.apply 同一条纪律 —— POST /api/config 的响应
+        // 是**全局配置**的回声，不许拿它的 model 覆盖会话模型（只回声档位）。
+        this.merge({ reasoning_effort: d.reasoning_effort });
         this.setNote(t('statusline.switched'), 5000);
         window.dispatchEvent(new Event('studio:config-saved'));
       })
       .catch((err: unknown) => {
-        this.merge(prev);
+        this.applyPatchView(prev);
         const reason = err instanceof Error ? err.message : String(err);
         this.setNote(t('statusline.withRestoredSettings', { text: t('statusline.switchFailed', { reason }) }), 6000);
       });

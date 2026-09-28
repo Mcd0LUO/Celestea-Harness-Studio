@@ -70,6 +70,12 @@ export interface PickerHost {
    */
   readonly sessionModelFixed: boolean;
   merge(partial: StatusSnapshot): void;
+  /**
+   * W2059：**权威**写状态栏模型（乐观切换 / 成功回声 / 失败回滚都走这里）。
+   * merge 把 model 当兜底（不覆盖已有会话模型，见 statusline.ts），所以 picker 必须
+   * 用本方法写会话真值，否则切换后徽标不会更新。
+   */
+  setModel(model: string): void;
   setNote(text: string, ms: number): void;
 }
 

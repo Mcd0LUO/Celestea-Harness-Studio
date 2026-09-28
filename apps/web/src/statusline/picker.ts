@@ -41,10 +41,10 @@ import { api, userErrorText } from '../api';
 import { t } from '../i18n'; // i18n P1-a
 import { el } from '../utils/dom';
 import { popOverlay, pushOverlay } from '../utils/overlays';
-import type { ConfigInfo, ConfigPatch } from '../types';
+import type { ConfigInfo, ConfigPatch, StatusSnapshot } from '../types';
 import { loadConfigCached, peekConfig, revalidateConfig } from './cfg-cache';
 import { optimisticPatchView, revertPointOf } from './optimistic';
-import { listChanged, renderEffortList, renderList, renderModelList } from './picker-list';
+import { listChanged, renderEffortList, renderList, renderModelList, sessionTruthEffort } from './picker-list';
 import {
   effortOptions,
   otherGroupLabel,
@@ -66,6 +66,16 @@ import {
 // 这里原样再导出，statusline.ts 与测试的既有 import 路径一个都不用改。
 export { effortOptions, otherGroupLabel };
 export type { ModelPick, PickerHost, SwitchKind };
+
+/**
+ * W2059：把一份「终态视图」写进状态栏。model 必须走 **setModel**（权威）——
+ * merge 已把 model 降级为「兜底，不覆盖会话真值」（见 statusline.ts），拿它写切换
+ * 结果徽标就不会更新。档位没有会话级概念，仍走 merge（只填不覆盖，语义相同）。
+ */
+function applyView(host: PickerHost, view: StatusSnapshot): void {
+  if (view.model !== undefined) host.setModel(view.model);
+  if (view.reasoning_effort !== undefined) host.merge({ reasoning_effort: view.reasoning_effort });
+}
 
 /** 渲染器的点击行为：请求编排留在本文件（渲染器不 import 本文件，零环）。 */
 const HOOKS: (host: PickerHost) => ListHooks = (host) => ({
@@ -113,7 +123,9 @@ export async function openPopup(host: PickerHost, kind: SwitchKind): Promise<voi
   const hooks = HOOKS(host);
   const seeded = peekConfig();
   if (kind === 'effort') {
-    renderEffortList(body, seeded?.reasoning_effort ?? host.snapshotEffort ?? '', hooks);
+    // W2059：与 renderList 的 revalidate 路径**共用同一条规则**（否则首屏与校验后
+    // 的高亮来源会分叉）：档位优先取状态栏已上报值，缺省回落全局配置。
+    renderEffortList(body, sessionTruthEffort(seeded, host), hooks);
   } else if (seeded !== null) {
     renderModelList(body, seeded, host, hooks);
   }
@@ -152,7 +164,7 @@ export async function runPick(host: PickerHost, pick: ModelPick): Promise<Sessio
       ? await requestSessionModel(host.sessionId, pick.model)
       : await requestGlobalModel(pick.model);
   if (outcome.kind !== 'ok') return outcome;
-  host.merge({ model: outcome.model });
+  host.setModel(outcome.model);
   window.dispatchEvent(new Event('studio:config-saved'));
   return outcome;
 }
@@ -167,7 +179,7 @@ export async function pickModel(host: PickerHost, pick: ModelPick): Promise<void
   const popup = host.popup;
   const prev = revertPoint(host);
   // W795 乐观：点下去**同一帧**就把状态栏画成已切到该模型（终态），请求在后台跑。
-  host.merge({ model: pick.model });
+  host.setModel(pick.model);
   const outcome = await runPick(host, pick);
   if (outcome.kind === 'ok') {
     // W870 如实：切的是本会话还是全局默认，说的就是哪一句（不混为一谈）。
@@ -176,7 +188,7 @@ export async function pickModel(host: PickerHost, pick: ModelPick): Promise<void
     return;
   }
   // 失败/挂起一律先回滚乐观显示：绝不留在错的显示上（W795 口径原样保留）。
-  host.merge(prev);
+  applyView(host, prev);
   if (outcome.kind === 'busy') {
     // 轮次进行中 ⇒ 这一轮**没有**切过去：挂起，本轮结束后按**同一条路径**重试。
     host.pendingPick = pick;
@@ -195,10 +207,15 @@ export async function apply(host: PickerHost, patch: ConfigPatch): Promise<void>
   const popup = host.popup;
   const prev = revertPoint(host);
   // W795 乐观：同一帧内先按补丁画出终态（档位胶囊立即变），请求在后台跑。
-  host.merge(optimisticPatchView(patch));
+  applyView(host, optimisticPatchView(patch));
   try {
     const d = await api.saveConfig(patch);
-    host.merge({ model: d.model, reasoning_effort: d.reasoning_effort });
+    // ★W2059（缺陷 3）：**不许**用 POST /api/config 的响应写 model。
+    // d 是**全局配置**的回声（deps.runtime.profile()），不是聚焦会话的模型；
+    // 旧写法 host.merge({ model: d.model }) 会把带覆盖的会话模型打回全局默认
+    // （用户切档位时看到模型闪成 deepseek，正是「推理档位也不正确」的另一半）。
+    // 会话级模型只由 pickModel/runPick 的 setModel 写；这里只回声**档位**。
+    host.merge({ reasoning_effort: d.reasoning_effort });
     host.setNote(t('statusline.switched'), 5000);
     window.dispatchEvent(new Event('studio:config-saved'));
     closePopup(host);
@@ -206,12 +223,12 @@ export async function apply(host: PickerHost, patch: ConfigPatch): Promise<void>
     const msg = t('statusline.withRestoredSettings', { text: t('statusline.switchFailed', { reason: err instanceof Error ? err.message : String(err) }) });
     if (isBusy(err)) {
       // 本轮不生效：退回原值 + 挂起，等本轮结束后重试（那时再乐观应用一次）
-      host.merge(prev);
+      applyView(host, prev);
       host.pendingPatch = patch;
       host.setNote(t('statusline.picker.busy'), 0);
       closePopup(host);
     } else {
-      host.merge(prev);
+      applyView(host, prev);
       if (host.popup === popup) popup.appendChild(el('div', 'sl-popup-status err', msg));
       else host.setNote(msg, 6000);
     }
@@ -235,13 +252,13 @@ export function retryPendingPick(host: PickerHost): boolean {
   const prev = revertPoint(host);
   // W795：本轮已结束 ⇒ 同一帧内先把状态栏画成已切到目标（不再有「正在应用切换…」占位），
   // 请求在后台跑；失败则退回原值并说明原因。
-  host.merge({ model: pick.model });
+  host.setModel(pick.model);
   void runPick(host, pick).then((outcome) => {
     if (outcome.kind === 'ok') {
       host.setNote(switchedNote(outcome.target), 5000);
       return;
     }
-    host.merge(prev);
+    applyView(host, prev);
     host.setNote(failureText(outcome), 6000);
   });
   return true;
