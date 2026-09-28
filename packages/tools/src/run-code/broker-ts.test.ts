@@ -181,7 +181,13 @@ describe.skipIf(!h.nodeReady)("run_code TypeScript (W774, default language)", ()
 
   it("reports a main-less SCRIPT with a clear program-level message (not aborted)", async () => {
     const tool = mount(echoRegistry());
-    const failure = await run(tool, "rc-ts-nomain", { code: "const x = await Promise.resolve(1);\n" }).catch(
+    // W2063: the fixture used to be `const x = await Promise.resolve(1);` — a
+    // genuine top-level await, which is now WRAPPED and RUNS (the wrapper is
+    // async). The INTENT here is "a main-less program that really is a script is
+    // reported as a PROGRAM error, never as `aborted`", so the fixture is now an
+    // `export` statement: legal only at module top level, hence not wrappable.
+    // The two assertions below are unchanged.
+    const failure = await run(tool, "rc-ts-nomain", { code: "export const x = await Promise.resolve(1);\n" }).catch(
       (error: unknown) => error as Error,
     );
     if (!(failure instanceof Error)) throw new Error("expected the main-less script to reject");

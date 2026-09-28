@@ -22,18 +22,26 @@
  *
  * A word counts only when it is a real token AT MODULE TOP LEVEL: bracket depth 0
  * and not the body of a brace-less arrow. Strings, comments and templates are
- * skipped. One `await` operand is additionally NOT evidence of module scope —
- * `await tools.<name>(…)` — because that bridge is SYNCHRONOUS by the SDK's own
- * declaration (`read_file(...args: unknown[]): unknown`), so awaiting it is a
- * no-op the wrapper hosts identically. Every other operand keeps the historical
- * script treatment (see the genuine-TLA cases below).
+ * skipped.
+ *
+ * ## W2063 superseded the `await` half of that rule
+ *
+ * W2060 also kept ONE `await` operand as evidence of module scope: a genuine
+ * top-level await (as opposed to `await tools.<name>(…)`, the engine's
+ * synchronous bridge). **W2063 removed that**, because its justification was
+ * false: the wrapper is `async function main()`, so a top-level `await` is legal
+ * inside it. A genuine top-level await is now a BODY, like every other await —
+ * see `w2063-await-not-script.test.ts`, which measures the real broker. The
+ * cases below were re-pointed accordingly; the module-only STATEMENTS (`export`,
+ * non-leading `import`) and the first-line bare call are untouched and still
+ * select the script form.
  *
  * ## What this file pins
  *
  * 1. the two shapes that were broken now RUN (A: first-line await assignment,
  *    B: await inside a loop body) — and the control C, which never broke;
- * 2. the genuine module-top-level await is STILL a script (the boundary that must
- *    not be lost while fixing 1);
+ * 2. the genuine module-top-level await is a BODY too (W2063), and the forms
+ *    that CANNOT be wrapped still select the script form;
  * 3. the unit matrix of the boundary, including the approximations this scanner
  *    deliberately makes (a regex literal is not modelled — pinned as a test).
  *
@@ -90,6 +98,10 @@ const PROGRAM_C = "const r = tools.run_shell({ command: 'echo hi' });\nreturn r.
 const PROGRAM_TLA = "const x = await Promise.resolve(1);\nreturn x;\n";
 /** TLA2: the same, awaiting an ordinary helper — the brief's "真正的 TLA" shape. */
 const PROGRAM_TLA2 = "const x = await helper();\nreturn x;\n";
+/** W2063: an `export` statement — module-only, so genuinely NOT wrappable. */
+const PROGRAM_EXPORT = "export const x = 1;\nreturn x;\n";
+/** W2063: an export whose initializer awaits — still module-only. */
+const PROGRAM_EXPORT_AWAIT = "export const x = await Promise.resolve(1);\nreturn x;\n";
 
 describe.skipIf(!h.nodeReady)("W2060 · real broker: the forms that were misjudged now run", () => {
   it("A: bare + await (first-line assignment) + return ⇒ SUCCESS (was program_syntax)", async () => {
@@ -115,23 +127,29 @@ describe.skipIf(!h.nodeReady)("W2060 · real broker: the forms that were misjudg
     expect(text).toContain('"hi"');
   }, 60_000);
 
-  it("★ genuine TLA + top-level return is STILL a script (the boundary is not lost)", async () => {
-    const { ok, text, form } = await measure("w2060-tla", PROGRAM_TLA);
+  // W2063: these three cases used a genuine top-level await as the script fixture.
+  // That premise is gone (the wrapper is ASYNC, so an await is a body). The
+  // INTENT — "the forms that cannot be wrapped still are not" — is preserved with
+  // the fixture that really cannot be wrapped: an `export` statement. The
+  // assertions are unchanged. PROGRAM_TLA/PROGRAM_TLA2 are still exercised, as
+  // bodies, in w2063-await-not-script.test.ts.
+  it("★ a module-only STATEMENT + top-level return is STILL a script (the boundary is not lost)", async () => {
+    const { ok, text, form } = await measure("w2060-tla", PROGRAM_EXPORT);
     expect(form).toBe("script");
     expect(ok, text).toBe(false);
     expect(text).toContain("program_syntax");
     expect(text).toContain("Return statement is not allowed here");
   }, 60_000);
 
-  it("★ genuine TLA awaiting a plain helper is STILL a script (not a bridge await)", async () => {
-    const { ok, text, form } = await measure("w2060-tla2", PROGRAM_TLA2);
+  it("★ an export whose initializer awaits is STILL a script (not wrappable at all)", async () => {
+    const { ok, text, form } = await measure("w2060-tla2", PROGRAM_EXPORT_AWAIT);
     expect(form).toBe("script");
     expect(ok, text).toBe(false);
     expect(text).toContain("Return statement is not allowed here");
   }, 60_000);
 
-  it("a genuine TLA with NO return is still reported as a missing entry point", async () => {
-    const { text, form } = await measure("w2060-tla-nomain", "const x = await Promise.resolve(1);\n");
+  it("an export-only program with NO return is still reported as a missing entry point", async () => {
+    const { text, form } = await measure("w2060-tla-nomain", "export const x = await Promise.resolve(1);\n");
     expect(form).toBe("script");
     expect(text).toContain("without defining 'main'");
     expect(text).not.toContain("code=aborted");
@@ -179,7 +197,11 @@ describe("W2060 · what counts as module top level", () => {
     expect(form(PROGRAM_C)).toBe("body");
   });
 
-  it("★ a GENUINE top-level await keeps the script treatment (the preserved boundary)", () => {
+  it("★ W2063: a GENUINE top-level await is a BODY now — the wrapper is async", () => {
+    // This case used to assert "script" for every entry below. Its premise was
+    // that a real top-level await proves module scope; W2063 measured that the
+    // wrapper is `async function main()`, where an await is ordinary code, so
+    // the await is not evidence of anything. Assertion INVERTED, fixture set kept.
     for (const code of [
       PROGRAM_TLA,
       PROGRAM_TLA2,
@@ -187,7 +209,9 @@ describe("W2060 · what counts as module top level", () => {
       "await f();\nreturn 1;\n",
       "const x = await Promise.resolve(1);\nconst main = async () => x;\n",
     ]) {
-      expect(form(code), code).toBe("script");
+      // The last entry ALSO declares main, which is an independent (still correct)
+      // reason to select script — it is pinned there, not here.
+      expect(form(code), code).toBe(code.includes("const main") ? "script" : "body");
     }
   });
 
@@ -258,10 +282,12 @@ describe("W2060 · what counts as module top level", () => {
   });
 
   it("★ DOCUMENTED APPROXIMATION: a regex literal is not modelled, so it still counts", () => {
-    // Telling `/await/g` from a division needs a parser. The scanner is
+    // Telling `/import/g` from a division needs a parser. The scanner is
     // deliberately character-based, so this stays a script. Pinned so the
     // boundary is visible and a future parser-backed fix has a target.
-    expect(form("const re = /await/g;\nreturn re;\n")).toBe("script");
+    // (W2063: the `await` form of this approximation is gone with the await
+    // rule; the `import` form is what the scanner still has an opinion about.)
+    expect(form("const re = /import/g;\nreturn re;\n")).toBe("script");
     // The conservative direction (a word MISSED) is the safe one: the program is
     // wrapped, and the wrapper hosts the await.
     expect(form("const s = `${await f()}`;\nreturn s;\n")).toBe("body");
@@ -277,10 +303,15 @@ describe("W2060 · assembly follows the form", () => {
     }
   });
 
-  it("the genuine TLA is emitted verbatim (no wrapper), as before", () => {
+  it("W2063: the genuine TLA is now WRAPPED (it used to be emitted verbatim)", () => {
     const program = assembleProgram(PROGRAM_TLA, "typescript");
-    expect(program).not.toContain("async function main() {\nconst x = await Promise");
-    expect(program).toContain("const x = await Promise.resolve(1);");
+    expect(program).toContain("async function main() {\nconst x = await Promise.resolve(1);");
+  });
+
+  it("the module-only STATEMENT is still emitted verbatim (no wrapper pretends otherwise)", () => {
+    const program = assembleProgram(PROGRAM_EXPORT, "typescript");
+    expect(program).not.toContain("async function main() {\nexport const");
+    expect(program).toContain("export const x = 1;");
   });
 });
 
