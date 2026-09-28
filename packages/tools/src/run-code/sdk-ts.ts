@@ -272,8 +272,9 @@ async function _celesteaRunMain(): Promise<unknown> {
       );
     }
     throw new Error(
-      "run_code: the program finished without defining 'main' - write it as a function body " +
-        "(plain statements ending in \`return <value>\`) or as a complete script defining main()",
+      "run_code: the program finished without defining 'main' - ★PREFER a plain script: bare " +
+        "statements ending in \`return <value>\` (the engine wraps them into main() for you, so " +
+        "there is no wrapper to brace-balance). A complete script that defines main() also works",
     );
   }
   return await (entry as () => unknown)();
