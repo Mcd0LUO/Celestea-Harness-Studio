@@ -78,6 +78,32 @@ async function pairOf(
 
 const REQ = { messages: [userMessage("hi")] };
 
+/**
+ * W2039: the guard for a stage whose FIRING is not what the case tests.
+ *
+ * A guard in the same magnitude as scheduler jitter turns a case into a
+ * load-dependent coin flip. This file already had that lesson once (the
+ * stream-idle guard, W887e, quoted at `timeout.test.ts:133`); W2039 is the
+ * response-header guard hitting the same wall:
+ *
+ *   the response-header case passed `responseTimeoutMs: 60` to a `clientFor`
+ *   serving BOTH targets. The silent primary MUST trip its 60ms guard - that is
+ *   the tested behaviour - but the healthy backup then armed its OWN 60ms guard
+ *   around connect + request write + server scheduling. Measured under 24 pinned
+ *   spinners (load ~43 on 28 cores) the backup's own guard expired before its
+ *   (already arrived) response was read, and because `attemptLoop` rethrows the
+ *   LAST attempt's error, that backup error escaped `generate()` instead of the
+ *   expected hand-over. Forced proof: stalling the event loop 120ms right after
+ *   the backup request was flushed reproduces it with the BACKUP's port in the
+ *   message (the port is the evidence - the primary's port never appears).
+ *
+ * The fix is NOT "a bigger 60ms": every guard that the case actually TESTS keeps
+ * its exact value, and only the incidental guard - the one that must simply not
+ * fire - is decoupled from the jitter magnitude. Two orders of magnitude is the
+ * same margin `timeout.test.ts` uses for the healthy stream.
+ */
+const DECOUPLED_GUARD_MS = 5_000;
+
 /** D2: a retryable status hands the call to the next target, visibly. */
 describe("D2 — 503 on target #1, healthy target #2", () => {
   it("produces `done`, calls each target once and reports reason http_503", async () => {
@@ -148,8 +174,16 @@ describe("D4 — three text frames, then a torn stream", () => {
     const attempts: FallbackAttemptInfo[] = [];
     const llm = createFallbackLlm({
       targets,
+      // W2039 (preventive, same class as the response-header case below): this
+      // case asserts the PRODUCED LOCK - a torn stream must end as
+      // `interrupted`, never as a hand-over. Its idle guard must therefore not
+      // fire at all, yet 60ms also covered the wait for the first body chunk, so
+      // a >60ms scheduling gap turned the expected `interrupted` into `failed`
+      // (proved live: injecting a 120ms inter-chunk gap flips the terminal).
+      // Not observed failing under load - hardened because it is the identical
+      // anti-pattern. The idle guard itself is covered by timeout.test.ts §2.
       clientFor: (t) =>
-        new OpenAiCompatClient({ baseUrl: t.baseUrl ?? "", apiKey: "k", model: t.model, streamIdleTimeoutMs: 60 }),
+        new OpenAiCompatClient({ baseUrl: t.baseUrl ?? "", apiKey: "k", model: t.model, streamIdleTimeoutMs: DECOUPLED_GUARD_MS }),
       onAttempt: (i) => attempts.push(i),
     });
 
@@ -240,7 +274,16 @@ describe("timeout trigger (§4.2.2)", () => {
         { name: "backup", provider: "b", model: "m-b", baseUrl: backup.baseUrl },
       ],
       clientFor: (t) =>
-        new OpenAiCompatClient({ baseUrl: t.baseUrl ?? "", apiKey: "k", model: t.model, responseTimeoutMs: 60 }),
+        new OpenAiCompatClient({
+          baseUrl: t.baseUrl ?? "",
+          apiKey: "k",
+          model: t.model,
+          // W2039: 60ms is the TESTED behaviour and stays on the silent primary,
+          // whose guard MUST trip. The backup is the healthy target the case
+          // hands over TO; racing it against the same 60ms only measures
+          // scheduler jitter (see DECOUPLED_GUARD_MS).
+          responseTimeoutMs: t.name === "primary" ? 60 : DECOUPLED_GUARD_MS,
+        }),
       onAttempt: (i) => attempts.push(i),
     });
 
