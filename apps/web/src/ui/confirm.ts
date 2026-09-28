@@ -10,6 +10,7 @@
 // ============================================================================
 import { el } from '../utils/dom';
 import { popOverlay, pushOverlay, type OverlayHandle } from '../utils/overlays';
+import { isImeKey } from './ime'; // W2033：组合中的 Enter 是「确认候选词」，不是「确认弹窗」
 import { t } from '../i18n';
 
 export interface ConfirmOpts {
@@ -93,6 +94,8 @@ export function confirmDialog(opts: ConfirmOpts): Promise<boolean> {
         ok.disabled = wordInput.value.trim() !== requireText;
       });
       wordInput.addEventListener('keydown', (e) => {
+        // W2033：IME 组合中（或 keyCode 229）的 Enter 属于输入法，绝不结算。
+        if (isImeKey(e)) return;
         if (e.key === 'Enter' && !ok.disabled) {
           e.preventDefault();
           settle(true);

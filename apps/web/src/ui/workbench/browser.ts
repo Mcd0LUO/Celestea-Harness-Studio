@@ -9,6 +9,7 @@
 // ============================================================================
 import { el } from '../../utils/dom';
 import { nextSeq, type PanelState } from './state';
+import { isImeKey } from '../ime'; // W2033：组合中的 Enter 是「确认候选词」，不是「打开这个 URL」
 import { t } from '../../i18n';
 
 let loadTimeoutMs = 4000;
@@ -79,6 +80,8 @@ export function renderBrowserPanel(body: HTMLElement, panel: PanelState, isCurre
 
   open.addEventListener('click', () => navigate(input.value));
   input.addEventListener('keydown', (e) => {
+    // W2033：IME 组合中的 Enter 属于输入法（域名/搜索词可能是中文）。
+    if (isImeKey(e)) return;
     if (e.key === 'Enter') {
       e.preventDefault();
       navigate(input.value);
