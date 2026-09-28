@@ -212,6 +212,8 @@ export const chat = {
   'chat.wb.listUnavailable': 'File listing is temporarily unavailable, please try again later',
   'chat.wb.dirOpenFailed': 'This directory cannot be opened: {reason}',
   'chat.wb.up': '↑ Up',
+  // W2040: keyboard semantics of a file row (same wording convention as chat.fileLink.open).
+  'chat.wb.rowOpen': 'Open (Enter)',
   'chat.wb.dirTruncated': 'This directory has too many entries; only the first part is shown',
   'chat.wb.dirEmpty': '(this directory is empty)',
   'chat.wb.upAtRoot': 'Already at the root',

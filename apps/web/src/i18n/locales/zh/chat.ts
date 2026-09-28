@@ -213,6 +213,8 @@ export const chat = {
   'chat.wb.listUnavailable': '文件列举暂不可用，请稍后再试',
   'chat.wb.dirOpenFailed': '这个目录打不开：{reason}',
   'chat.wb.up': '↑ 上级',
+  // W2040：文件行的键盘语义（与 chat.fileLink.open 同一口径：原生 button 的 Enter/Space）。
+  'chat.wb.rowOpen': '打开（Enter）',
   'chat.wb.dirTruncated': '这个目录条目太多，只显示了前一部分',
   'chat.wb.dirEmpty': '（这个目录是空的）',
   'chat.wb.upAtRoot': '已在根目录',

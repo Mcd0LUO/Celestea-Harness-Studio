@@ -127,6 +127,12 @@
   color: var(--c-text-2);
 }
 .wb-row:hover { background: var(--c-layer-2); }
+/* W2040：键盘焦点环。★ 复用 W2006 的**焦点环专用** token（--c-focus-ring，四套配色
+   各自定义、对四种真实底色合成后均 >= 3:1，由 tests/w9226-style-a11y-fixes.test.ts
+   钉住）—— 不新造颜色、不引用装饰 token（--c-accent-ring）。负 outline-offset 把环
+   画进行内，行高因此不变（:focus 不改变布局 ⇒ 不推挤列表）。
+   只写 :focus-visible：鼠标点击不画环，键盘 Tab/方向键才画（WCAG 2.4.7 的「键盘可见」）。 */
+.wb-row:focus-visible { outline: 2px solid var(--c-focus-ring); outline-offset: -2px; }
 .wb-row.sel { background: var(--c-accent-soft); color: var(--c-text-1); }
 .wb-row.dir .wb-name { color: var(--c-accent); }
 .wb-icon { flex: 0 0 auto; }
