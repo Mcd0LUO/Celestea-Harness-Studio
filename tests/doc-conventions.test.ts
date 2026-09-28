@@ -22,16 +22,24 @@
  *   ⑩ 计数：`ARCHITECTURE.md` §6.5.5 的 `console.warn`/`console.log` 计数由 `apps/web/src` 派生。
  */
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ownCheckoutPath } from './lib/checkout-path.js';
+import {
+  DOC_EXEMPT,
+  isTracked,
+  relTo,
+  walkMarkdownDocs,
+} from './lib/doc-visibility.js';
 
 const REPO = process.cwd();
 const DOCS = join(REPO, 'docs');
 const MAP = join(DOCS, 'README.md');
 const ARCHIVE = join(DOCS, 'archive');
 const MAX_LINES = 700;
-const LOCAL_ONLY = 'AGENT.local.md'; // 本机文件，gitignore，永不提交
+// LOCAL_ONLY / LOCAL_TEMPLATE / DOC_EXEMPT 都从 tests/lib/doc-visibility.ts 取：
+// 那里记录了「为什么豁免必须显式列出」以及 2026-09-28 的隐形文件事故。
+// 本机文件与模板的名字都在 tests/lib/doc-visibility.ts 里（含豁免理由）。
 
 /** 状态类别是**闭集**：自由文本一律先归类再比较，比较的是类别而不是原文。 */
 type StatusClass = '当前' | '已实现' | '设计' | '历史参考' | '已废弃';
@@ -49,17 +57,13 @@ function classifyStatus(raw: string): StatusClass | null {
 }
 
 function walkMd(dir: string): string[] {
-  const out: string[] = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) out.push(...walkMd(p));
-    else if (e.name.endsWith('.md')) out.push(p);
-  }
-  return out.sort();
+  // ★ 判据已移到 tests/lib/doc-visibility.ts：原来只认 endsWith('.md')，
+  //   于是 AGENT.local.md.example 对下面每一条断言都是隐形的（详见那里的注释）。
+  return walkMarkdownDocs(dir);
 }
 
 function relDocs(p: string): string {
-  return relative(DOCS, p).split(sep).join('/');
+  return relTo(DOCS, p);
 }
 function isArchived(p: string): boolean {
   return relDocs(p).startsWith('archive/');
@@ -68,7 +72,7 @@ function isArchived(p: string): boolean {
 /** 现行文档：`docs/**` 里除归档、总索引与本机文件之外的 markdown。 */
 function activeDocs(): string[] {
   return walkMd(DOCS).filter(
-    (p) => !isArchived(p) && relDocs(p) !== 'README.md' && !p.endsWith(LOCAL_ONLY),
+    (p) => !isArchived(p) && relDocs(p) !== 'README.md' && !DOC_EXEMPT.has(relDocs(p)),
   );
 }
 /** 需要在总索引登记的：根文档 + 分册索引（`docs/<名字>/README.md`）。 */
@@ -536,7 +540,19 @@ describe('文档不变量 · 规模与机器事实', () => {
 
   it('⑤ 提交进仓的文档不含本机 git 提交身份', () => {
     const problems: string[] = [];
-    const files = [...activeDocs(), ...archiveDocs(), join(REPO, 'README.md')];
+    // ★ 也扫 DOC_EXEMPT 里【已入库】的文件：模板同样提交进仓库、同样可能携带
+    //   本机路径。但只收 isTracked 的 —— AGENT.local.md 是 gitignore 的本机文件，
+    //   ★它本来就该装满本机事实，收进来会让本断言永远红（我第一版正是这样，
+    //   立刻被这条断言自己抓出来）。
+    const files = [
+      ...activeDocs(),
+      ...archiveDocs(),
+      // ★ 注意 relDocs() 是相对 docs/ 的，而 git ls-files 要【相对仓库根】的路径 ——
+      //   传错会让 isTracked 恒为 false，把这条扫描悄悄清空（我第一版就是这样，
+      //   变异测试 A 因此没有变红，才抓到它）。
+      ...walkMd(DOCS).filter((q) => DOC_EXEMPT.has(relDocs(q)) && isTracked(REPO, relTo(REPO, q))),
+      join(REPO, 'README.md'),
+    ];
     for (const p of files) {
       const text = readFileSync(p, 'utf8');
       if (text.includes('users.noreply.github.com')) {

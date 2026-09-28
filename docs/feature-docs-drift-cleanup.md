@@ -35,8 +35,8 @@
 
 **机械依据**：③b 的实现 `anchorProblems()` 遍历 `activeDocs()`，而 `activeDocs()` 的定义是
 「`docs/**` 里除归档、总索引与本机文件之外的 markdown」——`isArchived(p)` 为真的路径第一步就被滤掉
-（`tests/doc-conventions.test.ts:64`）。门禁 ⑤ 的 `checkoutPathProblems()` 用同一个 `isArchived(p)`
-早退（同文件 `:287`），两处口径一致。
+（`tests/doc-conventions.test.ts:68`）。门禁 ⑤ 的 `checkoutPathProblems()` 用同一个 `isArchived(p)`
+早退（同文件 `:490`），两处口径一致。
 
 **实测：这条豁免是承重的，不是装饰**。W1518 用 ③b 的同一判据扫了一遍 `docs/archive/`，
 **10 处锚点会红**（W1518 实测，见 W1518 交付报告（仓外 `/server-center/runtime/worker-exec/results/`））。下面是当时的探针输出，
