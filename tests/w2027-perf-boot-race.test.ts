@@ -302,6 +302,21 @@ function startProbe(script: string, env: Record<string, string>): Probe {
   return { stdout: () => out, stderr: () => err, exit };
 }
 
+/**
+ * ★ W2037：断言失败时**必须**把探针的 stderr 带出来。
+ *
+ * 原来只有 waitUntil 超时那条路径打印 stderr；而本用例真正会 flake 的是**退出码断言**
+ * （信号窗口里 boot() 因 Chrome 被收尾杀掉而 reject ⇒ Node 以 1 退出 ⇒ 报
+ * "expected 1 to be 143"）—— 那条路径不打印 stderr，最有价值的诊断恰好被丢掉。
+ */
+async function withProbeDiag<T>(probe: Probe, label: string, fn: () => T | Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    throw new Error(label + " 失败：" + String(error) + "\n子进程 stderr：\n" + probe.stderr().slice(-3000));
+  }
+}
+
 /** 探针打印的那一行（含 profileDir 与登记表条目数）。 */
 interface Booted { profileDir: string; cleanupCount: number }
 function bootedOf(probe: Probe): Booted {
@@ -337,16 +352,18 @@ describe.skipIf(CHROME === null || !posixProcessGroups)("W2027 ③ · 端到端�
     expect(profileDir, "★ 窗口内 Chrome 进程必须真的存在（否则本用例是空转）").not.toBeNull();
 
     const result = await probe.exit;
-    expect(result.signal, "★ 必须自己收尾后退出，而不是被 SIGTERM 打死（被打死 = 登记表里没有它）").toBeNull();
-    expect(result.code, "退出码 = 128 + SIGTERM(15) = 143").toBe(143);
-    await waitUntil("CDP 端口被释放", () => listenersOn(cdp).length === 0);
-    expect(await canBind(cdp), "★ CDP 端口必须可以被立刻重新 bind（Chrome 真的死了）").toBe(true);
-    expect(listenersOn(backend), "★ backend 端口也不得还有人监听").toEqual([]);
-    // ★★ 本任务的核心断言：窗口内收到信号之后，**不许留下孤儿 Chrome**。
-    //     变红时能看出根因：信号路径没跑到登记表里的那一条。
-    await waitUntil("窗口内的那个 Chrome 进程消失", () => processesMatching(profileDir!).length === 0, 5000);
-    expect(processesMatching(profileDir!), "★★ 窗口内 SIGTERM 之后不得留下任何 Chrome 进程（孤儿）").toEqual([]);
-    expect(existsSync(profileDir!), "★ profile 目录必须被删掉（只杀进程不删目录 = 半拉子收尾）").toBe(false);
+    await withProbeDiag(probe, "W2027 ③ 退出码与收尾", async () => {
+      expect(result.signal, "★ 必须自己收尾后退出，而不是被 SIGTERM 打死（被打死 = 登记表里没有它）").toBeNull();
+      expect(result.code, "退出码 = 128 + SIGTERM(15) = 143").toBe(143);
+      await waitUntil("CDP 端口被释放", () => listenersOn(cdp).length === 0);
+      expect(await canBind(cdp), "★ CDP 端口必须可以被立刻重新 bind（Chrome 真的死了）").toBe(true);
+      expect(listenersOn(backend), "★ backend 端口也不得还有人监听").toEqual([]);
+      // ★★ 本任务的核心断言：窗口内收到信号之后，**不许留下孤儿 Chrome**。
+      //     变红时能看出根因：信号路径没跑到登记表里的那一条。
+      await waitUntil("窗口内的那个 Chrome 进程消失", () => processesMatching(profileDir!).length === 0, 5000);
+      expect(processesMatching(profileDir!), "★★ 窗口内 SIGTERM 之后不得留下任何 Chrome 进程（孤儿）").toEqual([]);
+      expect(existsSync(profileDir!), "★ profile 目录必须被删掉（只杀进程不删目录 = 半拉子收尾）").toBe(false);
+    });
   }, 90000);
 });
 

@@ -46,6 +46,9 @@ interface CleanupMod {
   drainCleanup(): unknown[];
   activeCleanupCount(): number;
   isSignalCleanupInstalled(): boolean;
+  /** W2037：收尾窗口的边界（正常路径必须为 false —— 见 ④ 的零副作用断言）。 */
+  isDraining(): boolean;
+  isDrainGuardInstalled(): boolean;
 }
 const cleanupMod = (await import(/* @vite-ignore */ pathToFileURL(CLEANUP).href)) as CleanupMod;
 
@@ -212,8 +215,81 @@ describe("W2021 ④ · 登记表语义：不漏、不重复关、正常路径零
     expect(cleanupMod.isSignalCleanupInstalled(), "没有活实例时不得占用信号").toBe(false);
     const off = cleanupMod.registerCleanup(() => {});
     expect(cleanupMod.isSignalCleanupInstalled(), "有活实例时才安装").toBe(true);
+    // ★ W2037：守卫**只在收尾窗口内**存在。没收到信号就不许动异常语义
+    //   （否则正常路径抛错会被静默吞掉，那是比退出码更糟的缺陷）。
+    expect(cleanupMod.isDraining(), "没收到信号时不得处于收尾态").toBe(false);
+    expect(cleanupMod.isDrainGuardInstalled(), "★ 没收到信号时不得装收尾守卫（不改变正常路径的异常语义）").toBe(false);
     off();
     expect(cleanupMod.isSignalCleanupInstalled(), "最后一个实例注销后必须摘掉").toBe(false);
+  });
+});
+
+describe("W2037 · 收尾窗口里的退出码归属（不需要 Chrome，确定性复现）", () => {
+  /**
+   * 缺陷（W2037 实测，原始证据见 tests/w2027-perf-boot-race.test.ts 的 flake）：
+   * 信号处理器**不能 await**（见本文件 ①），所以「收到信号」与「process.exit(128+n)」
+   * 之间有一段最长 FORCE_EXIT_MS 的窗口，进程仍在跑普通代码。收尾会**杀掉 Chrome**，
+   * 于是窗口里某个**在途的 CDP 调用**随即 reject —— 真实探针的顶层 `await boot(...)`
+   * 就是这样。Node 对「顶层 await 的拒绝」的默认行为是**立即以 1 退出**，抢在挂起的
+   * process.exit(143) 之前 ⇒ 退出码 1（signal 为 null）、且收尾的**异步尾巴被腰斩**
+   * （「等 300ms 再 rmSync(profileDir)」跑不到 ⇒ profile 真的留在 $TEMP 里）。
+   *
+   * 本用例把那条竞态**变成确定性的**：收尾函数一被调用，就在同一个窗口里排一个
+   * 「稍后抛出」—— 与「收尾杀 Chrome ⇒ 在途的 CDP 调用失败」逐字同形，不依赖任何时长。
+   *
+   * ★ 为什么是 throw 而不是 reject 一个顶层 await：实测两者**不是**同一条通道。
+   *   顶层 await 的拒绝在模块求值阶段被 Node 升级成 uncaughtException，但退出码是
+   *   **13**（unsettled top-level await）；真实探针报的是 **1**（cdp ws error 直接变成
+   *   未捕获异常）。本用例取**已被实测钉死为 1** 的那条形状（见 W2037 报告 §机制）。
+   */
+  function writeDrainRaceProbe(dir: string): { script: string; syncMark: string; asyncMark: string } {
+    const script = join(dir, "probe.mjs");
+    const syncMark = join(dir, "sync.txt");
+    const asyncMark = join(dir, "async.txt");
+    writeFileSync(script, [
+      "import { writeFileSync } from 'node:fs';",
+      "import { registerCleanup } from " + JSON.stringify(pathToFileURL(CLEANUP).href) + ";",
+      "registerCleanup(() => {",
+      "  writeFileSync(" + JSON.stringify(syncMark) + ", 'sync');",
+      "  // ★ 复刻真实机制：收尾杀掉 Chrome ⇒ 窗口里某个在途的异步操作失败并抛出。",
+      "  //   （真实情形是 WebSocket 'error' → cdp.mjs 的 reject → 顶层 await 的 rejection，",
+      "  //     在模块求值阶段被 Node 升级成 uncaughtException。）",
+      "  setTimeout(() => { throw new Error('cdp ws error: 收尾杀 Chrome 导致在途请求失败'); }, 5);",
+      "  return new Promise((r) => setTimeout(() => { writeFileSync(" + JSON.stringify(asyncMark) + ", 'async'); r(); }, 150));",
+      "});",
+      "console.log('READY');",
+      "setInterval(() => {}, 1000);",
+    ].join("\n"));
+    return { script, syncMark, asyncMark };
+  }
+
+  it("★ 收尾窗口里抛异常：退出码仍必须是 143（不许被 exit 1 抢走），且异步收尾必须跑完", async () => {
+    const dir = makeTmp("w2037-drain-race-");
+    const { script, syncMark, asyncMark } = writeDrainRaceProbe(dir);
+    const child = spawn(process.execPath, [script], { stdio: ["ignore", "pipe", "pipe"] });
+    children.push(child);
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (b) => { stdout += String(b); });
+    child.stderr.on("data", (b) => { stderr += String(b); });
+    const exit = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
+      child.on("exit", (code, signal) => resolve({ code, signal }));
+    });
+    // READY 打在 registerCleanup() **之后** ⇒ 看到它就保证收尾已登记（不靠 sleep 赌）。
+    await waitUntil("探针 READY", () => stdout.includes("READY"));
+
+    child.kill("SIGTERM");
+    const result = await exit;
+
+    expect(result.signal, "必须自己退出，而不是被 SIGTERM 打死").toBeNull();
+    // ★★ 本用例的核心：窗口里的异常**不许**抢走退出码。
+    expect(result.code, "退出码 = 128 + SIGTERM(15) = 143（窗口里的异常不得把它改成 1）").toBe(143);
+    // ★★ 同样重要：收尾的**异步尾巴**必须跑完（否则 profile 目录真的会留下）。
+    expect(existsSync(syncMark), "同步收尾必须跑").toBe(true);
+    expect(existsSync(asyncMark), "★ 异步收尾必须跑完（被 exit 1 抢跑就会腰斩 ⇒ profile 留在 $TEMP）").toBe(true);
+    // 诊断信息只增不减：异常原文与栈仍要打到 stderr（不是静默吞掉）。
+    expect(stderr, "★ 被吞掉的异常必须**打印出来**（静默吞 = 丢掉最有价值的诊断）").toContain("收尾期间出现未捕获异常");
+    expect(stderr, "异常原文必须在 stderr 里可见").toContain("cdp ws error: 收尾杀 Chrome");
   });
 });
 
