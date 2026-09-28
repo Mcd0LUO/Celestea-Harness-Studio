@@ -192,13 +192,21 @@ describe('W2028 · 触摸端 Enter 换行', () => {
     expect(sends, '组合中不发送').toEqual([]);
   });
 
-  it('桌面：IME 组合中的 Enter 与改动前逐字相同（仍走发送 —— 本轮刻意不动它）', async () => {
+  // ★ W2032 更新（本条原为「桌面：IME 组合中的 Enter 与改动前逐字相同（仍走发送）」）：
+  //   W2028 当时把桌面组合中的 Enter **显式留成另一个工单**（见 newline.ts 的旧注释
+  //   「要改是另一个工单，且要先有真机 IME 证据」）。W2032 就是那个工单，且已附真机证据
+  //   （1440x900 + Input.imeSetComposition：修复前 POST /api/turn {input:"nihaoni hao"}）。
+  //   ⇒ 桌面组合中的 Enter 现在**不发送**（'swallow'：吃掉默认动作但不发送）。
+  //   触摸端那条（上一用例）**未变** —— W2028 的结论原样保留。
+  it('桌面：IME 组合中的 Enter 不发送（W2032 接管了这个工单，见上方注释）', async () => {
     setCapability(false, 0);
     const sends: Sends = [];
     await mount('zh', sends);
-    type('ni');
-    press(inputEl(), { key: 'Enter', isComposing: true });
-    expect(sends, '桌面组合中的 Enter 是既有行为，不在本轮范围内').toEqual([['ni', 'steer']]);
+    const el = type('ni');
+    const e = press(el, { key: 'Enter', isComposing: true });
+    expect(sends, 'W2032：桌面组合中的 Enter 不得发送').toEqual([]);
+    expect(JSON.stringify(el.value), '组合文字保留在输入框里').toBe(JSON.stringify('ni'));
+    expect(e.defaultPrevented, '桌面要吃掉默认动作（否则插进的换行会留在框里）').toBe(true);
   });
 
   it('触摸端：enterkeyhint=enter（软键盘回车键上的字与行为同源）', async () => {
