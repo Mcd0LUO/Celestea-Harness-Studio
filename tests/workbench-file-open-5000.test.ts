@@ -43,17 +43,59 @@ const shownLines = (): number => {
 };
 
 /**
- * 轮询等一个事实成立（上限 5s）。
+ * 流式装载的**停滞预算**（不是总预算）。
  *
- * 为什么需要：分段之间会**让出一帧**（requestAnimationFrame，见 preview/stream.ts），
- * 而 jsdom 的 rAF 是按 ~16ms 的宏任务跑的 —— 用固定 flush 猜段数会随机器负载 flake
- * （本仓 W896 的教训：把「猜宏任务数」换成「等事实成立」）。超时上限保证「真的坏了」
- * 依旧快速失败，而不是永远等下去。
+ * 判据是「有没有进展」，不是「总共花了多久」—— 这是本文件与墙钟预算的分水岭：
+ *   · 慢但一直在长（机器被别的 worker 挤住）⇒ **不算失败**，继续等；
+ *   · 卡住不动（真的坏了，例如上限被改回 256 KiB ⇒ 流在 ~1600 行处停死）⇒ 到点即红。
+ * 30s 与改动前的总预算**同值**，所以「真的坏了多久才红」这条性质一字未变；
+ * 变的只是它现在**只对停滞计时**，不再对正常耗时计时。
  */
-async function waitFor(probe: () => boolean, what: string, timeoutMs = 5000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!probe()) {
-    if (Date.now() > deadline) throw new Error('timed out waiting for ' + what);
+const STREAM_STALL_MS = 30_000;
+/**
+ * 兜底上限：防「永远在长、永远长不到头」这种病态（每 29s 长一行）。
+ * 取实测最坏合法总耗时的 ~4 倍（W2035 实测：空闲 9.5s；12 路争用下 20.5–29.0s）。
+ */
+const STREAM_CEILING_MS = 120_000;
+
+/**
+ * 等「分段流式装载真的读完」：判据是**进展**，不是墙钟。
+ *
+ * 为什么需要轮询：分段之间会**让出一帧**（requestAnimationFrame，见 preview/stream.ts），
+ * 而 jsdom 的 rAF 是按 ~16ms 的宏任务跑的 —— 用固定 flush 猜段数会随机器负载 flake
+ * （本仓 W896 的教训：把「猜宏任务数」换成「等事实成立」）。
+ *
+ * ★ 为什么不再用「总预算 30s」（W2035 修的就是它）：
+ *   本用例的**语义**是「5000 行（>256 KiB）必须**全文**渲染」，与耗时无关；耗时却
+ *   完全由宿主争用决定（W2035 实测：空闲 9.5s；12 路争用 20.5–29.0s；再挤 >30s）。
+ *   拿总耗时当闸门 ⇒ 机器一忙就红，且报错与断言无关（负载下抓到的是
+ *   `Test timed out in 30000ms`，不是任何一条断言失败）。
+ *   ⇒ 让**阈值**让步、**语义**不让步：断言一字未改，只把「多久算坏」从墙钟换成停滞。
+ */
+async function waitForFullStream(
+  progress: () => number,
+  target: number,
+  stallMs = STREAM_STALL_MS,
+  ceilingMs = STREAM_CEILING_MS,
+): Promise<void> {
+  const started = Date.now();
+  let best = progress();
+  let bestAt = Date.now();
+  for (;;) {
+    const seen = progress();
+    if (seen >= target) return;
+    if (seen > best) {
+      best = seen;
+      bestAt = Date.now();
+    }
+    const stalled = Date.now() - bestAt;
+    if (stalled > stallMs) {
+      // 报出**卡在第几行**：比「超时」有用得多（直接分辨「没开始」与「读一半停住」）。
+      throw new Error('stream stalled at ' + best + '/' + target + ' lines (no progress for ' + stalled + 'ms, ' + (Date.now() - started) + 'ms total)');
+    }
+    if (Date.now() - started > ceilingMs) {
+      throw new Error('stream never finished: ' + best + '/' + target + ' lines after ' + (Date.now() - started) + 'ms');
+    }
     await new Promise((r) => setTimeout(r, 10));
   }
 }
@@ -132,19 +174,22 @@ describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）'
     doc.body.appendChild(btn);
   });
   afterEach(() => { vi.unstubAllGlobals(); doc.body.replaceChildren(); });
-  it('★ 完整文件：5000 行（> 256 KiB）必须**全文**渲染，且不是降级文案', async () => {
+  // ★ W2035：文件级预算 150s（**只给这一条**，不动全局 testTimeout）。
+  //   它是兜底，不是判据 —— 先触发的一定是 waitForFullStream 的停滞判据（30s 无进展）；
+  //   150s 只为「一直在长但长不到头」这种病态兜底，且远大于实测最坏合法耗时（29.0s）。
+  it('★ 完整文件：5000 行（> 256 KiB）必须**全文**渲染，且不是降级文案', { timeout: 150_000 }, async () => {
     const lines = makeLines(5000);
     const expected = lines.join('\n') + '\n';
     expect(expected.length, '★ 样本必须**远**超过旧的 256 KiB 上限（否则变异抓不住，见 makeLines 注释）').toBeGreaterThan(600 * 1024);
     const srv = pagedServer(lines);
     const { wb } = await setup(srv.fetch);
     await clickFile(wb, 'big.ts');
-    // ★ 必须传显式超时：waitFor 的默认上限是 5000ms，而本用例（5000 行 × ≈150 字符
-    //   = 750 KB 走分段流式 + hljs 分块高亮）**单条实测 7.8–11.3s**（见文件头注）——
-    //   默认 5s 会让它在机器有负载时**必红**（全量 check 里实测 9.2s 超时）。
-    //   30s 与 vitest.config.ts 的 testTimeout 同口径：既覆盖正常耗时，又保证
-    //   「真的坏了」依旧快速失败，而不是永远等下去。
-    await waitFor(() => shownLines() === 5000, 'the stream to finish (5000 lines)', 30_000);
+    // ★ W2035：等「全文渲染完成」，判据是**进展**不是墙钟（见 waitForFullStream 的长注释）。
+    //   负载下这条用例合法地要 20.5–29.0s（12 路争用实测），而 vitest 的 30s testTimeout
+    //   是**文件级**的墙钟预算 —— 于是机器一忙就报 `Test timed out in 30000ms`。
+    //   断言一字未改；改的只是「多久算坏」。文件级预算同步抬到 150s（下面 it 的第三参），
+    //   让停滞判据（30s 无进展）成为**先**触发的那个，而不是被 vitest 抢答。
+    await waitForFullStream(() => shownLines(), 5000);
     expect(q('.preview-degrade'), '★ 不许降级成「文件过大」').toBeNull();
     expect(shownLines(), '★ DOM 行数必须等于服务端 totalLines').toBe(5000);
     expect(shownText(), '★ 逐字节等于完整文件').toBe(expected);
