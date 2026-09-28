@@ -29,6 +29,7 @@ import type { FsListEntry } from '../../types/fs-list';
 import { nextSeq, type PanelState } from './state';
 import { joinPath, parentOfPath } from '../fs-path'; // 平台路径（win32 盘符/UNC vs POSIX）
 import { openFilePreview } from './files-open';
+import { bindListKeys, consumeFocusAfterNav, focusFirstRow, ROW_SEL } from './files-keys'; // W2040：行的键盘通道
 import { t } from '../../i18n';
 
 /** 单面板内的浏览状态（挂在面板 data 上，切换时不丢）。 */
@@ -117,8 +118,14 @@ export async function renderFilesPanel(
   const list = el('div', 'wb-list');
   if (entries.length === 0) list.appendChild(el('div', 'wb-notice', t('chat.wb.dirEmpty')));
   for (const e of entries) list.appendChild(row(e, data, path, body, panel, isCurrent));
+  // W2040：列表整体的键盘通道（roving tabindex：整个列表只占 1 个 Tab 停靠点）。
+  // 挂在**列表**上而不是每一行：行是每次导航整体重建的，委托让重建不需要注销动作。
+  bindListKeys(list);
   off.appendChild(list);
   body.replaceChildren(...Array.from(off.childNodes));
+  // W2040：键盘进入目录后列表被重建，原来那行已不在 DOM 上（焦点会掉回 <body>）⇒
+  // 把焦点接回新列表的第一行。**只有键盘导航会置位**，鼠标路径一字不变。
+  if (consumeFocusAfterNav()) focusFirstRow(body);
 }
 
 function row(
@@ -129,7 +136,14 @@ function row(
   panel: PanelState,
   isCurrent: (id: string, seq: number) => boolean,
 ): HTMLElement {
+  // W2040：行是**列表项**（不是 W2025 正文里的行内元素）⇒ 走 roving tabindex：
+  // 每行都可被编程聚焦（-1），但同一时刻只有一行进 Tab 序列（0，由 bindListKeys 分配）。
+  // role=button + title 是 WAI-ARIA 对「用 div 做按钮」的要求（4.1.2 Name, Role, Value），
+  // 与 file-link-mark.ts 的 markHit 同一口径。★ 属性写在**节点**上（行每次新建，天然幂等）。
   const r = el('div', 'wb-row' + (e.type === 'dir' ? ' dir' : '') + (data.selected === e.name ? ' sel' : ''));
+  r.tabIndex = -1;
+  r.setAttribute('role', 'button');
+  r.title = t('chat.wb.rowOpen');
   r.appendChild(el('span', 'wb-icon', e.type === 'dir' ? '📁' : '📄'));
   r.appendChild(el('span', 'wb-name', e.name));
   r.appendChild(el('span', 'wb-size', fmtSize(e.size)));
@@ -143,7 +157,7 @@ function row(
     }
     // W1545：点文件 ⇒ **右侧预览面板**（不再是行下方内联展开）。
     // 清选中态按**本面板**作用域（同一种面板可多开，document 级会误伤别的面板）。
-    body.querySelectorAll('.wb-row').forEach((n) => n.classList.remove('sel'));
+    body.querySelectorAll(ROW_SEL).forEach((n) => n.classList.remove('sel'));
     r.classList.add('sel');
     data.selected = e.name;
     // 同步调用：面板壳当帧出现，内容由 files-open.ts 分段喂（首段小 ⇒ 首屏快）。
