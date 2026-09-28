@@ -259,7 +259,15 @@ describe("W2019 ④ · 防复发：README 登记 + 零依赖 + profile 不落仓
       expect(cleanup, "cleanup.mjs 必须接管 " + signal).toContain(signal);
     }
     expect(cleanup, "信号处理器里必须真的做收尾").toContain("drainCleanup");
-    expect(read("lib/app.mjs"), "boot() 必须把实例登记进收尾表").toContain("registerCleanup");
+    // ★ W2027 更新（这条断言原来钉的是字面量 "registerCleanup"）：boot() 仍然把实例登记进
+    //   收尾表，但**登记动作本身**被提前到 launchChrome 内部（spawn 之后的第一个 await 之前），
+    //   因为「Chrome 进程已存在、却还没登记」那段窗口里收到 SIGTERM 会留孤儿。
+    //   于是这里改钉**行为**而不是某个函数名：必须从收尾模块引入登记 API，且真的调用它。
+    //   牙口不弱于原来：删掉登记调用 / 删掉 import，两条都会红（W2027 变异①实测）。
+    const app = read("lib/app.mjs");
+    expect(app, "boot() 必须从收尾模块引入登记 API")
+      .toMatch(/import\s*\{[^}]*\b(?:adoptCleanup|registerCleanup)\b[^}]*\}\s*from\s*['"]\.\/cleanup\.mjs['"]/);
+    expect(app, "boot() 必须真的把实例登记进收尾表").toMatch(/\b(?:adoptCleanup|registerCleanup)\s*\(/);
     expect(read("run.mjs"), "run.mjs 必须 import 收尾模块（异常路径兜底）").toContain("closeAllRegistered");
   });
 
