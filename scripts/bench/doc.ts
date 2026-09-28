@@ -131,6 +131,7 @@ const METHOD = [
 const CHANGE_LOG = [
   "| version | engine change | baseline |",
   "| --- | --- | --- |",
+  "| v2.8.1 | **W9207**: `events()` reads a per-session in-memory mirror instead of re-reading the log from disk on every model step (the amplification this suite's log rows measure). Also `?tail=N` server-side trimming for the messages endpoint and a rAF-coalesced rail rebuild — neither is an engine hot path, but both are why this anchor exists. | `benchmarks/baseline-v2.8.1.json` |",
   "| v2.7.2 | **No engine hot-path change** (i18n completion + Windows path fixes). Recorded so the archive has an anchor at the released version. | `benchmarks/baseline-v2.7.2.json` |",
   "| v2.6.2 | **W766**: the statusline's context estimate rides in the W762 snapshot cache (`{request, tokens}` per log state), so an unchanged-log tick is a lookup instead of an O(bytes) walk of the messages. | `benchmarks/baseline-v2.6.2.json` |",
   "| v2.6.1 | **W762**: `trimContext()` de-quadraticised (single-pass suffix sums) + `contextSnapshot()` memoized on the log state; the token rate averages over ACTIVE intervals. | `benchmarks/baseline-v2.6.1.json` |",
