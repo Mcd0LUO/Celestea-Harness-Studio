@@ -11,6 +11,7 @@ import { api } from '../../api';
 import type { ProviderInfo } from '../../types';
 import { el } from '../../utils/dom';
 import { popOverlay, pushOverlay, type OverlayHandle } from '../../utils/overlays';
+import { bindRowActivate } from '../roving'; // W2053：表格行的键盘激活（非 roving，理由见 renderProviderRow）
 import { confirmDialog } from '../confirm';
 import { buildProviderForm } from './form';
 import { modelCount, refreshRow, renderStateCell, setMsg } from './rows';
@@ -89,6 +90,24 @@ export function renderProviderRow(
   tr.title = t('settings.providers.expandHint');
   tr.setAttribute('aria-expanded', 'false');
   if (p.is_default) tr.classList.add('is-default');
+  // W2053：此前 aria-expanded 已经写了（:51 :74 :90）却**没有任何键盘入口** ——
+  // 真机实测 tabIndex === -1，focus() 之后 activeElement 仍是 <body>，Tab 整圈跳过
+  // 全部提供商行。「有 aria 但键盘到不了」比没有 aria 更隐蔽：读屏会播报一个
+  // 用户永远无法操作的可展开控件。
+  //
+  // ★ 这一处**刻意不走 roving**（与另外 4 处不同），理由三条，逐条有真机证据：
+  //   ① <tr> 的 role=row + role=cell 是表格语义，行数由人手配置、**天然有界**
+  //      （生产 2 行，见 §6 实测）⇒ 「每行 tabindex=0」不会制造 Tab 污染，
+  //      而 roving 的收益（把 N 个停靠点收敛成 1 个）在这里没有对象；
+  //   ② 给 <tr> 加 role=button 会把 6 个 role=cell 全部降级成 generic
+  //      （真机 AX 实测）—— 表格的可读结构就此消失，代价远大于收益；
+  //   ③ 表格有**自己的**键盘惯例（role=grid + 方向键），而本仓一处 role=grid 都没有
+  //      （全仓 grep 为 0）。为 2 行引入 grid 语义 = 引入一套全新的、没有先例的
+  //      交互契约，且与「行内联编辑」这个简单事实不成比例。
+  //   结论：**保语义、加停靠点** —— tabindex=0 让行本身进 Tab 序列，Enter/Space
+  //   走 click（等效性由构造保证），role 与 aria-expanded 一字不改。
+  tr.tabIndex = 0;
+  bindRowActivate(tr);
 
   const tdName = el('td', 'prov-td-name');
   tdName.appendChild(el('span', 'prov-name', p.name || p.id));

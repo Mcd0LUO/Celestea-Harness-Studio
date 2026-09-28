@@ -29,7 +29,7 @@ import type { FsListEntry } from '../../types/fs-list';
 import { nextSeq, type PanelState } from './state';
 import { joinPath, parentOfPath } from '../fs-path'; // 平台路径（win32 盘符/UNC vs POSIX）
 import { openFilePreview } from './files-open';
-import { bindListKeys, consumeFocusAfterNav, focusFirstRow, ROW_SEL } from './files-keys'; // W2040：行的键盘通道
+import { bindListKeys, consumeFocusAfterNav, focusFirstRow, markRowButton, ROW_SEL } from './files-keys'; // W2040/W2053：行的键盘通道
 import { t } from '../../i18n';
 
 /** 单面板内的浏览状态（挂在面板 data 上，切换时不丢）。 */
@@ -141,8 +141,11 @@ function row(
   // role=button + title 是 WAI-ARIA 对「用 div 做按钮」的要求（4.1.2 Name, Role, Value），
   // 与 file-link-mark.ts 的 markHit 同一口径。★ 属性写在**节点**上（行每次新建，天然幂等）。
   const r = el('div', 'wb-row' + (e.type === 'dir' ? ' dir' : '') + (data.selected === e.name ? ' sel' : ''));
-  r.tabIndex = -1;
-  r.setAttribute('role', 'button');
+  // W2053：改调共享内核（原来手写 tabIndex/role 两行）—— 内核会**同时**打上 roving
+  // 标记属性，那是键盘通道认行的唯一依据（5 处列表行共用同一个常量，不存在两份
+  // 选择器漂移的机会）。不传 label ⇒ 用内容取名：行里只有图标+文件名+大小+时间，
+  // 内容取名恰好就是用户想听的那串（真机 AX 实测）。
+  markRowButton(r);
   r.title = t('chat.wb.rowOpen');
   r.appendChild(el('span', 'wb-icon', e.type === 'dir' ? '📁' : '📄'));
   r.appendChild(el('span', 'wb-name', e.name));

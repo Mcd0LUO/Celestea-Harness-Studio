@@ -328,6 +328,10 @@ body.resizing-col { cursor: col-resize; user-select: none; }
   color: var(--c-text-2); cursor: pointer;
 }
 .ws-worker-parent:hover { color: var(--c-text-1); }
+/* W2053：worker 分组头的键盘焦点环（与 .wb-row / .sess-leaf 同一行）。
+   本行没有背景色（hover 只换 color），环是它唯一的键盘可见指示 —— 少了这一条，
+   键盘用户 Tab 到这里看不出焦点在哪（WCAG 2.4.7）。 */
+.ws-worker-parent:focus-visible { outline: 2px solid var(--c-focus-ring); outline-offset: -2px; }
 .ws-lineage-mark { color: var(--c-text-3); }
 .ws-worker-parent-name {
   flex: 1 1 auto; min-width: 0;

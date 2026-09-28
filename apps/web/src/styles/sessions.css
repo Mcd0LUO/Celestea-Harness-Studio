@@ -84,6 +84,13 @@
   transition: background .12s ease;
 }
 .sess-leaf:hover { background: var(--c-accent-soft); }
+/* W2053：键盘焦点环。★ 与 W2040 的 .wb-row:focus-visible **逐字同一行** —— 复用 W2006 的
+   **焦点环专用** token --c-focus-ring（四套配色各自定义、对四种真实底色合成后均 >= 3:1，
+   由 tests/w9226-style-a11y-fixes.test.ts 钉住）—— 不新造颜色、不引用装饰 token
+   （--c-accent-ring）。负 outline-offset 把环画进行内 ⇒ 行高与行位置在聚焦前后
+   **逐像素不变**（outline 不参与布局），列表不会被推挤。
+   只写 :focus-visible：鼠标点击不画环，键盘 Tab/方向键才画（WCAG 2.4.7 的「键盘可见」）。 */
+.sess-leaf:focus-visible { outline: 2px solid var(--c-focus-ring); outline-offset: -2px; }
 .sess-leaf.active { background: var(--c-accent-soft); box-shadow: inset 2px 0 0 var(--c-accent-ring); }
 .sess-leaf.sel { box-shadow: inset 2px 0 0 var(--c-accent-ring); }
 .sess-leaf > svg { flex: 0 0 auto; color: var(--c-text-3); }
@@ -243,6 +250,8 @@
   flex: 0 0 auto;
 }
 .ws-fs-dir:hover { background: var(--c-accent-soft); }
+/* W2053：目录浏览弹层里目录行的键盘焦点环（与 .wb-row / .sess-leaf 同一行）。 */
+.ws-fs-dir:focus-visible { outline: 2px solid var(--c-focus-ring); outline-offset: -2px; }
 .ws-fs-dir-icon { display: inline-flex; align-items: center; flex: 0 0 auto; color: var(--c-accent); }
 .ws-fs-dir-icon svg { display: block; }
 .ws-fs-dir-name { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -293,6 +302,8 @@
   transition: background .12s ease;
 }
 .ws-worker-row:hover { background: var(--c-accent-soft); }
+/* W2053：worker 行的键盘焦点环（与 .wb-row / .sess-leaf 同一行）。 */
+.ws-worker-row:focus-visible { outline: 2px solid var(--c-focus-ring); outline-offset: -2px; }
 .ws-worker-row.active { background: var(--c-accent-soft); box-shadow: inset 2px 0 0 var(--c-accent-ring); }
 .ws-worker-name {
   flex: 1 1 auto; min-width: 0;

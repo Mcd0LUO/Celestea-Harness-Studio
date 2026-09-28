@@ -18,6 +18,7 @@ import {
 } from './store';
 import { parentOf, truncateName, widOf, workerSessions, workerSigOf, workerTitleOf } from './util';
 import { paneBusy, activeSessionId } from '../viewctx';
+import { bindRoving, markRowButton } from '../roving'; // W2053：worker 行的键盘通道
 import { t } from '../../i18n';
 
 /**
@@ -43,6 +44,10 @@ function renderWorkerRow(host: HTMLElement, w: SessionInfo, child: boolean): HTM
   if (w.events !== undefined) bits.push(t('shell.tree.events', { n: w.events }));
   if (bits.length) row.appendChild(el('span', 'ws-worker-meta', bits.join(' · ')));
   row.title = workerTitleOf(w) + (w.model ? ' · ' + w.model : '') + t(inherited ? 'shell.worker.inheritedHint' : 'shell.worker.openHint');
+  // W2053：键盘通道（真机实测改动前 tabIndex === -1、Tab 整圈跳过全部 worker 行）。
+  // 名字 = wid + 可见标题（WCAG 2.5.3 Label in Name）；行里还有运行态点与徽标，
+  // 内容取名会把它们一并读出来。
+  markRowButton(row, widOf(w) + ' ' + workerTitleOf(w));
   row.addEventListener('click', () => {
     const hostEl = document.getElementById('sessionTree') ?? host;
     openSessionRow(hostEl, id, { kind: 'worker', title: w.title || id });
@@ -98,6 +103,9 @@ export function renderWorkerGroup(host: HTMLElement, workers: SessionInfo[], ope
       head.appendChild(pname);
       head.appendChild(el('span', 'ws-worker-count', String(kids.length)));
       head.title = t('shell.worker.parentHint');
+      // W2053：分组头也是「点了开会话」的行 ⇒ 同样要能 Tab 到（真机实测改动前
+      // tabIndex === -1）。名字取可见的父会话标题（Label in Name）。
+      markRowButton(head, pname.textContent ?? '');
       head.addEventListener('click', () => {
         const hostEl = document.getElementById('sessionTree') ?? host;
         openSessionRow(hostEl, parentId, { kind: 'session', title: parentSession?.title });
@@ -113,6 +121,13 @@ export function renderWorkerGroup(host: HTMLElement, workers: SessionInfo[], ope
       for (const w of orphans) det.appendChild(renderWorkerRow(host, w, true));
     }
   }
+  // W2053：Worker 组的键盘通道。挂在 **det**（本次新建的 .ws-worker-details）上：
+  //   · 行是每次重建的新节点 ⇒ 与 keydown 一样天然幂等，不需要注销；
+  //   · 方向键在**本组内**连续移动（worker 组与工作区树是两个并列的列表，各有各的
+  //     停靠点 —— 它们不共享方向键序列，因为两者之间还隔着整棵会话树）；
+  //   · 组本身可折叠：折叠时 resetStops 找不到够得着的行 ⇒ 本组不占停靠点，
+  //     展开时 toggle 监听会把停靠点交给第一行（理由见 ui/roving.ts 文件头 ③④）。
+  bindRoving(det);
   host.replaceChildren(det);
 }
 

@@ -15,6 +15,7 @@ import { popOverlay, pushOverlay, type OverlayHandle } from '../utils/overlays';
 import { t } from '../i18n';
 import { joinPath, rootOfPath, splitPath } from './fs-path'; // 平台路径（win32 盘符/UNC vs POSIX）
 import { isImeKey } from './ime'; // W2033：组合中的 Enter 是「确认候选词」，不是「跳到这个路径」
+import { bindRoving, consumeFocusAfterNav, focusFirstRow, markRowButton, resetStops } from './roving'; // W2053：目录行的键盘通道
 
 /** 确认选目录时交给调用方的交互句柄。 */
 export interface FsBrowserUi {
@@ -71,6 +72,18 @@ export function openFsBrowser(opts: FsBrowserOpts): void {
 
   const crumbs = el('div', 'ws-fs-crumbs');
   const tree = el('div', 'ws-fs-tree');
+  // W2053：目录清单的键盘通道。tree 是**常驻节点**（弹层活着的期间不换），所以在这里
+  // 绑一次即可；每次 loadDirs 画完新行后调 settleTree() 重算停靠点 / 接回焦点。
+  bindRoving(tree, { refocus: true });
+  /**
+   * 画完一批目录行之后收尾：**总是**重算停靠点（新节点默认 tabindex 都是 -1，
+   * 不重算就没有任何行进 Tab 序列）；**只在键盘导航进来时**才把焦点接回第一行
+   * （鼠标用户本来就重新用鼠标指，夺焦只会打断他们）。
+   */
+  const settleTree = (): void => {
+    resetStops(tree);
+    if (consumeFocusAfterNav()) focusFirstRow(tree);
+  };
   const addrRow = el('div', 'ws-fs-addr');
   const addrInput = el('input', 'cfg-input') as HTMLInputElement;
   addrInput.placeholder = t('chat.fsbrowse.pathPlaceholder');
@@ -171,6 +184,10 @@ export function openFsBrowser(opts: FsBrowserOpts): void {
       icon.appendChild(folderIcon());
       row.appendChild(icon);
       row.appendChild(el('span', 'ws-fs-dir-name', d));
+      // W2053：目录行此前是 <div> + 只有一个 click（真机实测 tabIndex === -1、
+      // 弹层内 Tab 序列整圈跳过全部 16 行）。走共享内核的 roving tabindex。
+      // 名字取可见的目录名（Label in Name）。
+      markRowButton(row, d);
       row.addEventListener('click', () => {
         const next = joinPath(curPath, d); // 用 curPath 自身平台的分隔符，不混用 '/'
         void loadDirs(next);
@@ -178,6 +195,9 @@ export function openFsBrowser(opts: FsBrowserOpts): void {
       off.appendChild(row);
     }
     tree.replaceChildren(...off.childNodes);
+    // W2053：新一批目录行 ⇒ 重算停靠点；键盘 Enter 进来时把焦点接回第一行
+    // （鼠标路径不置位 ⇒ 这里什么也不做，鼠标行为一字不变）。
+    settleTree();
   }
 
   goBtn.addEventListener('click', () => {
