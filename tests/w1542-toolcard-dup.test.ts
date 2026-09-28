@@ -56,6 +56,11 @@ let tc: ToolcardsMod;
 let restore: RestoreMod;
 let tmpDir = "";
 
+// ★ W2035：本 hook 跑的是**真的 esbuild 打包**（前端源码 → 可 import 的 ESM），
+//   耗时由宿主争用决定，实测空闲 1.9–2.1s、12 路争用下 **7.3–7.7s** —— 而 vitest 的
+//   hookTimeout 默认 **10s**（本仓从未设过 hookTimeout，故所有 beforeAll 都在这个默认上），
+//   余量 <1.4x ⇒ 负载下会报 `Hook timed out in 10000ms`（W2035 在全量 check 里抓到过）。
+//   ⇒ 只给**这一个 hook** 显式预算 60s（>7x 实测最坏），不动全局 hookTimeout。
 beforeAll(async () => {
   installDom();
   tmpDir = mkdtempSync(join(tmpdir(), "w1542-dup-"));
@@ -68,7 +73,7 @@ beforeAll(async () => {
   const rOut = join(tmpDir, "restore.mjs");
   await bundleFrontend("export { restoreSessionHistory } from './apps/web/src/ui/restore.ts';", rOut);
   restore = (await import(pathToFileURL(rOut).href)) as RestoreMod;
-});
+}, 60_000);
 
 afterAll(() => {
   // W9219：还原 installDom 覆盖的全局（Node/document/window/navigator）。
