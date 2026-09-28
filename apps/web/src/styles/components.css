@@ -233,6 +233,58 @@
 .rendered li { margin: .15em 0; }
 .rendered a { color: var(--c-accent); text-decoration: none; }
 .rendered a:hover { text-decoration: underline; }
+/*
+ * W2052 · 正文里的**可点路径**必须看得出可点。
+ *
+ * 缺陷（用户报障「链接点击和文件路径点击怎么还没做」）：能力早已交付
+ * （W2013 点击委托 + W2025 键盘通道，见 ui/enhance/file-link-mark.ts），
+ * 但**样式侧一个字节都没有**。真机实测（1440x900，CDP 读 getComputedStyle）
+ * 改动前 data-fl-hit 与周围正文**逐条相同**：
+ *   color rgb(17,17,17) / text-decoration none / cursor auto / background 透明
+ * 于是「功能可点、看起来不可点」——用户据此判定「没做」。
+ *
+ * ★ 为什么必须与 markdown 链接（上面两条 .rendered a 规则）**分开写**：
+ *   mono 主题下 --c-accent = --interactive-accent = --s-gray-900 = #111，
+ *   与正文 --c-text-1 **是同一个颜色**。所以「像链接那样着色」在本仓
+ *   等于「什么都不做」（实测 computed 值逐字相同）。正文路径的提示只能靠
+ *   **装饰**（下划线）与 **cursor** 表达，颜色在本主题下不承载信息。
+ *
+ * ★ 取舍：为什么静态就加下划线，而不是只做 hover（候选 c）——
+ *   ① hover-only 对**用户报障的那个时刻**无效：鼠标没移到路径上时，正文
+ *      与改动前逐字相同，用户仍然看不出可点；
+ *   ② 它只覆盖鼠标：键盘与触摸端没有 hover，那两类用户永远得不到提示；
+ *   ③ 真正的可读性风险不是「线本身」，而是**线的对比度**：满对比度（= 文字色）
+ *      的线在密集路径里会把正文切成一段段。所以线取 --c-text-3（正文之下
+ *      一级的既有 token，不是新造的），并加 text-underline-offset 让它离开
+ *      字形。实测：线对底色 mono 4.92~5.41、dark 4.94~5.04、
+ *      claude 浅 4.68~5.34 / 深 5.94~7.01 —— 四套配色全部 >= 3:1
+ *      （WCAG 1.4.11 非文本对比度），且都**严格淡于**同处文字（>= 13.8:1）。
+ *      这是「看得见」与「不喧哗」之间的可复核取值，不是手感。
+ *
+ * ★ hover / focus 时线升到 currentColor（= 文字色）：交互中提示变强，
+ *   静止时保持克制。焦点环复用 W2006 的 --c-focus-ring（不要另造一个：
+ *   该 token 的存在理由就是 WCAG 1.4.11 的 3:1 焦点指示器对比度，
+ *   实测四套配色 3.12 / 4.47 / 3.30 / 5.51 全部达标）。
+ *
+ * ★ 只加样式，不动行为：点击/键盘/停靠点全部由 file-link.ts 与
+ *   file-link-mark.ts 负责，本段不改变任何一条既有规则（a 的两条原样保留）。
+ */
+.rendered [data-fl-hit] {
+  cursor: pointer;
+  text-decoration-line: underline;
+  text-decoration-color: var(--c-text-3);
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+.rendered [data-fl-hit]:hover,
+.rendered [data-fl-hit]:focus-visible {
+  text-decoration-color: currentColor;
+}
+.rendered [data-fl-hit]:focus-visible {
+  outline: 2px solid var(--c-focus-ring);
+  outline-offset: 2px;
+}
+
 .rendered blockquote {
   margin: .6em 0; padding: 2px 12px;
   border-left: 2px solid var(--c-border-strong); color: var(--c-text-2);
