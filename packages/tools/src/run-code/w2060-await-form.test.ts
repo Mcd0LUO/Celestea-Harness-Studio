@@ -227,24 +227,30 @@ describe("W2060 · what counts as module top level", () => {
     expect(form("export const f = async () => await g();\nreturn f();\n")).toBe("script");
   });
 
-  it("★ SEPARATE, UNFIXED GAP: definesEntryPoint is LINE-anchored, not scope-aware", () => {
-    // W2060 scope note: the form decision has TWO producers. This file fixes
-    // `startsAtModuleTop` (the reported defect). `definesEntryPoint` has the
-    // same CLASS of flaw — it trims each line and matches a declaration pattern,
-    // so a `main` that is NOT at module scope still selects the script form:
-    //
-    //   · nested inside another function  (`function make() { function main() … }`)
-    //   · inside a block comment or a multi-line template
-    //
-    // Both make a program that the WRAPPER would have hosted be emitted verbatim,
-    // where its top-level `return` is a syntax error. That is a real defect, but a
-    // DIFFERENT one from the reported bug, with a different blast radius (fixing it
-    // changes which programs get wrapped, and a wrong call there breaks working
-    // programs). It is therefore PINNED AS OBSERVED here — so the gap is visible and
-    // a future fix has a target — and reported to the architect instead of being
-    // silently changed in this commit.
-    expect(definesEntryPoint("function make() {\n  function main() { return 1; }\n  return main;\n}\nreturn make()();\n", "typescript")).toBe(true);
-    expect(definesEntryPoint("/*\nfunction main() {}\n*/\nreturn 1;\n", "typescript")).toBe(true);
+  // W2064 CLOSED THE GAP THIS CASE USED TO PIN. The two `toBe(true)` assertions
+  // below are the ONLY lines of this file W2064 touched; they were inverted
+  // because the behaviour they described was the defect, not a contract.
+  //
+  // W2060 scope note, kept as history: the form decision has TWO producers.
+  // W2060 fixed `startsAtModuleTop` (the reported defect) and left
+  // `definesEntryPoint` with the same CLASS of flaw — it trimmed each line and
+  // matched a declaration pattern, so a `main` that is NOT at module scope still
+  // selected the script form:
+  //
+  //   · nested inside another function  (`function make() { function main() … }`)
+  //   · inside a block comment or a multi-line template
+  //
+  // Both made a program that the WRAPPER would have hosted be emitted verbatim,
+  // where its top-level `return` is a syntax error. W2060 deliberately pinned
+  // that AS OBSERVED ("a future fix has a target") instead of silently changing
+  // which programs get wrapped. W2064 is that fix: `definesEntryPoint` now reads
+  // its declarations off the SAME lexical scan as `startsAtModuleTop`, so a
+  // declaration must be real code, the first token of its line, and at bracket
+  // depth 0. The guard against over-fixing it (every shape that MUST stay a
+  // script) lives in `w2064-defines-entry-point.test.ts`.
+  it("★ the W2060 gap: a `main` outside module scope is NOT an entry point (fixed by W2064)", () => {
+    expect(definesEntryPoint("function make() {\n  function main() { return 1; }\n  return main;\n}\nreturn make()();\n", "typescript")).toBe(false);
+    expect(definesEntryPoint("/*\nfunction main() {}\n*/\nreturn 1;\n", "typescript")).toBe(false);
     // What it does get right today: a mention inside a `//` comment or a single-line
     // string is not a declaration, and a mere CALL is not a definition.
     expect(definesEntryPoint("// function main() {}\nreturn 1;\n", "typescript")).toBe(false);
