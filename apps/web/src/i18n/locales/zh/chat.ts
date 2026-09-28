@@ -27,7 +27,7 @@ export const chat = {
   'chat.empty.hint': '在下方输入消息开始对话 · Enter 发送 · Shift+Enter 换行',
   // W2023：触摸设备**没有 Shift 键** —— 教它按 Shift 等于没教（真机实测：软键盘
   // Enter 的 shiftKey 恒为 false，按下去只会发送）。故触摸档只陈述 Enter 的行为。
-  'chat.empty.hintTouch': '在下方输入消息开始对话 · Enter 发送',
+  'chat.empty.hintTouch': '在下方输入消息开始对话 · Enter 换行 · 点发送键发出',
   'chat.user.you': '你',
   'chat.user.steering': '插话',
   'chat.user.queued': '排队',
@@ -235,9 +235,12 @@ export const chat = {
   'chat.wb.term.retry': '重试',
   'chat.input.placeholderIdle': '输入消息，Enter 发送，Shift+Enter 换行',
   // W2023：触摸档（无物理 Shift 键）。选取见 ui/viewport.ts 的 isTouchInput。
-  'chat.input.placeholderIdleTouch': '输入消息，Enter 发送',
+  'chat.input.placeholderIdleTouch': '输入消息，Enter 换行，点发送键发出',
   'chat.input.placeholderSteer': 'Enter 插话（下一步送达）· Ctrl/Cmd+Enter 排队（下一回合送达）',
   'chat.input.placeholderQueue': 'Enter 排队（本轮结束后送达）· Ctrl/Cmd+Enter 插话（下一步送达）',
+  // W2028：触摸端 Enter 是换行 ⇒ 这两档不能再教「Enter 插话 / Enter 排队」。
+  'chat.input.placeholderSteerTouch': '输入插话内容，点发送键发出（下一步送达）',
+  'chat.input.placeholderQueueTouch': '输入排队内容，点发送键发出（本轮结束后送达）',
   'chat.input.placeholderWorker': '对 worker 说点什么（送入它的收件箱，它空闲时会开新一轮）',
   'chat.input.interject': '插话',
   'chat.input.queue': '排队',
@@ -248,6 +251,13 @@ export const chat = {
   'chat.input.steerTitle': '插话（Enter）：注入运行中的轮次，下一步送达',
   'chat.input.queueTitle': '排队（Enter）：本轮结束后作为下一回合送达',
   'chat.input.sendTitle': '发送（Enter）',
+  // W2028：触摸端 Enter 是换行 ⇒ 发送键标题里不许再写「（Enter）」。
+  'chat.input.sendTitleTouch': '发送',
+  'chat.input.steerTitleTouch': '插话：注入运行中的轮次，下一步送达',
+  'chat.input.queueTitleTouch': '排队：本轮结束后作为下一回合送达',
+  'chat.input.sendWorkerTitleTouch': '发送到该 worker 的收件箱',
+  'chat.input.modeSteerTitleTouch': '当前：插话 · 下一步送达 · 点击改为排队',
+  'chat.input.modeQueueTitleTouch': '当前：排队 · 本轮结束后送达 · 点击改为插话',
   // W1512：发送/终止两态按钮的运行态文案（同一控件，照 DSH）。
   'chat.input.stop': '终止',
   'chat.input.stopTitle': '终止本轮生成',

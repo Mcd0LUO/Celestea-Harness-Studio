@@ -10,6 +10,7 @@
 // W847「发送前后 .input-side 宽度逐像素一致」不变量的前提。
 // ============================================================================
 import { t } from '../../i18n';
+import { isTouchInput } from '../viewport'; // W2028：标题里的快捷键提示按设备能力分流
 
 /** 与 inputbar 共享的两种状态（避免循环依赖，此处只声明形状）。 */
 export type ButtonInputMode = 'idle' | 'interject' | 'worker';
@@ -22,8 +23,19 @@ function idleText(mode: ButtonInputMode, lane: ButtonSubmitMode): string {
   return t('chat.input.send');
 }
 
-/** 空闲态的发送标题（与文案同源，含快捷键提示）。 */
+/**
+ * 空闲态的发送标题（与文案同源，含快捷键提示）。
+ *
+ * W2028：触摸设备（没有物理 Shift 键）上 Enter 是**换行**（见 ./newline.ts），发送
+ * 只有 #btnSend 一条路 ⇒ 标题里不能再说「（Enter）」，否则用户按 Enter 等发送、
+ * 等来一个换行（比不说更坏）。桌面文案**逐字不变**。
+ */
 function idleTitle(mode: ButtonInputMode, lane: ButtonSubmitMode): string {
+  if (isTouchInput()) {
+    if (mode === 'worker') return t('chat.input.sendWorkerTitleTouch');
+    if (mode === 'interject') return lane === 'steer' ? t('chat.input.steerTitleTouch') : t('chat.input.queueTitleTouch');
+    return t('chat.input.sendTitleTouch');
+  }
   if (mode === 'worker') return t('chat.input.sendWorkerTitle');
   if (mode === 'interject') return lane === 'steer' ? t('chat.input.steerTitle') : t('chat.input.queueTitle');
   return t('chat.input.sendTitle');
@@ -60,6 +72,10 @@ export function paintModeButton(btn: HTMLButtonElement, lane: ButtonSubmitMode):
   const label = btn.querySelector<HTMLElement>('.sl-mode-label');
   if (label) label.textContent = text;
   else btn.textContent = text;
-  btn.title = lane === 'steer' ? t('chat.input.modeSteerTitle') : t('chat.input.modeQueueTitle');
+  // W2028：车道键的 title 也含「（Enter）」快捷键提示 —— 触摸端 Enter 是换行，
+  // 同一理由换词（与 idleTitle 同一分流）。
+  const steerTitle = isTouchInput() ? t('chat.input.modeSteerTitleTouch') : t('chat.input.modeSteerTitle');
+  const queueTitle = isTouchInput() ? t('chat.input.modeQueueTitleTouch') : t('chat.input.modeQueueTitle');
+  btn.title = lane === 'steer' ? steerTitle : queueTitle;
   btn.classList.toggle('queue', lane === 'queue');
 }

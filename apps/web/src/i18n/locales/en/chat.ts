@@ -26,7 +26,7 @@ export const chat = {
   'chat.msg.system': 'System',
   'chat.empty.hint': 'Type a message below to start · Enter to send · Shift+Enter for a new line',
   // W2023: touch devices have no Shift key — teaching Shift there teaches nothing.
-  'chat.empty.hintTouch': 'Type a message below to start · Enter to send',
+  'chat.empty.hintTouch': 'Type a message below to start · Enter for a new line · tap Send to send',
   'chat.user.you': 'You',
   'chat.user.steering': 'Interjection',
   'chat.user.queued': 'Queued',
@@ -234,9 +234,14 @@ export const chat = {
   'chat.wb.term.retry': 'Retry',
   'chat.input.placeholderIdle': 'Type a message; Enter to send, Shift+Enter for a new line',
   // W2023: touch lane (no physical Shift key). Selection: ui/viewport.ts isTouchInput.
-  'chat.input.placeholderIdleTouch': 'Type a message; Enter to send',
+  'chat.input.placeholderIdleTouch': 'Type a message; Enter for a new line, tap Send to send',
+  // W2028: on touch Enter inserts a newline, so the send button is the only send path —
+  // its label must not promise "(Enter)".
   'chat.input.placeholderSteer': 'Enter to interject (delivered at the next step) · Ctrl/Cmd+Enter to queue (delivered on the next turn)',
   'chat.input.placeholderQueue': 'Enter to queue (delivered after this turn) · Ctrl/Cmd+Enter to interject (delivered at the next step)',
+  // W2028: on touch Enter is a newline, so these two lanes must not teach "Enter to …".
+  'chat.input.placeholderSteerTouch': 'Type an interjection, then tap Send (delivered at the next step)',
+  'chat.input.placeholderQueueTouch': 'Type a queued message, then tap Send (delivered after this turn)',
   'chat.input.placeholderWorker': 'Say something to the worker (it goes into its inbox; a new turn starts when it is idle)',
   'chat.input.interject': 'Interject',
   'chat.input.queue': 'Queue',
@@ -247,6 +252,14 @@ export const chat = {
   'chat.input.steerTitle': 'Interject (Enter): inject into the running turn, delivered at the next step',
   'chat.input.queueTitle': 'Queue (Enter): delivered as the next turn after this one ends',
   'chat.input.sendTitle': 'Send (Enter)',
+  // W2028: on touch Enter inserts a newline, so the send button is the only send path —
+  // its label must not promise "(Enter)".
+  'chat.input.sendTitleTouch': 'Send',
+  'chat.input.steerTitleTouch': 'Interject: inject into the running turn, delivered at the next step',
+  'chat.input.queueTitleTouch': 'Queue: delivered as the next turn after this one ends',
+  'chat.input.sendWorkerTitleTouch': "Send to the worker's inbox",
+  'chat.input.modeSteerTitleTouch': 'Current: interject · delivered at the next step · click to switch to queue',
+  'chat.input.modeQueueTitleTouch': 'Current: queue · delivered after this turn · click to switch to interject',
   // W1512: the running state of the merged send/stop control (one control, as DSH).
   'chat.input.stop': 'Stop',
   'chat.input.stopTitle': 'Stop this turn',
