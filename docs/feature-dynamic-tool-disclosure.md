@@ -373,7 +373,7 @@ W 组与 A 组绝对 token 不同（前缀更长、历史占比更高），但**
 | `packages/core` 类型 | **不改**（`ExposureOptions` 在 `packages/tools`） | 不改 | 不改 |
 | `packages/core/src/tool.ts:62-66` 注释「sorted by name」 | 改措辞为 stable disclosure order（顺序不在契约里） | — | — |
 | `{{tools}}` / M9 | 口径放宽为「可披露全集」（§2.4） | — | — |
-| golden fixtures / 对拍 | `fixtures/live/tools.json`、`reports/replay-e2e.*`、`reports/replay-diff.*`、`contracts/route-table.snapshot.json` | 需确认对拍是否断言 tools 数组字节（**待验证** U1） | 同步改 |
+| golden fixtures / 对拍 | `fixtures/live/tools.json`、`contracts/route-table.snapshot.json` | 需确认对拍是否断言 tools 数组字节（**待验证** U1） | 同步改 |
 
 **结论**：P0 **零新端点、零新工具、零 core 类型改动**；只改 `packages/tools` 与 `apps/studio` 装配/策略，外加测试。`tool_search` 把一个成本从「策略」变成「契约级连环改动」，**不建议 P0/P1**。
 
@@ -440,7 +440,7 @@ W 组与 A 组绝对 token 不同（前缀更长、历史占比更高），但**
 
 | ID | 项 | 影响 |
 |---|---|---|
-| U1 | `reports/replay-e2e.*` / `replay-diff.*` 是否断言 tools 数组字节 | 决定 golden/对拍成本 |
+| U1 | `fixtures/live/tools.json` 是否断言 tools 数组字节 | 决定 golden/对拍成本 |
 | U2 | deepseek-flash 的 `cache_read` 单价（账本 `priced_by=unpriced`） | 金额结论 |
 | U3 | 真实生产会话（3777）每 step/每 turn 改 tools 的实测命中率 | 本轮只做合成/契约工具探针，未动生产会话 |
 | U4 | `schemas()` 改序后既有会话的一次性前缀失效幅度 | 一次成本估计 |

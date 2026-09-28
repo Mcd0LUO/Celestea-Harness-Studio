@@ -4,11 +4,17 @@ coverage/
 *.log
 .env
 .DS_Store
-# generated probe evidence is committed on purpose; keep scratch output out
-reports/*.tmp
+# reports/ 是【脚本输出】目录，整目录不入库（铁律 6：不许提交派生产物）。
+# 旧规则只写了 `reports/replay-diff-*.json`，于是同一份内容的两种命名命运不同：
+#   reports/replay-diff-<stamp>.json  被忽略 ✓   reports/replay-diff.json  入库 ✗
+# 而 reports/replay-e2e.*、reports/contract-probe.md 更是不匹配任何规则 ⇒ 被提交。
+# 那些文件只被 writeFileSync 写、全仓无一处读（2026-09-28 核实）⇒ 是纯产物。
+reports/
 
-# generated per-run compare output
-reports/replay-diff-*.json
+# verify-contracts.ts 的产物（scripts/verify-contracts.ts:347 写它）。
+# contracts/ 其余文件都是【契约真源】必须入库；只有这一个是每次运行快照，
+# 且它已经腐烂（记录 sseEvents=9/tools=12，真实是 10/19）⇒ 与 reports/ 同一类。
+contracts/probe-evidence.json
 results/
 
 # 真实会话导出的 golden fixture 绝不入库（含私人对话）；合成 fixture 用 ! 例外保留
