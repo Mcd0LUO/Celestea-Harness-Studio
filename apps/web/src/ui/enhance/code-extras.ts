@@ -3,7 +3,8 @@
 // ----------------------------------------------------------------------------
 // 在**已高亮之后**运行（内置 hljs 遍先注册），对一个 `pre > code` 做四件事：
 //   1) 语言徽标（language-xxx；没有就不显示，不写 plaintext）；
-//   2) 超长折叠（默认折叠到固定高度 + 展开/收起）；
+//   2) 超长折叠（默认折叠到固定高度 + 展开/收起；**W2058 起预览面板整体退出这一步**，
+//      见 NO_FOLD_ATTR —— 聊天里的代码块折叠一字未动）；
 //   3) 行号栏；
 //   4) 悬停整行轻微底色。
 // 3/4 需要按行切分：把 code 的子树按 `\n` 拆成每行一个 `.cl`，**保留 hljs 的
@@ -50,6 +51,31 @@ export function setCodeFoldLines(n: number): void {
  * 单条工具结果 196187 字符）。折叠与徽标不受影响，块本身照常渲染。
  */
 export const CODE_LINES_MAX_CHARS = 20000;
+
+/**
+ * W2058：**容器级折叠退出标记**（预览面板专用）。
+ *
+ * 用户原话「取消这个展开」—— 指的是**文件预览**里代码块工具条上那个「展开」。
+ * 预览的语义就是「看完整内容」，折叠在此**只帮倒忙**：用户点开一个文件正是为了
+ * 读它，多一次「展开」点击、且默认只给 30 行。
+ *
+ * ★ 为什么用「标记」而不是「让预览不跑 code-extras」：
+ *   code-extras 是**四件事打包**的一个增强遍（徽标 / 折叠 / 行号 / 悬停行底色），
+ *   而用户只反对**折叠**这一件 —— 徽标与行号在预览里同样有用（用户没要求去掉，
+ *   本波也不动）。整遍跳过会连带丢掉徽标与行号，那是**过度执行**。
+ *   ⇒ 标记让「折叠」这一步单独可退出，其余三步在预览里逐字不变。
+ *
+ * ★ 为什么标记挂在**祖先**而不是给 enhancer 传参：
+ *   `runEnhancers(container)` 的合同是「container 是作用域」，签名里没有、也不该有
+ *   「本作用域要不要折叠」这种调用方配置（registry.ts 的头注写明缝不认识 DOM 语义）。
+ *   挂在 DOM 上则天然随内容走：面板的 `.preview-body` 带标记，流式分段（stream.ts 的
+ *   `.preview-seg`，是 body 的**后代**）用 `closest` 一样命中 —— 两个调用点
+ *   （panel.ts 的整篇、stream.ts 的逐段）**不需要各自记得传开关**，这正是本仓
+ *   「作用域 vs 目标自身」（W895-P2）那类坑的反面写法。
+ */
+export const NO_FOLD_ATTR = "data-code-fold";
+/** 标记的取值（只有恰好等于它才退出折叠）。 */
+export const NO_FOLD_VALUE = "off";
 
 export interface CodeSegment {
   /** 该段文本继承的 class 链（hljs 的 hljs-* 与 language-*）。 */
@@ -181,8 +207,23 @@ function renderLineSpans(code: Element): void {
   el.dataset["linesDone"] = "1";
 }
 
+/**
+ * 这个代码块是否处在「不折叠」作用域里（W2058；见 NO_FOLD_ATTR 的头注）。
+ *
+ * 用 `closest` 而不是「查某个已知祖先类」：预览的两次调用作用域不同
+ * （panel.ts 传 .preview-body、stream.ts 传 .preview-seg），`closest` 对两者
+ * 一视同仁，将来多一个调用点也不必回来改这里。
+ */
+function foldsOptedOut(pre: Element): boolean {
+  return pre.closest('[' + NO_FOLD_ATTR + '="' + NO_FOLD_VALUE + '"]') !== null;
+}
+
 /** 行数超过阈值时默认折叠 + 展开/收起按钮（幂等：工具条里只加一次）。 */
 function addFold(wrap: HTMLElement, pre: HTMLElement, code: Element): void {
+  // W2058：预览面板整体退出折叠（**先于**行数判据 —— 退出是容器级的，
+  // 与这个块有多长无关；放在后面会让「短块不折叠」与「预览不折叠」混成一条路径，
+  // 将来调阈值时行为会漂）。
+  if (foldsOptedOut(pre)) return;
   // 先判「要不要折叠」再建工具条：没东西可放时不留空工具条（DOM 里不留空节点）。
   const count = code.querySelectorAll(".cl").length;
   if (count <= currentFoldLines()) return;
