@@ -94,6 +94,40 @@ describe("reasoning + content + tool calls + usage", () => {
     }
   });
 
+  it("tolerates gateways that re-send the full tool name in every chunk", async () => {
+    // r4.codes shape: delta.function.name carries the complete name on every
+    // chunk instead of only the first. Concatenating it produced
+    // "read_fileread_fileread_file" -> "unknown tool" for every call.
+    const events = await runFrames([
+      sseFrame({
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, id: "call_1", function: { name: "read_file", arguments: '{"pa' } },
+              ],
+            },
+          },
+        ],
+      }),
+      sseFrame({
+        choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { name: "read_file", arguments: 'th":' } }] } }],
+      }),
+      sseFrame({
+        choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { name: "read_file", arguments: '"/tmp/a"}' } }] } }],
+      }),
+      sseFrame("[DONE]"),
+    ]);
+    const terminal = events.at(-1);
+    expect(terminal?.kind).toBe("done");
+    if (terminal?.kind === "done") {
+      expect(terminal.message.content).toEqual([
+        { type: "tool_call", content: { id: "call_1", name: "read_file", args: { path: "/tmp/a" } } },
+      ]);
+    }
+  });
+
   it("skips keepalive, comment and non-JSON frames silently", async () => {
     const events = await runFrames([
       ": keepalive\n\n",
