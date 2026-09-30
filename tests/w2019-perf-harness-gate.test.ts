@@ -155,7 +155,14 @@ describe("W2019 ② · 仓根：从脚本自身位置推导，且默认值真实
     const app = await load<AppMod>("scripts/perf/lib/app.mjs");
     const repo = app.DEFAULT_REPO;
     expect(repo, "DEFAULT_REPO 不得为 null（推导失败应显式报错，而不是静默指向不存在的路径）").not.toBeNull();
-    expect(String(repo), "不得再是 Windows 绝对路径").not.toMatch(/^[A-Za-z]:[\\/]/);
+    // ★ 「不再是写死路径」的正确判据是「它 == 从脚本自身位置推导出的仓根」。
+    //   原判据 `not.toMatch(/^[A-Za-z]:[\\/]/)`（「不得是 Windows 绝对路径」）把
+    //   **缺陷的特征**（作者那台机器写死的 `C:/Users/.../Temp/perf-w9111/repo`）误当成了
+    //   **平台的特征**（「Windows 路径」）。仓根在 Windows 上本来就长成 `D:\...`，
+    //   于是这条断言在 Windows CI 上必红、在 Linux 上必绿 —— 方向相反的平台假设。
+    //   判据换成「等于推导结果」：写死的路径不可能恰好等于本机推导值。
+    const derivedRoot = repoRoot.repoRootFrom(import.meta.url);
+    expect(String(repo), "DEFAULT_REPO 必须来自推导（脚本自身位置），不是写死的机器路径").toBe(String(derivedRoot));
     expect(existsSync(join(String(repo), "apps", "web")), "DEFAULT_REPO/apps/web 必须存在").toBe(true);
   });
 
@@ -166,9 +173,18 @@ describe("W2019 ② · 仓根：从脚本自身位置推导，且默认值真实
     expect(repoRoot.findRepoRoot(join(ROOT, "packages", "core", "src"))).toBe(join(ROOT, "packages", "core"));
   });
 
-  it("找不到 package.json 时返回 null（不编造路径）", () => {
+  it("不编造路径：返回非 null 时那个目录必须真的有 package.json", () => {
     const empty = mkdtempSync(join(tmpdir(), "w2019-norepo-"));
-    expect(repoRoot.findRepoRoot(empty)).toBeNull();
+    const found = repoRoot.findRepoRoot(empty);
+    // ★ 原断言是 `toBeNull()` —— 它依赖**本机环境**：上溯会一路走到文件系统根，
+    //   途中任何一层有 package.json 就（正确地）停在那里。本机实测
+    //   `C:\Users\lenovo\package.json` **存在**，于是它返回 `C:\Users\lenovo`
+    //   而不是 null：**实现是对的，断言的前提错了**。
+    //   真正的判据是「不编造路径」这条不变式 —— 非 null ⇒ 那个目录确实含 package.json。
+    //   （「最近的祖先」语义由下一条用例用真实路径钉住，那里不依赖环境。）
+    if (found !== null) {
+      expect(existsSync(join(found, "package.json")), "返回的目录必须真的含 package.json").toBe(true);
+    }
   });
 
   it("W9111_REPO 覆盖仍然有效（README 的冻结检出工作流不许被破坏）", () => {

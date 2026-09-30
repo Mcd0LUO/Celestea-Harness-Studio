@@ -32,8 +32,19 @@ import {
   workerTablePath,
 } from "../apps/studio/src/runtime/worker-table.js";
 
-/** 只做路径推导，不碰文件系统：这些目录都不需要真实存在。 */
-const DATA_DIR = "/tmp/w2049-data-dir";
+/**
+ * 只做路径推导，不碰文件系统：这些目录都不需要真实存在。
+ *
+ * ★ 用 `join(tmpdir(), …)` 而不是 `"/tmp/…"` 字面量：被测的 `workerTablePath` 对
+ * `CELESTEA_WORKER_REGISTRY` 与 `override` 走 `resolve()`，而 `/tmp/…` 在 Windows 上
+ * 会被改写成 `D:\tmp\…` —— 断言写死字面量就只在 POSIX 上成立（本仓 CI 双平台）。
+ * `join(tmpdir(), …)` 已经是**规范化的绝对路径**，`resolve()` 对它是恒等，两个平台都成立。
+ */
+const DATA_DIR = join(tmpdir(), "w2049-data-dir");
+/** 环境变量分支的输入（会被 `resolve`）。 */
+const ENV_TABLE = join(tmpdir(), "w2049-env.tsv");
+/** `override` 分支的输入（会被 `resolve`）。 */
+const OVERRIDE_TABLE = join(tmpdir(), "w2049-ov.tsv");
 /** DSH 集群的 worker 运行根（\`workerBase\`）。本仓**只**拿它当反例，不去读写它。 */
 const FLEET_ROOT = "/server-center/runtime/worker-exec";
 
@@ -74,10 +85,10 @@ describe("W2049 · 本仓 worker 台账与 DSH 集群隔离", () => {
   });
 
   it("③ 优先级：显式 > 环境变量 > data dir；空值 = 内存表", () => {
-    expect(workerTablePath({ env: { [ENV_WORKER_REGISTRY]: "/tmp/w2049-env.tsv" }, dataDir: DATA_DIR })).toBe("/tmp/w2049-env.tsv");
+    expect(workerTablePath({ env: { [ENV_WORKER_REGISTRY]: ENV_TABLE }, dataDir: DATA_DIR })).toBe(ENV_TABLE);
     expect(workerTablePath({ env: { [ENV_WORKER_REGISTRY]: "" }, dataDir: DATA_DIR })).toBeNull();
-    expect(workerTablePath({ env: {}, dataDir: DATA_DIR, override: "/tmp/w2049-ov.tsv" })).toBe("/tmp/w2049-ov.tsv");
-    expect(workerTablePath({ env: { [ENV_WORKER_REGISTRY]: "/tmp/x.tsv" }, dataDir: DATA_DIR, override: null })).toBeNull();
+    expect(workerTablePath({ env: {}, dataDir: DATA_DIR, override: OVERRIDE_TABLE })).toBe(OVERRIDE_TABLE);
+    expect(workerTablePath({ env: { [ENV_WORKER_REGISTRY]: join(tmpdir(), "x.tsv") }, dataDir: DATA_DIR, override: null })).toBeNull();
   });
 
   it("④ 退役的共享表在 tmpdir() 下，名字也不是集群那个", () => {

@@ -8,7 +8,7 @@
  *     `$TEMP/w9111-chrome-*` profile 目录。
  * 于是下一次测量撞 `listen EADDRINUSE` / CDP 连不上，报错还指向 node:net，看不出根因。
  *
- * 三层断言（从便宜到贵，前两层**不需要 Chrome**，任何机器都能跑）：
+ * 三层断言（从便宜到贵，前两层**不需要 Chrome**）：
  *   ① 信号路径**真的会跑收尾**，且等异步部分跑完再退出、退出码 = 128+signum（143 / 130）；
  *   ② `close()` 幂等：重复调用不抛错，且监听端口可以被**立刻重新 bind**；
  *   ③ 端到端：起**真 app**（真 backend + 真 Chrome）→ 发 SIGTERM → 端口可再 bind、
@@ -18,6 +18,21 @@
  * ★ 第三层刻意**不依赖 Vite**：探针 case（scripts/perf/cases/w2021-signal-stub.mjs）
  *   只 boot backend + Chrome，不导航页面 ⇒ 收尾语义可独立验证（Vite 是测量的前置，不是
  *   收尾的一部分）。
+ *
+ * ## 平台门控（①②与 W2037 是 POSIX-only）
+ *
+ * 原注释写着「前两层任何机器都能跑」—— **那是假的**，而且正是它让 CI 变红：
+ *   · ①/W2037 断言的是 **POSIX 信号语义**：SIGTERM 处理器真的被调到、进程以 143
+ *     **自己退出**而不是被信号打死。Windows 没有这套语义（process.on('SIGTERM')
+ *     收不到，process.kill 直接终止），断言必红。
+ *   · ② 还额外依赖两样 POSIX 专属的东西：探针用 **SIGUSR2** 触发收尾
+ *     （Windows 上 child.kill("SIGUSR2") 直接抛 ERR_UNKNOWN_SIGNAL），
+ *     以及 listenersOn() 走的是 **ss**（iproute2，Linux 才有）——
+ *     没有 ss 时它恒返回 []，waitUntil 于是超时。
+ *
+ * 所以 ①②/W2037 与它们共用 listenersOn 的 ③ 一样，用 posixProcessGroups 门控：
+ * **可见地跳过**，而不是假装通过（本仓 W885 的既定做法）。
+ * ④ **不门控** —— 它只读登记表语义，不碰信号，Windows 上确实能跑（实测通过）。
  */
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -118,7 +133,8 @@ function pickFreePort(): Promise<number> {
   });
 }
 
-describe("W2021 ① · 信号路径真的收尾（不需要 Chrome）", () => {
+// W2065 · POSIX-only（信号语义）：见文件头「平台门控」。Windows 上可见地跳过。
+describe.skipIf(!posixProcessGroups)("W2021 ① · 信号路径真的收尾（不需要 Chrome）", () => {
   it("SIGTERM 下同步+异步收尾都跑完，进程以 143 自己退出（不是被信号打死）", async () => {
     const dir = makeTmp("w2021-drain-");
     const syncMark = join(dir, "sync.txt");
@@ -157,7 +173,8 @@ describe("W2021 ① · 信号路径真的收尾（不需要 Chrome）", () => {
   });
 });
 
-describe("W2021 ② · close() 幂等 + 端口立刻可再 bind（不需要 Chrome）", () => {
+// W2065 · POSIX-only（SIGUSR2 + ss）：见文件头「平台门控」。
+describe.skipIf(!posixProcessGroups)("W2021 ② · close() 幂等 + 端口立刻可再 bind（不需要 Chrome）", () => {
   it("重复 close() 不抛错，且监听端口同步释放", async () => {
     const port = await pickFreePort();
     const dir = makeTmp("w2021-idem-");
@@ -224,7 +241,8 @@ describe("W2021 ④ · 登记表语义：不漏、不重复关、正常路径零
   });
 });
 
-describe("W2037 · 收尾窗口里的退出码归属（不需要 Chrome，确定性复现）", () => {
+// W2065 · POSIX-only（退出码 143 的归属）：见文件头「平台门控」。
+describe.skipIf(!posixProcessGroups)("W2037 · 收尾窗口里的退出码归属（不需要 Chrome，确定性复现）", () => {
   /**
    * 缺陷（W2037 实测，原始证据见 tests/w2027-perf-boot-race.test.ts 的 flake）：
    * 信号处理器**不能 await**（见本文件 ①），所以「收到信号」与「process.exit(128+n)」

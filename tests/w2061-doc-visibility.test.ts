@@ -12,7 +12,9 @@
  *    `activeDocs` / `archiveDocs` / `DOC_EXEMPT` 三者之一。
  *    ★ 判据用**独立遍历**（`walkAllFiles`），不用 `walkMarkdownDocs` ——
  *      否则是循环论证（我实测过：把 walkMarkdownDocs 改回旧判据，用它自己写的断言全绿）。
- * 2. **豁免不腐烂**：豁免表每一项都真实存在，且数量被钉住（新增必须有人改数字）。
+ * 2. **豁免不腐烂**：豁免表每一项都对应一个真实的**索引事实**（模板必须入库、
+ *    本机文件必须不入库 —— 判据是 git 索引，不是「文件存在」），且数量被钉住
+ *    （新增必须有人改数字）。
  *
  * ## 为什么这不是吹毛求疵
  * `AGENT.local.md.example` 的标题原本写着「AGENT.local.md — 本机事实（不入库）」、
@@ -25,6 +27,8 @@ import { describe, expect, it } from "vitest";
 import {
   DOC_EXEMPT,
   isMarkdownName,
+  isTracked,
+  LOCAL_ONLY,
   LOCAL_TEMPLATE,
   walkAllFiles,
   walkMarkdownDocs,
@@ -62,11 +66,19 @@ describe("docs/ 可见性 · 没有文件能靠「扫描器看不见」而绕过
     ).toEqual([]);
   });
 
-  it("② 豁免表每一项都真实存在（防豁免腐烂）", () => {
-    const all = new Set(walkAllFiles(DOCS).map(rel));
-    for (const r of DOC_EXEMPT) {
-      expect(all.has(r), "DOC_EXEMPT 里的 " + r + " 不存在（豁免腐烂了，删掉它）").toBe(true);
-    }
+  it("② 豁免表每一项都对应一个真实的**索引事实**（防豁免腐烂）", () => {
+    // 判据从「文件存在」改成「git 索引事实」—— 这是 doc-visibility.ts 注释里
+    // **本来就写明**的设计：「会不会被提交只有 git 索引知道」。
+    //
+    // 为什么原判据是错的：LOCAL_ONLY（AGENT.local.md）是 gitignore 的本机文件，
+    // **全新检出里按设计就不存在**。用「文件存在」判它 ⇒ 任何干净 checkout（含 CI）
+    // 必红；而本机恰好从模板复制过一份的人看到的是绿。这正是本仓反复吃亏的
+    // 「本机事实当平台事实」—— 只不过方向相反（本机绿、干净检出红）。
+    const inDocs = (name: string): string => "docs/" + name;
+    // 模板必须在索引里：否则别人 clone 后没有可复制的模板，这条豁免就是个空口子。
+    expect(isTracked(REPO, inDocs(LOCAL_TEMPLATE)), "模板必须入库（否则 clone 后无可复制的模板）").toBe(true);
+    // 本机文件必须【不】在索引里：它若被入库，正是本门禁要防的那个事故。
+    expect(isTracked(REPO, inDocs(LOCAL_ONLY)), "本机文件绝不许入库（gitignore 的本机事实）").toBe(false);
   });
 
   it("③ 豁免表不许悄悄变多（新增豁免必须有人改这个数字并说明理由）", () => {
