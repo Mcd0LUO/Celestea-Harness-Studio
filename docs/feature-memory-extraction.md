@@ -157,6 +157,8 @@ Phase 2 ─ 上下文压缩（方向已定：模型驱动 + 视图叠层；启�
 - **防自反馈**：提炼的模型请求**不 append 到 session log**（对应 ZCode 的 `skipTranscript`）。
 - **提炼模型（✅ 已裁决 2026-09-30）**：用**会话当前模型**（跟随 providers.json 的 default_model，不设独立配置项）；**reasoning_effort 硬钉最低档（off），不随会话 profile 走**——防止主对话调高 thinking 后提炼跟着贵起来（ZCode 同款：`auxiliaryModelOptions` 取公开档位最低项 + 输出压到 ≤5000）；输出预算 ≤2048 token（几条 MEMORY_ENTRY 的量级）。维持「单次结构化输出调用、无工具循环」裁决，ZCode 只借鉴模型/档位/预算这三件。
 - **usage ledger（✅ 已裁决 2026-09-30）**：**记**，独立 `kind: "extraction"`，**不并入 `turn_total`**——不记是隐性成本，并入则污染 Phase 0a 基线口径；独立 kind 让提炼成本可单独核算对账。
+- **提炼 prompt 内嵌取舍标准**：提炼调用的 prompt 必须自带记忆类型分类（user / feedback / project / reference，对齐 ZCode `persistent-memory-prompt`）与 NOT-save 清单（代码可推导 / git 可查 / 修复配方 / AGENTS.md 已有 / 临时状态）——ZCode 的提炼 prompt 是直接引用主 prompt 里现成的 Memory 章节，而本仓 system prompt 由用户自配、没有可引用的段落，标准必须内嵌自带。
+- **与主对话主动写互补**：主循环 `remember`/`forget` 的 WHEN TO SAVE 指引（e8a8e3a）让模型在对话中直接写记忆；提炼的 direct-write 跳过门（对应 ZCode `containsDirectMemoryWrite`）检测到本轮已直接写则跳过——主动写与后台提炼互不打架。
 
 ### Phase 2：上下文压缩 —— 方向已定：模型驱动 + 视图叠层
 
