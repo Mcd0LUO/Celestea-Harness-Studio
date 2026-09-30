@@ -110,6 +110,11 @@ function parseTargets(raw: unknown): LlmTarget[] {
       model,
       baseUrl: str(rec["baseUrl"]),
       apiKeyEnv: str(rec["apiKeyEnv"]),
+      // W2066: the target's own wire protocol. Absent stays absent, and the
+      // assembly layer (llm-assembly liveEngineLlmFor) is what decides between
+      // "inherit the primary's" and "name this one" — a parser that invented a
+      // default here would make the two cases indistinguishable downstream.
+      requestFormat: str(rec["requestFormat"]),
     });
   }
   return out;

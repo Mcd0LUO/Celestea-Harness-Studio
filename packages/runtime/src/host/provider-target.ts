@@ -42,6 +42,13 @@ export interface ProfileSlot {
   model: string;
   base_url: string;
   api_key_env: string;
+  /**
+   * W2066: the wire protocol the resolved model is spoken with. It travels on
+   * the TARGET (the route), never on a call: it is a property of the provider
+   * row that owns the model, and it is written into the profile only so the
+   * llm factory can resolve an adapter from it.
+   */
+  request_format: string;
 }
 
 /** The fields of a providers.json row this module reads. */
@@ -77,6 +84,12 @@ export type ProviderKeySource = "env" | "provider_store" | "none";
 export interface ProviderTarget {
   model: string;
   base_url: string;
+  /**
+   * W2066: the wire protocol of the owning provider row, verbatim. Reported
+   * beside model + base_url because those three are one answer — 「which model,
+   * on which host, spoken how」 — and the first two used to travel without it.
+   */
+  request_format: string;
   /** The provider row that lists `model` (null = no provider claims it). */
   provider_id: string | null;
   model_source: ModelSource;
@@ -171,6 +184,10 @@ export function resolveProviderTarget(
   return {
     model,
     base_url: resolveBaseUrl(owner, env, base.base_url),
+    // W2066: the OWNING row's protocol, verbatim. Absent owner (nothing lists
+    // the model) keeps the profile's own value — the same 「nobody declared
+    // anything」 reading W2065 gives base_url.
+    request_format: owner?.request_format ?? base.request_format,
     provider_id: owner?.id ?? null,
     model_source: source,
     key_source: keySource,
@@ -192,7 +209,10 @@ export function applyProviderTarget<P extends ProfileSlot>(
   const { key, source } = resolveProviderKey(owner, env, base.api_key_env);
   if (key !== null) env[base.api_key_env] = key;
   return {
-    profile: { ...base, model: target.model, base_url: target.base_url },
+    // W2066: the format joins model + base_url as a third thing that moves with
+    // the route. Writing model without it is the drift W2065 fixed for the
+    // endpoint; leaving it behind is the same bug one level down.
+    profile: { ...base, model: target.model, base_url: target.base_url, request_format: target.request_format },
     target: { ...target, key_source: source },
   };
 }

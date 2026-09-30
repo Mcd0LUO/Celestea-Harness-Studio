@@ -84,6 +84,8 @@ function defaultProfile(over: Partial<EngineProfile>): EngineProfile {
   return {
     model: "unknown",
     base_url: "http://127.0.0.1:3001/v1",
+    // W2066: the fake has no provider registry, so the documented default stands.
+    request_format: "chat_completions",
     reasoning_effort: null,
     max_steps: 4096,
     max_parallel_tool_calls: 4,

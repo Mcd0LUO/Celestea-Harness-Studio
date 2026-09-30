@@ -36,6 +36,17 @@ export interface LlmProfile extends TimeoutProfile {
   max_output_tokens?: number | null;
   /** Name of the env var holding the API key (default DEEPSEEK_API_KEY). */
   api_key_env?: string | null;
+  /**
+   * W2066: the wire protocol this ROUTE speaks, as the owning provider row
+   * names it. Absent/blank means chat_completions, which is what every
+   * pre-W2066 deployment actually spoke — the field used to be stored,
+   * displayed, and read by nobody.
+   *
+   * It is a ROUTE fact, not a call fact: §factory.ts§ resolves it through the
+   * adapter registry and REFUSES (§NO_ADAPTER§) when no adapter serves it,
+   * rather than quietly speaking OpenAI's dialect to a different protocol.
+   */
+  request_format?: string | null;
 }
 
 /** Fully resolved client configuration (carries the key; never logged). */

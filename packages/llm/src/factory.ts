@@ -21,9 +21,15 @@
  * injected test seam in apps/studio).
  */
 
+import {
+  AdapterRegistry,
+  CHAT_COMPLETIONS_FORMAT,
+  type RouteAdapter,
+  type RouteDescription,
+} from "./adapter.js";
 import { OpenAiCompatClient } from "./client.js";
 import { LlmError } from "./errors.js";
-import { resolveClientConfig, tiersFromConfig, type LlmProfile } from "./profile.js";
+import { resolveClientConfig, tiersFromConfig, type LlmProfile, type ResolvedClientConfig } from "./profile.js";
 import type { EnvLike, TimeoutTiers } from "./timeouts.js";
 
 /** `live` = the real provider; `offline` = the host's deterministic seam. */
@@ -74,9 +80,74 @@ export function withBaseUrlFallback(profile?: LiveLlmProfile | null, env: EnvLik
   return fromEnv === undefined ? base : { ...base, base_url: fromEnv };
 }
 
-/** Build the live OpenAI-compatible client behind the `Llm` seam. */
-export function createLiveLlm(profile?: LiveLlmProfile | null, env: EnvLike = process.env): OpenAiCompatClient {
-  return OpenAiCompatClient.fromProfile(withBaseUrlFallback(profile, env), env);
+/**
+ * W2066: the protocol a profile asks for, defaulting to the one every
+ * pre-W2066 deployment spoke. Blank/absent is the DEFAULT, not a guess: the
+ * absence means 「nobody declared anything」, and the only honest answer to
+ * that is the protocol this build has always used.
+ */
+export function requestFormatOf(profile?: LiveLlmProfile | null): string {
+  const asked = (profile?.request_format ?? "").trim();
+  return asked === "" ? CHAT_COMPLETIONS_FORMAT : asked;
+}
+
+/**
+ * The built-in OpenAI-compatible adapter — the protocol this repository has
+ * always spoken, behind the W2066 seam rather than beside it. Its client is
+ * the pre-W2066 `OpenAiCompatClient` unchanged: registering an adapter must
+ * not be a refactor of the code it wraps.
+ */
+export const chatCompletionsAdapter: RouteAdapter = {
+  name: "chat-completions",
+  requestFormat: CHAT_COMPLETIONS_FORMAT,
+  createClient: (config: ResolvedClientConfig) => OpenAiCompatClient.fromConfig(config),
+  // W2066: deliberately empty. The chat-completions dialect declares no
+  // effort vocabulary of its own — the endpoint decides, and inventing one
+  // here is exactly the clamping/aliasing the seam exists to avoid.
+  describe: (): RouteDescription => ({
+    requestFormat: CHAT_COMPLETIONS_FORMAT,
+    reasoningEfforts: [],
+    contextWindow: null,
+    acceptsImages: true,
+  }),
+};
+
+/** A registry holding only the built-in adapter (one per call, not shared). */
+export function defaultAdapterRegistry(): AdapterRegistry {
+  const registry = new AdapterRegistry();
+  registry.register(chatCompletionsAdapter);
+  return registry;
+}
+
+/**
+ * Build the live client behind the `Llm` seam, through the adapter registry.
+ *
+ * W2066: the format decides WHICH adapter builds the client. A format with
+ * no registered adapter is refused by name (NO_ADAPTER) before any socket
+ * is opened — the honest-refusal rule (docs/pitfalls.md P14), the same shape
+ * `provider-probe.ts` uses for UNSUPPORTED_FORMAT.
+ */
+export function createLiveLlm(
+  profile?: LiveLlmProfile | null,
+  env: EnvLike = process.env,
+  registry: AdapterRegistry = defaultAdapterRegistry(),
+): OpenAiCompatClient {
+  const effective = withBaseUrlFallback(profile, env);
+  const config = resolveClientConfig(effective, env);
+  const format = requestFormatOf(effective);
+  const adapter = registry.resolve(format, `profile.request_format='${format}'`);
+  const client = adapter.createClient(config);
+  // The registry is a general seam; the host still wants the concrete client
+  // (endpoint(), describe()). A future adapter may return a different
+  // implementation, so the cast is checked here rather than assumed.
+  if (!(client instanceof OpenAiCompatClient)) {
+    throw new LlmError(
+      `adapter '${adapter.name}' produced ${client.constructor.name}, which the host cannot describe`,
+      "generate",
+      { retryable: false },
+    );
+  }
+  return client;
 }
 
 /** Secret-free view of the live configuration (never carries the key). */

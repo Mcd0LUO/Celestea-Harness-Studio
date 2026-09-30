@@ -119,6 +119,8 @@ function buildApp(root: string, staticRoot: string, env: NodeJS.ProcessEnv): Stu
         profile: {
           model: "offline-model",
           base_url: "http://127.0.0.1:9/v1",
+          // W2066: route state travels with the route; no provider registry here.
+          request_format: "chat_completions",
           api_key_env: "CELESTEA_API_KEY",
           reasoning_effort: null,
           max_steps: 4096,

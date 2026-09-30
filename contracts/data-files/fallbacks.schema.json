@@ -35,7 +35,12 @@
             "provider": { "type": "string", "description": "providers.json row id (defaults to `name`)" },
             "model": { "type": "string", "minLength": 1 },
             "baseUrl": { "type": "string", "description": "absent = the composed profile's base_url" },
-            "apiKeyEnv": { "type": "string", "description": "ENV VAR NAME of this target's key; absent = the profile's api_key_env" }
+            "apiKeyEnv": { "type": "string", "description": "ENV VAR NAME of this target's key; absent = the profile's api_key_env" },
+            "requestFormat": {
+              "type": "string",
+              "enum": ["chat_completions", "responses", "anthropic_messages"],
+              "description": "W2066: the wire protocol THIS target speaks; absent = the composed profile's. A chain spanning providers must name it per target, otherwise another provider's model id would be posted in the primary's dialect. A value no adapter serves is refused by name (NO_ADAPTER) before any request."
+            }
           }
         }
       },
@@ -57,7 +62,7 @@
     "version": 1,
     "enabled": true,
     "targets": [
-      { "name": "primary", "provider": "celestea", "model": "deepseek-chat" },
+      { "name": "primary", "provider": "celestea", "model": "deepseek-chat", "requestFormat": "chat_completions" },
       { "name": "backup", "provider": "基元", "model": "gpt-x", "baseUrl": "https://backup.example/v1", "apiKeyEnv": "BACKUP_API_KEY" }
     ],
     "policy": { "maxAttempts": 2, "cooldownMs": 60000, "failureThreshold": 3 }

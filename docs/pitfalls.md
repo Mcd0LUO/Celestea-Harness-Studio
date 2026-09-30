@@ -30,6 +30,7 @@
 | P12 | 重绑失败的回滚边界 | compact 不回滚日志；rename 会回滚目录移动 |
 | P13 | W 号跨域撞号 | DSH 分配器看不见 MC 域台账；回执文件名只带号 ⇒ 同号互相覆盖 |
 | P14 | 切模型不同步切端点 | `base_url` 曾被 `request_format === "chat_completions"` 卡住；会话级覆盖压根没有端点概念 |
+| P15 | `request_format` 只写不读 | 字段有 UI、有 schema、有回显，但 `packages/llm` 零引用；协议是**路由的属性**，变化单元是 adapter |
 
 ---
 
@@ -301,7 +302,53 @@ originalId: p?.id                          // 打开编辑器时记录
 （`apps/studio/src/runtime/engine-profile.ts` 的 `ENGINE_REQUEST_FORMAT` 硬编码
 `chat_completions`，`packages/llm` 完全不消费 `request_format`）。
 所以一条声明为 `anthropic_messages` 的 provider 现在**端点对了、线格式仍不对** ——
-这是独立于本条的既有缺口。本次只把"指错 host"纠正成"指对 host"。
+**同源的诚实边界（W2066 已处理，见 P15）**：`request_format` 曾是**只写不读**的字段 ——
+UI 有下拉框（`apps/web/src/ui/providers/form.ts:111`）、schema 冻结了枚举、API 回显它，
+而 `packages/llm` 对它**零引用**，引擎无条件说 OpenAI 方言。端点修对之后，一条声明
+`anthropic_messages` 的行会**用 OpenAI 方言把 anthropic 的会话发出去**。
+
+---
+
+## P15 · `request_format` 只写不读：字段存在不等于行为存在
+
+**症状**：设置页能选 `anthropic_messages`，`providers.json` 里存着，列表里显示着 ——
+然后它对实际请求**毫无影响**。切到那个 provider 的模型，请求照旧用 OpenAI 方言发出去，
+失败形态是上游一个没有线索的 400。
+
+**根因（三个边界各丢一次）**：`apps/studio/src/runtime/engine-profile.ts` 的
+`ENGINE_REQUEST_FORMAT` 硬编码 `chat_completions`；`llm-assembly.ts` 的 `llmProfileOf`
+在**进 llm 包的边界**上把格式裁掉（宿主视图里连字段都没有）；`packages/llm` 全包零引用。
+`apps/studio/src/store/provider-probe.ts:133` 是全仓唯一诚实的地方 —— 它拒绝探测非
+chat_completions 的行且**不发请求**，W2066 沿用的就是它的形状。
+
+**正确做法（W2066）**：
+
+1. **协议是路由的属性，不是调用的属性。** 它跟着 `ProviderRow` 走，由 `ProviderTarget`
+   承接（与 W2065 的 `base_url` 同一个 `ownerFor`），写进 profile 只是为了让 llm 工厂
+   看得见 —— 不是因为它属于 profile。
+2. **变化单元是 adapter，不是方言开关。** `RouteAdapter` 拥有一个协议及其路由，
+   `AdapterRegistry` 按 `request_format` 解析。**不要**给客户端加 `if (format === ...)`
+   分支（`ARCHITECTURE.md` §3.3 的反模式）。
+3. **不支持是带名字的 fail-closed 失败**（`NO_ADAPTER`，`retryable: false`），在
+   **客户端构造期**抛出 —— 此时 socket 还不存在，所以「一个字节都没发」由构造顺序保证，
+   不是一个事后检查。
+
+**为什么不用现成的库**：DSH 走的是接 `pi-ai`（`openAICompletionsApi` /
+`anthropicMessagesApi` 等协议对象现成）的路。本仓的零依赖取向（`README`：core 零依赖、
+浏览器自己写 CDP 而不拖 Playwright）与之冲突，而该库传递闭包实测是 **89 个包 /
+11005 个文件 / 60 MB**（`@google/genai` 13.7 MB、`openai` 9.3 MB、`@anthropic-ai/sdk`
+8.3 MB）。所以取 DSH 的**结构**（adapter 注册 + 按名拒绝 + 能力由 adapter 回答），
+不取它的**依赖**。
+
+**怎么验证**：`packages/llm/src/adapter.test.ts`（注册表语义 + 拒绝 + 退役）与
+`apps/studio/src/runtime/w2066-request-format.test.ts`（真 socket：拒绝时上游零请求，
+对照行照常发）。变异负控制两处：target 不取 owner 的格式 → 路由化用例红；工厂绕过
+注册表 → 拒绝用例红。
+
+**仍然不做（有意）**：`anthropic_messages` / `responses` 的实现。它们的 SSE 帧必须
+**从真实 provider 录制**才能当黄金样本（`ARCHITECTURE.md` §6.4 的金标准顺序），手编的
+帧不配。接缝位置已经定对：将来加协议是**新增一个 adapter 文件 + 一行 `register()`**，
+不是重构。
 
 ---
 

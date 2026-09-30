@@ -41,6 +41,8 @@ function baseProfile(over: Partial<EngineProfile> = {}): EngineProfile {
   return {
     model: "unknown",
     base_url: "http://profile.test/v1",
+    // W2066: the base a test overrides; the owning row's format replaces it.
+    request_format: "chat_completions",
     reasoning_effort: null,
     max_steps: 4096,
     max_parallel_tool_calls: 4,
@@ -98,6 +100,39 @@ describe("target resolution", () => {
     expect(resolveProviderTarget(lookup(responses, "m1"), { CELESTEA_BASE_URL: "http://env.test/v1" }, baseProfile()).base_url).toBe(
       "http://gw.test/v1",
     );
+  });
+
+  it("W2066: the target carries the OWNING row's wire protocol, and writes it through", () => {
+    // request_format is ROUTE state (like base_url), not call state. Before W2066
+    // the field existed on the row, on the UI, and in the public view — and was
+    // read by nothing, so the engine spoke chat_completions to every endpoint.
+    const rows = [
+      row({ id: "gw", base_url: "http://gw.test/v1", request_format: "chat_completions", models: [{ id: "m1" }] }),
+      row({ id: "mm", base_url: "https://api.minimaxi.com/v1", request_format: "anthropic_messages", models: [{ id: "m2" }] }),
+    ];
+
+    // The global default names the gateway row's model: all three answers agree.
+    const gw = resolveProviderTarget(lookup(rows, "m1"), {}, baseProfile());
+    expect([gw.model, gw.request_format, gw.base_url, gw.provider_id]).toEqual([
+      "m1", "chat_completions", "http://gw.test/v1", "gw",
+    ]);
+
+    // Point the default at the other row: model, endpoint AND protocol all move
+    // together — a format that outlived its model is exactly the drift.
+    const mm = resolveProviderTarget(lookup(rows, "m2"), {}, baseProfile({ model: "m1" }));
+    expect([mm.model, mm.request_format, mm.base_url, mm.provider_id]).toEqual([
+      "m2", "anthropic_messages", "https://api.minimaxi.com/v1", "mm",
+    ]);
+
+    const applied = applyProviderTarget(baseProfile(), mm, lookup(rows, "m2"), {});
+    expect([applied.profile.model, applied.profile.request_format, applied.profile.base_url]).toEqual([
+      "m2", "anthropic_messages", "https://api.minimaxi.com/v1",
+    ]);
+  });
+
+  it("W2066: no owning row keeps the profile's own protocol (same rule as base_url)", () => {
+    const target = resolveProviderTarget(lookup([], null), {}, baseProfile({ request_format: "responses" }));
+    expect([target.provider_id, target.request_format]).toEqual([null, "responses"]);
   });
 
   it("still falls back to env for an owner with an EMPTY base_url (W2065)", () => {

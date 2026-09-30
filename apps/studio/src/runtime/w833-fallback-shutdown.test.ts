@@ -16,6 +16,7 @@ import { join } from "node:path";
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
+import type { EngineProfile } from "../runtime-adapter.js";
 import { createOfflineLlm } from "./offline-llm.js";
 import { createRealRuntimeAdapter } from "./real-runtime-adapter.js";
 // W9225：等条件成立，不等一个猜出来的时长。
@@ -30,9 +31,11 @@ const CONFIG = JSON.stringify({
   policy: { maxAttempts: 1, cooldownMs: 1000, failureThreshold: 1 },
 });
 
-const PROFILE = {
+const PROFILE: EngineProfile = {
   model: "offline-model",
   base_url: "http://127.0.0.1:9/v1",
+  // W2066: route state travels with the route; no provider registry here.
+  request_format: "chat_completions",
   api_key_env: "CELESTEA_API_KEY",
   reasoning_effort: null,
   max_steps: 4096,

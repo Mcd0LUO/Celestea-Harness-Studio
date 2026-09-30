@@ -7,6 +7,12 @@
  * Only this barrel is the package's public surface: provider internals
  * (SSE framing, wire mapping, HTTP transport) stay private so callers depend on
  * the `Llm` seam, not on the provider.
+ *
+ * W2066 added the wire-protocol seam above that one: `RouteAdapter` owns ONE
+ * protocol and the routes that speak it, `AdapterRegistry` resolves one per call
+ * and REFUSES by name (`NO_ADAPTER`) when the requested protocol has no adapter.
+ * A caller still only depends on the `Llm` seam — which is what lets the retry,
+ * fallback and image-downgrade decorators keep working unchanged across formats.
  */
 
 // The seam this package implements. A1 (W746): every symbol below is CORE's
@@ -114,13 +120,28 @@ export {
   validateModel,
 } from "./profile.js";
 
+// W2066: the wire-protocol seam. An adapter owns one protocol AND the routes
+// that speak it; an unregistered protocol is refused by name (NO_ADAPTER)
+// instead of being silently spoken as OpenAI's dialect.
+export type { RouteAdapter, RouteDescription } from "./adapter.js";
+export {
+  AdapterRegistry,
+  CHAT_COMPLETIONS_FORMAT,
+  noAdapterAdvice,
+  NO_ADAPTER,
+  unknownRouteDescription,
+} from "./adapter.js";
+
 // Production factory: mode switch + live profile -> client assembly (W511).
 export type { LiveLlmProfile, LiveLlmView, LlmMode } from "./factory.js";
 export {
+  chatCompletionsAdapter,
   createLiveLlm,
+  defaultAdapterRegistry,
   liveLlmView,
   LLM_BASE_URL_ENV,
   LLM_MODE_ENV,
+  requestFormatOf,
   resolveLlmMode,
   withBaseUrlFallback,
 } from "./factory.js";
