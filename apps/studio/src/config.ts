@@ -55,8 +55,15 @@ export function fsRoots(platform: string = process.platform, env: NodeJS.Process
 export const MAX_DIR_ENTRIES = 200;
 /** `src/api.rs` MIN_STEPS: POST /api/config can only raise max_steps. */
 export const MIN_STEPS = 4096;
-/** Contract default context window (statusline fallback). */
-export const CONTEXT_WINDOW = 1_000_000;
+/**
+ * Fallback context window, used only when neither CELESTEA_CONTEXT_WINDOW nor
+ * the model's providers.json entry declares one. A wrong-LOW window only trims
+ * early (observable, safe); a wrong-HIGH one silently overruns the real window
+ * mid-turn — so the fallback is the conservative floor of frontier models
+ * (128k), not the biggest number any channel advertises. Declared metadata or
+ * the env override lifts it.
+ */
+export const CONTEXT_WINDOW = 131_072;
 /**
  * W767: Studio's OWN password file (read-only input to `htpasswd -vbi`). This
  * is the file this project owns; no other service's credential store is ever

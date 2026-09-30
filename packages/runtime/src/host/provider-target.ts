@@ -22,6 +22,12 @@
  *             engine's only key channel, exactly like the engine's `env::set_var`).
  *             In-memory only: never written to a data file, never returned in a
  *             response, never logged.
+ *   window    env `CELESTEA_CONTEXT_WINDOW` wins; otherwise the owning model's
+ *             declared `context_window`; otherwise the profile's own value (the
+ *             host fallback constant). A wrong-LOW window trims early —
+ *             observable and safe; a wrong-HIGH one silently overruns the real
+ *             window mid-turn, so an undeclared model never inherits more than
+ *             the fallback.
  *
  * The module is store-free: it consumes the three `ProvidersStore` methods it
  * needs, so the rules are unit-testable without a data file.
@@ -41,6 +47,7 @@ export interface ProfileSlot {
   model: string;
   base_url: string;
   api_key_env: string;
+  context_window: number;
 }
 
 /** The fields of a providers.json row this module reads. */
@@ -49,7 +56,7 @@ export interface ProviderRef {
   base_url: string;
   request_format: string;
   api_key: string | null;
-  models: readonly { id: string }[];
+  models: readonly { id: string; context_window?: number | null }[];
 }
 
 /** The `ProvidersStore` slice this module needs. */
@@ -129,6 +136,29 @@ export function resolveBaseUrl(owner: ProviderRef | null, env: NodeJS.ProcessEnv
 }
 
 /**
+ * The trim budget's context window: the deployment's env override wins, then
+ * the owning model's declared `context_window`, then the profile's own value
+ * (the host fallback constant). Blank env values and non-positive declarations
+ * never count as "configured" (same rule as the key channel).
+ */
+export function resolveContextWindow(
+  owner: ProviderRef | null,
+  model: string,
+  env: NodeJS.ProcessEnv,
+  baseWindow: number,
+): number {
+  const fromEnv = trimmed(env["CELESTEA_CONTEXT_WINDOW"]);
+  if (fromEnv !== "") {
+    const parsed = Number(fromEnv);
+    // An unparseable override behaves like the engine profile does: the base
+    // (already the fallback in that chain) stands, declared metadata is skipped.
+    return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : baseWindow;
+  }
+  const declared = owner?.models.find((m) => m.id === model)?.context_window;
+  return typeof declared === "number" && Number.isFinite(declared) && declared > 0 ? Math.trunc(declared) : baseWindow;
+}
+
+/**
  * The key to authenticate with: the deployment's env key wins, a keyless env
  * borrows the owning provider's stored key (injected into the process env by
  * the caller). Blank values never count as "configured".
@@ -176,7 +206,12 @@ export function applyProviderTarget<P extends ProfileSlot>(
   const { key, source } = resolveProviderKey(owner, env, base.api_key_env);
   if (key !== null) env[base.api_key_env] = key;
   return {
-    profile: { ...base, model: target.model, base_url: target.base_url },
+    profile: {
+      ...base,
+      model: target.model,
+      base_url: target.base_url,
+      context_window: resolveContextWindow(owner, target.model, env, base.context_window),
+    },
     target: { ...target, key_source: source },
   };
 }

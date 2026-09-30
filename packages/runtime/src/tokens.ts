@@ -25,5 +25,5 @@ export const HOST_SESSION_ID = "cli-main";
 /** Default directory the worker receipt protocol writes `results/<wid>-<short>.md` into. */
 export const RESULTS_DIR = "results";
 
-/** W218: context window used for the estimated ratio (contract display default). */
-export const CONTEXT_WINDOW_FALLBACK = 1_000_000;
+/** W218: context window used for the estimated ratio when the profile carries none (display fallback, aligned with the studio fallback: conservative 128k floor). */
+export const CONTEXT_WINDOW_FALLBACK = 131_072;
