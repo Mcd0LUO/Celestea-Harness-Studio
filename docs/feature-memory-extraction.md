@@ -111,6 +111,11 @@ Phase 2 ─ 上下文压缩（方向已定：模型驱动 + 视图叠层；启�
 
 ### Phase 0b：常驻上下文去重
 
+> **状态：✅ 已实现（ff4e812）**。`packages/runtime/src/turn-context-dedup.ts` 的 `selectTurnContextRows(log, rows, config)`：
+> 状态是 (log, config) 的**纯函数**（无内存簿记，idle TTL / compact rebind / 重启后从 log 重新推导，落地接缝 2 按此化解）；
+> 可见性用与 loop **同一个** `trimContext` + 同一份 `AgentConfig` 保守模拟（落地接缝 1 按此化解——决策点到首 step 间只会切得更深，最坏本轮少一份、下轮自愈，单向安全）。
+> 接线在 `turn-runner.ts` `injectTurnContext`；12 个用例（10 纯函数 + 2 接线），变异控制（`isResident` 恒 true）恰好染红两条 ③ 态用例。
+
 **问题**：`turnContext` 在**每轮 turn 起点**被求值并无条件 append 成 user-role 历史 —— **没有去重、没有替换**。
 第 N 轮历史里有 N 份 skill catalog + N 份 `MEMORY.md`，**无自动上限**：`COMPACT_THRESHOLD = 8` 是允许压缩的**下限**（≤8 轮时拒绝压缩），不是副本数上限；
 模型侧唯一的自动边界是 `trimContext` 按预算砍，而那已经是「丢历史」。
