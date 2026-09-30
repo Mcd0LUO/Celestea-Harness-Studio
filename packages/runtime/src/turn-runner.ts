@@ -31,6 +31,7 @@ import {
   type SessionLog,
   type TurnOutcome,
 } from "@celestea/core";
+import { selectTurnContextRows } from "./turn-context-dedup.js";
 import { ComposeError, RuntimeReleasedError, TurnBusyError } from "./errors.js";
 import type { FrameMapper, LoopEventSink, TurnFrame } from "./frames.js";
 import type { TurnLedgerHooks } from "./ledger.js";
@@ -280,10 +281,13 @@ export class TurnRunner {
   /**
    * W884: append the engine-owned turn context (the skill catalog). Blank rows
    * are dropped, so a provider that has nothing to say is free to return [""].
+   *
+   * Phase 0b: rows pass the three-state dedup first — an unchanged row that is
+   * still model-visible is NOT appended again (turn-context-dedup.ts).
    */
   private injectTurnContext(log: SessionLog): void {
-    for (const row of this.deps.turnContext?.() ?? []) {
-      if (row.text === "") continue;
+    const rows = selectTurnContextRows(log, this.deps.turnContext?.() ?? [], this.deps.agentConfig);
+    for (const row of rows) {
       // W888: the origin travels with the row so the projection can label it.
       log.append({ type: "user_message", text: row.text, origin: row.origin });
     }
