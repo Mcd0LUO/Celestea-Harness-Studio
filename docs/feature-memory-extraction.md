@@ -106,8 +106,7 @@ Phase 2 ─ 上下文压缩（方向已定：模型驱动 + 视图叠层；启�
 | 常驻上下文占每轮 token 的**多少**？ | 占比低 → 0b 优先级可降 | 占比高 → 0b 必须先做 |
 | `trimContext` **多久触发一次**？ | 很少触发 → 压缩不急 | 频繁触发 → **正在持续丢历史**，Phase 2 要提前 |
 
-另有一个**零代码验证实验**可并行：把引擎指到 billion-context 代理（`D:\mozin\repos\billion-context`；本仓引擎恒走 OpenAI `chat_completions`，可直接挂）后跑真实流量，
-验证「模型驱动压缩」这个前提本身 —— 模型会不会不压 / 乱压、摘要质量如何、失控行为出不出。它是**实验手段**而非长期形态（见 §4 Phase 2「验证手段」）。
+> **billion-context 挂载实验：❌ 已关闭（2026-09-30，未执行）**。关闭理由：①0a/0b 落地后 Phase 2 紧迫性大降（缓存折价后账单仅约全价 21.7%、trim 现实不触发、常驻堆积已除根），在「Phase 2 是否启动」裁决前验证其前提是顺序倒置；②其 paper 已有 4.5 个月 / 174,327 次调用的生产实证，小规模重跑边际信息量小；③代理实验覆盖不了 Phase 2 的真实风险（水位数据面、trim/compact 的缓存失效不对称、视图叠层工程）。若 Phase 2 将来裁决为启动，再重开评估。
 
 ### Phase 0b：常驻上下文去重
 
@@ -156,7 +155,8 @@ Phase 2 ─ 上下文压缩（方向已定：模型驱动 + 视图叠层；启�
 - **支持 `supersedes`**：提炼天然需要「改正旧记忆」而非只新增；结构化输出应允许携带 supersedes 操作（写路径已支持该字段）。
 - **条目上限**：`MEMORY_ENTRY_MAX_BYTES = 2048` 是硬上限，prompt 必须告知模型，否则超长条目会被拒。
 - **防自反馈**：提炼的模型请求**不 append 到 session log**（对应 ZCode 的 `skipTranscript`）。
-- **动工前待定**（见 §6）：提炼用哪个模型；提炼调用是否记 usage ledger（不记会污染 Phase 0a 的成本基线）。
+- **提炼模型（✅ 已裁决 2026-09-30）**：用**会话当前模型**（跟随 providers.json 的 default_model，不设独立配置项）；**reasoning_effort 硬钉最低档（off），不随会话 profile 走**——防止主对话调高 thinking 后提炼跟着贵起来（ZCode 同款：`auxiliaryModelOptions` 取公开档位最低项 + 输出压到 ≤5000）；输出预算 ≤2048 token（几条 MEMORY_ENTRY 的量级）。维持「单次结构化输出调用、无工具循环」裁决，ZCode 只借鉴模型/档位/预算这三件。
+- **usage ledger（✅ 已裁决 2026-09-30）**：**记**，独立 `kind: "extraction"`，**不并入 `turn_total`**——不记是隐性成本，并入则污染 Phase 0a 基线口径；独立 kind 让提炼成本可单独核算对账。
 
 ### Phase 2：上下文压缩 —— 方向已定：模型驱动 + 视图叠层
 
@@ -203,7 +203,7 @@ token 估算器（`context-trim.ts`）；`cacheHitRatio`（`runtime/src/usage.ts
 - **#717 伪造标记**：模型在上下文压力下伪造「已压缩」确认文本、从未真正调用 —— 以状态为准，不以转录文本为准。
 - **炸锅 / 注入持久化**：哲学与工具记录必须瞬时、每轮重建，绝不沉淀进历史；已消费的压缩记录从视图隐藏（hide-consumed 卫生）；压缩循环设轮次上限，到顶**优雅完成**（绝不返回空完成）。
 
-**验证手段（非长期形态）**：本仓引擎恒走 OpenAI `chat_completions`（§3），今天即可把引擎指到 billion-context 代理后做 §4 0a 末尾的零代码实验。
+**验证手段（非长期形态）**：~~本仓引擎恒走 OpenAI `chat_completions`（§3），今天即可把引擎指到 billion-context 代理后做 §4 0a 末尾的零代码实验。~~ **❌ 已关闭（2026-09-30，理由见 §4 Phase 0a 末段）。** 保留以下判断备查：
 注意两点：挂载走的是其**代理模式**（为「改不了的客户端」设计的妥协路径，摘要伪装成 user 消息回灌）；且代理在进程外看不见 log / 提炼 / memory，
 本节的视图叠层收益在挂载形态下一条都拿不到 —— **挂载只是实验，长期形态必须是自研**。
 
@@ -235,11 +235,11 @@ Phase 2 定调为**视图叠层**（§4）后，原三条接缝只剩一条硬�
 
 | 项 | 状态 | 理由 |
 |---|---|---|
-| Phase 2 启动与否 / 优先级 | ⏸ 等 Phase 0a 数据 | 方向已定（模型驱动 + 视图叠层），启动门槛是 0a 三问的答案 |
+| Phase 2 启动与否 / 优先级 | ⏸ 挂起（0a 数据已到，启动信号未出现） | 0a 三问的答案：缓存折价后账单仅约 21.7%、trim 现实不触发、0b 已除常驻堆积——等真实长会话压力信号再裁决，方向不变（模型驱动 + 视图叠层） |
 | nudge 水位阈值 / preflight 触发预算 | ⏸ 挂起 | 等 Phase 0a 的数字；`trimContext` 现有阈值先客串兜底 |
 | 压缩状态存储位置 | ⏸ Phase 2 动工前裁决 | 建议：会话目录旁挂 `compression.json`，随 session store 生命周期 |
 | `decompress` 做成模型工具还是仅调试命令 | ⏸ Phase 2 动工前裁决 | billion-context 做成了模型工具；视图叠层下两种都便宜 |
-| 提炼用哪个模型 / 提炼调用是否记 usage ledger | ⏸ Phase 1 动工前裁决 | 不记 ledger 会污染 Phase 0a 的成本基线 |
+| 提炼用哪个模型 / 提炼调用是否记 usage ledger | ✅ 已裁决（2026-09-30） | 会话当前模型 + reasoning_effort 钉最低档 + 输出 ≤2048；ledger 记独立 `kind:"extraction"`、不并入 turn_total（§4 Phase 1） |
 | `trimContext` 与 `compactSession` 的取舍策略 | ✅ 已部分解答 | `trimContext` 留作 preflight 兜底；`compactSession` 待视图叠层落地后降级或退役（§4 Phase 2） |
 | 压缩阈值常量是否调整 | ⏸ 挂起 | 等 Phase 0a 的数字（仅当回退 log 重写方案时相关） |
 | 是否引入显式缓存断点 | ❌ 已撤回 | 见 §3 |
