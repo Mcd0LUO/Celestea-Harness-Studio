@@ -566,11 +566,17 @@ describe("W870 session-scoped model switch (contract delta)", () => {
   it("adds exactly ONE endpoint — PUT /api/sessions/{id}/model — with the frozen texts", () => {
     expect(model?.path).toBe("/api/sessions/{id}/model");
     expect(model?.method).toBe("PUT");
-    expect(model?.request.fields.map((f) => f.name)).toEqual(["model"]);
-    expect(model?.response.fields.map((f) => f.name)).toEqual(["ok", "session", "model", "covered", "effective"]);
+    // W2065: provider_id joins model on the request and base_url joins the response —
+    // the endpoint and the model are ONE switch, so they are reported as a pair.
+    expect(model?.request.fields.map((f) => f.name)).toEqual(["model", "provider_id"]);
+    expect(model?.response.fields.map((f) => f.name)).toEqual(["ok", "session", "model", "base_url", "covered", "effective"]);
     // The 409 guard is /compact's and the mode switch's sentence with this verb.
     expect(model?.errors).toContainEqual({ status: 409, error: "turn 进行中，无法切换模型" });
     expect(model?.errors).toContainEqual({ status: 422, error: "field 'model' must be a string" });
+    // W2065: a rejected provider_id is refused with NO partial write — the same rule
+    // and the same texts as POST /api/providers/default (W750).
+    expect(model?.errors).toContainEqual({ status: 404, error: "unknown provider '{id}'" });
+    expect(model?.errors).toContainEqual({ status: 400, error: "provider '{id}' does not list model '{v}'" });
     // Declared as TypeScript-only (the retired backend has no counterpart).
     const tsOnly = loadRouteSnapshot().tsOnlyRoutes ?? [];
     expect(tsOnly.map((r) => r.method + " " + r.path)).toContain("PUT /api/sessions/{id}/model");

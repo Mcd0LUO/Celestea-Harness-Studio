@@ -24,6 +24,12 @@ export interface SessionModelResp {
   ok?: boolean;
   session?: string;
   model?: string;
+  /**
+   * W2065：该会话下一轮**实际会打到哪个端点**（`session.json.base_url`，
+   * 没有覆盖时是全局 base_url）。与 `model` 成对读 —— 单独一个 model 无法
+   * 回答「这条请求发去哪儿」。
+   */
+  base_url?: string;
   /** true = 该会话有自己的 `session.json.model`（不跟全局默认走）。 */
   covered?: boolean;
   effective?: {
@@ -32,6 +38,12 @@ export interface SessionModelResp {
     base_model?: string;
     /** `'session'` = 覆盖生效；`'global'` = 回落全局默认。 */
     source?: 'session' | 'global';
+    /** W2065：与 `base_url` 同口径的生效端点。 */
+    base_url?: string;
+    /** 作答时刻的全局 base_url（端点覆盖的「全局默认」）。 */
+    base_base_url?: string;
+    /** 端点的来源：`'session'` = 本会话固定；`'global'` = 跟随全局。 */
+    base_url_source?: 'session' | 'global';
     /** 生效时机：下一轮边界（不打断在飞轮次）。 */
     next_turn?: boolean;
   };

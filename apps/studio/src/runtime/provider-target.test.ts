@@ -84,8 +84,26 @@ describe("target resolution", () => {
     expect(ownerOf(lookup(rows, "m1"), "nope")).toBeNull();
   });
 
-  it("keeps the env base_url for a provider without a chat adapter", () => {
+  it("applies the owning base_url for a NON chat_completions row (W2065)", () => {
+    // W2065: the old condition was `owner.request_format === chat_completions`, so
+    // a `responses` / `anthropic_messages` row resolved to the PREVIOUS host
+    // (env, then the profile) — the model moved, the endpoint did not, and the new
+    // model id was posted to the old provider. `request_format` shapes the request
+    // BODY; `base_url` says which host to talk to. Both non-chat formats pinned.
     const rows = [row({ request_format: "anthropic_messages" })];
+    const target = resolveProviderTarget(lookup(rows, "m1"), { CELESTEA_BASE_URL: "http://env.test/v1" }, baseProfile());
+    expect(target.base_url).toBe("http://gw.test/v1");
+    expect(target.provider_id).toBe("gw");
+    const responses = [row({ request_format: "responses" })];
+    expect(resolveProviderTarget(lookup(responses, "m1"), { CELESTEA_BASE_URL: "http://env.test/v1" }, baseProfile()).base_url).toBe(
+      "http://gw.test/v1",
+    );
+  });
+
+  it("still falls back to env for an owner with an EMPTY base_url (W2065)", () => {
+    // The non-empty check is NOT what changed: a row with no address still cannot
+    // answer for one, whatever its request_format.
+    const rows = [row({ base_url: "" })];
     const target = resolveProviderTarget(lookup(rows, "m1"), { CELESTEA_BASE_URL: "http://env.test/v1" }, baseProfile());
     expect(target.base_url).toBe("http://env.test/v1");
     expect(target.provider_id).toBe("gw");

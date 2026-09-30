@@ -29,6 +29,7 @@
 | P11 | `/api/clear` | 有 409 守卫、**无**备份 |
 | P12 | 重绑失败的回滚边界 | compact 不回滚日志；rename 会回滚目录移动 |
 | P13 | W 号跨域撞号 | DSH 分配器看不见 MC 域台账；回执文件名只带号 ⇒ 同号互相覆盖 |
+| P14 | 切模型不同步切端点 | `base_url` 曾被 `request_format === "chat_completions"` 卡住；会话级覆盖压根没有端点概念 |
 
 ---
 
@@ -260,6 +261,47 @@ originalId: p?.id                          // 打开编辑器时记录
 
 **怎么验证**：`tests/w2049-worker-registry-isolation.test.ts` 把隔离钉成五条断言
 （含"生产源码不得出现集群路径字面量"）；跨域核对则要**实读两张账**再比号，别只看一张。
+
+---
+
+## P14 · 切模型不同步切端点：`base_url` 不该由 `request_format` 决定
+
+**症状**：从一个惯用默认提供商的模型，切到另一个 provider（如 MiniMax）的模型，
+**模型切成功了，`base_url` 却还是旧提供商的** —— 于是新模型的 id 被发到旧 host。
+切回 chat_completions 的网关就正常，所以看起来像偶发。
+
+**根因（三层，缺一不可）**：
+
+1. `POST /api/providers/default` 的 compose patch 曾带
+   `owner.request_format === "chat_completions"` 条件，于是 `responses` /
+   `anthropic_messages` 的 provider **只写 model、不写 base_url**
+   （`apps/studio/src/handlers/providers.ts` `registerDefault`）。
+2. 同一守卫在 runtime 里还有一份逐字拷贝
+   （`packages/runtime/src/host/provider-target.ts` `resolveBaseUrl`）——
+   只修前端/handler 那份，症状会从"切了没生效"变成"切了下次重启又回退"。
+3. **会话级切换压根没有端点这个概念**（`PUT /api/sessions/{id}/model`）：
+   `session.json` 只有 `model`，`profileFor` 也只读 model，于是会话实例始终
+   继承全局 `base_url`。这条与 1/2 正交：修好 1/2 也补不上它
+   （手输模型名、`provider_id` 判定为空时都不经过全局那一步）。
+
+**正确做法**：`base_url` 是**「这个 provider 的地址」**，`request_format` 是
+**「请求体长什么样」** —— 后者永远不决定前者。两处解析都改成「owner 的
+`base_url` 非空就采用」；会话级则让**端点与模型成对落库、成对清除**
+（`session.json.base_url`，由 `profileFor` 按会话应用），并回声
+`base_url` / `effective.base_url_source`。
+
+**怎么验证**：变异负控制是这条的关键证据 ——
+把 `session-compose.ts` 的 `out.base_url = baseUrl` 停掉后，
+`apps/studio/src/runtime/session-model.test.ts` 的 5 条离线用例**仍然全绿**
+（它们只查写入值与回声），而
+**`apps/studio/src/runtime/w2065-session-base-url.test.ts` 的双上游实机用例转红**
+（请求落回网关那台）。只有后者能证明"请求真的发去了新端点"。
+
+**同源的诚实边界（本次未修，另记）**：TS 引擎目前只会说 OpenAI 兼容方言
+（`apps/studio/src/runtime/engine-profile.ts` 的 `ENGINE_REQUEST_FORMAT` 硬编码
+`chat_completions`，`packages/llm` 完全不消费 `request_format`）。
+所以一条声明为 `anthropic_messages` 的 provider 现在**端点对了、线格式仍不对** ——
+这是独立于本条的既有缺口。本次只把"指错 host"纠正成"指对 host"。
 
 ---
 

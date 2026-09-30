@@ -25,6 +25,11 @@ function provider(id: string, name: string, baseUrl: string, models: Array<Recor
   return { id, name, note: "", base_url: baseUrl, request_format: "chat_completions", api_key: SECRET, models };
 }
 
+/** W2065：可指定 `request_format` 的 provider 行（复现「切到 MiniMax」那类第三方端点）。 */
+function row(id: string, baseUrl: string, requestFormat: string, models: Array<Record<string, unknown>>): Record<string, unknown> {
+  return { id, name: id, note: "", base_url: baseUrl, request_format: requestFormat, api_key: SECRET, models };
+}
+
 function make(files: Record<string, unknown>, runtimeModel: string): StudioHarness {
   const h = makeHarness({
     runtime: createFakeRuntimeAdapter({ profile: { model: runtimeModel } }),
@@ -108,6 +113,29 @@ describe("W750 POST /api/providers/default — provider 消歧", () => {
     const legacy = await getJson(h.app, "/api/providers/default", jsonRequest("POST", { model: "deepseek-flash" }));
     expect(legacy.status).toBe(200);
     expect(h.runtime.profile().base_url).toBe("http://127.0.0.1:3001/v1");
+  });
+
+  it("W2065: 切到非 chat_completions provider 的模型时，base_url 必须跟着切", async () => {
+    // 回归线：compose 的 patch 曾被 `owner.request_format === "chat_completions"` 卡住，
+    // 于是切到 `responses` / `anthropic_messages` 的 provider 只换了模型、端点留在原地 ——
+    // 新模型的 id 被发到旧 host（用户报案：切到 MiniMax 的模型，模型能切换成功，
+    // 但 base_url 仍滞后不变）。request_format 决定请求体形状，不决定 host。
+    for (const fmt of ["responses", "anthropic_messages"]) {
+      const files = {
+        "providers.json": {
+          providers: [
+            row("gw", "http://127.0.0.1:3001/v1", "chat_completions", [model("glm-5.3-flash", [])]),
+            row("minimax", "https://api.minimaxi.com/v1", fmt, [model("MiniMax-M2", [])]),
+          ],
+          default_model: "glm-5.3-flash",
+        },
+      };
+      const h = make(files, "glm-5.3-flash");
+      const res = await getJson(h.app, "/api/providers/default", jsonRequest("POST", { model: "MiniMax-M2", provider_id: "minimax" }));
+      expect([fmt, res.status]).toEqual([fmt, 200]);
+      expect([fmt, h.runtime.profile().model]).toEqual([fmt, "MiniMax-M2"]);
+      expect([fmt, h.runtime.profile().base_url]).toEqual([fmt, "https://api.minimaxi.com/v1"]);
+    }
   });
 
   it("被拒的 provider_id 绝不落半成品（先校验后改）", async () => {

@@ -13,9 +13,10 @@
  *             ("profile default", i.e. the celestea.toml slot).
  *             An unlisted `default_model` never wins: the contract validates it
  *             against the provider rows instead of trusting a stale string.
- *   base_url  the provider that OWNS the resolved model, when its
- *             request_format is chat_completions and its base_url is non-empty
- *             (written into the profile before compose);
+ *   base_url  the provider that OWNS the resolved model, when its base_url is
+ *             non-empty (written into the profile before compose) — for EVERY
+ *             request_format (W2065; the `chat_completions` gate that used to sit
+ *             here left non-chat rows pointing at the previous host);
  *             else env `CELESTEA_BASE_URL` -> else the profile's own base_url.
  *   api key   env[api_key_env] when non-empty; otherwise a plaintext key stored
  *             on the owning provider row is injected into the PROCESS ENV (the
@@ -83,6 +84,12 @@ export interface ProviderTarget {
 }
 
 /** The request format that has a live adapter today (`ENGINE_FORMAT`). */
+/**
+ * W2065: kept because the export surface is public (the studio shim re-exports
+ * it) and the literal names a real wire format — but it is NO LONGER a gate on
+ * `base_url` resolution. `request_format` chooses the request body shape, never
+ * the host.
+ */
 export const CHAT_COMPLETIONS_FORMAT = "chat_completions";
 
 function trimmed(value: string | null | undefined): string {
@@ -121,7 +128,16 @@ export function ownerOf(lookup: ProviderLookup, model: string): ProviderRef | nu
 
 /** `resolve_base_url(profile, env)` restricted to the TS channels. */
 export function resolveBaseUrl(owner: ProviderRef | null, env: NodeJS.ProcessEnv, profileBaseUrl: string): string {
-  if (owner !== null && owner.request_format === CHAT_COMPLETIONS_FORMAT && trimmed(owner.base_url) !== "") {
+  // W2065: no `request_format` gate. It used to require
+  // `owner.request_format === CHAT_COMPLETIONS_FORMAT`, which made every
+  // `responses` / `anthropic_messages` row resolve to the PREVIOUS host's
+  // base_url (env, then the profile) — the model moved, the endpoint did not.
+  // The format says how the request BODY is shaped; the owner's `base_url` says
+  // which host to talk to. Same rule as `POST /api/providers/default`
+  // (apps/studio/src/handlers/providers.ts registerDefault) — the two copies
+  // MUST agree, or a switch that looks right in the UI silently reverts on the
+  // next startup.
+  if (owner !== null && trimmed(owner.base_url) !== "") {
     return owner.base_url;
   }
   const fromEnv = trimmed(env["CELESTEA_BASE_URL"]);
