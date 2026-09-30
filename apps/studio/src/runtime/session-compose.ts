@@ -26,9 +26,14 @@ import {
 import { InMemorySessionLog } from "@celestea/session";
 import {
   compose,
+  createMemoryExtractionScheduler,
   llmSummarizer,
+  memoryExtractionEnabled,
   SessionCapacityError,
   TurnCapacityError,
+  type ExtractionCursor,
+  type ExtractionCursorStore,
+  type MemoryExtractionScheduler,
   type Profile,
   type Runtime,
   type SessionBinding,
@@ -36,6 +41,7 @@ import {
   type WatchdogMountSettings,
   type WorkerWiring,
 } from "@celestea/runtime";
+import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CapacityError } from "../runtime-adapter.js";
@@ -45,19 +51,33 @@ import { enginePlugins, type DisclosureOptions, type QuestionWiring } from "./en
 import type { PendingQuestion, QuestionRegistry } from "../question-registry.js";
 import { questionAnsweredRow, questionAskedRow } from "../question-rows.js";
 import { EMPTY_GRANTS } from "./engine-grants.js";
-import { createEngineLlm } from "./llm-assembly.js";
+import { createEngineLlm, liveEngineLlm } from "./llm-assembly.js";
 import type { FallbackWiring } from "./fallback-host.js";
 import { workerTablePath } from "./worker-table.js";
 import type { RecoveryAuditWriter } from "./recovery-audit.js";
 import type { SessionGrantsReader } from "./session-grants.js";
-import { ATTACHMENTS_DIRNAME, createAttachmentStore, type AttachmentStore, type RunCodeEventSink } from "@celestea/tools";
-import { createImageDowngradeLlm, type ImageDowngradeInfo, type Llm as ProviderLlm } from "@celestea/llm";
+import {
+  applyMemoryExtractionOp,
+  ATTACHMENTS_DIRNAME,
+  createAttachmentStore,
+  MEMORY_ENTRY_MAX_BYTES,
+  memoryManifest,
+  memoryStoreOf,
+  type AttachmentStore,
+  type RunCodeEventSink,
+} from "@celestea/tools";
+import { createImageDowngradeLlm, resolveLlmMode, type ImageDowngradeInfo, type Llm as ProviderLlm } from "@celestea/llm";
 import { withAttachments } from "./attachments-llm.js";
 
 /** W510 resource caps (overridable through the adapter options or the env). */
 export const MAX_LIVE_SESSIONS = 4;
 export const MAX_CONCURRENT_TURNS = 2;
 export const SESSION_IDLE_TTL_MS = 15 * 60 * 1_000;
+
+/** Extraction cursor sidecar name inside the session directory (Phase 1). */
+export const MEMORY_EXTRACTION_CURSOR_FILE = "memory-extraction.json";
+/** Env override for the extraction client's reasoning tier (default "low"). */
+export const ENV_MEMORY_EXTRACTION_EFFORT = "CELESTEA_MEMORY_EXTRACTION_EFFORT";
 
 /**
  * Per-session injection wiring the host supplies (placement over SSE, W515 §2).
@@ -280,6 +300,8 @@ export class SessionComposer {
     const read = reader?.read(sessionId, dir) ?? { grants: EMPTY_GRANTS, warnings: [] };
     // W728: the ledger must exist before the Llm wrapper (every step books).
     const ledger = this.usageLedger(sessionId, dir);
+    // Phase 1: background memory extraction (best-effort; CELESTEA_MEMORY_EXTRACTION=off).
+    const extraction = this.memoryExtraction(sessionId, dir, workspace, profile, ledger);
     // W783: the question wiring of THIS generation. The runtime handle does not
     // exist until `compose()` below returns, so the wiring reaches it through a
     // holder it fills in immediately afterwards — the same late-binding the
@@ -325,12 +347,18 @@ export class SessionComposer {
       // W855 #1: reap detached `run_shell background:true` children on shutdown.
       // The composer holds the registry from `engine.tools`; runtime is L2 and
       // may not import @celestea/tools, so the hook is wired HERE (host side).
-      shutdownHooks: [() => engine.tools.processes.dispose()],
+      // Phase 1: drain queued extraction too — idle-TTL eviction runs these
+      // same hooks (disposeRuntime awaits runtime.shutdown()).
+      shutdownHooks: [
+        () => engine.tools.processes.dispose(),
+        ...(extraction === undefined ? [] : [() => extraction.drain()]),
+      ],
       usage,
       ...(ledger === null ? {} : { ledger }),
       inbox: hooks.inbox ?? createSessionInbox(),
       ...(hooks.onInjected === undefined ? {} : { onInjected: hooks.onInjected }),
       ...(turnContext === undefined ? {} : { turnContext }),
+      ...(extraction === undefined ? {} : { extraction }),
       loopFactory: (bindings) => {
         // W806: the turn boundary is the ONLY place the disclosed set may move.
         engine.tools.disclosure.beginTurn();
@@ -432,6 +460,81 @@ export class SessionComposer {
     const file = this.opts.ledgerFile;
     if (file === undefined || file === null) return null;
     return createUsageLedger({ session: sessionId ?? HOST_SESSION_ID, file });
+  }
+
+  /**
+   * Phase 1 (background memory extraction, docs/feature-memory-extraction.md
+   * §4): the session's extraction scheduler. Everything store- or
+   * process-bound is wired HERE because runtime may not import
+   * @celestea/tools: the write callback applies ops to the workspace's GLOBAL
+   * memory layer (with the session/turn provenance on every entry), the
+   * manifest is re-read per call, and the cursor lives in a sidecar file
+   * inside the session directory so trash/archive carry it along. The
+   * extraction client is the session's OWN model pinned to the cheapest
+   * reasoning tier (CELESTEA_MEMORY_EXTRACTION_EFFORT overrides) with a 2048
+   * output cap. Detached generations and workspace-less sessions get none.
+   */
+  private memoryExtraction(
+    sessionId: string | null,
+    dir: string | null,
+    workspace: { readonly path: string } | null,
+    profile: Profile,
+    ledger: UsageLedger | null,
+  ): MemoryExtractionScheduler | undefined {
+    if (sessionId === null || dir === null || workspace === null) return undefined;
+    if (!memoryExtractionEnabled(this.opts.env)) return undefined;
+    // The offline test seam has no real model behind it — composing a live
+    // extraction client there would fire REAL network calls from tests.
+    if (resolveLlmMode(this.opts.env) === "offline") return undefined;
+    const store = memoryStoreOf(workspace.path, { env: this.opts.env });
+    const effort = (this.opts.env[ENV_MEMORY_EXTRACTION_EFFORT] ?? "").trim() || "low";
+    const llm = liveEngineLlm({ ...profile, reasoning_effort: effort, max_output_tokens: 2048 }, this.opts.env);
+    return createMemoryExtractionScheduler({
+      llm,
+      model: profile.model,
+      write: (op, turnId) => applyMemoryExtractionOp(store, op, turnId === null ? null : { session: sessionId, turn: turnId }),
+      manifest: () => memoryManifest(store),
+      ...(ledger === null
+        ? {}
+        : {
+            bookExtraction: (input) =>
+              ledger.bookExtraction({
+                ...input,
+                provider: this.opts.providerLabel ?? null,
+                model: profile.model,
+                base_url_host: hostOf(profile.base_url),
+              }),
+          }),
+      cursor: this.extractionCursorStore(join(dir, MEMORY_EXTRACTION_CURSOR_FILE)),
+      entryMaxBytes: MEMORY_ENTRY_MAX_BYTES,
+      stderr: (line) => process.stderr.write(`[${sessionId}] ${line}\n`),
+    });
+  }
+
+  /** The extraction cursor sidecar (one JSON line in the session dir; a corrupt file just resets the cursor). */
+  private extractionCursorStore(file: string): ExtractionCursorStore {
+    return {
+      load: (): ExtractionCursor | null => {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(readFileSync(file, "utf8")) as unknown;
+        } catch {
+          return null;
+        }
+        if (typeof parsed !== "object" || parsed === null) return null;
+        const o = parsed as Record<string, unknown>;
+        return typeof o["turn_id"] === "string" && typeof o["event_count"] === "number"
+          ? { turn_id: o["turn_id"], event_count: o["event_count"] }
+          : null;
+      },
+      save: (cursor) => {
+        try {
+          writeFileSync(file, JSON.stringify(cursor) + "\n", "utf8");
+        } catch {
+          // Best-effort: a lost cursor only re-scans, and the store dedups.
+        }
+      },
+    };
   }
 
   /**

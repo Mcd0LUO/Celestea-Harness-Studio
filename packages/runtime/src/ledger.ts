@@ -2,7 +2,9 @@
  * Cost & usage ledger (iteration E §3 P0, W728) — append-only, step granularity.
  *
  * One JSON line per model step in `<data dir>/usage-ledger.jsonl`, plus one
- * `turn_total` line per turn for reconciliation. The file is the durable,
+ * `turn_total` line per turn for reconciliation and one `extraction` line per
+ * background memory-extraction call (Phase 1: out-of-turn spend that counts in
+ * the session totals but never in a `turn_total` row). The file is the durable,
  * never-rewritten record of what was spent: the in-memory usage tracker is
  * reset by every generation rebuild (§3.1 G3-1), the ledger is not.
  *
@@ -130,7 +132,36 @@ export interface UsageTurnTotalRecord {
   outcome: TurnOutcome;
 }
 
-export type UsageLedgerRecord = UsageStepRecord | UsageTurnTotalRecord;
+/**
+ * One background memory-extraction call (docs/feature-memory-extraction.md
+ * Phase 1): spend that belongs to NO turn — counted in the session totals
+ * (honest cost) but deliberately never in a `turn_total` row.
+ */
+export interface UsageExtractionRecord extends LedgerModelInfo {
+  v: number;
+  ts: number;
+  kind: "extraction";
+  session: string;
+  /** The turn whose slice was extracted (null when none could be mapped). */
+  turn_id: string | null;
+  usage: Usage;
+  price: PriceSnapshot | null;
+  cost: LedgerCost | null;
+  priced_by: PricedBy;
+  /** Memory ops the write callback actually applied (0 for no-op/error rows). */
+  entries: number;
+  status: "ok" | "no-op" | "error";
+}
+
+export type UsageLedgerRecord = UsageStepRecord | UsageTurnTotalRecord | UsageExtractionRecord;
+
+/** What [UsageLedger.bookExtraction] needs beyond the usage itself. */
+export interface ExtractionLedgerBooking extends LedgerModelInfo {
+  turn_id: string | null;
+  usage: Usage;
+  entries: number;
+  status: "ok" | "no-op" | "error";
+}
 
 /** What the ledger is told when a model step opens. */
 export interface LedgerStepInfo extends LedgerModelInfo {
@@ -374,6 +405,32 @@ export class UsageLedger implements UsageAccounting, LedgerStepSink, TurnLedgerH
   }
 
   /**
+   * Book one background memory-extraction call (Phase 1). No idempotency key:
+   * the scheduler's cursor already guarantees one call per slice, and a torn
+   * write must not suppress the retry's row (extraction rows carry no key).
+   */
+  bookExtraction(input: ExtractionLedgerBooking): void {
+    const price = priceFor(this.file.pricing, input.model);
+    const cost = price === null ? null : costOf(input.usage, price);
+    this.file.append({
+      v: LEDGER_VERSION,
+      ts: this.file.stamp(),
+      kind: "extraction",
+      session: this.session,
+      turn_id: input.turn_id,
+      provider: input.provider,
+      model: input.model,
+      base_url_host: input.base_url_host,
+      usage: { ...input.usage },
+      price: price === null ? null : priceSnapshot(this.file.pricing, price),
+      cost,
+      priced_by: cost === null ? "unpriced" : "table",
+      entries: input.entries,
+      status: input.status,
+    });
+  }
+
+  /**
    * Open one model step. The turn identity is captured HERE (not at close), so
    * a step that outlives its turn still books against the turn it belongs to.
    */
@@ -398,22 +455,27 @@ export class UsageLedger implements UsageAccounting, LedgerStepSink, TurnLedgerH
     return zeroUsage();
   }
 
-  /** Every token this session ever booked (survives a restart, §3.4 C5). */
+  /** Every token this session ever booked, extraction included (survives a restart, §3.4 C5). */
   total(): Usage {
-    return aggregateUsage(this.rows()).tokens;
+    return aggregateUsage(this.billableRows()).tokens;
   }
 
   /** C3/C5 view: tokens, cost, and the models the table could not price. */
   totals(): LedgerTotals {
-    return aggregateUsage(this.rows());
+    return aggregateUsage(this.billableRows());
   }
 
-  /** This session's step rows, newest first (`turn_total` rows excluded). */
+  /** This session's step rows, newest first (`turn_total` and extraction rows excluded). */
   private rows(): UsageStepRecord[] {
     return this.file
       .readAll()
-      .filter((r): r is UsageStepRecord => r.kind !== "turn_total" && r.session === this.session)
+      .filter((r): r is UsageStepRecord => (r.kind === "ok" || r.kind === "error") && r.session === this.session)
       .reverse();
+  }
+
+  /** Everything this session actually spent on: step rows plus extraction rows. */
+  private billableRows(): readonly UsageLedgerRecord[] {
+    return this.file.readAll().filter((r) => r.kind !== "turn_total" && r.session === this.session);
   }
 
   /** One handle per step: its own buffer, closed at most once. */

@@ -59,6 +59,7 @@ export * from "./session-binding.js";
 export * from "./retention.js";
 export * from "./turn-runner.js";
 export * from "./turn-context-dedup.js";
+export * from "./memory-extraction.js";
 export * from "./inbox.js";
 export * from "./inbox-checkpoint.js";
 export * from "./session-registry.js";

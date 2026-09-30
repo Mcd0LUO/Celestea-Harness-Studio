@@ -35,6 +35,11 @@ export interface MemoryEntryLine {
   readonly at: string;
   /** Id this entry replaces (a correction); the older id is tombstoned. */
   readonly supersedes?: string;
+  /**
+   * Where the entry came from (session id + turn id). Absent on lines written
+   * before background extraction existed; old lines parse fine without it.
+   */
+  readonly source?: { readonly session: string; readonly turn: string };
 }
 
 /** One deletion marker. It hides an id without ever touching its history line. */
@@ -62,6 +67,13 @@ export function memoryTextHash(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
+/** Accept only a well-shaped `source` object; anything else is dropped. */
+function isEntrySource(value: unknown): value is { session: string; turn: string } {
+  if (typeof value !== "object" || value === null) return false;
+  const o = value as Record<string, unknown>;
+  return typeof o["session"] === "string" && typeof o["turn"] === "string";
+}
+
 /** Split a log into lines, dropping blanks, the header and anything unparsable. */
 export function parseMemoryLog(text: string): MemoryLogLine[] {
   const out: MemoryLogLine[] = [];
@@ -84,6 +96,7 @@ export function parseMemoryLog(text: string): MemoryLogLine[] {
         tags: Array.isArray(o["tags"]) ? o["tags"].filter((t): t is string => typeof t === "string") : [],
         at: typeof o["at"] === "string" ? o["at"] : "",
         ...(typeof o["supersedes"] === "string" ? { supersedes: o["supersedes"] } : {}),
+        ...(isEntrySource(o["source"]) ? { source: o["source"] } : {}),
       });
     } else if (o["kind"] === "forget" && typeof o["id"] === "string") {
       out.push({ kind: "forget", id: o["id"], at: typeof o["at"] === "string" ? o["at"] : "" });

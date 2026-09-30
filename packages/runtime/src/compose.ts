@@ -61,6 +61,7 @@ import { Runtime, type RuntimeParts, type ShutdownHook } from "./runtime.js";
 import { bindSession, type SessionBinding } from "./session-binding.js";
 import { createStatusTracker, type StatusTracker } from "./status.js";
 import type { TurnLedgerHooks } from "./ledger.js";
+import type { MemoryExtractionScheduler } from "./memory-extraction.js";
 import type { TurnContextRow } from "./turn-runner.js";
 import { STATUS_TRACKER_SERVICE, USAGE_TRACKER_SERVICE } from "./tokens.js";
 import { TurnRunner, type LoopFactory, type PendingReceipt } from "./turn-runner.js";
@@ -101,6 +102,12 @@ export interface ComposeConfig {
    * generation (the default; the studio host wires one).
    */
   ledger?: TurnLedgerHooks;
+  /**
+   * Background memory extraction (docs/feature-memory-extraction.md Phase 1):
+   * the host builds the scheduler (its deps need the workspace memory store),
+   * the runner schedules it at every turn end. Absent = no extraction.
+   */
+  extraction?: MemoryExtractionScheduler;
   /** Worker orchestration wiring; `false` disables it. */
   workers?: WorkerWiring | false;
   /**
@@ -203,6 +210,7 @@ export function compose(config: ComposeConfig): Runtime {
     agentConfig,
     frameMapper: config.frameMapper ?? loopEventToFrame,
     ...(config.ledger === undefined ? {} : { ledger: config.ledger }),
+    ...(config.extraction === undefined ? {} : { extraction: config.extraction }),
     ...(config.loopFactory === undefined ? {} : { loopFactory: config.loopFactory }),
     ...(config.turnContext === undefined ? {} : { turnContext: config.turnContext }),
     drainPending: () => drained([...inbox.drain("next-turn"), ...receipts()], "turn-start"),
