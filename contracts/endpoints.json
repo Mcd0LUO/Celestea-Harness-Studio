@@ -1331,6 +1331,12 @@
             "type": "string",
             "required": true,
             "note": "A model id (same alphabet as POST /api/config). The EMPTY string CLEARS the session override, so the session falls back to the global default model."
+          },
+          {
+            "name": "provider_id",
+            "type": "string",
+            "required": false,
+            "note": "W2065: OPTIONAL disambiguator, same rule as POST /api/providers/default (W750) — model ids are NOT unique across providers, so model-id-only cannot say WHICH provider. When given, the model must be one of that provider models (else 404/400, NO partial write) and that provider base_url is persisted next to the model. When absent the historical first-lister behaviour is unchanged. Ignored when model is the empty string."
           }
         ]
       },
@@ -1355,6 +1361,12 @@
             "note": "the model this session will run on its NEXT turn: the session override when one is in force, else the global default"
           },
           {
+            "name": "base_url",
+            "type": "string",
+            "required": false,
+            "note": "W2065: the endpoint this session will actually POST to on its NEXT turn: session.json.base_url when the override pinned one, else the global base_url. Reported WITH model because a model id alone cannot say which host serves it."
+          },
+          {
             "name": "covered",
             "type": "boolean",
             "required": false,
@@ -1362,9 +1374,9 @@
           },
           {
             "name": "effective",
-            "type": "object{model:string,base_model:string,source:'session'|'global',next_turn:true}",
+            "type": "object{model:string,base_model:string,source:'session'|'global',base_url:string,base_base_url:string,base_url_source:'session'|'global',next_turn:true}",
             "required": false,
-            "note": "base_model is the global default at answer time; source names where model came from; next_turn says when the switch takes effect."
+            "note": "base_model / base_base_url are the global values at answer time; source / base_url_source say where model / base_url each came from (session only when the session actually pinned it); next_turn says when the switch takes effect."
           }
         ]
       },
@@ -1374,8 +1386,16 @@
           "error": "invalid model name '{v}': ..."
         },
         {
+          "status": 400,
+          "error": "provider '{id}' does not list model '{v}'"
+        },
+        {
           "status": 404,
           "error": "unknown session '{id}'"
+        },
+        {
+          "status": 404,
+          "error": "unknown provider '{id}'"
         },
         {
           "status": 409,
@@ -1392,6 +1412,7 @@
       ],
       "notes": [
         "W870: rewrites session.json.model through the W729 writer (title / mode / prompt are kept), then drops THIS session's instance so its NEXT turn recomposes on the new model (W516 invalidateSession, the same hook PUT /api/sessions/{id}/tools and PUT /api/sessions/{id}/permission use). model:\"\" DELETES the key (K8: absent = no override).",
+        "W2065: the endpoint travels WITH the model. provider_id is resolved before anything is written (404 unknown provider / 400 provider-does-not-list-model, NO partial write) and that provider base_url is written to session.json.base_url and applied per instance by runtime/session-compose.ts profileFor; model:\"\" clears BOTH keys. Before this the endpoint had no session-level representation at all, so switching a session to another provider model left it inheriting the global base_url and posted the new model id to the old host. Same rule as the two base_url resolvers: the owner base_url applies for EVERY request_format (response/anthropic_messages included) — request_format shapes the body, it never chooses the host.",
         "W870 product semantic: the statusline's model badge shows GET /api/status?session=, whose model is the SESSION instance's profile (global base + session.json.model, see runtime/session-compose.ts profileFor). The picker therefore targets THIS endpoint; POST /api/config still means the GLOBAL default and is what the settings page 通用配置 writes. Before W870 the picker wrote only the global default, so a session carrying an override bounced back to it on the next 2s status poll.",
         "The 409 guard is /compact's and POST /api/sessions/{id}/mode's, in semantics and wording: a switch inside a running turn would silently half-apply (this turn on the old model, the next on the new one).",
         "TS-only: the retired backend has no counterpart — see contracts/route-table.snapshot.json tsOnlyRoutes."
@@ -2539,7 +2560,8 @@
       ],
       "notes": [
         "compose failure never persists; persist failure never swaps. Unknown model ids are applied and stored as-is.",
-        "W750: a rejected provider_id (unknown provider / model not listed by it) is refused BEFORE compose, so nothing is applied and nothing is persisted."
+        "W750: a rejected provider_id (unknown provider / model not listed by it) is refused BEFORE compose, so nothing is applied and nothing is persisted.",
+        "W2065: the owner provider base_url is applied for EVERY request_format. The compose patch used to be gated on `owner.request_format === chat_completions`, so switching to a model on a `responses` / `anthropic_messages` provider changed the model but LEFT the previous base_url in place — the new model id was then posted to the old host (reporter: 切换到 MiniMax 的模型，模型能切换成功，但 base_url 仍滞后不变). request_format shapes the request BODY; it never chooses the host. The empty-base_url case still falls back to model-only."
       ],
       "probe": {
         "checked": false,

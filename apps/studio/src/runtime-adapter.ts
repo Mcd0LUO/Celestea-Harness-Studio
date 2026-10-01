@@ -34,6 +34,9 @@
  */
 
 import type { AskUserQuestionAnswerItem, AskUserQuestionItem, ImageRef, InjectionPlacement, Statusline } from "@celestea/core";
+// W2066: `EngineProfile.request_format` is typed by the runtime Profile, so the host
+// view and providers.json can never disagree about which protocols are declarable.
+import type { Profile } from "@celestea/runtime";
 /**
  * W737: the busy-slot error is part of the ENGINE contract, so it has exactly
  * one definition — `packages/runtime/src/errors.ts`. It is imported (never
@@ -94,6 +97,19 @@ export { clampRetries, DEFAULT_RETRY_POLICY, MAX_RETRIES } from "@celestea/llm";
 export interface EngineProfile {
   model: string;
   base_url: string;
+  /**
+   * W2066: the wire protocol this route speaks, as the owning provider row
+   * names it. REQUIRED (not optional) because every composition has a real
+   * answer: the row that owns the model, or the documented default when no row
+   * claims it. It is route state, so it lives beside base_url and not among the
+   * call controls below.
+   *
+   * Typed as the SAME union providers.json validates (`Profile["request_format"]`),
+   * not as a free string: a wire protocol this build cannot speak is exactly
+   * what W2066 refuses, and widening the host view to `string` would push that
+   * refusal downstream into a runtime check that no longer matches the file.
+   */
+  request_format: Profile["request_format"];
   reasoning_effort: string | null;
   max_steps: number;
   max_parallel_tool_calls: number;

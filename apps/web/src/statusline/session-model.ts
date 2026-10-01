@@ -60,16 +60,21 @@ function okOutcome(
 }
 
 /**
- * 切换一个会话的模型：`PUT /api/sessions/{id}/model {model}`。
+ * 切换一个会话的模型：`PUT /api/sessions/{id}/model {model, provider_id?}`。
  * `model: ''` = **清除覆盖**（该会话回落到全局默认）——服务端删除
  * `session.json.model` 这个键，并在响应里回 `covered:false`。
  *
+ * W2065：`providerId` 是**跨 provider 撞名时的消歧**（模型 id 在不同
+ * provider 间不唯一）。带上它，服务端会把该 provider 的 `base_url` 与
+ * `model` 一起落进 `session.json` —— 否则会话切了模型却仍用全局端点，
+ * 新模型的 id 会被发到旧 host。
+ *
  * 只有 200 且响应里带回了模型值才算成功：`ok:false` 的 200 也算失败（不假装成功）。
  */
-export async function requestSessionModel(session: string, model: string): Promise<SessionModelOutcome> {
+export async function requestSessionModel(session: string, model: string, providerId?: string): Promise<SessionModelOutcome> {
   if (session === '') return { kind: 'error', target: 'config', text: t('statusline.sessionNotReady') };
   try {
-    const r = await api.setSessionModel(session, model);
+    const r = await api.setSessionModel(session, model, providerId);
     if (r.ok === false) return { kind: 'error', target: 'session', text: t('statusline.switchFailedRetry') };
     const resolved = typeof r.model === 'string' && r.model !== '' ? r.model : model;
     const eff = r.effective === undefined ? '' : (r.effective.model ?? '');

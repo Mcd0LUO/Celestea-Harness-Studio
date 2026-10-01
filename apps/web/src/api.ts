@@ -288,8 +288,13 @@ export const api = {
    * 不存在或该部署未提供此端点。理由与产品语义见 statusline/session-model.ts
    * （徽标轮询的 model 来自会话实例的 profile，只改全局会被下一次轮询打回）。
    */
-  setSessionModel: (id: string, model: string) =>
-    putJson<SessionModelResp>('/api/sessions/' + encodeURIComponent(id) + '/model', { model }),
+  setSessionModel: (id: string, model: string, providerId?: string) =>
+    putJson<SessionModelResp>(
+      '/api/sessions/' + encodeURIComponent(id) + '/model',
+      // W2065：带 provider_id 时服务端把该 provider 的 base_url 与 model 一起
+      // 落到 session.json（不传则沿用历史的「按模型 id 找第一个 provider」）。
+      providerId ? { model, provider_id: providerId } : { model },
+    ),
   renameSession: (id: string, newTitle: string) => // W243：POST …/rename
     postJson<ClearResp>('/api/sessions/' + encodeURIComponent(id) + '/rename', {
       new_title: newTitle,

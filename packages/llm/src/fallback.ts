@@ -40,6 +40,18 @@ export interface LlmTarget {
   baseUrl?: string | null;
   /** Env var NAME holding this target's key (never the key itself, §4.5 R4-3). */
   apiKeyEnv?: string | null;
+  /**
+   * W2066: the wire protocol THIS target speaks. Absent = inherit the composed
+   * profile's, which is what every pre-W2066 sidecar meant.
+   *
+   * It has to live here, not just on the profile: a fallback chain whose
+   * targets sit on different providers cannot be served by one client, and a
+   * target that silently inherited the primary's protocol would post another
+   * provider's model id in the wrong dialect — the same drift W2065 fixed for
+   * base_url, one level down. A format with no adapter is refused by name
+   * (NO_ADAPTER) exactly like the primary path.
+   */
+  requestFormat?: string | null;
 }
 
 /** §4.2.1 defaults, verbatim. */

@@ -6,11 +6,15 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  createLiveLlm,
   liveLlmView,
   resolveLlmMode,
   withBaseUrlFallback,
 } from "@celestea/llm";
+// W2067: `createLiveLlm` returns the `Llm` SEAM (W2066/W2067), so the two cases
+// below that assert chat-completions-specific behaviour — `endpoint()`,
+// `requestBody()`, the timeout tiers — construct that client directly. Testing a
+// dialect through the registry is the wiring test's job, not this file's.
+import { OpenAiCompatClient } from "@celestea/llm";
 import type { EngineProfile } from "../runtime-adapter.js";
 import {
   applyProviderTarget,
@@ -41,6 +45,8 @@ function baseProfile(over: Partial<EngineProfile> = {}): EngineProfile {
   return {
     model: "unknown",
     base_url: "http://profile.test/v1",
+    // W2066: the base a test overrides; the owning row's format replaces it.
+    request_format: "chat_completions",
     reasoning_effort: null,
     max_steps: 4096,
     max_parallel_tool_calls: 4,
@@ -84,8 +90,59 @@ describe("target resolution", () => {
     expect(ownerOf(lookup(rows, "m1"), "nope")).toBeNull();
   });
 
-  it("keeps the env base_url for a provider without a chat adapter", () => {
+  it("applies the owning base_url for a NON chat_completions row (W2065)", () => {
+    // W2065: the old condition was `owner.request_format === chat_completions`, so
+    // a `responses` / `anthropic_messages` row resolved to the PREVIOUS host
+    // (env, then the profile) — the model moved, the endpoint did not, and the new
+    // model id was posted to the old provider. `request_format` shapes the request
+    // BODY; `base_url` says which host to talk to. Both non-chat formats pinned.
     const rows = [row({ request_format: "anthropic_messages" })];
+    const target = resolveProviderTarget(lookup(rows, "m1"), { CELESTEA_BASE_URL: "http://env.test/v1" }, baseProfile());
+    expect(target.base_url).toBe("http://gw.test/v1");
+    expect(target.provider_id).toBe("gw");
+    const responses = [row({ request_format: "responses" })];
+    expect(resolveProviderTarget(lookup(responses, "m1"), { CELESTEA_BASE_URL: "http://env.test/v1" }, baseProfile()).base_url).toBe(
+      "http://gw.test/v1",
+    );
+  });
+
+  it("W2066: the target carries the OWNING row's wire protocol, and writes it through", () => {
+    // request_format is ROUTE state (like base_url), not call state. Before W2066
+    // the field existed on the row, on the UI, and in the public view — and was
+    // read by nothing, so the engine spoke chat_completions to every endpoint.
+    const rows = [
+      row({ id: "gw", base_url: "http://gw.test/v1", request_format: "chat_completions", models: [{ id: "m1" }] }),
+      row({ id: "mm", base_url: "https://api.minimaxi.com/v1", request_format: "anthropic_messages", models: [{ id: "m2" }] }),
+    ];
+
+    // The global default names the gateway row's model: all three answers agree.
+    const gw = resolveProviderTarget(lookup(rows, "m1"), {}, baseProfile());
+    expect([gw.model, gw.request_format, gw.base_url, gw.provider_id]).toEqual([
+      "m1", "chat_completions", "http://gw.test/v1", "gw",
+    ]);
+
+    // Point the default at the other row: model, endpoint AND protocol all move
+    // together — a format that outlived its model is exactly the drift.
+    const mm = resolveProviderTarget(lookup(rows, "m2"), {}, baseProfile({ model: "m1" }));
+    expect([mm.model, mm.request_format, mm.base_url, mm.provider_id]).toEqual([
+      "m2", "anthropic_messages", "https://api.minimaxi.com/v1", "mm",
+    ]);
+
+    const applied = applyProviderTarget(baseProfile(), mm, lookup(rows, "m2"), {});
+    expect([applied.profile.model, applied.profile.request_format, applied.profile.base_url]).toEqual([
+      "m2", "anthropic_messages", "https://api.minimaxi.com/v1",
+    ]);
+  });
+
+  it("W2066: no owning row keeps the profile's own protocol (same rule as base_url)", () => {
+    const target = resolveProviderTarget(lookup([], null), {}, baseProfile({ request_format: "responses" }));
+    expect([target.provider_id, target.request_format]).toEqual([null, "responses"]);
+  });
+
+  it("still falls back to env for an owner with an EMPTY base_url (W2065)", () => {
+    // The non-empty check is NOT what changed: a row with no address still cannot
+    // answer for one, whatever its request_format.
+    const rows = [row({ base_url: "" })];
     const target = resolveProviderTarget(lookup(rows, "m1"), { CELESTEA_BASE_URL: "http://env.test/v1" }, baseProfile());
     expect(target.base_url).toBe("http://env.test/v1");
     expect(target.provider_id).toBe("gw");
@@ -158,7 +215,7 @@ describe("live assembly (mode + profile mapping)", () => {
       max_output_tokens: 4321,
       context_window_tokens: 128_000,
     };
-    const client = createLiveLlm(profile, env);
+    const client = OpenAiCompatClient.fromProfile(profile, env);
     expect(client.describe()).toEqual({
       baseUrl: "http://gw.test/v1",
       model: "m1",
@@ -179,7 +236,7 @@ describe("live assembly (mode + profile mapping)", () => {
   });
 
   it("passes the reasoning effort through verbatim in the request body", () => {
-    const client = createLiveLlm({ model: "m1", base_url: "http://gw.test/v1", reasoning_effort: "max" }, {});
+    const client = OpenAiCompatClient.fromProfile({ model: "m1", base_url: "http://gw.test/v1", reasoning_effort: "max" }, {});
     const body = client.requestBody({ messages: [{ role: "user", content: [{ type: "text", content: "hi" }], tool_call_id: null }] });
     expect(body.reasoning_effort).toBe("max");
     expect(body.model).toBe("m1");

@@ -161,7 +161,9 @@ export async function runPick(host: PickerHost, pick: ModelPick): Promise<Sessio
   const target = modelTargetOf(host.sessionId);
   const outcome =
     target === 'session'
-      ? await requestSessionModel(host.sessionId, pick.model)
+      // W2065：providerId 一并下发 —— 会话级切换也要把该 provider 的 base_url
+      // 与模型一起钉住，否则这一行只改了全局默认，会话实例仍按旧端点跑。
+      ? await requestSessionModel(host.sessionId, pick.model, pick.providerId)
       : await requestGlobalModel(pick.model);
   if (outcome.kind !== 'ok') return outcome;
   host.setModel(outcome.model);

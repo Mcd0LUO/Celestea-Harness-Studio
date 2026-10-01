@@ -56,6 +56,7 @@ export function llmProfileOf(profile: Profile | EngineProfile): {
   model: string;
   base_url: string;
   api_key_env: string;
+  request_format: string;
   reasoning_effort: string | null;
   max_output_tokens: number | null;
   context_window_tokens: number;
@@ -64,6 +65,11 @@ export function llmProfileOf(profile: Profile | EngineProfile): {
     model: profile.model,
     base_url: profile.base_url,
     api_key_env: profile.api_key_env,
+    // W2066: THIS is the line where the format used to die — the host view had
+    // no such field, so the wire protocol was decided inside the transport and
+    // the row's declaration never arrived. It is route state and crosses the
+    // boundary with the rest of the route (model + base_url + key env).
+    request_format: profile.request_format,
     reasoning_effort: profile.reasoning_effort,
     max_output_tokens: profile.max_output_tokens,
     context_window_tokens:
@@ -183,6 +189,11 @@ export function liveEngineLlmFor(
       model: target.model,
       base_url: target.baseUrl ?? base.base_url,
       api_key_env: target.apiKeyEnv ?? base.api_key_env,
+      // W2066: a fallback target carries its OWN protocol; inheriting the
+      // primary's is only right when the sidecar did not name one.
+      ...(target.requestFormat === undefined || target.requestFormat === null
+        ? {}
+        : { request_format: target.requestFormat as Profile["request_format"] }),
     },
     env,
     onTruncated,

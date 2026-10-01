@@ -135,6 +135,23 @@ function registerModelsFetch(app: Hono, deps: Deps, table: RouteTable): string {
  * list the id. When `provider_id` is given the model must be one of that
  * provider's models (otherwise nothing is applied: 400/404, no partial write);
  * when it is absent the historical first-lister behaviour is unchanged.
+ *
+ * W2065: the owner's `base_url` is applied for EVERY request format, not just
+ * `chat_completions`. The old condition `owner.request_format === "chat_completions"`
+ * made 「switch to a model on another provider」 silently keep the PREVIOUS
+ * provider's endpoint for any row declared `responses` or `anthropic_messages`:
+ * the model switched, `base_url` did not, and the new model id was posted to the
+ * old provider (user report: 「切换到 MiniMax 的模型，模型能切换成功，但 base_url
+ * 仍滞后不变」). `request_format` says how the request BODY is shaped; it does not
+ * say which host to talk to — `base_url` is that host's address. Keeping the
+ * guard also made the two resolver copies disagree (§ `resolveBaseUrl`).
+ *
+ * The non-empty check stays: a provider row with no address cannot answer for one.
+ * NOTE (honest scope): the TS engine composes OpenAI-compatible wire format today
+ * (`ENGINE_REQUEST_FORMAT` in runtime/engine-profile.ts), so a row declared
+ * `anthropic_messages` is reachable but not yet spoken correctly — that is a
+ * separate, pre-existing gap. This endpoint now points at the RIGHT host instead
+ * of silently pointing at the wrong one.
  */
 function registerDefault(app: Hono, deps: Deps, table: RouteTable): string {
   const route = table.get("post_provider_default");
@@ -160,7 +177,7 @@ function registerDefault(app: Hono, deps: Deps, table: RouteTable): string {
     } else {
       owner = deps.providers.rows().find((p) => p.models.some((m) => m.id === wanted));
     }
-    const patch = owner !== undefined && owner.request_format === "chat_completions" && owner.base_url !== "" ? { model: wanted, base_url: owner.base_url } : { model: wanted };
+    const patch = owner !== undefined && owner.base_url !== "" ? { model: wanted, base_url: owner.base_url } : { model: wanted };
     try {
       await deps.runtime.configure(patch);
     } catch (e) {

@@ -29,6 +29,10 @@
 | P11 | `/api/clear` | 有 409 守卫、**无**备份 |
 | P12 | 重绑失败的回滚边界 | compact 不回滚日志；rename 会回滚目录移动 |
 | P13 | W 号跨域撞号 | DSH 分配器看不见 MC 域台账；回执文件名只带号 ⇒ 同号互相覆盖 |
+| P14 | 切模型不同步切端点 | `base_url` 曾被 `request_format === "chat_completions"` 卡住；会话级覆盖压根没有端点概念 |
+| P15 | `request_format` 只写不读 | 字段有 UI、有 schema、有回显，但 `packages/llm` 零引用；协议是**路由的属性**，变化单元是 adapter |
+| P16 | responses 端点的两个静默陷阱 | 打满 token 上限时**终帧改名**（`response.incomplete`）；`max_tokens` 被 200 接受但不生效 |
+| P17 | usage 藏在哪个帧 / 它该**发出来** | responses 只在终帧带 usage；anthropic 拆成两帧要合并。两者都**曾完全不发出** usage 事件 |
 
 ---
 
@@ -263,6 +267,158 @@ originalId: p?.id                          // 打开编辑器时记录
 
 ---
 
+## P14 · 切模型不同步切端点：`base_url` 不该由 `request_format` 决定
+
+**症状**：从一个惯用默认提供商的模型，切到另一个 provider（如 MiniMax）的模型，
+**模型切成功了，`base_url` 却还是旧提供商的** —— 于是新模型的 id 被发到旧 host。
+切回 chat_completions 的网关就正常，所以看起来像偶发。
+
+**根因（三层，缺一不可）**：
+
+1. `POST /api/providers/default` 的 compose patch 曾带
+   `owner.request_format === "chat_completions"` 条件，于是 `responses` /
+   `anthropic_messages` 的 provider **只写 model、不写 base_url**
+   （`apps/studio/src/handlers/providers.ts` `registerDefault`）。
+2. 同一守卫在 runtime 里还有一份逐字拷贝
+   （`packages/runtime/src/host/provider-target.ts` `resolveBaseUrl`）——
+   只修前端/handler 那份，症状会从"切了没生效"变成"切了下次重启又回退"。
+3. **会话级切换压根没有端点这个概念**（`PUT /api/sessions/{id}/model`）：
+   `session.json` 只有 `model`，`profileFor` 也只读 model，于是会话实例始终
+   继承全局 `base_url`。这条与 1/2 正交：修好 1/2 也补不上它
+   （手输模型名、`provider_id` 判定为空时都不经过全局那一步）。
+
+**正确做法**：`base_url` 是**「这个 provider 的地址」**，`request_format` 是
+**「请求体长什么样」** —— 后者永远不决定前者。两处解析都改成「owner 的
+`base_url` 非空就采用」；会话级则让**端点与模型成对落库、成对清除**
+（`session.json.base_url`，由 `profileFor` 按会话应用），并回声
+`base_url` / `effective.base_url_source`。
+
+**怎么验证**：变异负控制是这条的关键证据 ——
+把 `session-compose.ts` 的 `out.base_url = baseUrl` 停掉后，
+`apps/studio/src/runtime/session-model.test.ts` 的 5 条离线用例**仍然全绿**
+（它们只查写入值与回声），而
+**`apps/studio/src/runtime/w2065-session-base-url.test.ts` 的双上游实机用例转红**
+（请求落回网关那台）。只有后者能证明"请求真的发去了新端点"。
+
+**同源的诚实边界（本次未修，另记）**：TS 引擎目前只会说 OpenAI 兼容方言
+（`apps/studio/src/runtime/engine-profile.ts` 的 `ENGINE_REQUEST_FORMAT` 硬编码
+`chat_completions`，`packages/llm` 完全不消费 `request_format`）。
+所以一条声明为 `anthropic_messages` 的 provider 现在**端点对了、线格式仍不对** ——
+**同源的诚实边界（W2066 已处理，见 P15）**：`request_format` 曾是**只写不读**的字段 ——
+UI 有下拉框（`apps/web/src/ui/providers/form.ts:111`）、schema 冻结了枚举、API 回显它，
+而 `packages/llm` 对它**零引用**，引擎无条件说 OpenAI 方言。端点修对之后，一条声明
+`anthropic_messages` 的行会**用 OpenAI 方言把 anthropic 的会话发出去**。
+
+---
+
+## P15 · `request_format` 只写不读：字段存在不等于行为存在
+
+**症状**：设置页能选 `anthropic_messages`，`providers.json` 里存着，列表里显示着 ——
+然后它对实际请求**毫无影响**。切到那个 provider 的模型，请求照旧用 OpenAI 方言发出去，
+失败形态是上游一个没有线索的 400。
+
+**根因（三个边界各丢一次）**：`apps/studio/src/runtime/engine-profile.ts` 的
+`ENGINE_REQUEST_FORMAT` 硬编码 `chat_completions`；`llm-assembly.ts` 的 `llmProfileOf`
+在**进 llm 包的边界**上把格式裁掉（宿主视图里连字段都没有）；`packages/llm` 全包零引用。
+`apps/studio/src/store/provider-probe.ts:133` 是全仓唯一诚实的地方 —— 它拒绝探测非
+chat_completions 的行且**不发请求**，W2066 沿用的就是它的形状。
+
+**正确做法（W2066）**：
+
+1. **协议是路由的属性，不是调用的属性。** 它跟着 `ProviderRow` 走，由 `ProviderTarget`
+   承接（与 W2065 的 `base_url` 同一个 `ownerFor`），写进 profile 只是为了让 llm 工厂
+   看得见 —— 不是因为它属于 profile。
+2. **变化单元是 adapter，不是方言开关。** `RouteAdapter` 拥有一个协议及其路由，
+   `AdapterRegistry` 按 `request_format` 解析。**不要**给客户端加 `if (format === ...)`
+   分支（`ARCHITECTURE.md` §3.3 的反模式）。
+3. **不支持是带名字的 fail-closed 失败**（`NO_ADAPTER`，`retryable: false`），在
+   **客户端构造期**抛出 —— 此时 socket 还不存在，所以「一个字节都没发」由构造顺序保证，
+   不是一个事后检查。
+
+**为什么不用现成的库**：DSH 走的是接 `pi-ai`（`openAICompletionsApi` /
+`anthropicMessagesApi` 等协议对象现成）的路。本仓的零依赖取向（`README`：core 零依赖、
+浏览器自己写 CDP 而不拖 Playwright）与之冲突，而该库传递闭包实测是 **89 个包 /
+11005 个文件 / 60 MB**（`@google/genai` 13.7 MB、`openai` 9.3 MB、`@anthropic-ai/sdk`
+8.3 MB）。所以取 DSH 的**结构**（adapter 注册 + 按名拒绝 + 能力由 adapter 回答），
+不取它的**依赖**。
+
+**怎么验证**：`packages/llm/src/adapter.test.ts`（注册表语义 + 拒绝 + 退役）与
+`apps/studio/src/runtime/w2066-request-format.test.ts`（真 socket：拒绝时上游零请求，
+对照行照常发）。变异负控制两处：target 不取 owner 的格式 → 路由化用例红；工厂绕过
+注册表 → 拒绝用例红。
+
+**已做（下一节 P16）**：`responses` 已作为第二个 adapter 落地（W2067）。
+
+---
+
+## P16 — responses 端点：两个**静默**陷阱（录制帧才有真相）
+
+**症状**：接上 `responses` 协议后，工具调用正常、文本正常，但有两种情况静默出错，
+且**都不报错**：
+
+1. 设了输出上限的轮次，引擎判成 `interrupted`（一个成功返回的调用报传输失败）；
+2. 设了输出上限但完全没生效，模型一路写满预算。
+
+**根因（都是实机测出来的，规范里查不到）**：
+
+1. **终帧的名字会变。** 正常收尾是 `response.completed`；一旦输出打满，终帧换成
+   **`response.incomplete`**，并带 `incomplete_details.reason: "length"`。
+   录制证据：`max_output_tokens: 5` 的那一份里 `response.completed` 出现 **0 次**、
+   `response.incomplete` 出现 1 次，`output_tokens` 正好 5。只认 `completed` 的解码器
+   会把「跑完预算」当成「流断在中途」。
+
+2. **上限字段叫 `max_output_tokens`，而 `max_tokens` 被 200 接受但不生效。**
+   对照探针：发 `max_output_tokens: 5` -> `output_tokens: 5`；发 `max_tokens: 5` ->
+   `output_tokens: 34`（等于不限），**没有 400**。比拒绝更危险：调用方以为限流了。
+
+3. 附带一条：**`reasoning: {effort}` 被明确 400 拒绝**（试了三次，两次直接断连）。
+   所以 responses 协议的 effort 无处可去，adapter 的 `describe()` 如实声明
+   `reasoningEfforts: []`，让 UI 停止提供一个点了没反应的旋钮。
+
+**正确做法**：`response.incomplete` 与 `response.completed` 同为**终态**，都带 usage；
+前者额外把「被上限截断」映射成 W2017 的 `done.truncated: true`（截断的答案仍是答案，
+所以终态仍是 `done`）。请求侧只发 `max_output_tokens` 这一个名字。
+
+**怎么验证**：`packages/llm/src/responses/{wire,decode}.test.ts` 跑的是
+`fixtures/responses/recorded-*.sse` **真实录制帧**（脱敏：id / trace_id / 上游 IP /
+提问内容全部抹掉，密钥零残留）。变异负控制两处：把上限字段改回 `max_tokens` ->
+wire 用例红；删掉 `response.incomplete` 分支 -> 截断用例红。
+
+**教训**：前两条都不是「读规范能知道」的。第一条在事件直方图里完全看不出来
+（事件类型齐全，只是少了一种）；第二条探针**返回 200**，不看 `output_tokens` 就会
+以为成功了。**只有把字节录下来、跑解码器、比对计数，才会暴露。**
+## P17 — usage 藏在哪个帧，以及它**必须发出来**
+
+**症状（两类）**：
+
+1. 状态栏 token 数一直是 0 / 成本账本没有这一行，但模型答得好好的；
+2. 轮次显示「花了 39 prompt token、0 completion」或反过来 —— 两个数都非零，但没一个是真实配对。
+
+**根因（两个协议各一半）**：
+
+1. **usage 藏在哪一帧，协议各不相同**，都不在「顺手能拿到」的地方：
+   - `chat_completions`：`stream_options:{include_usage}` 的 usage-only 尾帧；
+   - `responses`：**只有终帧**（`response.completed` 或 `response.incomplete`）带，
+     流式过程中一律拿不到；
+   - `anthropic_messages`：**拆成两帧** —— `message_start` 给 `input_tokens`
+     （`output_tokens` 是 0），`message_delta` 给真正的 `output_tokens`。
+2. **两个解码器都曾把 usage 折进内部累加器却不发出事件**，于是轮次正常完成、
+   账本与状态栏什么也没收到。`stream.ts:263` 的约定是「usage 事件紧挨在终态事件
+   之前」，新写的两个解码器都漏了这一条。
+
+**正确做法**：
+
+- 归一化到**同一个扁平契约**（`prompt_tokens` / `completion_tokens` /
+  `total_tokens` / `cache_read`），`total_tokens` 在缺失时**推导**（anthropic 不发它）；
+- anthropic 的两帧**必须合并**：只取一帧会得到「有 input 没 output」或反之，
+  任何一帧单独看都是合法的，所以这条错得非常安静；
+- 合并逻辑抽成**导出纯函数**并直接测它。否则「两帧都解析对了但没人合并」这种变异
+  **测不出来** —— 本条就是这么被发现的：第一次变异负控制跑完是**绿的**。
+
+**怎么验证**：`packages/llm/src/responses/decode.test.ts` 与
+`packages/llm/src/anthropic/decode.test.ts` 各有一条
+「usage 事件出现在终态之前且两半都非零」的端到端断言，跑的是真实录制帧；
+变异负控制把 emit 停掉 → 两条都红。
 ## 附：容易误记的几件事
 
 | 误记 | 事实 |

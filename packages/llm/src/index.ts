@@ -7,6 +7,12 @@
  * Only this barrel is the package's public surface: provider internals
  * (SSE framing, wire mapping, HTTP transport) stay private so callers depend on
  * the `Llm` seam, not on the provider.
+ *
+ * W2066 added the wire-protocol seam above that one: `RouteAdapter` owns ONE
+ * protocol and the routes that speak it, `AdapterRegistry` resolves one per call
+ * and REFUSES by name (`NO_ADAPTER`) when the requested protocol has no adapter.
+ * A caller still only depends on the `Llm` seam — which is what lets the retry,
+ * fallback and image-downgrade decorators keep working unchanged across formats.
  */
 
 // The seam this package implements. A1 (W746): every symbol below is CORE's
@@ -114,16 +120,75 @@ export {
   validateModel,
 } from "./profile.js";
 
+// W2066: the wire-protocol seam. An adapter owns one protocol AND the routes
+// that speak it; an unregistered protocol is refused by name (NO_ADAPTER)
+// instead of being silently spoken as OpenAI's dialect.
+export type { RouteAdapter, RouteDescription } from "./adapter.js";
+export {
+  AdapterRegistry,
+  chatCompletionsAdapter,
+  CHAT_COMPLETIONS_FORMAT,
+  noAdapterAdvice,
+  NO_ADAPTER,
+  unknownRouteDescription,
+} from "./adapter.js";
+
 // Production factory: mode switch + live profile -> client assembly (W511).
 export type { LiveLlmProfile, LiveLlmView, LlmMode } from "./factory.js";
 export {
   createLiveLlm,
+  defaultAdapterRegistry,
   liveLlmView,
   LLM_BASE_URL_ENV,
   LLM_MODE_ENV,
+  requestFormatOf,
   resolveLlmMode,
   withBaseUrlFallback,
 } from "./factory.js";
+
+// W2067: the `responses` protocol — the second adapter, and the evidence that the
+// seam is one. `ResponsesClient` is the same `Llm` seam behind a different wire;
+// the pure frame decoder and the request encoder are exported so the golden
+// recordings replay through the SAME code the live path runs.
+export type { SendRequestOptions } from "./responses/decode.js";
+export {
+  parseCallArguments,
+  parseFrame,
+  responsesEvents,
+  ResponsesClient,
+  type ParsedFrame,
+} from "./responses/decode.js";
+export { RESPONSES_FORMAT, responsesAdapter } from "./responses/adapter.js";
+
+// W2068: the `anthropic_messages` protocol — the third adapter.
+export type { SendRequestOptions as AnthropicSendOptions } from "./anthropic/decode.js";
+export {
+  anthropicEvents,
+  AnthropicClient,
+  parseAnthropicArguments,
+  parseAnthropicFrame,
+  parseAnthropicUsage,
+  type AnthropicFrame,
+} from "./anthropic/decode.js";
+export { ANTHROPIC_MESSAGES_FORMAT, anthropicMessagesAdapter } from "./anthropic/adapter.js";
+export {
+  anthropicUrl,
+  buildAnthropicBody,
+  DEFAULT_MAX_TOKENS,
+  mapAnthropicTool,
+  type AnthropicBlock,
+  type AnthropicBody,
+  type AnthropicMessage,
+  type AnthropicTool,
+} from "./anthropic/wire.js";
+export {
+  buildResponsesBody,
+  mapResponsesTool,
+  responsesUrl,
+  type ResponsesBody,
+  type ResponsesInput,
+  type ResponsesTool,
+} from "./responses/wire.js";
 
 // Fallback chain (iteration E §4 P1): the decorator, its trigger-table defaults
 // and the sidecar config loader (`fallbacks.json` / `CELESTEA_LLM_FALLBACKS`).

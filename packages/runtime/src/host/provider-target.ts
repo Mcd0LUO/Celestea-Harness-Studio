@@ -13,9 +13,10 @@
  *             ("profile default", i.e. the celestea.toml slot).
  *             An unlisted `default_model` never wins: the contract validates it
  *             against the provider rows instead of trusting a stale string.
- *   base_url  the provider that OWNS the resolved model, when its
- *             request_format is chat_completions and its base_url is non-empty
- *             (written into the profile before compose);
+ *   base_url  the provider that OWNS the resolved model, when its base_url is
+ *             non-empty (written into the profile before compose) — for EVERY
+ *             request_format (W2065; the `chat_completions` gate that used to sit
+ *             here left non-chat rows pointing at the previous host);
  *             else env `CELESTEA_BASE_URL` -> else the profile's own base_url.
  *   api key   env[api_key_env] when non-empty; otherwise a plaintext key stored
  *             on the owning provider row is injected into the PROCESS ENV (the
@@ -48,6 +49,13 @@ export interface ProfileSlot {
   base_url: string;
   api_key_env: string;
   context_window: number;
+  /**
+   * W2066: the wire protocol the resolved model is spoken with. It travels on
+   * the TARGET (the route), never on a call: it is a property of the provider
+   * row that owns the model, and it is written into the profile only so the
+   * llm factory can resolve an adapter from it.
+   */
+  request_format: string;
 }
 
 /** The fields of a providers.json row this module reads. */
@@ -83,6 +91,12 @@ export type ProviderKeySource = "env" | "provider_store" | "none";
 export interface ProviderTarget {
   model: string;
   base_url: string;
+  /**
+   * W2066: the wire protocol of the owning provider row, verbatim. Reported
+   * beside model + base_url because those three are one answer — 「which model,
+   * on which host, spoken how」 — and the first two used to travel without it.
+   */
+  request_format: string;
   /** The provider row that lists `model` (null = no provider claims it). */
   provider_id: string | null;
   model_source: ModelSource;
@@ -90,6 +104,12 @@ export interface ProviderTarget {
 }
 
 /** The request format that has a live adapter today (`ENGINE_FORMAT`). */
+/**
+ * W2065: kept because the export surface is public (the studio shim re-exports
+ * it) and the literal names a real wire format — but it is NO LONGER a gate on
+ * `base_url` resolution. `request_format` chooses the request body shape, never
+ * the host.
+ */
 export const CHAT_COMPLETIONS_FORMAT = "chat_completions";
 
 function trimmed(value: string | null | undefined): string {
@@ -128,7 +148,16 @@ export function ownerOf(lookup: ProviderLookup, model: string): ProviderRef | nu
 
 /** `resolve_base_url(profile, env)` restricted to the TS channels. */
 export function resolveBaseUrl(owner: ProviderRef | null, env: NodeJS.ProcessEnv, profileBaseUrl: string): string {
-  if (owner !== null && owner.request_format === CHAT_COMPLETIONS_FORMAT && trimmed(owner.base_url) !== "") {
+  // W2065: no `request_format` gate. It used to require
+  // `owner.request_format === CHAT_COMPLETIONS_FORMAT`, which made every
+  // `responses` / `anthropic_messages` row resolve to the PREVIOUS host's
+  // base_url (env, then the profile) — the model moved, the endpoint did not.
+  // The format says how the request BODY is shaped; the owner's `base_url` says
+  // which host to talk to. Same rule as `POST /api/providers/default`
+  // (apps/studio/src/handlers/providers.ts registerDefault) — the two copies
+  // MUST agree, or a switch that looks right in the UI silently reverts on the
+  // next startup.
+  if (owner !== null && trimmed(owner.base_url) !== "") {
     return owner.base_url;
   }
   const fromEnv = trimmed(env["CELESTEA_BASE_URL"]);
@@ -185,6 +214,10 @@ export function resolveProviderTarget(
   return {
     model,
     base_url: resolveBaseUrl(owner, env, base.base_url),
+    // W2066: the OWNING row's protocol, verbatim. Absent owner (nothing lists
+    // the model) keeps the profile's own value — the same 「nobody declared
+    // anything」 reading W2065 gives base_url.
+    request_format: owner?.request_format ?? base.request_format,
     provider_id: owner?.id ?? null,
     model_source: source,
     key_source: keySource,
@@ -206,10 +239,18 @@ export function applyProviderTarget<P extends ProfileSlot>(
   const { key, source } = resolveProviderKey(owner, env, base.api_key_env);
   if (key !== null) env[base.api_key_env] = key;
   return {
+    // W2066: the format joins model + base_url as a third thing that moves with
+    // the route. Writing model without it is the drift W2065 fixed for the
+    // endpoint; leaving it behind is the same bug one level down.
+    // W2067 (Phase 2): the context window is the FOURTH thing that moves with the
+    // route — a model-metadata reading (env > the owning model's declaration >
+    // the profile's own value), so a switch that lands on a model with a smaller
+    // declared window stops overrunning it.
     profile: {
       ...base,
       model: target.model,
       base_url: target.base_url,
+      request_format: target.request_format,
       context_window: resolveContextWindow(owner, target.model, env, base.context_window),
     },
     target: { ...target, key_source: source },

@@ -169,6 +169,9 @@ export function createStudioEngine(deps: StudioEngineDeps): EngineFactory {
       // W513: the session-level model override is applied to that session's own
       // instance (it no longer rewrites a global engine profile).
       sessionModel: (id) => sessionMetaAt(stores, id)?.model ?? null,
+      // W2065: the endpoint that override was resolved against, so a session
+      // pinned to another provider's model does not inherit the global base_url.
+      sessionBaseUrl: (id) => sessionMetaAt(stores, id)?.base_url ?? null,
       // W729 (§5.1 #4, R3): the session's mode is fixed at creation and the
       // PROMPT assembly is therefore per instance, not per process. Both hooks
       // read `session.json` of the session being composed, so a standard and an

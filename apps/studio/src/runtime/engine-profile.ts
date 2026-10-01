@@ -18,7 +18,13 @@ import type { Profile } from "@celestea/runtime";
 import { CONTEXT_WINDOW, MIN_STEPS } from "../config.js";
 import type { EngineProfile, ProfilePatch } from "../runtime-adapter.js";
 
-/** The only request format the TS engine composes today (OpenAI-compatible). */
+/**
+ * The protocol used when no provider row claims the model — i.e. what every
+ * pre-W2066 deployment spoke, because nothing declared anything back then.
+ * W2066: this is a DEFAULT, not a hardcode. A row that DOES declare a format
+ * has it carried through the target (see provider-target.ts) and the llm factory
+ * refuses the ones no adapter serves; nothing silently lands back here.
+ */
 export const ENGINE_REQUEST_FORMAT: Profile["request_format"] = "chat_completions";
 
 /** Host view of a composed profile. */
@@ -26,6 +32,7 @@ export function engineProfileOf(profile: Profile): EngineProfile {
   return {
     model: profile.model,
     base_url: profile.base_url,
+    request_format: profile.request_format,
     reasoning_effort: profile.reasoning_effort,
     max_steps: profile.max_steps,
     max_parallel_tool_calls: profile.max_parallel_tool_calls,
@@ -45,6 +52,11 @@ export function profileFromEngine(engine: EngineProfile, base?: Partial<Profile>
   return {
     model: engine.model,
     base_url: engine.base_url,
+    // W2066: the host view's own value WINS over the frozen base — the format is
+    // route state the host resolved, and `base` only ever holds the default. No
+    // empty-string guard is needed: the field is the providers.json union, which
+    // has no "" member, so an unset route can only arrive as the default.
+    request_format: engine.request_format,
     api_key_env: engine.api_key_env,
     api_key_file: base?.api_key_file ?? null,
     max_steps: engine.max_steps,
@@ -53,7 +65,6 @@ export function profileFromEngine(engine: EngineProfile, base?: Partial<Profile>
     max_output_tokens: engine.max_output_tokens,
     context_window_tokens: engine.context_window,
     system_prompt: engine.system_prompt,
-    request_format: base?.request_format ?? ENGINE_REQUEST_FORMAT,
     temperature: base?.temperature ?? null,
   };
 }
@@ -92,6 +103,10 @@ export function defaultEngineProfile(env: NodeJS.ProcessEnv, apiKeyEnv: string):
   return {
     model: env["CELESTEA_MODEL"] ?? "unknown",
     base_url: env["CELESTEA_BASE_URL"] ?? "http://127.0.0.1:3001/v1",
+    // W2066: providers.json overrides this on top (startupEngineProfile); this is
+    // the answer when no row claims the model, and it stays the documented
+    // default rather than a silent hardcode inside the transport.
+    request_format: ENGINE_REQUEST_FORMAT,
     reasoning_effort: env["CELESTEA_REASONING_EFFORT"] ?? null,
     max_steps: maxSteps === undefined ? MIN_STEPS : Math.max(MIN_STEPS, Number(maxSteps) || MIN_STEPS),
     max_parallel_tool_calls: base.max_parallel_tool_calls,

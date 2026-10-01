@@ -19,6 +19,7 @@
     "POST /api/config does NOT write it back: the session-level model is decided at creation time.",
     "W729: `mode` (standard|execution) is fixed at creation; DEFAULT = standard and it is NOT written (a session without the key behaves exactly as before).",
     "W729: an unknown `mode` value is ignored on read (behaves like a missing key); POST /api/sessions rejects it with 400 `invalid mode: <v>` before anything is created.",
+    "W2065: `base_url` joins `model` because a model id is meaningless without the host that serves it: switching a session to another provider's model used to leave it inheriting the global base_url, so the new model id was posted to the previous host. The pair is written and cleared together — a `base_url` without a `model` is never written.",
     "additionalProperties: true is kept: a hand-written unknown key never breaks a session."
   ],
   "schema": {
@@ -27,6 +28,10 @@
       "model": {
         "type": "string",
         "description": "model id override; invalid value -> 400 invalid session model: {e} on activate"
+      },
+      "base_url": {
+        "type": "string",
+        "description": "W2065: the http(s) endpoint the `model` override was resolved against. Written and CLEARED together with `model` by PUT /api/sessions/{id}/model (the request's optional `provider_id` picks the owning row). Absent = follow the global base_url. A non-string or non-http(s) value is ignored on read, never repaired on disk."
       },
       "prompt": {
         "type": "string",

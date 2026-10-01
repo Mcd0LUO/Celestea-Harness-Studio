@@ -126,6 +126,14 @@ export interface SessionComposerOptions {
   /** Session-level model override (`session.json`), applied per instance. */
   sessionModel?: (id: string) => string | null;
   /**
+   * W2065: the endpoint that session-level model override was resolved against
+   * (`session.json.base_url`). Kept as a SEPARATE hook rather than folded into
+   * `sessionModel` because `Profile` is the frozen 12-key contract and this
+   * assembles a `Partial<Profile>`. Absent = 「the session pinned no endpoint,
+   * follow the global base_url」.
+   */
+  sessionBaseUrl?: (id: string) => string | null;
+  /**
    * W729: session-level mode (`session.json.mode`; null = the session never
    * declared one). Consumed by the worker wiring, so a worker's row/receipt can
    * record the mode of the session that spawned it (§2.3).
@@ -691,9 +699,10 @@ export class SessionComposer {
 
   /**
    * Base profile + the session's own `session.json` overrides (model AND, since
-   * W729, the mode-dependent system prompt). This is the ONE place a session's
-   * instance profile is decided, so two sessions in the same process can differ
-   * in prompt without either one seeing the other's.
+   * W729, the mode-dependent system prompt; AND, since W2065, the base_url that
+   * model was resolved against). This is the ONE place a session's instance
+   * profile is decided, so two sessions in the same process can differ in prompt
+   * — or in provider — without either one seeing the other's.
    */
   profileFor(sessionId: string | null): Profile {
     const base = this.opts.baseProfile();
@@ -707,6 +716,11 @@ export class SessionComposer {
     const out: Partial<Profile> = {};
     const model = this.opts.sessionModel?.(sessionId) ?? "";
     if (model !== "") out.model = model;
+    // W2065: the endpoint travels WITH the model. Without this, a session that
+    // pinned another provider's model kept the global base_url and posted that
+    // model's id to the old host.
+    const baseUrl = this.opts.sessionBaseUrl?.(sessionId) ?? "";
+    if (baseUrl !== "") out.base_url = baseUrl;
     const prompt = this.opts.sessionSystemPrompt?.(sessionId) ?? "";
     if (prompt !== "") out.system_prompt = prompt;
     return Object.keys(out).length === 0 ? null : out;
