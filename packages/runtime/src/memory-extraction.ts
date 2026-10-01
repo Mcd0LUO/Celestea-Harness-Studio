@@ -365,7 +365,15 @@ export function createMemoryExtractionScheduler(deps: MemoryExtractionDeps): Mem
       }
       const { cursor, slices } = sliceUnprocessedTurns(events, loadCursor());
       if (cursor.event_count !== loadCursor().event_count) saveCursor(cursor);
-      for (const slice of slices) await extractSlice(run, slice);
+      // STOP at the first slice that did not advance. The cursor is a single
+      // position, so letting a LATER slice succeed would move it past the
+      // failed one and the retry this module promises ("a failed pass does not
+      // advance; the next turn's events retry it") would never happen. A
+      // provider hiccup on turn 3 of 10 used to lose turn 3's extraction for
+      // good, silently, as soon as turn 4's call succeeded.
+      for (const slice of slices) {
+        if (!(await extractSlice(run, slice))) break;
+      }
     }
   };
 
@@ -373,7 +381,13 @@ export function createMemoryExtractionScheduler(deps: MemoryExtractionDeps): Mem
     schedule(log: SessionLog): void {
       pendingLog = log;
       if (running === null) {
-        running = pump().finally(() => {
+        running = pump()
+          // The last line of defence: [extractSlice] fences per slice, so this
+          // only catches a bug in the pump itself — but a rejected `running`
+          // would be an unhandled rejection, and this module's contract is that
+          // extraction can never take the process (or a turn) down.
+          .catch((error: unknown) => stderr(`memory-extraction: pump failed: ${String(error)}`))
+          .finally(() => {
           running = null;
           // A schedule() that landed during the finally() re-arms the pump.
           if (pendingLog !== null) this.schedule(pendingLog);
@@ -399,19 +413,40 @@ interface ExtractionRun {
   saveCursor: (cursor: ExtractionCursor) => void;
 }
 
-/** One slice end to end: the two gates, the model call, the writes, the cursor. */
-async function extractSlice(run: ExtractionRun, slice: ExtractionSlice): Promise<void> {
+/**
+ * One slice end to end: the two gates, the model call, the writes, the cursor.
+ *
+ * Returns whether the cursor was ADVANCED. `false` (the model call failed)
+ * means the slice stays unprocessed and the caller must not walk past it —
+ * see the pump for why a single cursor position makes that mandatory.
+ */
+async function extractSlice(run: ExtractionRun, slice: ExtractionSlice): Promise<boolean> {
+  try {
+    return await extractSliceInner(run, slice);
+  } catch (error) {
+    // The HOST's own calls live in here too (the manifest renderer, the ledger
+    // writer), and none of them is worth a rejected pump: schedule() is
+    // fire-and-forget, so a rejection would surface as an unhandled rejection
+    // in the middle of the turn path. A throwing dep is a failed slice — the
+    // cursor does not advance and the caller stops.
+    run.stderr(`memory-extraction: ${slice.turn_id} raised: ${String(error)}`);
+    return false;
+  }
+}
+
+/** The body of [extractSlice]; the fence and the return contract live there. */
+async function extractSliceInner(run: ExtractionRun, slice: ExtractionSlice): Promise<boolean> {
   const { deps, stderr } = run;
   const cursor: ExtractionCursor = { turn_id: slice.turn_id, event_count: slice.event_count };
   // Gate 1: a deliberate direct write makes extraction redundant this turn.
   if (containsDirectMemoryWrite(slice.events)) {
     run.saveCursor(cursor);
-    return;
+    return true;
   }
   // Gate 2: too little real user prose to contain anything durable.
   if (!hasEligibleUserProse(userProseOf(slice.events), run.minUserWords)) {
     run.saveCursor(cursor);
-    return;
+    return true;
   }
   const transcript = renderExtractionTranscript(slice.events, run.maxTranscriptBytes);
   const prompt = `Existing memory entries (id — text):\n${deps.manifest()}\n\nTranscript:\n${transcript}`;
@@ -440,7 +475,7 @@ async function extractSlice(run: ExtractionRun, slice: ExtractionSlice): Promise
   if (failed !== null) {
     stderr(`memory-extraction: ${slice.turn_id} failed: ${failed}`);
     deps.bookExtraction?.({ turn_id: slice.turn_id, usage, entries: 0, status: "error" });
-    return; // cursor NOT advanced — retried with the next turn's events
+    return false; // cursor NOT advanced — retried with the next turn's events
   }
   const { ops } = parseExtractionOps(text, deps.entryMaxBytes);
   let applied = 0;
@@ -460,6 +495,7 @@ async function extractSlice(run: ExtractionRun, slice: ExtractionSlice): Promise
     status: applied > 0 ? "ok" : "no-op",
   });
   run.saveCursor(cursor);
+  return true;
 }
 
 function preview(value: unknown): string {

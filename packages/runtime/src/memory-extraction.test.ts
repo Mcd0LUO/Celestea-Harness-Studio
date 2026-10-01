@@ -61,12 +61,17 @@ const assistantSays = (text: string): SessionEvent => ({ type: "assistant_messag
 
 function deps(overrides: {
   script: StreamEvent[][];
-  writes?: { op: ExtractionOp; result: { applied: boolean; reason?: string } }[];
+  /**
+   * Scripted STORE answers, consumed one per op (default: every op applies).
+   * The recorder below is what the tests assert on; this is the input.
+   */
+  outcomes?: { applied: boolean; reason?: string }[];
   ledger?: ExtractionLedgerInput[];
   saved?: ExtractionCursor[];
 }) {
   const { llm, requests } = scriptedLlm(overrides.script);
-  const writes = overrides.writes ?? [];
+  const outcomes = [...(overrides.outcomes ?? [])];
+  const writes: { op: ExtractionOp; result: { applied: boolean; reason?: string } }[] = [];
   const ledger = overrides.ledger ?? [];
   const saved = overrides.saved ?? [];
   return {
@@ -79,7 +84,7 @@ function deps(overrides: {
       model: "test-model",
       entryMaxBytes: 2048,
       write: (op: ExtractionOp) => {
-        const result = { applied: true };
+        const result = outcomes.shift() ?? { applied: true };
         writes.push({ op, result });
         return result;
       },
@@ -281,6 +286,90 @@ describe("P1 · scheduler", () => {
     expect(d.writes).toHaveLength(0);
     expect(d.ledger[0]?.status).toBe("no-op");
     expect(d.saved.at(-1)?.turn_id).toBe("turn-1");
+  });
+
+  it("a failure in the MIDDLE of a batch stops the pass instead of being walked over", async () => {
+    // Two turns are waiting; the call for turn-1 fails and the one for turn-2
+    // would succeed. The cursor is ONE position, so letting turn-2's success
+    // move it past turn-1 would lose turn-1's extraction for good — the module
+    // promises "a failed pass does not advance; the next turn's events retry
+    // it", and with several slices in one pump that promise needs the pass to
+    // STOP, not to continue.
+    const log = memoryLog();
+    turn(log, 1, [userSays("the first turn says something durable")]);
+    turn(log, 2, [userSays("the second turn says something durable too")]);
+    const d = deps({
+      script: [
+        [{ kind: "failed", kindOf: "stream", message: "boom" }],
+        doneWith('{"ops":[{"op":"add","text":"a durable fact"}]}'),
+      ],
+    });
+    const sched = createMemoryExtractionScheduler(d.deps);
+    sched.schedule(log);
+    await sched.drain();
+    expect(d.requests).toHaveLength(1); // turn-2 was NOT called after the failure
+    expect(d.ledger.map((l) => l.status)).toEqual(["error"]);
+    expect(d.writes).toHaveLength(0);
+    expect(d.saved).toHaveLength(0); // nothing advanced
+
+    // The next schedule retries from the failed slice and gets through BOTH.
+    sched.schedule(log);
+    await sched.drain();
+    expect(d.ledger.map((l) => l.status)).toEqual(["error", "ok", "ok"]);
+    expect(d.saved.map((c) => c.turn_id)).toEqual(["turn-1", "turn-2"]);
+  });
+
+  it("a REFUSED write is not a failed pass: it advances, and counts only what landed", async () => {
+    // The store may refuse an op (an entry over the cap, an unknown id). The
+    // model answered and we read the answer, so retrying the same slice would
+    // just ask the same question again — but `entries` must not claim a write
+    // that never happened.
+    const log = memoryLog();
+    turn(log, 1, [userSays("please always use tabs indentation")]);
+    const d = deps({
+      script: [doneWith('{"ops":[{"op":"add","text":"a fact"}]}')],
+      outcomes: [{ applied: false, reason: "too_long" }],
+    });
+    const sched = createMemoryExtractionScheduler(d.deps);
+    sched.schedule(log);
+    await sched.drain();
+    expect(d.writes).toHaveLength(1);
+    expect(d.ledger[0]?.entries).toBe(0);
+    expect(d.ledger[0]?.status).toBe("no-op");
+    expect(d.saved.at(-1)?.turn_id).toBe("turn-1");
+  });
+
+  it("a throwing HOST dep is a failed slice, never a rejected pump", async () => {
+    // schedule() is fire-and-forget: a rejection out of the pump is an
+    // unhandled rejection in the turn path, which is exactly what this module
+    // promises never happens. A host renderer that throws is a failed slice.
+    const log = memoryLog();
+    turn(log, 1, [userSays("a turn with enough prose to pass gate two")]);
+    const { llm } = scriptedLlm([doneWith('{"ops":[]}')]);
+    const saved: ExtractionCursor[] = [];
+    const lines: string[] = [];
+    let boom = true;
+    const sched = createMemoryExtractionScheduler({
+      llm,
+      model: "m",
+      entryMaxBytes: 2048,
+      write: () => ({ applied: true }),
+      manifest: () => {
+        if (boom) throw new Error("manifest blew up");
+        return "";
+      },
+      cursor: { load: () => null, save: (c) => void saved.push(c) },
+      stderr: (line) => void lines.push(line),
+    });
+    sched.schedule(log);
+    await sched.drain(); // RESOLVES: the fence turned the throw into a stderr line
+    expect(lines.some((l) => l.includes("raised"))).toBe(true);
+    expect(saved).toHaveLength(0);
+    // ...and the same slice is retried once the host recovers.
+    boom = false;
+    sched.schedule(log);
+    await sched.drain();
+    expect(saved.at(-1)?.turn_id).toBe("turn-1");
   });
 
   it("coalesces: two schedules while in-flight process only the latest log", async () => {
