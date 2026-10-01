@@ -287,7 +287,15 @@ describe("P1 · scheduler", () => {
     expect(d.ledger[0]?.status).toBe("no-op");
     expect(d.saved.at(-1)?.turn_id).toBe("turn-1");
   });
+});
 
+/**
+ * The failure half of the same scheduler. The cursor is ONE position, so "a
+ * failed pass does not advance" is only meaningful together with "and the pass
+ * STOPS there" — plus the two ways a HOST call can go wrong without taking the
+ * fire-and-forget pump (and the process) down with it.
+ */
+describe("P1 · scheduler · failure semantics", () => {
   it("a failure in the MIDDLE of a batch stops the pass instead of being walked over", async () => {
     // Two turns are waiting; the call for turn-1 fails and the one for turn-2
     // would succeed. The cursor is ONE position, so letting turn-2's success

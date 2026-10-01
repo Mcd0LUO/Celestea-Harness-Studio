@@ -13,7 +13,7 @@
  */
 
 import { createUsageTracker, DefaultAgentLoop, withRepetitionPerturbation, type RepetitionDiagnostics } from "@celestea/agent-loop";
-import { listSkills, memoryContextOf, readLayers, renderSkillCatalog, type Llm, type PendingInjection, type Sandbox, type SessionEvent, type SessionLog, type Tool, type ToolGuard } from "@celestea/core";
+import { listSkills, memoryContextOf, readLayers, renderSkillCatalog, type CompressionHost, type Llm, type PendingInjection, type Sandbox, type SessionEvent, type SessionLog, type Tool, type ToolGuard } from "@celestea/core";
 import { createSessionInbox, type SessionInbox, type TurnContextRow } from "@celestea/runtime";
 import {
   createLedgerLlm,
@@ -297,6 +297,30 @@ export class SessionComposer {
     };
   }
 
+  /**
+   * W1900: the compression host of THIS generation, plus the holder that
+   * carries the late-bound runtime — kept out of `compose()` so that method
+   * stays inside its line budget while this keeps its reasoning.
+   *
+   * The tools are built BEFORE `compose()` returns the log they act on, so the
+   * host closes over a holder the same way the question and run_code wirings
+   * do — and the holder is the `Runtime.session` GETTER, so the `rebind()` a
+   * reopened session performs is picked up instead of stranding a dead log. The
+   * water level is the runtime's OWN `contextUsageFacts()`, i.e. the number
+   * /api/status reports: one plane, three readers.
+   */
+  private compressionWiring(): {
+    holder: { runtime: Runtime | null };
+    option: { compression?: CompressionHost };
+  } {
+    const holder: { runtime: Runtime | null } = { runtime: null };
+    const compression = compressionHostOf({
+      log: () => holder.runtime?.session ?? null,
+      usage: () => holder.runtime?.contextUsageFacts() ?? null,
+    });
+    return { holder, option: compression === null ? {} : { compression } };
+  }
+
   /** Compose one session generation (the registry's build factory). */
   compose(sessionId: string | null, dir: string | null): Runtime {
     const profile = this.profileFor(sessionId);
@@ -335,19 +359,7 @@ export class SessionComposer {
     // append to, so the runtime travels through a holder.
     const runCodeHolder: { runtime: Runtime | null } = { runtime: null };
     const onRunCodeEvent = this.runCodeSink(sessionId, runCodeHolder);
-    // W1900: the compression host of THIS generation. The tools are built
-    // BEFORE `compose()` returns the log they act on, so the host closes over
-    // a holder the same way the question and run_code wirings do — and the
-    // holder is the `Runtime.session` GETTER, so the `rebind()` a reopened
-    // session performs is picked up instead of stranding a dead log. The water
-    // level is the runtime's OWN `contextUsageFacts()`, i.e. the number
-    // /api/status reports: one plane, three readers.
-    const compressionLogHolder: { runtime: Runtime | null } = { runtime: null };
-    const compression = compressionHostOf({
-      log: () => compressionLogHolder.runtime?.session ?? null,
-      usage: () => compressionLogHolder.runtime?.contextUsageFacts() ?? null,
-    });
-    const compressionFor = compression === null ? {} : { compression };
+    const compression = this.compressionWiring();
     const engine = enginePlugins({
       profile,
       // W791 (P1, §5.2 #2): the mode decided at compose time. The DETACHED
@@ -369,7 +381,7 @@ export class SessionComposer {
       ...(reader === undefined ? {} : { audit: reader.audit(sessionId) }),
       env: this.opts.env,
       ...(onRunCodeEvent === undefined ? {} : { onRunCodeEvent }),
-      ...compressionFor,
+      ...compression.option,
     });
     // After the boundary is built: audit the generation and spend one-shots, so
     // THIS turn keeps its grants and the next one sees the consumption.
@@ -436,7 +448,7 @@ export class SessionComposer {
     // `isLive` and the `user_question` log row address THIS generation.
     questionHolder.runtime = composed;
     runCodeHolder.runtime = composed; // W1467: same late binding for sub-call rows
-    compressionLogHolder.runtime = composed; // W1900: the compression tools' port
+    compression.holder.runtime = composed; // W1900: the compression tools' port
     return composed;
   }
 

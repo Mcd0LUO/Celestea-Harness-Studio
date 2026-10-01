@@ -114,6 +114,22 @@ async function turn(app: Hono, studio: StudioApp, input: string): Promise<void> 
 /** The model ids each upstream actually received, in call order. */
 const seen = (p: MockProvider): string[] => p.requests.map((r) => String((r.body["model"] as string) ?? ""));
 
+/**
+ * Wait until `p` has received at least `n` requests.
+ *
+ * The turn's OWN request is settled by `waitIdle`, but the background memory
+ * extraction is fire-and-forget (scheduled at turn end, never awaited by the
+ * turn path), so a count that includes it needs to wait for the call to land
+ * rather than for the turn to end.
+ */
+async function waitSeen(p: MockProvider, n: number, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (p.requests.length < n) {
+    if (Date.now() > deadline) throw new Error(`upstream saw ${p.requests.length} requests, wanted ${n}`);
+    await sleep(5);
+  }
+}
+
 describe("W2065 · 切到另一个 provider 后，请求真的发去了那个端点", () => {
   it("第一轮走网关；切到 MiniMax 之后，下一轮到达 MiniMax 那台上游", async () => {
     const gw = await startMockProvider([answer("网关答")]);
@@ -121,6 +137,9 @@ describe("W2065 · 切到另一个 provider 后，请求真的发去了那个端
     upstreams.push(gw, mm);
     const { app, studio } = makeHost(gw.v1BaseUrl, mm.v1BaseUrl);
 
+    // Exactly one request: this input is BELOW the extraction pass's prose floor
+    // ("先在网关上问一句" = 8 non-space chars < 9, and one whitespace-word < 3),
+    // so the turn is the only thing that talks upstream.
     await turn(app, studio, "先在网关上问一句");
     expect([seen(gw), seen(mm)]).toEqual([[GW_MODEL], []]);
 
@@ -129,8 +148,14 @@ describe("W2065 · 切到另一个 provider 后，请求真的发去了那个端
     expect((await res.json()) as Record<string, unknown>).toMatchObject({ model: MM_MODEL, base_url: mm.v1BaseUrl, covered: true });
 
     // 这才是回归线：请求落在 MiniMax 那台上，网关一个都没多收。
+    //
+    // 两次而不是一次：这一轮的输入过了提炼的 prose 下限，所以轮次结束后还有
+    // 一次后台记忆提炼调用（Phase 1 默认开）。它用的也是**本会话当前的 profile**,
+    // 于是「切换对派生调用同样成立」也被这条断言一起钉住了 —— 提炼客户端若仍
+    // 指向旧 host，这里会是 [GW_MODEL, MM_MODEL] 而不是两次 MM_MODEL。
     await turn(app, studio, "现在问 MiniMax");
-    expect([seen(gw), seen(mm)]).toEqual([[GW_MODEL], [MM_MODEL]]);
+    await waitSeen(mm, 2);
+    expect([seen(gw), seen(mm)]).toEqual([[GW_MODEL], [MM_MODEL, MM_MODEL]]);
   });
 
   it("同一模型名挂在两个 provider 下时，provider_id 决定发去哪一个", async () => {

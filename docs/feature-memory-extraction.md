@@ -1,6 +1,6 @@
 # 记忆提炼与长对话成本 · 路线设计
 
-> 状态：**设计（P0 已实现）**。本文只定**路线与已闭合决策**，不跟踪进度 —— 按 [`README.md`](./README.md) 的维护约定，
+> 状态：**设计（P0–P2 已实现）**。本文只定**路线与已闭合决策**，不跟踪进度 —— 按 [`README.md`](./README.md) 的维护约定，
 > 「每完成一个可提交单元就更新」的接续手册不入 `docs/`。落地后若仍有未完成分期，改状态为「设计（P0 已实现）」，不要整篇归档。
 
 **范围**：把「后台自动提炼」引入本仓既有的记忆系统，以及与之**耦合**的长对话成本改造。
@@ -170,7 +170,7 @@ Phase 2 ─ 上下文压缩（方向已定：模型驱动 + 视图叠层；启�
 |---|---|---|---|
 | ① 日志 | `packages/tools/src/memory/log.ts` | `source?{session,turn}` 溯源字段 + 后向兼容解析 | `:42`、`:70-75`、`:99` |
 | ② 写入 | `packages/tools/src/memory/extraction.ts` | `applyMemoryExtractionOp`（add/update/forget 与拒绝原因）+ `memoryManifest` | `:44-76`、`:79`、`:88-97` |
-| ③ 调度 | `packages/runtime/src/memory-extraction.ts` | `createMemoryExtractionScheduler`：cursor、两道跳过门、`{"ops":[…]}`、drain | `:321-447`、`:198-220`、`:354-362`、`:441-446` |
+| ③ 调度 | `packages/runtime/src/memory-extraction.ts` | `createMemoryExtractionScheduler`：cursor、两道跳过门、`{"ops":[…]}`、drain | `:321-401`、`:198-210`、`:360-371`、`:397-401` |
 | ④ 账本 | `packages/runtime/src/ledger.ts`、`packages/runtime/src/ledger-query.ts` | `kind:"extraction"` 独立行；step 视图 `ok|error` 白名单；诚实计入 total/session_total | `ledger.ts:140-154`、`:469-479`、`ledger-query.ts:117-126`、`:270-287` |
 | ⑤ 接线 | `packages/runtime/src/turn-runner.ts`、`packages/runtime/src/compose.ts` | `ledger.endTurn` 之后 `extraction.schedule(log)` | `turn-runner.ts:230`、`compose.ts:213` |
 | ⑥ 组装 | `apps/studio/src/runtime/session-compose.ts` | effort/输出预算、env 开关、cursor sidecar、shutdown drain、offline 跳过 | `:477-512`、`:352-355` |
@@ -215,17 +215,17 @@ Phase 2 ─ 上下文压缩（方向已定：模型驱动 + 视图叠层；启�
 
 **⑥ 组装层：studio 侧**
 
-`session-compose.ts` 的 `memoryExtraction()`（`:477-512`）按序短路：`sessionId`/目录/工作区为空 → 跳过（`:484`）；`!memoryExtractionEnabled` → 跳过（`:485`）；`resolveLlmMode(env)==="offline"` → 跳过（`:488`）。随后：`memoryStoreOf(workspace.path)`（`:489`）；effort 取 env 或默认 `"low"`（`:490`）；`liveEngineLlm({...profile, reasoning_effort:effort, max_output_tokens:2048}, env)`（`:491`）；`write` 回调包上 `{session,turn}` 溯源（`:495`）；`manifest` 回调（`:496`）；`bookExtraction` 带上 provider/model/base_url_host（`:497-507`）；cursor 指向 `join(dir,"memory-extraction.json")`（`:508`、`:78`、`:515-538`，损坏即重置）；`entryMaxBytes` 传 `MEMORY_ENTRY_MAX_BYTES`（`:509`）；stderr（`:510`）。
+`session-compose.ts` 的 `memoryExtraction()`（`:583-618`）按序短路：`sessionId`/目录/工作区为空 → 跳过（`:590`）；`!memoryExtractionEnabled` → 跳过（`:591`）；`resolveLlmMode(env)==="offline"` → 跳过（`:594`）。随后：`memoryStoreOf(workspace.path)`（`:595`）；effort 取 env 或默认 `"low"`（`:596`）；`liveEngineLlm({...profile, reasoning_effort:effort, max_output_tokens:2048}, env)`（`:597`）；`write` 回调包上 `{session,turn}` 溯源（`:601`）；`manifest` 回调（`:602`）；`bookExtraction` 带上 provider/model/base_url_host（`:606-612`）；cursor 指向 `join(dir,"memory-extraction.json")`（`:614`、`:79`、`:621-644`，损坏即重置）；`entryMaxBytes` 传 `MEMORY_ENTRY_MAX_BYTES`（`:615`）；stderr（`:616`）。
 
 **env 开关与默认值**
 
 | 变量 | 默认 | 行为 | 锚点 |
 |---|---|---|---|
-| `CELESTEA_MEMORY_EXTRACTION` | 开 | 取 `off`/`0`/`false`/`no` 关闭；其余开启 | `memory-extraction.ts:144-150`、`session-compose.ts:485` |
-| `CELESTEA_MEMORY_EXTRACTION_EFFORT` | `"low"` | 覆盖提炼调用的 `reasoning_effort`（自由字符串，逐字透传） | `session-compose.ts:80`、`:490`；`packages/llm/src/profile.ts:107` |
+| `CELESTEA_MEMORY_EXTRACTION` | 开 | 取 `off`/`0`/`false`/`no` 关闭；其余开启 | `memory-extraction.ts:144-150`、`session-compose.ts:591` |
+| `CELESTEA_MEMORY_EXTRACTION_EFFORT` | `"low"` | 覆盖提炼调用的 `reasoning_effort`（自由字符串，逐字透传） | `session-compose.ts:81`、`:596`；`packages/llm/src/profile.ts:107` |
 | （内部）`max_transcript_bytes` | 24000 | 转录头截断上限，截断处标 `[transcript head truncated]` | `memory-extraction.ts:135`、`:250-289` |
 | （内部）`min_user_words` | 3 | 跳过门 2 阈值 | `memory-extraction.ts:136` |
-| （内部）`max_output_tokens` | 2048 | 请求 `max_tokens` | `memory-extraction.ts:137`、`:369-376` |
+| （内部）`max_output_tokens` | 2048 | 请求 `max_tokens` | `memory-extraction.ts:137`、`:455-463` |
 
 **测试矩阵（本地全绿）**
 
@@ -241,9 +241,9 @@ Phase 2 ─ 上下文压缩（方向已定：模型驱动 + 视图叠层；启�
 
 **已知边界**
 
-- **§5 接缝与当前实现的张力**：§5 把 `drain()`（接缝 2，line 226）与 cursor 悬空容忍（接缝 3，line 227）标为 ⛔「不再需要」，但当前代码**两者都实现了**（`memory-extraction.ts:441-446`、`:203-209`），且模块头（`:18-24`）以「压缩会重编号 turn id」为悬空容忍的**现行**理由。根因是 **Phase 2 视图叠层尚未落地**，`compactSession` 仍会重写/重编号日志（§4 line 212、§7 line 279）。因此 §5 的两条 ⛔ 是对 **Phase 2 落地后**的判定，而当前代码正处在 §5 自述的「回退则复活」分支上——落地 Phase 2 前，这两条接缝属于现行必需。
+- **§5 接缝与当前实现的张力**：§5 把 `drain()`（接缝 2，line 226）与 cursor 悬空容忍（接缝 3，line 227）标为 ⛔「不再需要」，但当前代码**两者都实现了**（`memory-extraction.ts:397-401`、`:203-209`），且模块头（`:18-24`）以「压缩会重编号 turn id」为悬空容忍的**现行**理由。根因是 **Phase 2 视图叠层尚未落地**，`compactSession` 仍会重写/重编号日志（§4 line 212、§7 line 279）。因此 §5 的两条 ⛔ 是对 **Phase 2 落地后**的判定，而当前代码正处在 §5 自述的「回退则复活」分支上——落地 Phase 2 前，这两条接缝属于现行必需。
 - **`turn_end` 硬约束**：§5 接缝 1 保留；`schedule(log)` 只在轮次关闭后触发，天然满足「不打断进行中的轮次」。
-- **anti-pattern 缓解落地**：不每轮都提炼 → 两道跳过门 + cursor（`memory-extraction.ts:223-247`、`:354-362`）；不污染轮次成本 → 独立 `kind:"extraction"` 行、step 视图白名单；可审计 → `source{...}`；人工在环 → 直写门 + 全局层只写 + `entries.jsonl`/`forget` 召回（§2.1）。
+- **anti-pattern 缓解落地**：不每轮都提炼 → 两道跳过门 + cursor（`memory-extraction.ts:217-247`、`:360-371`）；不污染轮次成本 → 独立 `kind:"extraction"` 行、step 视图白名单；可审计 → `source{...}`；人工在环 → 直写门 + 全局层只写 + `entries.jsonl`/`forget` 召回（§2.1）。
 - **不做自我反馈**：提炼调用不写回会话日志（`generate` 的请求不落 log，§4 line 157），不会触发下一轮提炼。
 - **真实通道探针（✅ 已验证 2026-10-01）**：r4.codes / deepseek-v4-flash 真通道 E2E 全 PASS——账本出现独立 `kind:"extraction"` 行（status ok、entries 1、323 in / 134 out）、cursor sidecar `memory-extraction.json` 正常推进、`entries.jsonl` 新条目带 `source:{session,turn}` 且事实归类准确（未把临时任务状态写成持久事实）。环境事实：数据根无 `pricing.json` 时成本恒 `unpriced`（按设计，非 bug）。
 
@@ -293,8 +293,8 @@ token 估算器（`context-trim.ts`，仍是唯一估算器）；`cacheHitRatio`
 
 **动工修订（六条，来自动工前的裁决；均已落地）**
 
-1. **哲学并入 `config.system_prompt` 的构造链**，不是 system 层运行时拼接：`agentConfigFromProfile`（`packages/runtime/src/agent-config.ts:36-53`）在返回前用 `withCompressionPhilosophy`（`packages/core/src/compression.ts:258`）把 `COMPRESSION_PHILOSOPHY`（`:225`）接到 profile 串尾——`config.system_prompt` 因此**就是最终串**，loop 的裁剪预算（`packages/agent-loop/src/loop.ts:300-306`）、0b 去重的可见性模拟（`packages/runtime/src/turn-context-dedup.ts:97-107`）与 statusline 的组装估算（`packages/runtime/src/runtime.ts:254-260`）三处 `estimateTokens` 自动看到同一串。放进 studio 的 prompt 链会被 `USER_OVERRIDE` 整体旁路；放进 `buildRequest` 会让去重模拟的 system 偏小、切得偏浅，破坏 `turn-context-dedup.ts:28-30` 声明的「只会切得更深」单向安全。
-2. **消息引用号 → turn 区间引用**：模型调 `compress({from_turn,to_turn})`，不渲染逐消息引用号（message 无 id、event 无序数 id，唯一稳定锚是 turn id；`tool_call` 累积合并使 message↔event 非 1:1）。区间合法性是**引擎硬校验**（`packages/core/src/compression-range.ts:86`）：未对齐 / 未知轮 / 端点在飞轮 / 倒置 / 空区间五种拒绝码。
+1. **哲学并入 `config.system_prompt` 的构造链**，不是 system 层运行时拼接：`agentConfigFromProfile`（`packages/runtime/src/agent-config.ts:36-53`）在返回前用 `withCompressionPhilosophy`（`packages/core/src/compression.ts:262`）把 `COMPRESSION_PHILOSOPHY`（`:229`）接到 profile 串尾——`config.system_prompt` 因此**就是最终串**，loop 的裁剪预算（`packages/agent-loop/src/loop.ts:300-306`）、0b 去重的可见性模拟（`packages/runtime/src/turn-context-dedup.ts:97-107`）与 statusline 的组装估算（`packages/runtime/src/runtime.ts:254-260`）三处 `estimateTokens` 自动看到同一串。放进 studio 的 prompt 链会被 `USER_OVERRIDE` 整体旁路；放进 `buildRequest` 会让去重模拟的 system 偏小、切得偏浅，破坏 `turn-context-dedup.ts:28-30` 声明的「只会切得更深」单向安全。
+2. **消息引用号 → turn 区间引用**：模型调 `compress({from_turn,to_turn})`，不渲染逐消息引用号（message 无 id、event 无序数 id，唯一稳定锚是 turn id；`tool_call` 累积合并使 message↔event 非 1:1）。区间合法性是**引擎硬校验**（`packages/core/src/compression-range.ts:100`）：未对齐 / 未知轮 / 端点在飞轮 / 倒置 / 空区间五种拒绝码。
 3. **压缩的触发经济学**（新增小节，正文见下）。
 4. **叠层落点写死**：`compressedLog`（`packages/session/src/compression-log.ts:30`）包住 `SessionLog`，只替换 `deriveMessages` 的派生视图；状态在 `openSessionLog` 的组装点注入（`packages/runtime/src/host/engine-session.ts:143-150`），文件是会话目录旁挂的 `compression.json`（`packages/session/src/compression.ts:29`），损坏 / 版本不符即重置为空（`:64`）。提炼读原始事件，不受叠层影响。
 5. **水位与触发**（新增小节，正文见下）。
@@ -308,8 +308,8 @@ token 估算器（`context-trim.ts`，仍是唯一估算器）；`cacheHitRatio`
 
 水位只有一个数据面：`packages/runtime/src/status.ts` 的 `contextUsage`（`:450`，真实 provider prompt_tokens 优先，否则用与 trim 同一个估算器的备忘录组装）。runtime 投影成 `ContextUsageFacts`（`packages/runtime/src/runtime.ts:138-140`）并作为 `contextUsage` 绑定交给 loop（`packages/runtime/src/compose.ts:223`、`packages/runtime/src/turn-runner.ts:298`）。两级触发读同一个 ratio：
 
-- **50% nudge**（`COMPRESSION_NUDGE_RATIO`，`packages/core/src/compression.ts:151`）：`buildRequest` 尾部追加一条**瞬时** system 消息（`packages/agent-loop/src/loop.ts:307`、`packages/agent-loop/src/compression-nudge.ts:91`），进视图、绝不进 log、绝不进 system prompt、每步重建。
-- **0.8 preflight**（`COMPRESSION_PREFLIGHT_RATIO`，`:161`）：措辞从「可以压」升级为「现在压」，并说明引擎即将开始有损裁剪（`packages/agent-loop/src/compression-nudge.ts:63`）。真正的兜底仍是既有 `trimContext` —— `CONTEXT_TRIM_THRESHOLD`（`packages/runtime/src/agent-config.ts:17`）就是同一个 0.8，它不依赖模型是否调用 compress。
+- **50% nudge**（`COMPRESSION_NUDGE_RATIO`，`packages/core/src/compression.ts:155`）：`buildRequest` 尾部追加一条**瞬时** system 消息（`packages/agent-loop/src/loop.ts:307`、`packages/agent-loop/src/compression-nudge.ts:91`），进视图、绝不进 log、绝不进 system prompt、每步重建。
+- **0.8 preflight**（`COMPRESSION_PREFLIGHT_RATIO`，`:165`）：措辞从「可以压」升级为「现在压」，并说明引擎即将开始有损裁剪（`packages/agent-loop/src/compression-nudge.ts:63`）。真正的兜底仍是既有 `trimContext` —— `CONTEXT_TRIM_THRESHOLD`（`packages/runtime/src/agent-config.ts:17`）就是同一个 0.8，它不依赖模型是否调用 compress。
 
 **压缩块 schema**（原 §5 遗留项，已定）
 
@@ -319,7 +319,7 @@ token 估算器（`context-trim.ts`，仍是唯一估算器）；`cacheHitRatio`
 
 | 层 | 文件 | 内容 | 关键锚点 |
 |---|---|---|---|
-| ① 纯函数 | `packages/core/src/compression.ts`、`compression-range.ts` | 块 schema、区间数学（校验 / 归一化合并 / turn 索引）、叠层投影、哲学常量、水位事实投影 | `compression.ts:50`、`:95`、`:117`、`:173`；`compression-range.ts:86`、`:120`、`:150` |
+| ① 纯函数 | `packages/core/src/compression.ts`、`compression-range.ts` | 块 schema、区间数学（校验 / 归一化合并 / turn 索引）、叠层投影、哲学常量、水位事实投影 | `compression.ts:50`、`:95`、`:117`、`:177`；`compression-range.ts:100`、`:142`、`:172` |
 | ② 会话状态 | `packages/session/src/compression.ts`、`compression-log.ts` | `compression.json` 侧车（损坏即重置）、`deriveMessages` 叠层装饰器 | `compression.ts:29`、`:64`、`:102`；`compression-log.ts:27`、`:30` |
 | ③ 运行时接线 | `packages/runtime/src/host/engine-session.ts`、`compression-host.ts`、`compression-switch.ts`、`agent-config.ts`、`compose.ts`、`runtime.ts` | 组装点注入、宿主端口、env kill-switch、哲学并入、水位绑定 | `engine-session.ts:147-150`、`compression-host.ts:116`、`compression-switch.ts:19`、`agent-config.ts:50-51`、`compose.ts:223`、`runtime.ts:138` |
 | ④ 循环 | `packages/agent-loop/src/compression-nudge.ts`、`loop.ts` | nudge 文本 / 阈值 / 瞬时消息；`buildRequest` 尾部注入 | `compression-nudge.ts:62`、`:91`；`loop.ts:299-316` |
@@ -347,9 +347,9 @@ token 估算器（`context-trim.ts`，仍是唯一估算器）；`cacheHitRatio`
 
 - `search_context` 未做（设计上可延后）；`decompress` 只接受与块**完全一致**的区间，不做区间裁剪式部分还原。
 - 侧车损坏 / 版本不符 → 静默重置为空并 warn（与 `memory-extraction.json` 同模式），**不做备份**。
-- 嵌套再压缩 = 区间覆盖合并（`normalizeBlocks`，`compression-range.ts:120`），摘要是「摘要的摘要」；`mergedBlockCount`（`:150`）回报被吞掉的块数。
-- `compactSession` **尚未退役**，今天两条路径并存（§5 的注）。
-- 本节对应的实现仍在**工作树**（未提交）；提交后文档头状态可按维护约定改为「设计（P0/P2 已实现）」并同步 `docs/README.md` 地图行。
+- 嵌套再压缩 = 区间覆盖合并（`normalizeBlocks`，`compression-range.ts:142`），摘要是「摘要的摘要」；`mergedBlockCount`（`:172`）回报被吞掉的块数。
+- `compactSession` **尚未退役**，今天两条路径并存（§5 的注）——**但压缩视图不再受它影响**：重写日志会作废 `<session dir>/compression.json`（`packages/runtime/src/compact/run.ts` 的 `clearCompressionSidecar`，落在原子重写之后、调用方重绑之前；清理失败即抛，于是 `compaction_start` 保持未配对，交给 P12 的既有判定）。侧车是「**旧编号上的闭区间**」，留着就等于把旧区间套到重编号后的新日志上；而 overlay 对「找不到 `to_turn`」的读法又只能往前盖 —— 两条一起，正是当初必须把「重写日志」和「作废派生状态」绑成一步的原因。
+- 本节对应的实现已随 PR#2 **并入 main**（本次吸纳，状态行同步为「设计（P0–P2 已实现）」）。
 **行为参照与测试场景**：billion-context 的插件模式（pi 适配器，其文档自称 "the ONLY behavioral reference"）。其事故录直接翻译为本仓测试场景：
 
 - **#717 伪造标记**：模型在上下文压力下伪造「已压缩」确认文本、从未真正调用 —— 以状态为准，不以转录文本为准。
@@ -360,7 +360,7 @@ token 估算器（`context-trim.ts`，仍是唯一估算器）；`cacheHitRatio`
 本节的视图叠层收益在挂载形态下一条都拿不到 —— **挂载只是实验，长期形态必须是自研**。
 
 **现 `compactSession` 的处置**：视图叠层落地后降级为「硬重置」工具或退役；其「重写 log + 单份备份」的可逆性短板随之消失。
-（**注**：Phase 2 已落地但 `compactSession` **尚未退役**，两条路径并存，`compactSession` 仍会重写 / 重编号日志 —— §5 的注因此仍然成立。）
+（**注**：Phase 2 已落地但 `compactSession` **尚未退役**，两条路径并存，`compactSession` 仍会重写 / 重编号日志 —— §5 的注因此仍然成立。**压缩侧车不在此列**：重写会作废 `compression.json`，所以「旧区间套到新日志上」这条已经堵住。）
 
 **仍有效的约束**：前作 §3 反模式第 6 条（过度剪枝；丢失特异性很难恢复，**稀疏记忆比略大的记忆更糟**）。
 模型驱动把「压什么」交给模型，哲学提示词与测试场景必须防住「过度压缩」这一侧。
@@ -396,7 +396,7 @@ Phase 2 定调为**视图叠层**（§4）后，原三条接缝只剩一条硬�
 | `decompress` 做成模型工具还是仅调试命令 | ✅ 已裁决（2026-10-01） | 做成模型工具（`packages/tools/src/tools/compression.ts:173`）：视图叠层下可逆性便宜，把它升级为协议的一部分 |
 | 提炼用哪个模型 / 提炼调用是否记 usage ledger | ✅ 已裁决（2026-09-30） | 会话当前模型 + reasoning_effort 钉最低档 + 输出 ≤2048；ledger 记独立 `kind:"extraction"`、不并入 turn_total（§4 Phase 1） |
 | `trimContext` 与 `compactSession` 的取舍策略 | ✅ 已部分解答 | `trimContext` 留作 preflight 兜底；`compactSession` 待视图叠层落地后降级或退役（§4 Phase 2） |
-| 压缩阈值常量是否调整 | ✅ 已裁决（2026-10-01） | `COMPRESSION_NUDGE_RATIO = 0.5` / `COMPRESSION_PREFLIGHT_RATIO = 0.8`（`packages/core/src/compression.ts:151`、`:161`）；与 `CONTEXT_TRIM_THRESHOLD` 同值，兜底与提示同一条线 |
+| 压缩阈值常量是否调整 | ✅ 已裁决（2026-10-01） | `COMPRESSION_NUDGE_RATIO = 0.5` / `COMPRESSION_PREFLIGHT_RATIO = 0.8`（`packages/core/src/compression.ts:155`、`:165`）；与 `CONTEXT_TRIM_THRESHOLD` 同值，兜底与提示同一条线 |
 | 是否引入显式缓存断点 | ❌ 已撤回 | 见 §3 |
 | `[[wiki-link]]` 式记忆间链接 | ⏸ 挂起 | 与 append-only log 模型有张力，未评估 |
 

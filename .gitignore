@@ -64,6 +64,16 @@ packages/core/contracts/
 # 它们必须是 git 与 eslint 的盲区，否则主工作树会把它们当未跟踪文件、并 lint 半成品代码。
 .worktrees/
 
+# 过程稿与实验工作区（.probe/）：Phase 0-2 的讨论记录、E2E 探针、一次性脚本，
+# 以及原始的 reporter 产物。它们有真实价值（Phase 2 的实现就是照其中
+# phase2-discussion.md 的六项修订做的），但形态是**过程稿**而不是仓库资产：
+#   · 体量：24 个文件 / 1.97 MB，其中 .probe/vitest-run1.json 是 1.39 MB 的单行 JSON；
+#   · 它自己的红线栏写着「.probe/ 不入库；探针产物留在 .probe/」（phase2-progress.md），
+#     而最后一次提交恰恰把它提交了 —— 把这句话变成机器可执行的，就是这一条；
+#   · 落在点目录里正好绕开 tests/doc-conventions.test.ts 的文档规范（所以它没被门禁抓住）。
+# 结论：留在本机、不入库。值得沉淀的部分另行走 docs/（不在这里做文档搬运）。
+.probe/
+
 # 本机事实（机器相关：路径/账号/凭据位置/端口）。模板入库，真身绝不入库。
 #   AGENT.md 是提交进仓库的协作规范，必须与机器无关；本机差异写在 AGENT.local.md。
 docs/AGENT.local.md
