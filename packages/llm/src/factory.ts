@@ -21,15 +21,14 @@
  * injected test seam in apps/studio).
  */
 
-import {
-  AdapterRegistry,
-  CHAT_COMPLETIONS_FORMAT,
-  type RouteAdapter,
-  type RouteDescription,
-} from "./adapter.js";
-import { OpenAiCompatClient } from "./client.js";
+import { AdapterRegistry, chatCompletionsAdapter, CHAT_COMPLETIONS_FORMAT } from "./adapter.js";
+// W2067: the second protocol. Assembled here so the registry is built from ONE
+// place; BOTH adapters live in neutral modules, so neither imports the other and
+// the pair is not circular (dep-cruiser `no-circular`).
+import { responsesAdapter } from "./responses/adapter.js";
 import { LlmError } from "./errors.js";
-import { resolveClientConfig, tiersFromConfig, type LlmProfile, type ResolvedClientConfig } from "./profile.js";
+import { resolveClientConfig, tiersFromConfig, type LlmProfile } from "./profile.js";
+import type { Llm } from "./seam.js";
 import type { EnvLike, TimeoutTiers } from "./timeouts.js";
 
 /** `live` = the real provider; `offline` = the host's deterministic seam. */
@@ -91,31 +90,19 @@ export function requestFormatOf(profile?: LiveLlmProfile | null): string {
   return asked === "" ? CHAT_COMPLETIONS_FORMAT : asked;
 }
 
-/**
- * The built-in OpenAI-compatible adapter — the protocol this repository has
- * always spoken, behind the W2066 seam rather than beside it. Its client is
- * the pre-W2066 `OpenAiCompatClient` unchanged: registering an adapter must
- * not be a refactor of the code it wraps.
- */
-export const chatCompletionsAdapter: RouteAdapter = {
-  name: "chat-completions",
-  requestFormat: CHAT_COMPLETIONS_FORMAT,
-  createClient: (config: ResolvedClientConfig) => OpenAiCompatClient.fromConfig(config),
-  // W2066: deliberately empty. The chat-completions dialect declares no
-  // effort vocabulary of its own — the endpoint decides, and inventing one
-  // here is exactly the clamping/aliasing the seam exists to avoid.
-  describe: (): RouteDescription => ({
-    requestFormat: CHAT_COMPLETIONS_FORMAT,
-    reasoningEfforts: [],
-    contextWindow: null,
-    acceptsImages: true,
-  }),
-};
 
-/** A registry holding only the built-in adapter (one per call, not shared). */
+/**
+ * A registry holding the protocols THIS build can speak.
+ *
+ * W2067: it now holds TWO. The W2066 refusal path is unchanged for a third —
+ * an unregistered protocol is still a named, non-retryable failure — which is
+ * exactly the property that made adding the second one a new file plus one line
+ * instead of a refactor.
+ */
 export function defaultAdapterRegistry(): AdapterRegistry {
   const registry = new AdapterRegistry();
   registry.register(chatCompletionsAdapter);
+  registry.register(responsesAdapter);
   return registry;
 }
 
@@ -131,23 +118,18 @@ export function createLiveLlm(
   profile?: LiveLlmProfile | null,
   env: EnvLike = process.env,
   registry: AdapterRegistry = defaultAdapterRegistry(),
-): OpenAiCompatClient {
+): Llm {
   const effective = withBaseUrlFallback(profile, env);
   const config = resolveClientConfig(effective, env);
   const format = requestFormatOf(effective);
   const adapter = registry.resolve(format, `profile.request_format='${format}'`);
-  const client = adapter.createClient(config);
-  // The registry is a general seam; the host still wants the concrete client
-  // (endpoint(), describe()). A future adapter may return a different
-  // implementation, so the cast is checked here rather than assumed.
-  if (!(client instanceof OpenAiCompatClient)) {
-    throw new LlmError(
-      `adapter '${adapter.name}' produced ${client.constructor.name}, which the host cannot describe`,
-      "generate",
-      { retryable: false },
-    );
-  }
-  return client;
+  // W2067: the return type is the SEAM, not the chat-completions class. An
+  // earlier draft returned `OpenAiCompatClient` and runtime-checked the result,
+  // which by construction rejected the second protocol: the responses client is
+  // not a subclass. That check was the seam failing to be a seam. Nothing above
+  // this line needs `endpoint()` / `describe()` (the host only ever calls
+  // `generate`), so the concrete class is a detail of the adapter again.
+  return adapter.createClient(config);
 }
 
 /** Secret-free view of the live configuration (never carries the key). */

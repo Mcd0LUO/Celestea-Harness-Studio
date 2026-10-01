@@ -126,6 +126,7 @@ export {
 export type { RouteAdapter, RouteDescription } from "./adapter.js";
 export {
   AdapterRegistry,
+  chatCompletionsAdapter,
   CHAT_COMPLETIONS_FORMAT,
   noAdapterAdvice,
   NO_ADAPTER,
@@ -135,7 +136,6 @@ export {
 // Production factory: mode switch + live profile -> client assembly (W511).
 export type { LiveLlmProfile, LiveLlmView, LlmMode } from "./factory.js";
 export {
-  chatCompletionsAdapter,
   createLiveLlm,
   defaultAdapterRegistry,
   liveLlmView,
@@ -145,6 +145,28 @@ export {
   resolveLlmMode,
   withBaseUrlFallback,
 } from "./factory.js";
+
+// W2067: the `responses` protocol — the second adapter, and the evidence that the
+// seam is one. `ResponsesClient` is the same `Llm` seam behind a different wire;
+// the pure frame decoder and the request encoder are exported so the golden
+// recordings replay through the SAME code the live path runs.
+export type { SendRequestOptions } from "./responses/decode.js";
+export {
+  parseCallArguments,
+  parseFrame,
+  responsesEvents,
+  ResponsesClient,
+  type ParsedFrame,
+} from "./responses/decode.js";
+export { RESPONSES_FORMAT, responsesAdapter } from "./responses/adapter.js";
+export {
+  buildResponsesBody,
+  mapResponsesTool,
+  responsesUrl,
+  type ResponsesBody,
+  type ResponsesInput,
+  type ResponsesTool,
+} from "./responses/wire.js";
 
 // Fallback chain (iteration E §4 P1): the decorator, its trigger-table defaults
 // and the sidecar config loader (`fallbacks.json` / `CELESTEA_LLM_FALLBACKS`).

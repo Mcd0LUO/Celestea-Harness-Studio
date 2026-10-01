@@ -1,0 +1,180 @@
+event: response.created
+data: {"type":"response.created","response":{"created_at":1790861288,"id":"resp_REDACTED","model":"deepseek-flash","object":"response","output":[],"service_tier":"auto","status":"in_progress","tools":[{"name":"get_weather","type":"function","description":"Get current weather for a city","parameters":{"properties":{"city":{"description":"City name","type":"string"}},"type":"object","required":["city"]}}],"caching":{"type":"disabled"},"store":true,"expire_at":1791120488,"background":false,"previous_response_id":null,"error":null,"incomplete_details":null,"trace_id":"trace_REDACTED"},"sequence_number":0}
+
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"created_at":1790861288,"id":"resp_REDACTED","model":"deepseek-flash","object":"response","output":[],"service_tier":"auto","status":"in_progress","tools":[{"name":"get_weather","type":"function","description":"Get current weather for a city","parameters":{"properties":{"city":{"description":"City name","type":"string"}},"type":"object","required":["city"]}}],"caching":{"type":"disabled"},"store":true,"expire_at":1791120488,"background":false,"previous_response_id":null,"error":null,"incomplete_details":null,"trace_id":"trace_REDACTED"},"sequence_number":1}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"item_REDACTED","type":"reasoning","summary":[],"status":"in_progress"},"sequence_number":2}
+
+event: response.reasoning_summary_part.added
+data: {"type":"response.reasoning_summary_part.added","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"summary_index":0,"part":{"type":"summary_text"},"sequence_number":3}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":"The","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":4}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" user wants the","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":5}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" weather in Beijing. I should","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":6}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" call the tool","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":7}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":".\n\nAlso I need","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":8}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" to think","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":9}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" about the","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":10}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" tool result","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":11}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" — I'll get","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":12}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" the data back","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":13}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":". Let me call it","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":14}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":".\n\nNote: the tool","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":15}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" may","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":16}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" return something. Let me just","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":17}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" call it and","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":18}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" then","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":19}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" respond","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":20}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":".\n\nWait","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":21}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":", there's a","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":22}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" subtlety: I should call","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":23}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" the tool and then","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":24}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" report.","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":25}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" Let me do","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":26}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" that.\n\nActually","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":27}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":", I can't see","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":28}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" the result","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":29}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" yet — I","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":30}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" need to make the call","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":31}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" first","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":32}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":".\n\nAlso, I should note","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":33}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" the","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":34}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" system","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":35}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" prompt","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":36}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" says I","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":37}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" can invoke","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":38}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" multiple","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":39}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" tools in the same block if","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":40}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" independent. Only one tool needed","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":41}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" here.","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"sequence_number":42}
+
+event: response.reasoning_summary_text.done
+data: {"type":"response.reasoning_summary_text.done","summary_index":0,"item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"text":"The user wants the weather in Beijing. I should call the tool.\n\nAlso I need to think about the tool result — I'll get the data back. Let me call it.\n\nNote: the tool may return something. Let me just call it and then respond.\n\nWait, there's a subtlety: I should call the tool and then report. Let me do that.\n\nActually, I can't see the result yet — I need to make the call first.\n\nAlso, I should note the system prompt says I can invoke multiple tools in the same block if independent. Only one tool needed here.","sequence_number":43}
+
+event: response.reasoning_summary_part.done
+data: {"type":"response.reasoning_summary_part.done","item_id":"item_tr_0849b769820d41799855c54023ddb55d_0","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"The user wants the weather in Beijing. I should call the tool.\n\nAlso I need to think about the tool result — I'll get the data back. Let me call it.\n\nNote: the tool may return something. Let me just call it and then respond.\n\nWait, there's a subtlety: I should call the tool and then report. Let me do that.\n\nActually, I can't see the result yet — I need to make the call first.\n\nAlso, I should note the system prompt says I can invoke multiple tools in the same block if independent. Only one tool needed here."},"sequence_number":44}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"item_REDACTED","type":"reasoning","summary":[{"type":"summary_text","text":"The user wants the weather in Beijing. I should call the tool.\n\nAlso I need to think about the tool result — I'll get the data back. Let me call it.\n\nNote: the tool may return something. Let me just call it and then respond.\n\nWait, there's a subtlety: I should call the tool and then report. Let me do that.\n\nActually, I can't see the result yet — I need to make the call first.\n\nAlso, I should note the system prompt says I can invoke multiple tools in the same block if independent. Only one tool needed here."}],"status":"completed"},"sequence_number":45}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":1,"item":{"call_id":"call_REDACTED","name":"get_weather","type":"function_call","id":"fc_REDACTED","status":"in_progress"},"sequence_number":46}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"","item_id":"fc_tr_0849b769820d41799855c54023ddb55d_1","output_index":1,"sequence_number":47}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"{","item_id":"fc_tr_0849b769820d41799855c54023ddb55d_1","output_index":1,"sequence_number":48}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\"","item_id":"fc_tr_0849b769820d41799855c54023ddb55d_1","output_index":1,"sequence_number":49}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"city","item_id":"fc_tr_0849b769820d41799855c54023ddb55d_1","output_index":1,"sequence_number":50}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\"","item_id":"fc_tr_0849b769820d41799855c54023ddb55d_1","output_index":1,"sequence_number":51}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":": ","item_id":"fc_tr_0849b769820d41799855c54023ddb55d_1","output_index":1,"sequence_number":52}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\"","item_id":"fc_tr_0849b769820d41799855c54023ddb55d_1","output_index":1,"sequence_number":53}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"Beijing","item_id":"fc_tr_0849b769820d41799855c54023ddb55d_1","output_index":1,"sequence_number":54}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"\"","item_id":"fc_tr_0849b769820d41799855c54023ddb55d_1","output_index":1,"sequence_number":55}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"}","item_id":"fc_tr_0849b769820d41799855c54023ddb55d_1","output_index":1,"sequence_number":56}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","item_id":"fc_tr_0849b769820d41799855c54023ddb55d_1","output_index":1,"arguments":"{\"city\": \"Beijing\"}","sequence_number":57}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":1,"item":{"arguments":"{\"city\": \"Beijing\"}","call_id":"call_REDACTED","name":"get_weather","type":"function_call","id":"fc_REDACTED","status":"completed"},"sequence_number":58}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":59,"response":{"created_at":1790861289,"object":"response","service_tier":"default","status":"completed","tools":[{"name":"get_weather","type":"function","description":"Get current weather for a city","parameters":{"properties":{"city":{"description":"City name","type":"string"}},"type":"object","required":["city"]}}],"usage":{"input_tokens":312,"output_tokens":159,"total_tokens":471,"input_tokens_details":{"cached_tokens":256,"cache_creation_tokens":null},"output_tokens_details":{"reasoning_tokens":120}},"caching":{"type":"disabled"},"store":true,"expire_at":1791120488,"id":"resp_REDACTED","model":"deepseek-flash","background":false,"output":[{"id":"item_REDACTED","type":"reasoning","summary":[{"type":"summary_text","text":"The user wants the weather in Beijing. I should call the tool.\n\nAlso I need to think about the tool result — I'll get the data back. Let me call it.\n\nNote: the tool may return something. Let me just call it and then respond.\n\nWait, there's a subtlety: I should call the tool and then report. Let me do that.\n\nActually, I can't see the result yet — I need to make the call first.\n\nAlso, I should note the system prompt says I can invoke multiple tools in the same block if independent. Only one tool needed here."}],"status":"completed"},{"arguments":"{\"city\": \"Beijing\"}","call_id":"call_REDACTED","name":"get_weather","type":"function_call","id":"fc_REDACTED","status":"completed"}],"output_text":"","previous_response_id":null,"error":null,"incomplete_details":null,"cost_cny":"0.00069712","billing_pending":false,"trace_id":"trace_REDACTED"}}
+

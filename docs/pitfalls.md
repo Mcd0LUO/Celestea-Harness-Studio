@@ -31,6 +31,7 @@
 | P13 | W 号跨域撞号 | DSH 分配器看不见 MC 域台账；回执文件名只带号 ⇒ 同号互相覆盖 |
 | P14 | 切模型不同步切端点 | `base_url` 曾被 `request_format === "chat_completions"` 卡住；会话级覆盖压根没有端点概念 |
 | P15 | `request_format` 只写不读 | 字段有 UI、有 schema、有回显，但 `packages/llm` 零引用；协议是**路由的属性**，变化单元是 adapter |
+| P16 | responses 端点的两个静默陷阱 | 打满 token 上限时**终帧改名**（`response.incomplete`）；`max_tokens` 被 200 接受但不生效 |
 
 ---
 
@@ -345,13 +346,46 @@ chat_completions 的行且**不发请求**，W2066 沿用的就是它的形状�
 对照行照常发）。变异负控制两处：target 不取 owner 的格式 → 路由化用例红；工厂绕过
 注册表 → 拒绝用例红。
 
-**仍然不做（有意）**：`anthropic_messages` / `responses` 的实现。它们的 SSE 帧必须
-**从真实 provider 录制**才能当黄金样本（`ARCHITECTURE.md` §6.4 的金标准顺序），手编的
-帧不配。接缝位置已经定对：将来加协议是**新增一个 adapter 文件 + 一行 `register()`**，
-不是重构。
+**已做（下一节 P16）**：`responses` 已作为第二个 adapter 落地（W2067）。
 
 ---
 
+## P16 — responses 端点：两个**静默**陷阱（录制帧才有真相）
+
+**症状**：接上 `responses` 协议后，工具调用正常、文本正常，但有两种情况静默出错，
+且**都不报错**：
+
+1. 设了输出上限的轮次，引擎判成 `interrupted`（一个成功返回的调用报传输失败）；
+2. 设了输出上限但完全没生效，模型一路写满预算。
+
+**根因（都是实机测出来的，规范里查不到）**：
+
+1. **终帧的名字会变。** 正常收尾是 `response.completed`；一旦输出打满，终帧换成
+   **`response.incomplete`**，并带 `incomplete_details.reason: "length"`。
+   录制证据：`max_output_tokens: 5` 的那一份里 `response.completed` 出现 **0 次**、
+   `response.incomplete` 出现 1 次，`output_tokens` 正好 5。只认 `completed` 的解码器
+   会把「跑完预算」当成「流断在中途」。
+
+2. **上限字段叫 `max_output_tokens`，而 `max_tokens` 被 200 接受但不生效。**
+   对照探针：发 `max_output_tokens: 5` -> `output_tokens: 5`；发 `max_tokens: 5` ->
+   `output_tokens: 34`（等于不限），**没有 400**。比拒绝更危险：调用方以为限流了。
+
+3. 附带一条：**`reasoning: {effort}` 被明确 400 拒绝**（试了三次，两次直接断连）。
+   所以 responses 协议的 effort 无处可去，adapter 的 `describe()` 如实声明
+   `reasoningEfforts: []`，让 UI 停止提供一个点了没反应的旋钮。
+
+**正确做法**：`response.incomplete` 与 `response.completed` 同为**终态**，都带 usage；
+前者额外把「被上限截断」映射成 W2017 的 `done.truncated: true`（截断的答案仍是答案，
+所以终态仍是 `done`）。请求侧只发 `max_output_tokens` 这一个名字。
+
+**怎么验证**：`packages/llm/src/responses/{wire,decode}.test.ts` 跑的是
+`fixtures/responses/recorded-*.sse` **真实录制帧**（脱敏：id / trace_id / 上游 IP /
+提问内容全部抹掉，密钥零残留）。变异负控制两处：把上限字段改回 `max_tokens` ->
+wire 用例红；删掉 `response.incomplete` 分支 -> 截断用例红。
+
+**教训**：前两条都不是「读规范能知道」的。第一条在事件直方图里完全看不出来
+（事件类型齐全，只是少了一种）；第二条探针**返回 200**，不看 `output_tokens` 就会
+以为成功了。**只有把字节录下来、跑解码器、比对计数，才会暴露。**
 ## 附：容易误记的几件事
 
 | 误记 | 事实 |

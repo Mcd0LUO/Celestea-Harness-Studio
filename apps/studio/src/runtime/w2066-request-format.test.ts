@@ -63,7 +63,12 @@ describe("W2066 · 未实现的 request_format 在构造期被拒绝，且一个
     expect(chunks.at(0)).toBe("答");
   });
 
-  for (const format of ["anthropic_messages", "responses"]) {
+  // W2067 moved `responses` OUT of this list: it is implemented now, so a row
+  // declaring it is served. What remains is the honest-refusal contract for a
+  // protocol this build genuinely does not have — and the refusal is still
+  // load-bearing, because `anthropic_messages` is a valid row value that no
+  // adapter serves.
+  for (const format of ["anthropic_messages"]) {
     it(format + "：构造期就拒绝，上游零请求", async () => {
       const up = await startMockProvider([answer("不该被问到")]);
       upstreams.push(up);
@@ -77,4 +82,21 @@ describe("W2066 · 未实现的 request_format 在构造期被拒绝，且一个
       expect(up.requests).toEqual([]);
     });
   }
+
+  it("W2067: a row declaring responses is now SERVED, and posts to /responses", async () => {
+    const up = await startMockProvider([answer("答")]);
+    upstreams.push(up);
+    const client = createLiveLlm(profileFor(up.v1BaseUrl, "responses"), { TEST_UPSTREAM_KEY: "k" }, defaultAdapterRegistry());
+
+    // The endpoint is the proof: same base_url, a different path, no branch in
+    // the factory. (/v1 is NOT doubled — base_url already carries it.)
+    const chunks: string[] = [];
+    for await (const event of await client.generate({ model: MODEL, messages: [userMessage("问")] })) {
+      if (event.kind === "text") chunks.push((event as { text: string }).text);
+      if (event.kind === "done") break;
+    }
+    expect(up.requests).toHaveLength(1);
+    expect(up.requests[0]?.url).toBe("/v1/responses");
+    expect(String(up.requests[0]?.body["model"])).toBe(MODEL);
+  });
 });

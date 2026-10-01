@@ -1,0 +1,129 @@
+event: response.created
+data: {"type":"response.created","response":{"created_at":1790861399,"id":"resp_REDACTED","model":"deepseek-flash","object":"response","output":[],"service_tier":"auto","status":"in_progress","caching":{"type":"disabled"},"store":true,"expire_at":1791120599,"background":false,"previous_response_id":null,"error":null,"incomplete_details":null,"trace_id":"trace_REDACTED"},"sequence_number":0}
+
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"created_at":1790861399,"id":"resp_REDACTED","model":"deepseek-flash","object":"response","output":[],"service_tier":"auto","status":"in_progress","caching":{"type":"disabled"},"store":true,"expire_at":1791120599,"background":false,"previous_response_id":null,"error":null,"incomplete_details":null,"trace_id":"trace_REDACTED"},"sequence_number":1}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"item_REDACTED","type":"reasoning","summary":[],"status":"in_progress"},"sequence_number":2}
+
+event: response.reasoning_summary_part.added
+data: {"type":"response.reasoning_summary_part.added","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"summary_index":0,"part":{"type":"summary_text"},"sequence_number":3}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":"We","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":4}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" need answer. Need comply","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":5}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":":","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":6}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" Name","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":7}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" three primary colors. Answer as","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":8}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" one short sentence,","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":9}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" no tools. Need likely \"","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":10}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":"Red","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":11}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":", blue","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":12}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":", and yellow are the three","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":13}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" primary colors.\" But","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":14}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" note primary","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":15}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" colors for","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":16}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" additive are","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":17}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" red green blue","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":18}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":",","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":19}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" subtract","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":20}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":"ive cyan","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":21}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" magenta yellow. Traditional art","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":22}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" primary red","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":23}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" blue yellow","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":24}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":". User asks name","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":25}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" three primary colors. Simple.","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":26}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" One","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":27}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" short sentence. No tools.","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":28}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" final.","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":29}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","summary_index":0,"delta":" ","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"sequence_number":30}
+
+event: response.reasoning_summary_text.done
+data: {"type":"response.reasoning_summary_text.done","summary_index":0,"item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"text":"We need answer. Need comply: PROMPT_REDACTED\"Red, blue, and yellow are the three primary colors.\" But note primary colors for additive are red green blue, subtractive cyan magenta yellow. Traditional art primary red blue yellow. User asks name three primary colors. Simple. One short sentence. No tools. final. ","sequence_number":31}
+
+event: response.reasoning_summary_part.done
+data: {"type":"response.reasoning_summary_part.done","item_id":"item_tr_966e1fa8e77f4420863dbae582ed2753_0","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"We need answer. Need comply: PROMPT_REDACTED\"Red, blue, and yellow are the three primary colors.\" But note primary colors for additive are red green blue, subtractive cyan magenta yellow. Traditional art primary red blue yellow. User asks name three primary colors. Simple. One short sentence. No tools. final. "},"sequence_number":32}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"item_REDACTED","type":"reasoning","summary":[{"type":"summary_text","text":"We need answer. Need comply: PROMPT_REDACTED\"Red, blue, and yellow are the three primary colors.\" But note primary colors for additive are red green blue, subtractive cyan magenta yellow. Traditional art primary red blue yellow. User asks name three primary colors. Simple. One short sentence. No tools. final. "}],"status":"completed"},"sequence_number":33}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":1,"item":{"type":"message","role":"assistant","content":[],"status":"in_progress","id":"msg_tr_966e1fa8e77f4420863dbae582ed2753_1"},"sequence_number":34}
+
+event: response.content_part.added
+data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_tr_966e1fa8e77f4420863dbae582ed2753_1","output_index":1,"part":{"type":"output_text","text":""},"sequence_number":35}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":"Red","item_id":"msg_tr_966e1fa8e77f4420863dbae582ed2753_1","output_index":1,"sequence_number":36}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":", blue, and yellow are","item_id":"msg_tr_966e1fa8e77f4420863dbae582ed2753_1","output_index":1,"sequence_number":37}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","content_index":0,"delta":" the three primary colors.","item_id":"msg_tr_966e1fa8e77f4420863dbae582ed2753_1","output_index":1,"sequence_number":38}
+
+event: response.output_text.done
+data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_tr_966e1fa8e77f4420863dbae582ed2753_1","output_index":1,"text":"Red, blue, and yellow are the three primary colors.","sequence_number":39}
+
+event: response.content_part.done
+data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_tr_966e1fa8e77f4420863dbae582ed2753_1","output_index":1,"part":{"type":"output_text","text":"Red, blue, and yellow are the three primary colors."},"sequence_number":40}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":1,"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Red, blue, and yellow are the three primary colors."}],"status":"completed","id":"msg_tr_966e1fa8e77f4420863dbae582ed2753_1"},"sequence_number":41}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":42,"response":{"created_at":1790861400,"object":"response","service_tier":"default","status":"completed","usage":{"input_tokens":44,"output_tokens":92,"total_tokens":136,"input_tokens_details":{"cached_tokens":0,"cache_creation_tokens":null},"output_tokens_details":{"reasoning_tokens":80}},"caching":{"type":"disabled"},"store":true,"expire_at":1791120599,"id":"resp_REDACTED","model":"deepseek-flash","background":false,"output":[{"id":"item_REDACTED","type":"reasoning","summary":[{"type":"summary_text","text":"We need answer. Need comply: PROMPT_REDACTED\"Red, blue, and yellow are the three primary colors.\" But note primary colors for additive are red green blue, subtractive cyan magenta yellow. Traditional art primary red blue yellow. User asks name three primary colors. Simple. One short sentence. No tools. final. "}],"status":"completed"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Red, blue, and yellow are the three primary colors."}],"status":"completed","id":"msg_tr_966e1fa8e77f4420863dbae582ed2753_1"}],"output_text":"Red, blue, and yellow are the three primary colors.","previous_response_id":null,"error":null,"incomplete_details":null,"cost_cny":"0.00041200","billing_pending":false,"trace_id":"trace_REDACTED"}}
+

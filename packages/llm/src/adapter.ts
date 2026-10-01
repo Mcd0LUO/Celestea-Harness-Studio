@@ -43,6 +43,7 @@
  * @module @celestea/llm/adapter
  */
 
+import { OpenAiCompatClient } from "./client.js";
 import { LlmError } from "./errors.js";
 import type { ResolvedClientConfig } from "./profile.js";
 import type { Llm } from "./seam.js";
@@ -92,6 +93,33 @@ export interface RouteAdapter {
   /** What this route supports. Optional: the default claims nothing. */
   describe?(config: ResolvedClientConfig): RouteDescription;
 }
+
+/**
+ * The built-in OpenAI-compatible adapter — the protocol this repository has
+ * always spoken, now behind the seam rather than beside it. Its client is the
+ * pre-W2066 `OpenAiCompatClient` unchanged: registering an adapter must not be
+ * a refactor of the code it wraps.
+ *
+ * It lives HERE, not in `factory.ts`, for one structural reason: the responses
+ * adapter registers alongside it, and having IT import `factory.ts` back made
+ * the pair circular (dep-cruiser `no-circular`). The registry is the neutral
+ * ground both sides stand on — which is also why `factory.ts` may assemble
+ * both without either knowing about the other.
+ */
+export const chatCompletionsAdapter: RouteAdapter = {
+  name: "chat-completions",
+  requestFormat: CHAT_COMPLETIONS_FORMAT,
+  createClient: (config: ResolvedClientConfig) => OpenAiCompatClient.fromConfig(config),
+  // W2066: deliberately empty. The chat-completions dialect declares no effort
+  // vocabulary of its own — the endpoint decides, and inventing one here is
+  // exactly the clamping/aliasing the seam exists to avoid.
+  describe: (): RouteDescription => ({
+    requestFormat: CHAT_COMPLETIONS_FORMAT,
+    reasoningEfforts: [],
+    contextWindow: null,
+    acceptsImages: true,
+  }),
+};
 
 /** The description used when an adapter declares none. */
 export function unknownRouteDescription(requestFormat: string): RouteDescription {

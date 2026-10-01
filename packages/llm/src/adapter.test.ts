@@ -24,7 +24,10 @@ import {
   unknownRouteDescription,
   type RouteAdapter,
 } from "./adapter.js";
-import { chatCompletionsAdapter, createLiveLlm, defaultAdapterRegistry, requestFormatOf } from "./factory.js";
+import { createLiveLlm, defaultAdapterRegistry, requestFormatOf } from "./factory.js";
+import { chatCompletionsAdapter } from "./adapter.js";
+import { OpenAiCompatClient } from "./client.js";
+import { ResponsesClient } from "./responses/decode.js";
 import { LlmError } from "./errors.js";
 import type { ResolvedClientConfig } from "./profile.js";
 
@@ -129,8 +132,29 @@ describe("AdapterRegistry", () => {
 
 describe("createLiveLlm routes through the registry", () => {
   it("the built-in registry serves chat_completions with the unchanged client", () => {
+    // W2067: the factory returns the SEAM, so this asserts the concrete client
+    // only by its endpoint — the one thing that distinguishes the two protocols.
     const client = createLiveLlm({ model: "m1", base_url: "http://gw.test/v1" }, { API_KEY: "k" }, defaultAdapterRegistry());
-    expect(client.endpoint()).toBe("http://gw.test/v1/chat/completions");
+    expect(client).toBeInstanceOf(OpenAiCompatClient);
+    const chat = client as OpenAiCompatClient;
+    expect(chat.endpoint()).toBe("http://gw.test/v1/chat/completions");
+  });
+
+  it("W2067: the same call serves responses when the profile declares it", () => {
+    // The point of the whole exercise: a SECOND protocol reached through the
+    // SAME seam, with no branch in the factory.
+    const client = createLiveLlm(
+      { model: "m1", base_url: "http://gw.test/v1", request_format: "responses" },
+      { API_KEY: "k" },
+      defaultAdapterRegistry(),
+    );
+    // The evidence that the seam is a seam: the SAME factory call returns a
+    // DIFFERENT implementation, chosen by the profile's declared protocol, with no
+    // branch anywhere in the factory.
+    expect(client).toBeInstanceOf(ResponsesClient);
+    expect(client).not.toBeInstanceOf(OpenAiCompatClient);
+    const responses = client as ResponsesClient;
+    expect(responses.endpoint()).toBe("http://gw.test/v1/responses");
   });
 
   it("a row's undeclared-but-unserved protocol is REFUSED, not spoken as OpenAI", () => {

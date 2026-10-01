@@ -6,11 +6,15 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  createLiveLlm,
   liveLlmView,
   resolveLlmMode,
   withBaseUrlFallback,
 } from "@celestea/llm";
+// W2067: `createLiveLlm` returns the `Llm` SEAM (W2066/W2067), so the two cases
+// below that assert chat-completions-specific behaviour — `endpoint()`,
+// `requestBody()`, the timeout tiers — construct that client directly. Testing a
+// dialect through the registry is the wiring test's job, not this file's.
+import { OpenAiCompatClient } from "@celestea/llm";
 import type { EngineProfile } from "../runtime-adapter.js";
 import {
   applyProviderTarget,
@@ -211,7 +215,7 @@ describe("live assembly (mode + profile mapping)", () => {
       max_output_tokens: 4321,
       context_window_tokens: 128_000,
     };
-    const client = createLiveLlm(profile, env);
+    const client = OpenAiCompatClient.fromProfile(profile, env);
     expect(client.describe()).toEqual({
       baseUrl: "http://gw.test/v1",
       model: "m1",
@@ -232,7 +236,7 @@ describe("live assembly (mode + profile mapping)", () => {
   });
 
   it("passes the reasoning effort through verbatim in the request body", () => {
-    const client = createLiveLlm({ model: "m1", base_url: "http://gw.test/v1", reasoning_effort: "max" }, {});
+    const client = OpenAiCompatClient.fromProfile({ model: "m1", base_url: "http://gw.test/v1", reasoning_effort: "max" }, {});
     const body = client.requestBody({ messages: [{ role: "user", content: [{ type: "text", content: "hi" }], tool_call_id: null }] });
     expect(body.reasoning_effort).toBe("max");
     expect(body.model).toBe("m1");
