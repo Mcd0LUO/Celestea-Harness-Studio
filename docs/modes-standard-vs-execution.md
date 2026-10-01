@@ -51,7 +51,7 @@
 |---|---|---|
 | 模式概念 | **完全不存在**：无 `mode` 字段、无模式端点、无按会话的工具面差异 | 全仓 grep 无命中；`contracts/endpoints.json` 清单里没有 mode 类端点（W729 实读时 43 条，后增至 47） |
 | 工具暴露 | 单一来源 `registry.schemas()`，模型每一步都看到**全部 10 个**工具 | `packages/agent-loop/src/loop.ts:165`；`contracts/tools.json`（`count: 10`，含 `run_code`） |
-| `run_code` 现状 | **已落地且是"并存"形态**（非 DSH 的唯一入口）：注册进注册表，broker 子调用走同一 registry；白名单 4 工具；硬限额 20 次/120s/256KiB/64KiB 日志 | `packages/tools/src/plugin.ts:117-133`、`run-code/limits.ts:26-43`、`run-code/broker.ts:303-322` |
+| `run_code` 现状 | **已落地且是"并存"形态**（非 DSH 的唯一入口）：注册进注册表，broker 子调用走同一 registry；白名单 4 工具；硬限额 20 次/120s/256KiB/64KiB 日志 | `packages/tools/src/plugin.ts:129-159`、`run-code/limits.ts:26-43`、`run-code/broker.ts:303-322` |
 | `run_code` 的提示词 | `tool_access` 段已含 run_code 段落，并**硬编码**了 10 个工具名清单 | `apps/studio/src/store/builtin-sections.ts:34`（该段 617 B，是全 10 段里第二长） |
 | 提示词段 | 冻结 **10 段**（order 100..1000），内置模板拼装后总长 **3835 B**（含空行分隔） | `builtin-sections.ts:17-78`；`prompts.test.ts:40-42` |
 | 提示词上限 | `PROMPT_MAX_LEN = 8192` 字节，**尾部截断**（char 边界） | `apps/studio/src/store/prompts-template.ts:10,94-100`、`prompts-compose.ts:55` |
