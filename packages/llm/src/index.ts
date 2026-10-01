@@ -159,6 +159,28 @@ export {
   type ParsedFrame,
 } from "./responses/decode.js";
 export { RESPONSES_FORMAT, responsesAdapter } from "./responses/adapter.js";
+
+// W2068: the `anthropic_messages` protocol — the third adapter.
+export type { SendRequestOptions as AnthropicSendOptions } from "./anthropic/decode.js";
+export {
+  anthropicEvents,
+  AnthropicClient,
+  parseAnthropicArguments,
+  parseAnthropicFrame,
+  parseAnthropicUsage,
+  type AnthropicFrame,
+} from "./anthropic/decode.js";
+export { ANTHROPIC_MESSAGES_FORMAT, anthropicMessagesAdapter } from "./anthropic/adapter.js";
+export {
+  anthropicUrl,
+  buildAnthropicBody,
+  DEFAULT_MAX_TOKENS,
+  mapAnthropicTool,
+  type AnthropicBlock,
+  type AnthropicBody,
+  type AnthropicMessage,
+  type AnthropicTool,
+} from "./anthropic/wire.js";
 export {
   buildResponsesBody,
   mapResponsesTool,

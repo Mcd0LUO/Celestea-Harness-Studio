@@ -376,6 +376,12 @@ export async function* responsesEvents(
   };
   // W2017: the cap is reported as a property of the done event, never as an error —
   // a half-written answer is what the caller must expect, not a failed turn.
+  // W2067 follow-up: usage rides just before the terminal event, the same contract
+  // `stream.ts` follows. An earlier draft folded it into the accumulator and
+  // emitted nothing, so a responses turn completed with no observable usage at
+  // all — found while adding the third adapter (W2068) and its test.
+  const usage = state.turn.usage;
+  if (usage !== null) yield { kind: "usage", usage };
   yield state.truncated ? { kind: "done", message, truncated: true } : { kind: "done", message };
 }
 

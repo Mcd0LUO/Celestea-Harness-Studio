@@ -26,6 +26,8 @@ import { AdapterRegistry, chatCompletionsAdapter, CHAT_COMPLETIONS_FORMAT } from
 // place; BOTH adapters live in neutral modules, so neither imports the other and
 // the pair is not circular (dep-cruiser `no-circular`).
 import { responsesAdapter } from "./responses/adapter.js";
+// W2068: the third protocol, same assembly point (see the no-circular note above).
+import { anthropicMessagesAdapter } from "./anthropic/adapter.js";
 import { LlmError } from "./errors.js";
 import { resolveClientConfig, tiersFromConfig, type LlmProfile } from "./profile.js";
 import type { Llm } from "./seam.js";
@@ -103,6 +105,7 @@ export function defaultAdapterRegistry(): AdapterRegistry {
   const registry = new AdapterRegistry();
   registry.register(chatCompletionsAdapter);
   registry.register(responsesAdapter);
+  registry.register(anthropicMessagesAdapter);
   return registry;
 }
 

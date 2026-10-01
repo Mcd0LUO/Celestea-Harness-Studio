@@ -75,7 +75,25 @@ describe("W2067  —  responses decoding over recorded frames", () => {
     expect(terminal(events).kind).toBe("done");
   });
 
-  it("2: reasoning and text stay separate events (merging leaks deliberation into the answer)", async () => {
+  it("2: the turn emits its usage BEFORE the terminal event", async () => {
+    // W2067 follow-up (found while adding the third adapter): the decoder folded
+    // the terminal frame's usage into the accumulator and emitted NOTHING, so the
+    // ledger and the statusline saw a completed turn with no counters. Usage
+    // rides just before `done`, which is the contract `stream.ts` follows.
+    const events = await eventsOf("recorded-text.sse");
+    const usage = events.find((e) => e.kind === "usage");
+    expect(usage).toBeDefined();
+    if (usage !== undefined && usage.kind === "usage") {
+      expect(usage.usage.prompt_tokens).toBeGreaterThan(0);
+      expect(usage.usage.completion_tokens).toBeGreaterThan(0);
+    }
+    const usageAt = events.findIndex((e) => e.kind === "usage");
+    const doneAt = events.findIndex((e) => e.kind === "done");
+    expect(usageAt).toBeGreaterThanOrEqual(0);
+    expect(usageAt).toBeLessThan(doneAt);
+  });
+
+  it("4: reasoning and text stay separate events (merging leaks deliberation into the answer)", async () => {
     const events = await eventsOf("recorded-text.sse");
     expect(thinkingOf(events).length).toBeGreaterThan(0);
     expect(textOf(events).length).toBeGreaterThan(0);

@@ -28,6 +28,7 @@ import { createLiveLlm, defaultAdapterRegistry, requestFormatOf } from "./factor
 import { chatCompletionsAdapter } from "./adapter.js";
 import { OpenAiCompatClient } from "./client.js";
 import { ResponsesClient } from "./responses/decode.js";
+import { AnthropicClient } from "./anthropic/decode.js";
 import { LlmError } from "./errors.js";
 import type { ResolvedClientConfig } from "./profile.js";
 
@@ -157,16 +158,33 @@ describe("createLiveLlm routes through the registry", () => {
     expect(responses.endpoint()).toBe("http://gw.test/v1/responses");
   });
 
-  it("a row's undeclared-but-unserved protocol is REFUSED, not spoken as OpenAI", () => {
-    // The regression line: before W2066 this call succeeded and posted an
-    // anthropic-shaped conversation to whatever base_url the row carried.
+  it("W2068: a row declaring anthropic_messages is now SERVED (the refusal list is empty in practice)", () => {
+    // W2066 shipped this test with `anthropic_messages` as the example of a
+    // protocol nobody serves. W2068 implemented it, so the same call now returns a
+    // different implementation — the shape of the W2066 note, realised.
+    const client = createLiveLlm(
+      { model: "claude-x", base_url: "https://api.anthropic.com/v1", request_format: "anthropic_messages" },
+      { ANTHROPIC_API_KEY: "k" },
+      defaultAdapterRegistry(),
+    );
+    expect(client).toBeInstanceOf(AnthropicClient);
+    expect(client).not.toBeInstanceOf(OpenAiCompatClient);
+    expect((client as AnthropicClient).endpoint()).toBe("https://api.anthropic.com/v1/messages");
+  });
+
+  it("a protocol this build genuinely does not serve is still REFUSED, by name", () => {
+    // The refusal contract is not retired by the three adapters: a row can still
+    // name something no adapter claims, and it must be refused BEFORE a socket is
+    // opened rather than spoken as OpenAI's dialect. The earlier test proved this
+    // with `anthropic_messages`, which is now implemented — so the shape is pinned
+    // with a format that is legitimately absent.
     expect(() =>
       createLiveLlm(
-        { model: "claude-x", base_url: "https://api.anthropic.com/v1", request_format: "anthropic_messages" },
-        { ANTHROPIC_API_KEY: "k" },
+        { model: "x", base_url: "http://gw.test/v1", request_format: "not_a_protocol" },
+        { API_KEY: "k" },
         defaultAdapterRegistry(),
       ),
-    ).toThrow(/anthropic_messages/);
+    ).toThrow(/not_a_protocol/);
   });
 });
 

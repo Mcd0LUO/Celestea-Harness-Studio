@@ -32,6 +32,7 @@
 | P14 | 切模型不同步切端点 | `base_url` 曾被 `request_format === "chat_completions"` 卡住；会话级覆盖压根没有端点概念 |
 | P15 | `request_format` 只写不读 | 字段有 UI、有 schema、有回显，但 `packages/llm` 零引用；协议是**路由的属性**，变化单元是 adapter |
 | P16 | responses 端点的两个静默陷阱 | 打满 token 上限时**终帧改名**（`response.incomplete`）；`max_tokens` 被 200 接受但不生效 |
+| P17 | usage 藏在哪个帧 / 它该**发出来** | responses 只在终帧带 usage；anthropic 拆成两帧要合并。两者都**曾完全不发出** usage 事件 |
 
 ---
 
@@ -386,6 +387,38 @@ wire 用例红；删掉 `response.incomplete` 分支 -> 截断用例红。
 **教训**：前两条都不是「读规范能知道」的。第一条在事件直方图里完全看不出来
 （事件类型齐全，只是少了一种）；第二条探针**返回 200**，不看 `output_tokens` 就会
 以为成功了。**只有把字节录下来、跑解码器、比对计数，才会暴露。**
+## P17 — usage 藏在哪个帧，以及它**必须发出来**
+
+**症状（两类）**：
+
+1. 状态栏 token 数一直是 0 / 成本账本没有这一行，但模型答得好好的；
+2. 轮次显示「花了 39 prompt token、0 completion」或反过来 —— 两个数都非零，但没一个是真实配对。
+
+**根因（两个协议各一半）**：
+
+1. **usage 藏在哪一帧，协议各不相同**，都不在「顺手能拿到」的地方：
+   - `chat_completions`：`stream_options:{include_usage}` 的 usage-only 尾帧；
+   - `responses`：**只有终帧**（`response.completed` 或 `response.incomplete`）带，
+     流式过程中一律拿不到；
+   - `anthropic_messages`：**拆成两帧** —— `message_start` 给 `input_tokens`
+     （`output_tokens` 是 0），`message_delta` 给真正的 `output_tokens`。
+2. **两个解码器都曾把 usage 折进内部累加器却不发出事件**，于是轮次正常完成、
+   账本与状态栏什么也没收到。`stream.ts:263` 的约定是「usage 事件紧挨在终态事件
+   之前」，新写的两个解码器都漏了这一条。
+
+**正确做法**：
+
+- 归一化到**同一个扁平契约**（`prompt_tokens` / `completion_tokens` /
+  `total_tokens` / `cache_read`），`total_tokens` 在缺失时**推导**（anthropic 不发它）；
+- anthropic 的两帧**必须合并**：只取一帧会得到「有 input 没 output」或反之，
+  任何一帧单独看都是合法的，所以这条错得非常安静；
+- 合并逻辑抽成**导出纯函数**并直接测它。否则「两帧都解析对了但没人合并」这种变异
+  **测不出来** —— 本条就是这么被发现的：第一次变异负控制跑完是**绿的**。
+
+**怎么验证**：`packages/llm/src/responses/decode.test.ts` 与
+`packages/llm/src/anthropic/decode.test.ts` 各有一条
+「usage 事件出现在终态之前且两半都非零」的端到端断言，跑的是真实录制帧；
+变异负控制把 emit 停掉 → 两条都红。
 ## 附：容易误记的几件事
 
 | 误记 | 事实 |

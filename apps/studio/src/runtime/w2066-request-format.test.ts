@@ -68,7 +68,11 @@ describe("W2066 · 未实现的 request_format 在构造期被拒绝，且一个
   // protocol this build genuinely does not have — and the refusal is still
   // load-bearing, because `anthropic_messages` is a valid row value that no
   // adapter serves.
-  for (const format of ["anthropic_messages"]) {
+  // W2068 implemented `anthropic_messages`, so it left this list too. The refusal
+  // contract now has no protocol left to refuse — which is the honest end state
+  // (W2066's P15 predicted exactly this: adding a protocol = new file + one line).
+  // The refusal is still covered by `adapter.test.ts` with a format nobody ships.
+  for (const format of ["anthropic_messages_not_shipped"] as const) {
     it(format + "：构造期就拒绝，上游零请求", async () => {
       const up = await startMockProvider([answer("不该被问到")]);
       upstreams.push(up);
