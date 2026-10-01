@@ -16,12 +16,18 @@
  *   - a read/summary/write failure throws — the caller turns it into a 500 with
  *     the message (never a silent no-op that left the log untouched).
  *
+ * W1900: the rewrite also INVALIDATES the session's compression sidecar, since
+ * that sidecar is a list of turn intervals over the numbering the rewrite has
+ * just replaced (see [clearCompressionSidecar]).
+ *
  * Parsing mirrors the host's `parse_session_jsonl`: blank lines are padding and
  * parsing STOPS at the first unparsable record (a torn tail is not content).
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
+import { dirname } from "node:path";
 import { parseSessionEvent, type SessionEvent } from "@celestea/core";
+import { compressionPathFor } from "@celestea/session";
 import {
   COMPACT_HEAD_TURNS,
   COMPACT_KEEP_TURNS,
@@ -48,10 +54,15 @@ export interface CompactionInput {
   readText?: (path: string) => string;
   write?: (path: string, events: readonly SessionEvent[]) => void;
   /**
-   * W2020: how the pair-closing end append lands. The CALLER owns the timing
+   * W2020: how the pair-closing end marker lands. The CALLER owns the timing
    * (see [installCompactionEnd]); this only decides the bytes.
    */
   writeEndMarker?: (path: string) => void;
+  /**
+   * W1900: how the stale compression sidecar is removed (default: real fs).
+   * Injected so a test can assert the invalidation happened without a disk.
+   */
+  removeSidecar?: (path: string) => void;
 }
 
 export interface CompactionResult {
@@ -131,6 +142,29 @@ export function installCompactionEnd(
 }
 
 /**
+ * W1900: drop the session's compression sidecar, because the log it described
+ * has just been renumbered.
+ *
+ * The sidecar is DERIVED state (a list of turn intervals plus summaries), and
+ * a compaction replaces the turn numbering wholesale. Rebound over the new log
+ * it would either cover the wrong turns or — via the overlay's missing-turn
+ * arm — reach past what it ever claimed. Nothing is lost by dropping it: the
+ * new log carries the summary row, and `decompress` was only ever about the
+ * pre-compaction numbering.
+ *
+ * Best-effort on a MISSING file (the ordinary case: most sessions never
+ * compress), loud on a real failure — see the call site for why that has to
+ * fail the whole compaction rather than be swallowed.
+ */
+function clearCompressionSidecar(path: string, remove?: (p: string) => void): void {
+  try {
+    (remove ?? ((p: string): void => rmSync(p, { force: true })))(path);
+  } catch (e) {
+    throw new Error(`压缩已重写日志，但清理压缩侧车失败（${path}）：${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/**
  * Run one compaction. Throws on read/summarize/write failure; returns the
  * skipped branch when the history is too short to be worth a summary request.
  *
@@ -154,6 +188,21 @@ export async function runCompaction(input: CompactionInput): Promise<CompactionR
   // self-defeating: the rename replaces that file, destroying the marker.
   const rewritten: SessionEvent[] = [compactionStartEvent(), ...planned];
   (input.write ?? rewriteAtomic)(input.logPath, rewritten);
+  // W1900 x W2011: the rewrite RENUMBERS the turns (the old log's turns are
+  // replaced by a synthetic head + the kept tail, all counted from turn-0
+  // again). Every block in the compression sidecar is a CLOSED INTERVAL OVER
+  // THE OLD NUMBERS, so keeping the file means the next rebind applies
+  // intervals that now point at different turns — or, when a `to_turn` no
+  // longer exists, at whatever the overlay can reach from there. The history
+  // itself is not lost (the new log carries the summary row), so the honest
+  // move is to drop the derived state with the numbering it was derived from.
+  //
+  // It rides WITH the rewrite, before the caller rebinds: a rebind over a
+  // stale sidecar is precisely the window this closes. A failure here throws,
+  // which leaves the compaction's `compaction_start` pair unpaired — the same
+  // "half-finished state is detectable" rule the end-marker placement follows
+  // (docs/pitfalls.md P12), rather than a silent return over a stale view.
+  clearCompressionSidecar(compressionPathFor(dirname(input.logPath)), input.removeSidecar);
   // W2020: the end marker is NOT appended here. This function is only the
   // REWRITE half of the operation; the caller still has to rebind the engine,
   // and a pair closed before that step cannot describe that step's failure. The
