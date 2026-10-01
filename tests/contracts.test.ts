@@ -304,9 +304,29 @@ describe("contracts/data-files", () => {
 
     const ledger = loadDataFileSchema("usage-ledger.schema.json");
     const defs = (ledger["schema"] as { $defs: Record<string, unknown> }).$defs;
-    expect(Object.keys(defs).sort()).toEqual(["cost", "price", "step", "turn_total", "usage"]);
+    // Phase 1 (docs/feature-memory-extraction.md) added a THIRD record kind to
+    // this file. This assertion is the gate that keeps a new row shape from
+    // shipping without its contract: ledger.ts writes the row and only the cost
+    // tooling reads it back, so the contract is the only place it is visible.
+    expect(Object.keys(defs).sort()).toEqual(["cost", "extraction", "price", "step", "turn_total", "usage"]);
     const kind = (defs["step"] as { properties: Record<string, { enum?: string[] }> }).properties["kind"];
     expect(kind?.enum).toEqual(["ok", "error"]);
+    const extraction = defs["extraction"] as {
+      properties: Record<string, { const?: string }>;
+      required: string[];
+    };
+    expect(extraction.properties["kind"]?.const).toBe("extraction");
+    // `entries` is the whole reason the row exists: what the write callback
+    // actually applied (a refused op is not an entry).
+    expect(extraction.required).toContain("entries");
+    // ...and every record kind the writer can emit must be reachable from the
+    // schema's own root, or the contract describes rows nobody validates.
+    const oneOf = (ledger["schema"] as { oneOf: { $ref: string }[] }).oneOf;
+    expect(oneOf.map((r) => r.$ref).sort()).toEqual([
+      "#/schema/$defs/extraction",
+      "#/schema/$defs/step",
+      "#/schema/$defs/turn_total",
+    ]);
     expect(loadDataFileSchema("pricing.schema.json")["title"]).toContain("pricing.json");
 
     expect(loadEndpoints().count).toBe(ENDPOINT_COUNT);
