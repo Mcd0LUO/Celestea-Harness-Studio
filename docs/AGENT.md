@@ -205,6 +205,7 @@ tag 一推就有自己的 CI 结论；**等它绿了再 `publish`** 才是完整
 
 - **机械门禁优先于人的记性**：任何「别忘了」都应该变成一条断言。本仓已有：文案门禁、契约计数、体积棘轮、发布门禁、README 硬数字、文档规范、源码直跑解析。
 - **「本机能跑」不等于「干净机器能跑」**：本机常年有 `dist/`、缓存、`node_modules`，于是「依赖上一次构建」「依赖本机工具」的坑只在别人的机器上现形。CI（`.github/workflows/ci.yml`，ubuntu + windows）就是那个干净机器；加它第一天就抓出一个全新检出起不来的真 bug。
+- **CI 不是「推了就会跑」**：`pull_request` 事件要在 `refs/pull/<n>/merge` 上跑，而**冲突中的 PR 建不出这个 ref**，workflow 根本不启动 —— 本仓实测：PR#2 从创建到关闭，全仓 `event=pull_request` 的 run 数一直是 **0**，`gh pr checks` 回答 `no checks reported`，而它自己分支上就有一条必红的用例。所以「CI 绿了」必须落到**具体 sha** 上（`gh run list --branch <b>`，或 `gh api repos/{o}/{r}/actions/runs?head_sha=<sha>` 数出 run 才算数）；协作者的分支落后 main 时**先 rebase 再等 CI**，否则那只是一份没人跑过的提交。配套的机器判据见 §2「完成定义」。
 - **平台是参数，不是常量**：路径/平台判定走可注入 seam（`isAbsolutePath` / `parentDir` / `joinPath` / `platformGates()`），这样 win32 分支能在 Linux 上测。
 - **诚实降级 > 静默放行**：能力缺失时按策略**降级并说清**，或 fail-closed 报结构化错误，绝不假装成功。
 - **注释写「为什么」**：尤其是反直觉的决定与已知代价（例：`check-version.mjs` 明写它不再察觉 dist 落后于 HEAD）。
