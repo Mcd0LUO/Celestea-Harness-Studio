@@ -119,6 +119,28 @@ async function agree(h: StudioHarness, session: string): Promise<string[]> {
   return composed;
 }
 
+describe("W1900 · the tool face is derived from the DETACHED generation", () => {
+  it("the compression trio IS advertised on the detached face, and therefore on every session's", async () => {
+    // `RealRuntimeAdapter.sessionTools` reads `registry.peek(null).runtime.tools`
+    // — the DETACHED generation's registry — and only then applies the session's
+    // mode. That is deliberate (its comment: the face must be a function of the
+    // mode, never of "whichever instance happens to be live"), and it means the
+    // detached generation is the process's canonical spec source: a tool that is
+    // not mounted there is not mounted anywhere, for the prompt's `{{tools}}`
+    // either. Measured while trying to gate this mount on "there is a session":
+    // the face went from 22 names to 19 on EVERY session.
+    const h = engine();
+    const res = await getJson(h.app, "/api/tools");
+    expect(res.status).toBe(200);
+    const detached = (res.body["tools"] as Array<{ name: string }>).map((tool) => tool.name);
+    expect(detached).toContain("compress");
+    expect(detached).toContain("decompress");
+    expect(detached).toContain("context_status");
+    // ...and the session face agrees, which is the property that actually matters.
+    expect(await httpFace(h, S1)).toEqual(detached);
+  });
+});
+
 describe("W860 /api/sessions/{id}/tools", () => {
   it("① GET defaults to an empty disabled list and an empty effective deny", async () => {
     const h = engine();

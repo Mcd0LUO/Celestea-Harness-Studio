@@ -54,6 +54,20 @@ describe("W1900 · the port speaks the host's water level", () => {
     expect(view).toEqual({ enabled: true, blocks: 1, ranges: [[1, 2]], last_ratio: 0.61 });
   });
 
+  it("last_ratio is the block written LAST, not the one that STARTS latest", () => {
+    // The store hands back NORMALIZED (sorted by `from_turn`) blocks, so "the
+    // last element" is the range with the largest START. Compress a range BELOW
+    // an existing block and the two readings diverge: `last_ratio` exists to
+    // describe the model's newest decision, so it must follow `created_turn`.
+    const { log, store } = stagedLog();
+    store.save([
+      { from_turn: 1, to_turn: 2, summary: "written at turn 3", created_turn: 3, context_ratio: 0.9 },
+      { from_turn: 0, to_turn: 0, summary: "written at turn 5", created_turn: 5, context_ratio: 0.42 },
+    ]);
+    expect(compressionViewOf(log).last_ratio).toBe(0.42);
+    expect(compressionViewOf(log).ranges).toEqual([[0, 0], [1, 2]]);
+  });
+
   it("newestTurnOf answers the log's own last turn, and -1 when there is none", () => {
     expect(newestTurnOf(new InMemorySessionLog())).toBe(-1);
     expect(newestTurnOf(stagedLog().log)).toBe(3);

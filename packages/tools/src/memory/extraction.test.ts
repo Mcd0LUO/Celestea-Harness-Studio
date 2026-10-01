@@ -128,7 +128,12 @@ describe("Phase 1 · memoryManifest", () => {
     }
     const manifest = memoryManifest(store, 200);
     expect(Buffer.byteLength(manifest, "utf8")).toBeLessThanOrEqual(220); // budget + marker slack
-    expect(manifest).toContain("truncated");
+    // W1900: the marker COUNTS what it hid. A model that cannot see how much of
+    // the manifest it is missing cannot tell "not remembered" from "not shown".
+    const shown = manifest.split("\n").filter((line) => line.startsWith("- m")).length;
+    const counted = /\((\d+) more entries not shown\)/.exec(manifest);
+    expect(counted).not.toBeNull();
+    expect(Number(counted?.[1])).toBe(30 - shown);
   });
 });
 

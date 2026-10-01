@@ -226,11 +226,20 @@ export function compressionViewOf(log: SessionLog | null | undefined): Compressi
     return { enabled: false, blocks: 0, ranges: [], last_ratio: null };
   }
   const blocks = store.blocks();
-  const last = blocks[blocks.length - 1];
+  // The block written LAST, not the one that STARTS latest. `blocks()` hands back
+  // NORMALIZED (sorted by `from_turn`) blocks, so "the last element" is the range
+  // with the largest start — a different block the moment the model compresses a
+  // range BELOW one it already compressed. `created_turn` is what the write
+  // recorded, so it is the honest key; equal turns (two blocks in one turn) keep
+  // the later entry in store order.
+  const last = blocks.reduce<CompressionBlock | null>(
+    (best, block) => (best === null || block.created_turn >= best.created_turn ? block : best),
+    null,
+  );
   return {
     enabled: true,
     blocks: blocks.length,
     ranges: blocks.map((b) => [b.from_turn, b.to_turn] as [number, number]),
-    last_ratio: last === undefined ? null : last.context_ratio,
+    last_ratio: last === null ? null : last.context_ratio,
   };
 }

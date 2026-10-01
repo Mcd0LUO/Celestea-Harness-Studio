@@ -27,6 +27,7 @@ import {
   type SessionEvent,
   type SessionLog,
 } from "@celestea/core";
+import { MemoryCompressionStore, compressedLog } from "@celestea/session";
 import { compose } from "./compose.js";
 import { createSessionBinding } from "./session-binding.js";
 import type { Profile } from "./profile.js";
@@ -84,6 +85,21 @@ function userRow(text: string): SessionEvent {
   return { type: "user_message", text };
 }
 
+/** Two complete turns (start/user/assistant/end each) — the overlay needs turn boundaries. */
+function fourRows(): SessionEvent[] {
+  const out: SessionEvent[] = [];
+  for (let n = 0; n < 2; n += 1) {
+    const id = `turn-${n}`;
+    out.push(
+      { type: "turn_start", id },
+      { type: "user_message", text: `q${n}` },
+      { type: "assistant_message", text: `a${n}` },
+      { type: "turn_end", id, outcome: "completed" },
+    );
+  }
+  return out;
+}
+
 function runtimeWith(loop: CountingLoop, open: () => SessionLog, sessionId = "bench/session"): Runtime {
   return compose({
     profile: benchProfile(),
@@ -121,6 +137,31 @@ describe("Runtime.contextSnapshot() memoization (W762)", () => {
     expect(loop.calls).toBe(2);
     expect(second).not.toBe(first);
     expect(second?.messages).toHaveLength(2);
+  });
+
+  it("re-assembles after a COMPRESSION write, which appends no event (W1900)", () => {
+    // The key was `(log identity, event count, last event)`, and a compression
+    // writes a SIDECAR — never an event — so all three stay identical while the
+    // derived view changes under them. The store's version is the term that makes
+    // "the view changed with no append" visible to the cache; without it the
+    // statusline and the context viewer kept serving the PRE-compression
+    // assembly until some later append happened to invalidate it.
+    const loop = new CountingLoop();
+    const store = new MemoryCompressionStore();
+    const log = compressedLog(memoryLog(fourRows()), store);
+    const runtime = runtimeWith(loop, () => log);
+
+    const before = runtime.contextSnapshot();
+    expect(loop.calls).toBe(1);
+    expect(before?.messages).toHaveLength(4);
+
+    store.save([{ from_turn: 0, to_turn: 0, summary: "folded turn 0", created_turn: 1, context_ratio: 0.7 }]);
+
+    const after = runtime.contextSnapshot();
+    expect(loop.calls).toBe(2);
+    expect(after).not.toBe(before);
+    // The view really is different: the folded turn is ONE block row now.
+    expect(after?.messages).toHaveLength(3);
   });
 
   it("never serves an assembly across a rebind with the same count and the same last event", () => {

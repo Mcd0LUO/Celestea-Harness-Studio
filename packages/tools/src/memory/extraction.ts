@@ -89,10 +89,15 @@ export function memoryManifest(store: MemoryStore, maxBytes: number = MEMORY_MAN
   const lines = readMemoryState(store).entries.map(
     (e) => `- ${e.id}${e.tags.length > 0 ? ` [${e.tags.join(", ")}]` : ""} ${e.text.replace(/\s+/g, " ")}`,
   );
+  const total = lines.length;
   let out = lines.join("\n");
   while (Buffer.byteLength(out, "utf8") > maxBytes && lines.length > 1) {
     lines.pop();
-    out = lines.join("\n") + "\n- … (truncated)";
+    // The COUNT, not a bare "(truncated)": a model that cannot see how much of
+    // the manifest it is missing cannot judge whether "no such entry" means "not
+    // remembered" or "not shown". The policy stays "oldest kept" (see above) —
+    // this only makes the cut legible.
+    out = lines.join("\n") + `\n- … (${total - lines.length} more entries not shown)`;
   }
   return out;
 }

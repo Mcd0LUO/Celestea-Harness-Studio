@@ -308,6 +308,20 @@ export class SessionComposer {
    * reopened session performs is picked up instead of stranding a dead log. The
    * water level is the runtime's OWN `contextUsageFacts()`, i.e. the number
    * /api/status reports: one plane, three readers.
+   *
+   * This is mounted for the DETACHED generation too, and it has to be: the
+   * studio's reported tool face is derived from THAT generation's registry
+   * (`RealRuntimeAdapter.sessionTools` reads `registry.peek(null)` and then
+   * applies the session's mode — see its comment for why the face must not come
+   * from "whichever instance happens to be live"), and the session prompt's
+   * `{{tools}}` is rendered from the same list. Gating the mount on "there is a
+   * session" therefore removes the trio from EVERY session's face and prompt,
+   * not just from the detached one — measured: 22 names became 19.
+   *
+   * Advertising it is not the same as being able to run it: a detached runtime
+   * has no log, so its port is null and every call answers `no_session` — the
+   * honest answer, and the same shape `ask_user_question` takes when no
+   * question service is mounted.
    */
   private compressionWiring(): {
     holder: { runtime: Runtime | null };
