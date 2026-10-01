@@ -18,6 +18,7 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
 import { USAGE_LEDGER_FILE, UsageLedgerFile, type UsageStepRecord } from "@celestea/runtime";
+import { memoryStoreOf, readMemoryState } from "@celestea/tools";
 import { createStudioApp, type StudioApp } from "../app.js";
 import { loadStudioConfig } from "../config.js";
 import { jsonRequest } from "../harness.test-util.js";
@@ -54,6 +55,8 @@ interface Host {
   app: Hono;
   studio: StudioApp;
   ledgerPath: string;
+  workspace: string;
+  home: string;
 }
 
 /** The production app over a throwaway data root, with pricing + the ledger. */
@@ -90,15 +93,21 @@ function makeHost(v1BaseUrl: string, envOverride: NodeJS.ProcessEnv = {}): Host 
     ],
     default_model: MODEL,
   });
+  const home = join(root, "home");
   const env: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(process.env)) if (!k.startsWith("CELESTEA_")) env[k] = v;
   env["CELESTEA_API_KEY"] = "test-key";
   env["CELESTEA_TOOL_ROOTS"] = workspace;
   env["CELESTEA_SANDBOX_NET"] = "0";
+  // The background extractor shares these mock upstreams; tests that assert the
+  // STEP ledger contract pin it off (its row/timing is its own test below), and
+  // CELESTEA_HOME keeps the memory store inside the throwaway root regardless.
+  env["CELESTEA_HOME"] = home;
+  env["CELESTEA_MEMORY_EXTRACTION"] = "off";
   Object.assign(env, envOverride);
   const config = loadStudioConfig({ cwd: root, env, paths: { staticRoot } });
   const studio = createStudioApp({ config, env });
-  return { app: studio.app, studio, ledgerPath: join(root, "usage-ledger.jsonl") };
+  return { app: studio.app, studio, ledgerPath: join(root, "usage-ledger.jsonl"), workspace, home };
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -130,13 +139,13 @@ function ledgerRows(path: string): Row[] {
   }
 }
 
-/** Σ of one session's STEP rows in the file (`turn_total` excluded, like the view). */
+/** Σ of one session's STEP rows in the file (ok|error only, like the view). */
 function sessionStepTotals(path: string, session: string): { records: number; prompt: number; completion: number } {
   let records = 0;
   let prompt = 0;
   let completion = 0;
   for (const row of ledgerRows(path)) {
-    if (row["kind"] === "turn_total" || row["session"] !== session) continue;
+    if ((row["kind"] !== "ok" && row["kind"] !== "error") || row["session"] !== session) continue;
     records += 1;
     const usage = row["usage"] as Row | null;
     if (usage === null) continue;
@@ -148,7 +157,7 @@ function sessionStepTotals(path: string, session: string): { records: number; pr
 
 /** The `ts` of the first step row (the ledger's own clock, in seconds). */
 function firstStepTs(path: string): number {
-  const row = ledgerRows(path).find((r) => r["kind"] !== "turn_total") ?? {};
+  const row = ledgerRows(path).find((r) => r["kind"] === "ok" || r["kind"] === "error") ?? {};
   return row["ts"] as number;
 }
 
@@ -355,6 +364,71 @@ describe("aggregate view over the ledger file (W785 P1 ①/②)", () => {
       const since = await host.app.request("/api/usage/ledger?since=yesterday");
       expect(since.status).toBe(422);
       expect(await since.json()).toEqual({ ok: false, error: "field 'since' must be an integer" });
+    } finally {
+      await upstream.close();
+    }
+  });
+
+});
+
+describe("background memory extraction (Phase 1, feature-memory-extraction.md)", () => {
+  it("books ONE extraction row, writes the memory line, and keeps the step view clean", async () => {
+    const upstream = await startMockProvider([
+      // The turn's answer…
+      [textDelta("got it"), usageChunk(1000, 200), DONE_FRAME],
+      // …then the extractor's call answers with one add op.
+      [textDelta('{"ops":[{"op":"add","text":"user prefers CNY cost reports","tags":["feedback"]}]}'), usageChunk(300, 40), DONE_FRAME],
+    ]);
+    try {
+      const host = makeHost(upstream.v1BaseUrl, { CELESTEA_MEMORY_EXTRACTION: "on" });
+      await runTurn(host.app, "please report costs in CNY from now on");
+      await waitIdle(host.studio);
+
+      // Extraction runs AFTER the turn settles — poll the ledger file for its row.
+      const deadline = Date.now() + 10_000;
+      let extraction: Row | undefined;
+      while (extraction === undefined && Date.now() < deadline) {
+        extraction = ledgerRows(host.ledgerPath).find((r) => r["kind"] === "extraction");
+        if (extraction === undefined) await sleep(5);
+      }
+      expect(extraction).toBeDefined();
+      expect(extraction?.["session"]).toBe("ws/s1");
+      expect(extraction?.["turn_id"]).toBe("turn-0");
+      expect(extraction?.["status"]).toBe("ok");
+      expect(extraction?.["entries"]).toBe(1);
+      expect(extraction?.["model"]).toBe(MODEL);
+      expect(extraction?.["provider"]).toBe("mock");
+      expect((extraction?.["usage"] as Row)["prompt_tokens"]).toBe(300);
+      // Priced like a step (300·$1 + 40·$2 per MTok) but never a turn/step row.
+      expect(extraction?.["cost"]).toEqual({ in: 0.0003, out: 0.00008, cache: 0, total: 0.00038 });
+
+      // The extractor's request went out with the pinned posture: capped output.
+      const extractionRequest = upstream.requests[1];
+      expect(extractionRequest?.body["max_tokens"]).toBe(2048);
+
+      // The memory line landed in the (isolated) global store with its provenance.
+      const state = readMemoryState(memoryStoreOf(host.workspace, { env: { CELESTEA_HOME: host.home } }));
+      const entry = state.entries.find((e) => e.text === "user prefers CNY cost reports");
+      expect(entry).toBeDefined();
+      expect(entry?.tags).toEqual(["feedback"]);
+      expect(entry?.source).toEqual({ session: "ws/s1", turn: "turn-0" });
+
+      // The STEP aggregate ignores the extraction row…
+      const aggregate = await getJsonRow(host.app, "/api/usage/ledger?session=ws%2Fs1");
+      expect((aggregate["rows"] as Row[])[0]?.["records"]).toBe(1);
+      // …while /api/status.cost counts it in the session total (honest cost) with
+      // records/attempts still step-only and turn_total turn-scoped.
+      const status = (await (await host.app.request("/api/status")).json()) as Row;
+      expect(status["cost"]).toEqual({
+        session_total: 0.00178,
+        turn_total: 0.0014,
+        attempts: 1,
+        currency: "CNY",
+        priced_by: "table",
+        unpriced_models: [],
+        records: 1,
+        cost_complete: true,
+      });
     } finally {
       await upstream.close();
     }

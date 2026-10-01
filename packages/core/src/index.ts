@@ -14,6 +14,7 @@
  *   session-event.ts SessionEvent JSONL codec (validate / serialize)  (session_log.rs)
  *   session-log.ts   SessionLog seam + storage half + default projection (A2)
  *   projection.ts    derive_messages / balance_tool_calls      (session/log.rs, A2)
+ *   compression.ts   Phase 2 overlay: block schema + range math (derived view)
  *   turn-id.ts       turn id math + audit                      (A2)
  *   injection.ts     mid-turn delivery seam: lanes / placement / envelope (W513)
  *   plugin.ts        Plugin seam + NamedRegistry                   (plugin.rs)
@@ -43,6 +44,7 @@ export * from "./stream.js";
 export * from "./session-event.js";
 export * from "./session-log.js";
 export * from "./projection.js";
+export * from "./compression.js";
 export * from "./tool-surface.js";
 export * from "./turn-id.js";
 export * from "./injection.js";

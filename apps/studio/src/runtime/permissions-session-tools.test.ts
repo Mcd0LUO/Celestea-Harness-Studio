@@ -26,7 +26,8 @@ import type { RealRuntimeAdapter } from "./real-runtime-adapter.js";
 import { engineOf, makeEngineHarness } from "./test-util.js";
 
 /**
- * The frozen standard face of the production registry (W791/W804/W7/W884/F4/B2: 18 names).
+ * The frozen standard face of the production registry (W791/W804/W7/W884/F4/B2:
+ * 18 names; W1533: 19; W1900: 22 — the compression trio is in the keep list).
  * The SET is asserted (never "some substring is absent"): a tool that silently
  * disappears — or one that silently survives — fails here either way.
  */
@@ -34,6 +35,9 @@ const STANDARD_FACE: readonly string[] = [
   "ask_user_question",
   "browser_act",
   "browser_open",
+  "compress",
+  "context_status",
+  "decompress",
   "forget",
   "http_request",
   "list_dir",
@@ -55,8 +59,8 @@ const STANDARD_FACE: readonly string[] = [
 /** `read-only` (W9) = the standard face minus the preset's `toolDeny` (`write_file`). */
 const READ_ONLY_FACE: readonly string[] = STANDARD_FACE.filter((name) => name !== "write_file");
 
-/** The execution-mode face (W791 M7; W884 keeps load_skill): the mode fold, before any permission. */
-const EXECUTION_FACE: readonly string[] = ["browser_act", "browser_open", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"].sort();
+/** The execution-mode face (W791 M7; W884 keeps load_skill; W1900 keeps the compression trio): the mode fold, before any permission. */
+const EXECUTION_FACE: readonly string[] = ["browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"].sort();
 
 const READ_ONLY_SESSION = "sample-ws/ro";
 const BYSTANDER_SESSION = "sample-ws/full";

@@ -23,6 +23,7 @@ import {
   type AgentConfig,
   type AgentLoop,
   type Context,
+  type ContextUsageFacts,
   type ImageRef,
   type InjectionSource,
   type PendingInjection,
@@ -31,9 +32,11 @@ import {
   type SessionLog,
   type TurnOutcome,
 } from "@celestea/core";
+import { selectTurnContextRows } from "./turn-context-dedup.js";
 import { ComposeError, RuntimeReleasedError, TurnBusyError } from "./errors.js";
 import type { FrameMapper, LoopEventSink, TurnFrame } from "./frames.js";
 import type { TurnLedgerHooks } from "./ledger.js";
+import type { MemoryExtractionScheduler } from "./memory-extraction.js";
 import type { StatusTracker } from "./status.js";
 import { TURN_ABORT_SERVICE, TURN_SINK_SERVICE, USAGE_TRACKER_SERVICE } from "./tokens.js";
 import type { UsageAccounting } from "./usage.js";
@@ -70,6 +73,14 @@ export interface LoopBindings {
   usage: UsageAccounting;
   /** Mid-turn injection source (absent = nothing can be injected). */
   injections?: InjectionSource;
+  /**
+   * W1900: the water level the compression nudge reads at BUILD time. The
+   * host injects the runtime's OWN `contextUsage` answer — the loop must not
+   * compute a second one, or the nudge and the statusline would quote
+   * different numbers to the same operator. Absent = no nudge, which is
+   * byte-for-byte the pre-Phase-2 request.
+   */
+  contextUsage?: () => ContextUsageFacts | null;
 }
 
 /** Builds the per-turn `AgentLoop`; the host injects its concrete loop here. */
@@ -92,6 +103,12 @@ export interface TurnRunnerDeps {
    * swallows its own IO failures, so a turn cannot fail because of bookkeeping.
    */
   ledger?: TurnLedgerHooks;
+  /**
+   * Background memory extraction (docs/feature-memory-extraction.md Phase 1):
+   * scheduled fire-and-forget at every turn end; the scheduler coalesces and
+   * the host drains it at session eviction/shutdown.
+   */
+  extraction?: MemoryExtractionScheduler;
   /** Absent = the loop is resolved from `AGENT_LOOP_SERVICE` in the Context. */
   loopFactory?: LoopFactory;
   /**
@@ -118,6 +135,12 @@ export interface TurnRunnerDeps {
    * typed user bubble.
    */
   turnContext?: () => readonly TurnContextRow[];
+  /**
+   * W1900: the loop's compression-nudge water level, wired from `compose` to
+   * the SAME `contextUsage` the statusline reads, so the nudge, the
+   * `context_status` tool and `/api/status` can never disagree.
+   */
+  contextUsage?: () => ContextUsageFacts | null;
 }
 
 export class TurnRunner {
@@ -216,6 +239,10 @@ export class TurnRunner {
     try {
       const outcome = resolveOutcome(log.events(), start, signal, failure);
       this.deps.ledger?.endTurn(outcome);
+      // Phase 1: AFTER the turn closes (and its ledger rows), fire-and-forget.
+      // The skip gates live in the scheduler; a turn without eligible prose
+      // costs nothing but a cursor save.
+      this.deps.extraction?.schedule(log);
       return outcome;
     } catch (error) {
       // A wiring failure still closes the ledger's turn before it propagates:
@@ -268,6 +295,7 @@ export class TurnRunner {
         sink,
         usage: this.deps.usage,
         ...(injections === undefined ? {} : { injections }),
+        ...(this.deps.contextUsage === undefined ? {} : { contextUsage: this.deps.contextUsage }),
       });
     }
     const loop = this.deps.ctx.get<AgentLoop>(AGENT_LOOP_SERVICE);
@@ -280,10 +308,13 @@ export class TurnRunner {
   /**
    * W884: append the engine-owned turn context (the skill catalog). Blank rows
    * are dropped, so a provider that has nothing to say is free to return [""].
+   *
+   * Phase 0b: rows pass the three-state dedup first — an unchanged row that is
+   * still model-visible is NOT appended again (turn-context-dedup.ts).
    */
   private injectTurnContext(log: SessionLog): void {
-    for (const row of this.deps.turnContext?.() ?? []) {
-      if (row.text === "") continue;
+    const rows = selectTurnContextRows(log, this.deps.turnContext?.() ?? [], this.deps.agentConfig);
+    for (const row of rows) {
       // W888: the origin travels with the row so the projection can label it.
       log.append({ type: "user_message", text: row.text, origin: row.origin });
     }

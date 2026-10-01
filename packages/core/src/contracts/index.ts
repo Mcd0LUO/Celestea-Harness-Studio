@@ -194,7 +194,10 @@ export const FROZEN_COUNTS = {
   // B2 (F3 P1): 16 -> 18 (`remember` + `forget`, the workspace-memory write pair).
   // W1533: 18 -> 19 (`update_tasks`, the model's todo list -- the panel reads it
   // back off the existing tool/tool_result frames, so no endpoint is added).
-  tools: 19,
+  // W1900 (Phase 2): 19 -> 22 (`compress` + `decompress` + `context_status`, the
+  // model-driven context compression face; the block list lives in a session
+  // sidecar, so still ZERO endpoints).
+  tools: 22,
 } as const;
 
 /** One frozen-count divergence, with everything an operator needs to act. */

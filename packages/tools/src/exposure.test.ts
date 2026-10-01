@@ -34,11 +34,14 @@ afterAll(async () => {
   await h.cleanup();
 });
 
-/** The production name set (contracts/tools.json; W884: 14, F4: +browser, B2: +remember/forget). */
+/** The production name set (contracts/tools.json; W884: 14, F4: +browser, B2: +remember/forget, W1900: +compression trio). */
 const PRODUCTION_NAMES: readonly string[] = [
   "ask_user_question",
   "browser_act",
   "browser_open",
+  "compress",
+  "context_status",
+  "decompress",
   "forget",
   "http_request",
   "list_dir",
@@ -69,7 +72,10 @@ describe("exposedRegistry (W791 P1)", () => {
   it("M7: execution exposes exactly the eight kept names; standard exposes the whole registry", () => {
     const inner = productionFace();
     const execution = exposedRegistry(inner, executionExposure(inner.names()));
-    expect(execution.schemas().map((s) => s.name).sort()).toEqual(["browser_act", "browser_open", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"]);
+    // W1900: the compression trio is KEPT in execution mode — the system prompt
+    // carries the compression philosophy in BOTH modes, so folding these three
+    // would leave a model reading about a tool it cannot see.
+    expect(execution.schemas().map((s) => s.name).sort()).toEqual(["browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"]);
     expect(execution.schemas().map((s) => s.name).sort()).toEqual([...EXECUTION_TOOL_NAMES].sort());
     // The inner registry is untouched: the fold is a FACE, not a removal — this
     // is what keeps `run_code` able to reach the folded tools.

@@ -59,6 +59,20 @@ describe("B2 · append-only memory log (pure)", () => {
     expect(nextMemoryId([{ kind: "entry", id: "m7", text: "", tags: [], at: "" }])).toBe("m8");
   });
 
+  it("keeps a well-shaped source, drops malformed ones, and old lines parse without it", () => {
+    const text = [
+      '{"kind":"entry","id":"m1","text":"old line","tags":[],"at":"t"}',
+      '{"kind":"entry","id":"m2","text":"sourced","tags":[],"at":"t","source":{"session":"s-1","turn":"turn-3"}}',
+      '{"kind":"entry","id":"m3","text":"bad source","tags":[],"at":"t","source":{"session":"s-1"}}',
+      '{"kind":"entry","id":"m4","text":"string source","tags":[],"at":"t","source":"s-1"}',
+    ].join("\n");
+    const entries = foldMemoryLog(parseMemoryLog(text)).entries;
+    expect(entries[0]?.source).toBeUndefined();
+    expect(entries[1]?.source).toEqual({ session: "s-1", turn: "turn-3" });
+    expect(entries[2]?.source).toBeUndefined();
+    expect(entries[3]?.source).toBeUndefined();
+  });
+
   it("renders groups (sorted, untagged last) with an explicit generated banner", () => {
     const entries = [
       { kind: "entry" as const, id: "m1", text: "no tag", tags: [], at: "" },

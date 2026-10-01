@@ -31,11 +31,14 @@ import { PersistentSessionLog } from "@celestea/session";
 import {
   checkpointedLog,
   CheckpointStore,
+  compressedLog,
   currentProcessIdentity,
+  FileCompressionStore,
   writeErrorCountOf,
   type CheckpointIdentity,
 } from "@celestea/session";
 import type { SessionLog } from "@celestea/core";
+import { compressionEnabled } from "../compression-switch.js";
 import { createSessionBinding, type SessionBinding } from "../session-binding.js";
 
 /** The engine's per-session log file name. */
@@ -85,6 +88,12 @@ export interface CheckpointWiring {
   now?: () => number;
   warn?: (message: string) => void;
   /**
+   * W1900 (Phase 2): the compression sidecar's warning channel — a corrupt or
+   * unwritable `compression.json` degrades to "nothing compressed" and says so
+   * here rather than failing a turn.
+   */
+  compressionWarn?: (message: string) => void;
+  /**
    * E §1.3 P1 ③: the audit channel of a DEGRADED log — the sidecar's
    * `degraded.log_write_errors` just became non-zero, so disk and memory have
    * forked. Called at most once per session store.
@@ -130,7 +139,15 @@ export function openSessionLog(dir: string, wiring: CheckpointWiring = {}): Sess
     logWriteErrors: () => writeErrorCountOf(log),
     ...(wiring.onDegraded === undefined ? {} : { onDegraded: wiring.onDegraded }),
   });
-  return checkpointedLog(log, store);
+  const checkpointed = checkpointedLog(log, store);
+  if (!compressionEnabled()) return checkpointed;
+  // W1900 (Phase 2): the compression sidecar rides ON TOP of the checkpoint
+  // decorator, so deriveMessages() sees one overlay while events() still hands
+  // every consumer -- extraction included -- the untouched log.
+  return compressedLog(
+    checkpointed,
+    new FileCompressionStore(dir, wiring.compressionWarn === undefined ? {} : { warn: wiring.compressionWarn }),
+  );
 }
 
 /** One in-memory log per detached session id, reused across rebinds. */

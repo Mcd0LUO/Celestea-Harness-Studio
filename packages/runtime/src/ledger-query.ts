@@ -15,6 +15,8 @@
  * `turn_total` rows are DELIBERATELY excluded from every sum: they are the
  * reconciliation convenience of §3.2.1 (they restate the steps of their turn), so
  * counting them would book every token twice. Details stay the only truth.
+ * Extraction rows (Phase 1) stay out of the step-folded views but DO count in a
+ * session's cost block — out-of-turn spend is still spend.
  *
  * `cost` is `null` — never `0` — when no contributing row carried a cost, and
  * `unpriced_records`/`unpriced_models` name the models the price table could not
@@ -26,6 +28,7 @@ import { costAdd, type LedgerCost } from "./pricing.js";
 import {
   aggregateUsage,
   type LedgerTotals,
+  type UsageExtractionRecord,
   type UsageLedgerRecord,
   type UsageStepRecord,
   type UsageTurnTotalRecord,
@@ -114,7 +117,8 @@ export const UNKNOWN_MODEL_LABEL = "(unknown model)";
 function queryRows(records: readonly UsageLedgerRecord[], q: LedgerQuery): UsageStepRecord[] {
   const out: UsageStepRecord[] = [];
   for (const record of records) {
-    if (record.kind === "turn_total") continue;
+    // Step rows only: `turn_total` would double-count, extraction is out-of-turn spend.
+    if (record.kind !== "ok" && record.kind !== "error") continue;
     if (!inRange(record, q)) continue;
     out.push(record);
   }
@@ -244,13 +248,19 @@ function lastTurnTotal(records: readonly UsageLedgerRecord[], session: string): 
   return null;
 }
 
-/** The step rows of ONE session (the `turn_total` rows never contribute). */
+/** The step rows of ONE session (`turn_total` and extraction rows never contribute). */
 function sessionSteps(records: readonly UsageLedgerRecord[], session: string): UsageStepRecord[] {
   const out: UsageStepRecord[] = [];
   for (const record of records) {
-    if (record.kind !== "turn_total" && record.session === session) out.push(record);
+    if (record.kind !== "ok" && record.kind !== "error") continue;
+    if (record.session === session) out.push(record);
   }
   return out;
+}
+
+/** The extraction rows of ONE session (Phase 1: out-of-turn but in-session spend). */
+function sessionExtractions(records: readonly UsageLedgerRecord[], session: string): UsageExtractionRecord[] {
+  return records.filter((r): r is UsageExtractionRecord => r.kind === "extraction" && r.session === session);
 }
 
 /**
@@ -259,7 +269,9 @@ function sessionSteps(records: readonly UsageLedgerRecord[], session: string): U
  */
 export function ledgerCostBlock(records: readonly UsageLedgerRecord[], session: string): LedgerCostBlock {
   const steps = sessionSteps(records, session);
-  const totals = aggregateUsage(steps);
+  // Honest cost: extraction spend counts in the session total, while
+  // attempts/records stay STEP counts (an extraction call is not an attempt).
+  const totals = aggregateUsage([...steps, ...sessionExtractions(records, session)]);
   const last = lastTurnTotal(records, session);
   const attempts = steps.length;
   return {

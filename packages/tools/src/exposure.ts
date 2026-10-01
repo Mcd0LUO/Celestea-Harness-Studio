@@ -83,6 +83,14 @@ export const EXECUTION_TOOL_NAMES: readonly string[] = [
   // while the user still expects to watch it -- the same "prompt must not lie"
   // rule that kept load_skill (W884), the browser tools (F4) and memory (B2).
   "update_tasks",
+  // W1900 (Phase 2): the compression trio. They are NOT SDK-covered, and the
+  // system prompt carries the compression philosophy in BOTH modes, so folding
+  // them would advertise a discipline the model has no way to follow -- the same
+  // "prompt must not lie" rule that kept load_skill, the browser pair, the
+  // memory write pair and update_tasks.
+  "compress",
+  "decompress",
+  "context_status",
 ];
 
 /**

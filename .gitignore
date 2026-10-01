@@ -68,6 +68,15 @@ packages/core/contracts/
 #   AGENT.md 是提交进仓库的协作规范，必须与机器无关；本机差异写在 AGENT.local.md。
 docs/AGENT.local.md
 
+# 根 agent 入口 `AGENTS.md`：harness 每个会话**自动注入**，是本机的工作入口，不入库。
+#   与上面的 docs/AGENT.md 分工：AGENT.md 是入库的协作规范正文（机器无关、必须共享）；
+#   本文件只是**路由表**（读什么、边界在哪），内容随本机习惯变 —— 不入库是为了避免
+#   "入口清单"与 docs/README.md 的文档地图两处维护、互相漂移。
+#   为什么根锚定（前导 /）：与下面的 /workspaces.json 同理 —— 只忽略仓库根那一份，
+#   将来子目录里若有**需要入库**的 AGENTS.md（如某包的局部约定）不受影响。
+#   换机器 / 新 clone 后本文件不存在：按 docs/AGENT.md 重建即可，规则正文不随它丢失。
+/AGENTS.md
+
 # ---- Studio 数据目录的**根上**落点（W9107 复核时发现的仓卫生缺口） ----------------
 # loadStudioConfig() 的默认值是 resolve(cwd, "<name>")（apps/studio/src/config.ts:111-113）：
 # 没设 CELESTEA_HOME / CELESTEA_*_FILE 时，从**仓库根**起实例就会把数据文件写在仓库根。

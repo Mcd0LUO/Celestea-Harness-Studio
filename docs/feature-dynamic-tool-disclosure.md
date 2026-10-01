@@ -181,7 +181,7 @@ $ pgrep -af 'dsh/lib/bin.js'
 | `executionExposure` / `faceForMode` | 同文件 :78-104 | 模式基线折叠（standard 11 / execution 6） |
 | 装配点 | `apps/studio/src/runtime/engine-plugins.ts:190-197` | `ctx.provide(TOOL_REGISTRY_SERVICE, exposed)` |
 | loop 读面 | `packages/agent-loop/src/loop.ts:178` | 每 step `buildRequest` 里 `seams.registry.schemas()` |
-| `{{tools}}` 渲染 | `apps/studio/src/handlers/config-shape.ts:224-234`、`apps/studio/src/runtime/real-runtime-adapter.ts:346-349` | 见 §2.4 裁决 |
+| `{{tools}}` 渲染 | `apps/studio/src/handlers/config-shape.ts:224-234`、`apps/studio/src/runtime/real-runtime-adapter.ts:380-382,401-406` | 见 §2.4 裁决 |
 | 只读读者 | `GET /api/tools?session=`（`handlers/health.ts:22`） | P0 沿用，不加端点 |
 | 排序 | `packages/tools/src/registry.ts:61-63` `schemas()` **按 name 升序**；`packages/core/src/tool.ts:62-66` 注释「Sorted by name … a deterministic order keeps the prompt prefix stable」 | 见 §2.2：动态新增会**插入中段** |
 

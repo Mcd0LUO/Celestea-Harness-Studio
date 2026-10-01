@@ -34,11 +34,13 @@ import {
   type AgentConfig,
   type AgentLoop,
   type Context,
+  type ContextUsageFacts,
   type InjectionSource,
   type LoopEvent,
   type LlmStream,
   type ModelRequest,
   type ImageRef,
+  parseTurnNumber,
   type StreamEvent,
   type ToolCall,
   type ToolOutput,
@@ -54,6 +56,7 @@ import {
   isAborted,
   raceAbort,
 } from "./cancel.js";
+import { compressionNudgeMessage } from "./compression-nudge.js";
 import { estimateTokens, trimContext } from "./context-trim.js";
 import { doneEvent, toolCallEvent, toolResultEvent, turnEndEvent, type EventSink } from "./events.js";
 import { isPerturbable } from "./perturbation.js";
@@ -109,6 +112,24 @@ export interface AgentLoopBindings {
    * Absent = the line carries `null`, which is honest rather than invented.
    */
   sessionId?: string | null;
+  /**
+   * W1900 (Phase 2): the session's current water level, read at BUILD time
+   * (not constructed per loop — the level moves every turn, so a snapshot taken
+   * at construction would be stale exactly when it matters). Returns
+   * `ContextUsageFacts` or `null`.
+   *
+   * The loop may not import the runtime that computes it (`@celestea/agent-loop`
+   * depends on core only), and it must not compute a second water level either:
+   * a nudge that disagreed with the statusline about the same turn would be a
+   * prompt that lies. So the host injects the runtime's own `contextUsage`
+   * answer, and the loop only decides what to do with it: below the threshold
+   * nothing is added, at or above it ONE ephemeral system message is appended
+   * to the request (never to the log — see compression-nudge.ts).
+   *
+   * Absent = no nudge channel at all: a loop with no port is byte-identical to
+   * a pre-Phase-2 one.
+   */
+  contextUsage?: () => ContextUsageFacts | null;
 }
 
 /** Bound of the "do not close while a steering message waits" extension. */
@@ -141,6 +162,8 @@ export class DefaultAgentLoop implements AgentLoop {
   private sessionId: string | null = null;
   /** W855: resolved from the Context once per turn (null = retention off). */
   private retention: ToolResultRetention | null = null;
+  /** W1900 (Phase 2): the water-level reader for the ephemeral nudge. */
+  private readonly contextUsage: (() => ContextUsageFacts | null) | undefined;
 
   constructor(config: AgentConfig, bindings: AgentLoopBindings = {}) {
     this.config = config;
@@ -152,6 +175,7 @@ export class DefaultAgentLoop implements AgentLoop {
     this.repetitionRetries = Math.max(0, bindings.repetitionRetries ?? DEFAULT_REPETITION_RETRIES);
     this.diagnostics = bindings.repetitionDiagnostics ?? null;
     this.sessionId = bindings.sessionId ?? null;
+    this.contextUsage = bindings.contextUsage;
   }
 
   /** The config this loop drives turns with. */
@@ -273,6 +297,12 @@ export class DefaultAgentLoop implements AgentLoop {
   /**
    * Derive the history from the log and trim it to the context budget. A
    * `context_window_tokens` of 0 disables trimming (back-compat).
+   *
+   * W1900 (Phase 2): the compression nudge is appended HERE, at the tail of the
+   * assembled request, and nowhere else. It is the last thing the model reads
+   * before its next step, it is rebuilt from scratch on every step (so a stale
+   * water level can never persist), and it never touches the log or the system
+   * prompt — see compression-nudge.ts for why those two matter.
    */
   private buildRequest(seams: Seams): ModelRequest {
     const trimmed = trimContext(
@@ -282,14 +312,45 @@ export class DefaultAgentLoop implements AgentLoop {
       this.config.context_trim_threshold,
       this.config.context_keep_recent,
     );
+    const nudge = compressionNudgeMessage(this.readContextUsage(seams), this.currentTurnNumber(seams));
     return {
       model: this.config.model,
       system: this.config.system_prompt,
-      messages: trimmed.messages,
+      messages: nudge === null ? trimmed.messages : [...trimmed.messages, nudge],
       tools: seams.registry.schemas(),
       max_tokens: null,
       temperature: null,
     };
+  }
+
+  /**
+   * W1900: the injected water level, read fresh and defensively. A reader that
+   * throws must not take the turn down — the nudge is advice, and losing it is
+   * strictly better than losing the turn.
+   */
+  private readContextUsage(seams: Seams): ContextUsageFacts | null {
+    if (this.contextUsage === undefined) return null;
+    try {
+      return this.contextUsage();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * W1900: the turn the nudge names. The log owns the counter, so the number is
+   * read from the newest `turn_start` rather than guessed — and 1 is the floor
+   * so a turn id can never render as `turn-0` in the text the model reads.
+   */
+  private currentTurnNumber(seams: Seams): number {
+    const events = seams.session.events();
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i];
+      if (event === undefined || event.type !== "turn_start") continue;
+      const parsed = parseTurnNumber(event.id);
+      if (parsed !== null) return parsed;
+    }
+    return 1;
   }
 
   /** Start one model response; interruptible, never throws on provider failure. */

@@ -104,6 +104,7 @@ import {
 import { watchdogCount, watchdogOf, watchdogRunningOf, workerStatusOf } from "./watchdog-view.js";
 import { hasLiveWorkersOf } from "./worker-live.js";
 import { recoveryViewOf, type RecoveryView } from "./recovery-view.js";
+import { compressionViewOf, type CompressionStatusView } from "./compression-view.js";
 import { workerTablePath, workerTableStateOf, type WorkerTableState } from "./worker-table.js";
 import { clearSession, compactSession, type SessionLifecycleDeps } from "./session-lifecycle.js";
 import { releaseSessionOf, releaseSettleMs } from "./session-release.js";
@@ -754,6 +755,15 @@ class RealEngine implements RealRuntimeAdapter {
   /** E §1.3 P1 ②: `/api/status.recovery` of one session (never composes one). */
   recoveryView(session: string | null): RecoveryView {
     return recoveryViewOf(this.registry.peek(session)?.runtime.session ?? null, session);
+  }
+
+  /**
+   * W1900: `/api/status.compression` of one session. It PEEKS like
+   * `recoveryView` — a status poll must never compose a session, and an
+   * uncomposed session simply has nothing compressed.
+   */
+  compressionView(session: string | null): CompressionStatusView {
+    return compressionViewOf(this.registry.peek(session)?.runtime.session ?? null);
   }
 
   /**

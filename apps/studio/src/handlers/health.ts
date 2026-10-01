@@ -37,6 +37,9 @@ import type { RouteTable } from "../routes.js";
 import type { LedgerCostBlock } from "@celestea/runtime";
 import { resolveStudioVersion } from "../version.js";
 import { emptyRecoveryView } from "../runtime/recovery-view.js";
+import { compressionViewOf, type CompressionStatusView } from "../runtime/compression-view.js";
+/** W1900: the always-present "nothing is compressed here" answer. */
+const DISABLED_COMPRESSION: CompressionStatusView = compressionViewOf(null);
 import type { FallbackStatusView } from "../runtime/fallback-host.js";
 import { activeSession, modeOfSession, sessionModelCovered, type Deps } from "./common.js";
 import { baseUrlOf } from "./config-shape.js";
@@ -101,6 +104,11 @@ export function registerHealth(app: Hono, deps: Deps, table: RouteTable): string
       // present (an adapter without checkpointing answers the empty block), so a
       // client can rely on the key existing without inventing a default.
       recovery: recoveryBlockOf(deps, session),
+      // W1900: what is currently compressed away in the QUERIED session. A
+      // PURE ADDITION, always present (an adapter with no sidecar answers the
+      // disabled block), so an operator can see a view shrink without turning
+      // on a debug endpoint.
+      compression: compressionBlockOf(deps, session),
       // E §4.2.3 #4 (W785): `model` stays the CONFIGURED value; these two are
       // the only place a downgrade shows. Pure additions, always present.
       effective_model: fallbackView(deps, session)?.effective_model ?? line.model,
@@ -139,6 +147,11 @@ function fallbackView(deps: Deps, session: string | null): FallbackStatusView | 
 /** E §1.3 P1 ②: the `recovery` block of the queried session (never a new endpoint). */
 function recoveryBlockOf(deps: Deps, session: string | null): Record<string, unknown> {
   return { ...(deps.runtime.recoveryView?.(session) ?? emptyRecoveryView(session)) };
+}
+
+/** W1900: the queried session's compression block (always present). */
+function compressionBlockOf(deps: Deps, session: string | null): Record<string, unknown> {
+  return { ...(deps.runtime.compressionView?.(session) ?? DISABLED_COMPRESSION) };
 }
 
 /**

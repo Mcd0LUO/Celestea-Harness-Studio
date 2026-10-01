@@ -57,4 +57,5 @@ export const COMPOSE_STEPS = [
 ] as const;
 
 export const DEFAULT_BIND = "127.0.0.1:3777";
-export const CONTEXT_WINDOW = 1_000_000;
+/** Kept in step with the studio fallback (apps/studio/src/config.ts CONTEXT_WINDOW): the conservative 128k floor, lifted by declared model metadata or CELESTEA_CONTEXT_WINDOW. */
+export const CONTEXT_WINDOW = 131_072;

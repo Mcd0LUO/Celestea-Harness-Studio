@@ -155,6 +155,19 @@ export {
   type MemoryToolOptions,
 } from "./tools/memory.js";
 export {
+  COMPRESS_DESCRIPTION,
+  COMPRESSION_ERROR_PREFIX,
+  CONTEXT_STATUS_DESCRIPTION,
+  DECOMPRESS_DESCRIPTION,
+  compressionTools,
+  compressSpec,
+  compressTool,
+  contextStatusSpec,
+  contextStatusTool,
+  decompressSpec,
+  decompressTool,
+} from "./tools/compression.js";
+export {
   MEMORY_ENTRIES_FILE_NAME,
   MEMORY_ENTRY_MAX_BYTES,
   MEMORY_LOG_VERSION,
@@ -173,6 +186,14 @@ export {
   type MemoryLogState,
 } from "./memory/log.js";
 export { appendMemoryLine, memoryStoreOf, nodeMemoryStoreIo, readMemoryLog, readMemoryState, type MemoryStore, type MemoryStoreIo } from "./memory/store.js";
+export {
+  applyMemoryExtractionOp,
+  MEMORY_MANIFEST_MAX_BYTES,
+  memoryManifest,
+  type MemoryExtractionOp,
+  type MemoryExtractionResult,
+  type MemoryExtractionSource,
+} from "./memory/extraction.js";
 export { builtinTools, type BuiltinToolsOptions } from "./builtin.js";
 
 // --- attachments (W804): the per-session content-addressed image store ---------
