@@ -26,7 +26,14 @@
  * here re-estimates, re-reads the log or recomputes a ratio — see
  `statusUsageFactsOf` for the mapping and its refusal to.
  */
-import { contextRatioFacts, type CompressionBlock, type CompressionHost, type CompressionPort, type ContextUsageFacts } from "@celestea/core";
+import {
+  contextRatioFacts,
+  maxTurnNumber,
+  type CompressionBlock,
+  type CompressionHost,
+  type CompressionPort,
+  type ContextUsageFacts,
+} from "@celestea/core";
 import type { SessionLog, Statusline } from "@celestea/core";
 import { compressionStoreOf, type CompressionStore } from "@celestea/session";
 import { compressionEnabled } from "./compression-switch.js";
@@ -153,22 +160,22 @@ function portOf(log: SessionLog | null, usage: CompressionUsageReader): Compress
 }
 
 /**
- * The newest `turn_start` number in the log, or 1 when the log has none yet.
+ * The newest turn number in the log, or **-1 when the log has no turn at all**.
  *
- * The floor matters: `validateRange` compares `to_turn` against this value, so
- * a log with no turn yet must not report 0 (which would make `to_turn: 0` legal
- * and let an empty log accept a block) nor `Infinity` (which would accept
- * anything). 1 means "the only legal range is empty", which is exactly true.
+ * This is the log's own number (`turn-0` is the first turn — turn-id.ts), with
+ * no offset: `validateRange` refuses `to_turn >= currentTurn`, so the turn in
+ * flight is protected by comparing like with like.
+ *
+ * W1900 shipped `n > 0 ? n : 1` here, i.e. it skipped `turn-0` and then
+ * FABRICATED a 1 for a log whose only turn is the first one. Those two floors
+ * described a 1-based numbering that no other reader of this feature used
+ * (`turnNumbersOf` and the block schema are 0-based), which is how the first
+ * turn of every session became uncompressed-and-uncompressible. -1 says "no
+ * turn yet" honestly: every range is then refused by the `current_turn` arm,
+ * which is exactly true for an empty log.
  */
 export function newestTurnOf(log: SessionLog): number {
-  const events = log.events();
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const event = events[i];
-    if (event === undefined || event.type !== "turn_start") continue;
-    const n = Number.parseInt(event.id.replace(/^turn-/, ""), 10);
-    if (Number.isSafeInteger(n) && n > 0) return n;
-  }
-  return 1;
+  return maxTurnNumber(log.events());
 }
 
 /**

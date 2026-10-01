@@ -54,8 +54,20 @@ describe("W1900 · the port speaks the host's water level", () => {
     expect(view).toEqual({ enabled: true, blocks: 1, ranges: [[1, 2]], last_ratio: 0.61 });
   });
 
-  it("newestTurnOf floors at 1 on an empty log (the only legal range is empty)", () => {
-    expect(newestTurnOf(new InMemorySessionLog())).toBe(1);
+  it("newestTurnOf answers the log's own last turn, and -1 when there is none", () => {
+    expect(newestTurnOf(new InMemorySessionLog())).toBe(-1);
     expect(newestTurnOf(stagedLog().log)).toBe(3);
+  });
+
+  it("newestTurnOf reports 0 for a log whose only turn is the FIRST one", () => {
+    // W1900 skipped turn-0 (`n > 0`) and then FABRICATED a 1. That is the
+    // numbering bug in one line: the value is compared against `to_turn` by
+    // validateRange and quoted to the model by context_status, so a fabricated
+    // 1 both mis-reported the current turn and hid the real first turn.
+    const inner = new InMemorySessionLog();
+    inner.append({ type: "turn_start", id: "turn-0" });
+    inner.append({ type: "user_message", text: "only" });
+    inner.append({ type: "turn_end", id: "turn-0", outcome: "completed" });
+    expect(newestTurnOf(inner)).toBe(0);
   });
 });
