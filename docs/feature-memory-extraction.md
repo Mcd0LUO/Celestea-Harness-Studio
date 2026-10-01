@@ -310,6 +310,7 @@ token 估算器（`context-trim.ts`，仍是唯一估算器）；`cacheHitRatio`
 
 - **50% nudge**（`COMPRESSION_NUDGE_RATIO`，`packages/core/src/compression.ts:155`）：`buildRequest` 尾部追加一条**瞬时** system 消息（`packages/agent-loop/src/loop.ts:307`、`packages/agent-loop/src/compression-nudge.ts:91`），进视图、绝不进 log、绝不进 system prompt、每步重建。
 - **0.8 preflight**（`COMPRESSION_PREFLIGHT_RATIO`，`:165`）：措辞从「可以压」升级为「现在压」，并说明引擎即将开始有损裁剪（`packages/agent-loop/src/compression-nudge.ts:63`）。真正的兜底仍是既有 `trimContext` —— `CONTEXT_TRIM_THRESHOLD`（`packages/runtime/src/agent-config.ts:17`）就是同一个 0.8，它不依赖模型是否调用 compress。
+- **协议适配（W2068 `anthropic_messages`）**：该协议没有会话内的 system 角色，所以 `packages/llm/src/anthropic/wire.ts` 把 messages 里的 system 消息**提升**进顶层 `system`（拼在 profile 串之后，遇到顺序）。**不是丢弃** —— 丢的话这条路由上动态水位完全消失，而第三方端点（MiniMax 那类行）走的正是这条。代价是位置：它和系统提示一起被读，而不是作为「下一步之前最后读到的东西」。
 
 **压缩块 schema**（原 §5 遗留项，已定）
 
@@ -396,7 +397,7 @@ Phase 2 定调为**视图叠层**（§4）后，原三条接缝只剩一条硬�
 | `decompress` 做成模型工具还是仅调试命令 | ✅ 已裁决（2026-10-01） | 做成模型工具（`packages/tools/src/tools/compression.ts:173`）：视图叠层下可逆性便宜，把它升级为协议的一部分 |
 | 提炼用哪个模型 / 提炼调用是否记 usage ledger | ✅ 已裁决（2026-09-30） | 会话当前模型 + reasoning_effort 钉最低档 + 输出 ≤2048；ledger 记独立 `kind:"extraction"`、不并入 turn_total（§4 Phase 1） |
 | `trimContext` 与 `compactSession` 的取舍策略 | ✅ 已部分解答 | `trimContext` 留作 preflight 兜底；`compactSession` 待视图叠层落地后降级或退役（§4 Phase 2） |
-| 压缩阈值常量是否调整 | ✅ 已裁决（2026-10-01） | `COMPRESSION_NUDGE_RATIO = 0.5` / `COMPRESSION_PREFLIGHT_RATIO = 0.8`（`packages/core/src/compression.ts:155`、`:165`）；与 `CONTEXT_TRIM_THRESHOLD` 同值，兜底与提示同一条线 |
+| 压缩阈值常量是否调整 | ✅ 已裁决（2026-10-01） | `COMPRESSION_NUDGE_RATIO = 0.5` / `COMPRESSION_PREFLIGHT_RATIO = 0.8`（`packages/core/src/compression.ts:155`、`:165`）；与 `CONTEXT_TRIM_THRESHOLD` 同值，兜底与提示同一条线。**保持常量、不做 env 可配**：哲学正文里写着「roughly half the window」，一个能被配置移动的数字就是一句会说谎的提示词。将来若真要扫参，必须**同一个改动里**把哲学正文改成按同一来源渲染（`withCompressionPhilosophy` 在 `agentConfigFromProfile` 里合并，一个 generation 内仍是冻结串，所以技术上可行）——只改阈值不改正文，就是让提示词与行为分叉 |
 | 是否引入显式缓存断点 | ❌ 已撤回 | 见 §3 |
 | `[[wiki-link]]` 式记忆间链接 | ⏸ 挂起 | 与 append-only log 模型有张力，未评估 |
 

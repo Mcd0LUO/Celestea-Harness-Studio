@@ -81,6 +81,36 @@ describe("selectTurnContextRows", () => {
     expect(selectTurnContextRows(log, [SKILL], cfg)).toEqual([]);
   });
 
+  it("the simulated cut is SHALLOWER than the real one — and heals in one round", () => {
+    // The module header's single documented divergence (:27-30): the decision is
+    // taken BEFORE the receipt drain and the user's input land, and both can only
+    // DEEPEN the cut. So a row this filter calls resident can still be missing
+    // from the request the model actually receives — for exactly ONE round,
+    // because the next decision sees the deeper view and re-injects. That promise
+    // was only ever prose; this is the case that makes it checkable.
+    const log = InMemorySessionLog.create();
+    inject(log, SKILL);
+    fill(log, 2);
+    const cfg = config({ context_window_tokens: 100 });
+
+    // Round 1: nothing has landed yet, the view fits, so the row is "resident"
+    // and the filter SKIPS it — that is the decision the model will not see it.
+    const before = trimContext(log.deriveMessages(), 0, cfg.context_window_tokens, cfg.context_trim_threshold, cfg.context_keep_recent);
+    expect(before.outcome.trimmed).toBe(false);
+    expect(selectTurnContextRows(log, [SKILL], cfg)).toEqual([]);
+
+    // The user's next input lands AFTER that decision. It is what pushes the row
+    // out of the request the model actually gets.
+    fill(log, 30);
+    const real = trimContext(log.deriveMessages(), 0, cfg.context_window_tokens, cfg.context_trim_threshold, cfg.context_keep_recent);
+    expect(real.outcome.trimmed).toBe(true);
+    expect(real.outcome.removedMessages).toBeGreaterThan(1);
+
+    // Round 2: same row text, deeper view -> RE-INJECT. One round lost, then the
+    // state machine recovers on its own — the property that makes the skew safe.
+    expect(selectTurnContextRows(log, [SKILL], cfg)).toEqual([SKILL]);
+  });
+
   it("tracks origins independently", () => {
     const log = InMemorySessionLog.create();
     inject(log, SKILL);

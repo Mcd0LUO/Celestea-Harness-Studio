@@ -34,7 +34,7 @@ import type {
   TurnOutcome,
 } from "@celestea/core";
 import type { Watchdog, WorkerRegistry } from "@celestea/workers";
-import { markCleanShutdown } from "@celestea/session";
+import { compressionVersionOf, markCleanShutdown } from "@celestea/session";
 import { closeLog } from "./host/engine-session.js";
 import { RuntimeReleasedError, TurnBusyError } from "./errors.js";
 import type { ContextUsageFacts, InjectionLane } from "@celestea/core";
@@ -327,12 +327,19 @@ export class Runtime {
   private snapshotEntry(): SnapshotCache {
     const log = this.p.sessionRef.log;
     const last = lastEventOf(log);
+    const version = compressionVersionOf(log);
     const cached = this.snapshotCache;
-    if (cached !== null && cached.log === log && cached.events === last.count && cached.last === last.event) {
+    if (
+      cached !== null &&
+      cached.log === log &&
+      cached.events === last.count &&
+      cached.last === last.event &&
+      cached.version === version
+    ) {
       return cached;
     }
     const request = contextSnapshotOf(this.p.agentLoop, this.p.ctx);
-    const entry: SnapshotCache = { log, events: last.count, last: last.event, request, assembled: null };
+    const entry: SnapshotCache = { log, events: last.count, last: last.event, version, request, assembled: null };
     this.snapshotCache = entry;
     return entry;
   }
@@ -470,6 +477,17 @@ interface SnapshotCache {
   log: SessionLog;
   events: number;
   last: SessionEvent | undefined;
+  /**
+   * W1900: the compression sidecar's version at build time.
+   *
+   * The third term of the key, and the one the other two CANNOT see: a
+   * compression writes a sidecar, never an event, so `(count, last event)` is
+   * unchanged by it and the statusline would keep serving the PRE-compression
+   * view and estimate until the next append happened to invalidate the cache.
+   * `compressionVersionOf` is the store's own mutation counter (0 for a log
+   * with no store), which is exactly "has the derived view changed".
+   */
+  version: number;
   request: ModelRequest | null;
   assembled: AssembledContext | null;
 }

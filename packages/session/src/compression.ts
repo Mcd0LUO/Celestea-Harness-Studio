@@ -89,6 +89,12 @@ function parseBlock(entry: unknown): CompressionBlock | null {
   if (typeof o["summary"] !== "string" || o["summary"].trim() === "") return null;
   if (typeof o["created_turn"] !== "number" || !Number.isSafeInteger(o["created_turn"])) return null;
   if (typeof o["context_ratio"] !== "number" || !Number.isFinite(o["context_ratio"])) return null;
+  // W1900: an interval that is not one. A hand-edited or foreign sidecar with
+  // `to_turn < from_turn` (or a negative end) is not a block — and admitting it
+  // is worse than dropping it, because the overlay's missing-`to_turn` arm then
+  // reads it as reaching forward to the next real turn boundary. The module's
+  // promise is "a half-bad block degrades to EMPTY", so it is refused HERE.
+  if (o["from_turn"] < 0 || o["to_turn"] < o["from_turn"]) return null;
   return {
     from_turn: o["from_turn"],
     to_turn: o["to_turn"],

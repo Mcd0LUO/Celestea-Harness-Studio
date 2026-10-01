@@ -146,6 +146,20 @@ describe("W1900 · a corrupt sidecar resets instead of crashing", () => {
     expect(readCompressionState(path).map((b) => [b.from_turn, b.to_turn])).toEqual([[1, 2]]);
   });
 
+  it("drops a block whose INTERVAL is not one (a hand-edited sidecar)", () => {
+    // W1900: `to_turn < from_turn` (or a negative end) used to be ADMITTED, and
+    // the overlay's missing-`to_turn` arm then reads such a row as reaching
+    // forward to the next real turn boundary — a malformed line silently hiding
+    // live turns is exactly the failure this file promises to degrade away.
+    const dir = tmpDir();
+    const path = compressionPathFor(dir);
+    writeFileSync(
+      path,
+      JSON.stringify({ version: COMPRESSION_SCHEMA_VERSION, blocks: [block(1, 2), block(5, 3), block(-1, 2)] }),
+    );
+    expect(readCompressionState(path).map((b) => [b.from_turn, b.to_turn])).toEqual([[1, 2]]);
+  });
+
   it("refuses a top-level value that is not an object at all", () => {
     const dir = tmpDir();
     const path = compressionPathFor(dir);
