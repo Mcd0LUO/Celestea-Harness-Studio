@@ -26,6 +26,7 @@ import {
 import { InMemorySessionLog } from "@celestea/session";
 import {
   compose,
+  compressionHostOf,
   createMemoryExtractionScheduler,
   llmSummarizer,
   memoryExtractionEnabled,
@@ -259,6 +260,26 @@ export class SessionComposer {
 
   constructor(private readonly opts: SessionComposerOptions) {}
 
+  /**
+   * W884 + F3: the engine-owned TURN CONTEXT. The skill catalog (name +
+   * description ONLY) and the workspace MEMORY.md are re-read at EVERY turn
+   * start from the SAME workspace the sandbox/guard use (W768) and injected as
+   * durable user-role history. Neither is ever put in the system prompt. A
+   * workspace with neither produces NO rows at all (zero cost), and a detached
+   * generation (no workspace) never attaches the provider at all.
+   */
+  private turnContextFor(workspacePath: string | null): (() => readonly TurnContextRow[]) | undefined {
+    if (workspacePath === null) return undefined;
+    return (): readonly TurnContextRow[] => {
+      const rows: TurnContextRow[] = [];
+      const catalog = renderSkillCatalog(listSkills(readLayers(workspacePath, { env: this.opts.env })));
+      if (catalog !== null) rows.push({ text: catalog, origin: "skill" });
+      const memory = memoryContextOf(workspacePath, { env: this.opts.env });
+      if (memory !== null) rows.push({ text: memory, origin: "memory" });
+      return rows;
+    };
+  }
+
   /** Compose one session generation (the registry's build factory). */
   compose(sessionId: string | null, dir: string | null): Runtime {
     const profile = this.profileFor(sessionId);
@@ -279,23 +300,7 @@ export class SessionComposer {
     // system prompt renders (the host's `resolveSession` hook). A session with no
     // resolvable workspace keeps the process env posture — never a failure.
     const workspace = sessionId === null ? null : (this.opts.resolveSession?.(sessionId)?.workspace ?? null);
-    // W884 + F3: the engine-owned TURN CONTEXT. The skill catalog (name +
-    // description ONLY) and the workspace MEMORY.md are re-read at EVERY turn
-    // start from the SAME workspace the sandbox/guard use (W768) and injected
-    // as durable user-role history. Neither is ever put in the system prompt.
-    // A workspace with neither produces NO rows at all (zero cost), and a
-    // detached generation (no workspace) never attaches the provider at all.
-    const turnContext =
-      workspace === null
-        ? undefined
-        : (): readonly TurnContextRow[] => {
-            const rows: TurnContextRow[] = [];
-            const catalog = renderSkillCatalog(listSkills(readLayers(workspace.path, { env: this.opts.env })));
-            if (catalog !== null) rows.push({ text: catalog, origin: "skill" });
-            const memory = memoryContextOf(workspace.path, { env: this.opts.env });
-            if (memory !== null) rows.push({ text: memory, origin: "memory" });
-            return rows;
-          };
+    const turnContext = this.turnContextFor(workspace === null ? null : workspace.path);
     const reader = this.opts.grants;
     const read = reader?.read(sessionId, dir) ?? { grants: EMPTY_GRANTS, warnings: [] };
     // W728: the ledger must exist before the Llm wrapper (every step books).
@@ -313,6 +318,19 @@ export class SessionComposer {
     // append to, so the runtime travels through a holder.
     const runCodeHolder: { runtime: Runtime | null } = { runtime: null };
     const onRunCodeEvent = this.runCodeSink(sessionId, runCodeHolder);
+    // W1900: the compression host of THIS generation. The tools are built
+    // BEFORE `compose()` returns the log they act on, so the host closes over
+    // a holder the same way the question and run_code wirings do — and the
+    // holder is the `Runtime.session` GETTER, so the `rebind()` a reopened
+    // session performs is picked up instead of stranding a dead log. The water
+    // level is the runtime's OWN `contextUsageFacts()`, i.e. the number
+    // /api/status reports: one plane, three readers.
+    const compressionLogHolder: { runtime: Runtime | null } = { runtime: null };
+    const compression = compressionHostOf({
+      log: () => compressionLogHolder.runtime?.session ?? null,
+      usage: () => compressionLogHolder.runtime?.contextUsageFacts() ?? null,
+    });
+    const compressionFor = compression === null ? {} : { compression };
     const engine = enginePlugins({
       profile,
       // W791 (P1, §5.2 #2): the mode decided at compose time. The DETACHED
@@ -334,6 +352,7 @@ export class SessionComposer {
       ...(reader === undefined ? {} : { audit: reader.audit(sessionId) }),
       env: this.opts.env,
       ...(onRunCodeEvent === undefined ? {} : { onRunCodeEvent }),
+      ...compressionFor,
     });
     // After the boundary is built: audit the generation and spend one-shots, so
     // THIS turn keeps its grants and the next one sees the consumption.
@@ -367,6 +386,11 @@ export class SessionComposer {
           sink: bindings.sink,
           usage,
           ...(bindings.injections === undefined ? {} : { injections: bindings.injections }),
+          // W1900: the nudge's water level. `compose()` already wired the same
+          // reader into the turn runner; passing it through keeps the studio
+          // loop byte-identical to the headless one instead of diverging into
+          // a second estimate. `undefined` is a valid loop binding (no nudge).
+          ...(bindings.contextUsage === undefined ? {} : { contextUsage: bindings.contextUsage }),
         });
       },
       workers: this.workerWiring(sessionId, profile),
@@ -380,6 +404,7 @@ export class SessionComposer {
     // `isLive` and the `user_question` log row address THIS generation.
     questionHolder.runtime = composed;
     runCodeHolder.runtime = composed; // W1467: same late binding for sub-call rows
+    compressionLogHolder.runtime = composed; // W1900: the compression tools' port
     return composed;
   }
 

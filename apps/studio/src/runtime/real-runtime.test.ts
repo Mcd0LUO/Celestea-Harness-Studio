@@ -334,6 +334,7 @@ describe("GET /api/status and /api/tools", () => {
     // fails here.
     expect(Object.keys(before.body).sort()).toEqual([
       "busy",
+      "compression",
       "context_usage",
       "cost",
       "effective_model",
@@ -429,7 +430,8 @@ describe("GET /api/sessions/{id}/context over the real engine", () => {
     // F4: 14 -> 16 — the browser tools ride the session attachment store.
     // F3: 16 -> 18 — the memory write pair (remember/forget) joins the face.
     // W1533: 18 -> 19 — `update_tasks` (the model's todo list) is mounted too.
-    expect(toolViews).toHaveLength(19);
+    // W1900: 19 -> 22 — the compression trio (compress/decompress/context_status).
+    expect(toolViews).toHaveLength(22);
     expect(tools).toContain("ask_user_question");
     expect(tools).toContain("read_image");
     for (const view of toolViews) {

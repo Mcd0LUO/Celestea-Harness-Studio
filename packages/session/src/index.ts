@@ -24,6 +24,8 @@
  *   replay.ts          replay analysis + SSE transcript derivation
  *   checkpoint.ts      checkpoint.json sidecar: shape + atomic read/write
  *   checkpoint-log.ts  SessionLog decorator: turn boundary -> checkpoint
+ *   compression.ts     compression.json sidecar: block list + read/write
+ *   compression-log.ts SessionLog decorator: deriveMessages -> compression overlay
  *   checkpoint-recovery.ts  boot decision table (§1.2.3), append-only repair
  */
 
@@ -38,4 +40,6 @@ export * from "./turn-id.js";
 export * from "./replay.js";
 export * from "./checkpoint.js";
 export * from "./checkpoint-log.js";
+export * from "./compression.js";
+export * from "./compression-log.js";
 export * from "./checkpoint-recovery.js";

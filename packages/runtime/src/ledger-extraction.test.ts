@@ -11,7 +11,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { zeroUsage, type Llm, type LlmStream, type ModelRequest, type SessionLog, type StreamEvent, type Usage } from "@celestea/core";
+import { zeroUsage, type Llm, type LlmStream, type SessionLog, type StreamEvent, type Usage } from "@celestea/core";
 import { createLedgerLlm } from "./ledger-llm.js";
 import { ledgerCostBlock, queryLedger } from "./ledger-query.js";
 import {

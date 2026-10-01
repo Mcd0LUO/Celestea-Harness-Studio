@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENT_LOOP_SERVICE,
+  COMPRESSION_PHILOSOPHY,
   LLM_SERVICE,
   TOOL_REGISTRY_SERVICE,
   definePlugin,
@@ -10,6 +11,7 @@ import {
 } from "@celestea/core";
 import { WORKER_REGISTRY_SERVICE, workerTools } from "@celestea/workers";
 import { agentConfigFromProfile, MIN_STEPS } from "./agent-config.js";
+import { compressionEnabled, ENV_MEMORY_COMPRESSION } from "./compression-switch.js";
 import { compose } from "./compose.js";
 import { ComposeError } from "./errors.js";
 import { sanitizeConfigJson, sanitizeProfile } from "./sanitize.js";
@@ -25,6 +27,19 @@ function markerPlugin(name: string, token: string, value: unknown, log: string[]
 }
 
 const WORKER_NAMES = ["spawn_worker", "send_message", "stop_worker", "worker_status"];
+
+/** W1900: run `body` with the compression kill-switch forced, then restore. */
+function withCompressionSwitch(value: "off", body: () => void): void {
+  const before = process.env[ENV_MEMORY_COMPRESSION];
+  process.env[ENV_MEMORY_COMPRESSION] = value;
+  try {
+    body();
+  } finally {
+    if (before === undefined) delete process.env[ENV_MEMORY_COMPRESSION];
+    else process.env[ENV_MEMORY_COMPRESSION] = before;
+  }
+  expect(compressionEnabled()).toBe(before === undefined);
+}
 
 describe("compose", () => {
   it("mounts plugins in order and lets the last provider win the token", () => {
@@ -104,9 +119,24 @@ describe("compose", () => {
     expect(agentConfigFromProfile(testProfile({ max_steps: 12 })).max_steps).toBe(12);
   });
 
-  it("keeps the profile's identity prompt in the loop config", () => {
+  it("keeps the profile's identity prompt in the loop config, followed by the compression philosophy", () => {
     const runtime = compose({ profile: testProfile({ system_prompt: "You are celestea." }), plugins: [memorySessionPlugin()], workers: false });
-    expect(runtime.agentConfig.system_prompt).toBe("You are celestea.");
+    // W1900: the identity prompt is still the FIRST thing, verbatim, and the
+    // philosophy is merged into the SAME string at AgentConfig construction —
+    // not appended per step and not routed through the studio prompt chain.
+    const prompt = runtime.agentConfig.system_prompt;
+    expect(prompt.startsWith("You are celestea.")).toBe(true);
+    expect(prompt).toContain(COMPRESSION_PHILOSOPHY);
+    expect(prompt.slice("You are celestea.".length).trim()).toBe(COMPRESSION_PHILOSOPHY);
+  });
+
+  it("drops the compression philosophy when the process kill-switches it off", () => {
+    const on = agentConfigFromProfile(testProfile({ system_prompt: "You are celestea." }));
+    expect(on.system_prompt).toContain(COMPRESSION_PHILOSOPHY);
+    withCompressionSwitch("off", () => {
+      const off = agentConfigFromProfile(testProfile({ system_prompt: "You are celestea." }));
+      expect(off.system_prompt).toBe("You are celestea.");
+    });
   });
 
   it("shares the injected usage tracker and status tracker services", () => {

@@ -269,9 +269,12 @@ export interface WorkerSendRequest {
 }
 
 import type { RecoveryView } from "./runtime/recovery-view.js";
+import type { CompressionStatusView } from "./runtime/compression-view.js";
 
 /** E §1.3 P1 ②: the `/api/status.recovery` block (see `runtime/recovery-view.ts`). */
 export type { RecoveryView };
+/** W1900: the `/api/status.compression` block (see `runtime/compression-view.ts`). */
+export type { CompressionStatusView };
 
 /**
  * W894: one worker's context occupancy. Deliberately the SAME shape `/api/status`
@@ -477,6 +480,16 @@ export interface RuntimeAdapter {
    * Optional: an adapter without checkpointing answers the empty block.
    */
   recoveryView?(session: string | null): RecoveryView;
+  /**
+   * W1900: this session's context-COMPRESSION view for `GET /api/status`
+   * (`{enabled, blocks, ranges, last_ratio}`): how many summary blocks are
+   * currently folding the view, which turn ranges they cover, and the water
+   * level at the moment the newest one was made. Optional: an adapter without
+   * a compression sidecar answers the disabled block, so the key is always
+   * present and a client never has to distinguish "no compression" from "old
+   * backend".
+   */
+  compressionView?(session: string | null): CompressionStatusView;
   tools(): ToolInfo[];
   /**
    * W729 (S2): the tool face of ONE session, used to render the `{{tools}}`

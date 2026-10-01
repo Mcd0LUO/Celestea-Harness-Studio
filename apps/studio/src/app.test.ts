@@ -100,10 +100,12 @@ describe("health / status / tools / config", () => {
     // the fake adapter, which has none — the real adapter's key set is asserted in
     // `runtime/real-runtime.test.ts`). W787: capability 1-P1 always adds
     // `recovery`. W870 adds `model_covered` (is `model` this session's own
-    // session.json override? — the picker's 「本会话已固定模型」 line). The SET is
-    // asserted, so an undeclared field still fails here.
+    // session.json override? — the picker's 「本会话已固定模型」 line). W1900
+    // (Phase 2) always adds `compression`. The SET is asserted, so an
+    // undeclared field still fails here.
     expect(Object.keys(body).sort()).toEqual([
       "busy",
+      "compression",
       "context_usage",
       "effective_model",
       "fallback",

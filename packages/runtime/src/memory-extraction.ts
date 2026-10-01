@@ -229,7 +229,7 @@ export function userProseOf(events: readonly SessionEvent[]): string {
   return events
     .filter(
       (e): e is Extract<SessionEvent, { type: "user_message" }> =>
-        e.type === "user_message" && (e.origin === undefined || e.origin === "user"),
+        e.type === "user_message" && !INJECTED_ORIGINS.has(e.origin ?? "user"),
     )
     .map((e) => e.text)
     .join("\n");
@@ -348,66 +348,8 @@ export function createMemoryExtractionScheduler(deps: MemoryExtractionDeps): Mem
     }
   };
 
-  const extractSlice = async (slice: ExtractionSlice): Promise<void> => {
-    const cursor: ExtractionCursor = { turn_id: slice.turn_id, event_count: slice.event_count };
-    // Gate 1: a deliberate direct write makes extraction redundant this turn.
-    if (containsDirectMemoryWrite(slice.events)) {
-      saveCursor(cursor);
-      return;
-    }
-    // Gate 2: too little real user prose to contain anything durable.
-    if (!hasEligibleUserProse(userProseOf(slice.events), minUserWords)) {
-      saveCursor(cursor);
-      return;
-    }
-    const transcript = renderExtractionTranscript(slice.events, maxTranscriptBytes);
-    const prompt = `Existing memory entries (id — text):\n${deps.manifest()}\n\nTranscript:\n${transcript}`;
-    let text = "";
-    let usage = zeroUsage();
-    let failed: string | null = null;
-    try {
-      const stream = await deps.llm.generate({
-        model: deps.model,
-        system,
-        messages: [userMessage(prompt)],
-        tools: [],
-        max_tokens: maxOutputTokens,
-        temperature: null,
-      });
-      for await (const event of stream) {
-        if (event.kind === "text") text += event.text;
-        else if (event.kind === "usage") usage = event.usage;
-        else if (event.kind === "failed") failed = event.message;
-        else if (event.kind === "interrupted") failed = "interrupted";
-        else if (event.kind === "done" && text === "") text = messageText(event.message) ?? "";
-      }
-    } catch (error) {
-      failed = String(error);
-    }
-    if (failed !== null) {
-      stderr(`memory-extraction: ${slice.turn_id} failed: ${failed}`);
-      deps.bookExtraction?.({ turn_id: slice.turn_id, usage, entries: 0, status: "error" });
-      return; // cursor NOT advanced — retried with the next turn's events
-    }
-    const { ops } = parseExtractionOps(text, deps.entryMaxBytes);
-    let applied = 0;
-    for (const op of ops) {
-      try {
-        const result = deps.write(op, slice.turn_id);
-        if (result.applied) applied += 1;
-        else stderr(`memory-extraction: op refused (${result.reason ?? "unknown"})`);
-      } catch (error) {
-        stderr(`memory-extraction: write failed: ${String(error)}`);
-      }
-    }
-    deps.bookExtraction?.({
-      turn_id: slice.turn_id,
-      usage,
-      entries: applied,
-      status: applied > 0 ? "ok" : "no-op",
-    });
-    saveCursor(cursor);
-  };
+  // Everything the slice runner needs, captured once per scheduler.
+  const run: ExtractionRun = { deps, system, maxTranscriptBytes, minUserWords, maxOutputTokens, stderr, saveCursor };
 
   const pump = async (): Promise<void> => {
     for (;;) {
@@ -423,7 +365,7 @@ export function createMemoryExtractionScheduler(deps: MemoryExtractionDeps): Mem
       }
       const { cursor, slices } = sliceUnprocessedTurns(events, loadCursor());
       if (cursor.event_count !== loadCursor().event_count) saveCursor(cursor);
-      for (const slice of slices) await extractSlice(slice);
+      for (const slice of slices) await extractSlice(run, slice);
     }
   };
 
@@ -446,9 +388,79 @@ export function createMemoryExtractionScheduler(deps: MemoryExtractionDeps): Mem
   };
 }
 
-// ---------------------------------------------------------------------------
-// Internals
-// ---------------------------------------------------------------------------
+/** Everything one extraction slice needs, so the scheduler body stays short. */
+interface ExtractionRun {
+  deps: MemoryExtractionDeps;
+  system: string;
+  maxTranscriptBytes: number;
+  minUserWords: number;
+  maxOutputTokens: number;
+  stderr: (line: string) => void;
+  saveCursor: (cursor: ExtractionCursor) => void;
+}
+
+/** One slice end to end: the two gates, the model call, the writes, the cursor. */
+async function extractSlice(run: ExtractionRun, slice: ExtractionSlice): Promise<void> {
+  const { deps, stderr } = run;
+  const cursor: ExtractionCursor = { turn_id: slice.turn_id, event_count: slice.event_count };
+  // Gate 1: a deliberate direct write makes extraction redundant this turn.
+  if (containsDirectMemoryWrite(slice.events)) {
+    run.saveCursor(cursor);
+    return;
+  }
+  // Gate 2: too little real user prose to contain anything durable.
+  if (!hasEligibleUserProse(userProseOf(slice.events), run.minUserWords)) {
+    run.saveCursor(cursor);
+    return;
+  }
+  const transcript = renderExtractionTranscript(slice.events, run.maxTranscriptBytes);
+  const prompt = `Existing memory entries (id — text):\n${deps.manifest()}\n\nTranscript:\n${transcript}`;
+  let text = "";
+  let usage = zeroUsage();
+  let failed: string | null = null;
+  try {
+    const stream = await deps.llm.generate({
+      model: deps.model,
+      system: run.system,
+      messages: [userMessage(prompt)],
+      tools: [],
+      max_tokens: run.maxOutputTokens,
+      temperature: null,
+    });
+    for await (const event of stream) {
+      if (event.kind === "text") text += event.text;
+      else if (event.kind === "usage") usage = event.usage;
+      else if (event.kind === "failed") failed = event.message;
+      else if (event.kind === "interrupted") failed = "interrupted";
+      else if (event.kind === "done" && text === "") text = messageText(event.message) ?? "";
+    }
+  } catch (error) {
+    failed = String(error);
+  }
+  if (failed !== null) {
+    stderr(`memory-extraction: ${slice.turn_id} failed: ${failed}`);
+    deps.bookExtraction?.({ turn_id: slice.turn_id, usage, entries: 0, status: "error" });
+    return; // cursor NOT advanced — retried with the next turn's events
+  }
+  const { ops } = parseExtractionOps(text, deps.entryMaxBytes);
+  let applied = 0;
+  for (const op of ops) {
+    try {
+      const result = deps.write(op, slice.turn_id);
+      if (result.applied) applied += 1;
+      else stderr(`memory-extraction: op refused (${result.reason ?? "unknown"})`);
+    } catch (error) {
+      stderr(`memory-extraction: write failed: ${String(error)}`);
+    }
+  }
+  deps.bookExtraction?.({
+    turn_id: slice.turn_id,
+    usage,
+    entries: applied,
+    status: applied > 0 ? "ok" : "no-op",
+  });
+  run.saveCursor(cursor);
+}
 
 function preview(value: unknown): string {
   let s: string;

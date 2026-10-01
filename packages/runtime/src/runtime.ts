@@ -37,11 +37,13 @@ import type { Watchdog, WorkerRegistry } from "@celestea/workers";
 import { markCleanShutdown } from "@celestea/session";
 import { closeLog } from "./host/engine-session.js";
 import { RuntimeReleasedError, TurnBusyError } from "./errors.js";
-import type { InjectionLane } from "@celestea/core";
+import type { ContextUsageFacts, InjectionLane } from "@celestea/core";
 import type { InboxPushOptions, InjectedMessage, SessionInbox } from "./inbox.js";
 import { bindSession, type SessionBinding } from "./session-binding.js";
+import { statusUsageFactsOf } from "./compression-host.js";
 import {
   ContextPressure,
+  contextUsage,
   estimatedContextTokens,
   statuslineOf,
   type AssembledContext,
@@ -77,6 +79,24 @@ export interface RuntimeParts {
   /** Names of the mounted plugins, in mount order (order is semantics). */
   plugins: readonly string[];
   shutdownHooks: readonly ShutdownHook[];
+  /**
+   * W1900: the late-bound context-usage reader. `compose` builds the turn
+   * runner BEFORE this Runtime exists, but the compression nudge's water level
+   * must be the SAME answer `/api/status` gives, so the Runtime constructor
+   * fills this holder and the turn runner reads it lazily. A holder rather than
+   * a value for the same reason `sessionRef` is one: a rebind swaps the log
+   * under every reader.
+   */
+  usagePlane: ContextUsagePlane;
+}
+
+/**
+ * W1900: the holder the water level travels in. Declared where compose can
+ * also name it, because compose creates it and the Runtime fills it — the same
+ * late-binding shape as `sessionRef`, and for the same reason.
+ */
+export interface ContextUsagePlane {
+  reader: (() => ContextUsageFacts | null) | null;
 }
 
 export class Runtime {
@@ -102,6 +122,25 @@ export class Runtime {
     this.parts = parts;
     this.binding = parts.binding;
     if (!parts.ctx.has(EVENT_BUS_SERVICE)) parts.ctx.provide(EVENT_BUS_SERVICE, createEventBus());
+    // W1900: publish the SINGLE water-level reader. It IS the function
+    // /api/status itself runs, so the compression nudge, the
+    // `context_status` tool and the statusline quote one number, not three
+    // estimates of it. It closes over `this`, so a rebind is picked up for
+    // free — and it is the one reader the turn runner was already waiting on.
+    parts.usagePlane.reader = () => this.contextUsageFacts();
+  }
+
+  /**
+   * W1900: the one water level, in the shape the compression tools and the
+   * nudge read. Defensive by construction — a reader that throws must not take
+   * a turn down, and "unknown" is a better answer than a fabricated zero.
+   */
+  contextUsageFacts(): ContextUsageFacts | null {
+    try {
+      return statusUsageFactsOf(contextUsage(this.statusView()));
+    } catch {
+      return null;
+    }
   }
 
   private get p(): RuntimeParts {

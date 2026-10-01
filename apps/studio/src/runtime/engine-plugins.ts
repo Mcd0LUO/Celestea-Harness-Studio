@@ -24,6 +24,7 @@ import {
   EVENT_BUS_SERVICE,
   SandboxError,
   type AskUserQuestionAnswerItem,
+  type CompressionHost,
   type Context,
   type EventBus,
   type Llm,
@@ -140,6 +141,15 @@ export interface EnginePluginInput {
    * sub-calls are dispatched but recorded nowhere — the pre-W1467 behaviour.
    */
   onRunCodeEvent?: RunCodeEventSink;
+  /**
+   * W1900: the compression host. Present = the session mounts the
+   * `compress` / `decompress` / `context_status` trio, absent = the model is
+   * never told compression exists (an embedding with no session log must not
+   * offer tools that can only fail). Built by the composer from the session's
+   * own log, lazily, so the same handle survives the `rebind` that a reopened
+   * session performs.
+   */
+  compression?: CompressionHost | null;
 }
 
 /**
@@ -244,6 +254,7 @@ export function engineTools(opts: EnginePluginInput): EngineTools {
       ...(opts.attachments === undefined ? {} : { attachments: opts.attachments }),
       ...(opts.imageInputAllowed === undefined ? {} : { imageInputAllowed: opts.imageInputAllowed }),
       model: opts.profile.model,
+      ...(opts.compression === undefined ? {} : { compression: opts.compression }),
     }),
     ...(opts.tools ?? []),
   ];

@@ -14,9 +14,10 @@
  * leaves `questions` out instead of registering a tool that can never work.
  */
 
-import type { Sandbox, Tool, UserQuestionService } from "@celestea/core";
+import type { CompressionHost, Sandbox, Tool, UserQuestionService } from "@celestea/core";
 
 import { askUserTool } from "./tools/ask-user.js";
+import { compressionTools } from "./tools/compression.js";
 import { httpRequestTool, type HttpRequestToolOptions } from "./tools/http-request.js";
 import { listDirTool } from "./tools/list-dir.js";
 import { processControlTool } from "./tools/process-control.js";
@@ -65,6 +66,14 @@ export interface BuiltinToolsOptions {
   workspace?: string | null;
   /** W884: environment the CELESTEA_HOME global skill layer resolves under. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * W1900 (Phase 2): the session's compression port — the model-facing
+   * `compress` / `decompress` / `context_status` trio. Present = the tools are
+   * mounted (19 -> 22); absent = they are not offered, so a generation with no
+   * live session log never advertises a tool that could only fail. Same
+   * "register only what works" rule as ask_user_question.
+   */
+  compression?: CompressionHost | null;
 }
 
 /** The six builtins, sharing one sandbox + one process registry. */
@@ -118,6 +127,14 @@ export function builtinTools(options: BuiltinToolsOptions = {}): Tool[] {
     // browser_open and browser_act drive the same page and process.
     const manager = new BrowserManager({ sandbox, processes, attachments: options.attachments });
     tools.push(browserOpenTool({ manager }), browserActTool({ manager }));
+  }
+  // W1900 (Phase 2): only with a live session log to act on. The three
+  // compression tools need the raw events (validation reads the log, not the
+  // view), the turn in flight, and the sidecar store — a host that injects no
+  // `compression` port has none of those, and an advertised tool that always
+  // fails is worse than a missing one.
+  if (options.compression !== undefined && options.compression !== null) {
+    tools.push(...compressionTools(options.compression));
   }
   return tools;
 }

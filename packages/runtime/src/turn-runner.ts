@@ -23,6 +23,7 @@ import {
   type AgentConfig,
   type AgentLoop,
   type Context,
+  type ContextUsageFacts,
   type ImageRef,
   type InjectionSource,
   type PendingInjection,
@@ -72,6 +73,14 @@ export interface LoopBindings {
   usage: UsageAccounting;
   /** Mid-turn injection source (absent = nothing can be injected). */
   injections?: InjectionSource;
+  /**
+   * W1900: the water level the compression nudge reads at BUILD time. The
+   * host injects the runtime's OWN `contextUsage` answer — the loop must not
+   * compute a second one, or the nudge and the statusline would quote
+   * different numbers to the same operator. Absent = no nudge, which is
+   * byte-for-byte the pre-Phase-2 request.
+   */
+  contextUsage?: () => ContextUsageFacts | null;
 }
 
 /** Builds the per-turn `AgentLoop`; the host injects its concrete loop here. */
@@ -126,6 +135,12 @@ export interface TurnRunnerDeps {
    * typed user bubble.
    */
   turnContext?: () => readonly TurnContextRow[];
+  /**
+   * W1900: the loop's compression-nudge water level, wired from `compose` to
+   * the SAME `contextUsage` the statusline reads, so the nudge, the
+   * `context_status` tool and `/api/status` can never disagree.
+   */
+  contextUsage?: () => ContextUsageFacts | null;
 }
 
 export class TurnRunner {
@@ -280,6 +295,7 @@ export class TurnRunner {
         sink,
         usage: this.deps.usage,
         ...(injections === undefined ? {} : { injections }),
+        ...(this.deps.contextUsage === undefined ? {} : { contextUsage: this.deps.contextUsage }),
       });
     }
     const loop = this.deps.ctx.get<AgentLoop>(AGENT_LOOP_SERVICE);

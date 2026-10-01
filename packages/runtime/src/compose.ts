@@ -57,7 +57,7 @@ import { createToolResultRetention, retentionSettingsFromEnv } from "./retention
 import { ComposeError } from "./errors.js";
 import { loopEventToFrame, type FrameMapper } from "./frames.js";
 import type { Profile } from "./profile.js";
-import { Runtime, type RuntimeParts, type ShutdownHook } from "./runtime.js";
+import { Runtime, type ContextUsagePlane, type RuntimeParts, type ShutdownHook } from "./runtime.js";
 import { bindSession, type SessionBinding } from "./session-binding.js";
 import { createStatusTracker, type StatusTracker } from "./status.js";
 import type { TurnLedgerHooks } from "./ledger.js";
@@ -202,6 +202,8 @@ export function compose(config: ComposeConfig): Runtime {
     }
     return annotated;
   };
+  // W1900: the late-bound water level (see the `contextUsage` line below).
+  const usagePlane: ContextUsagePlane = { reader: null };
   const runner = new TurnRunner({
     ctx,
     session: () => sessionRef.log,
@@ -213,6 +215,12 @@ export function compose(config: ComposeConfig): Runtime {
     ...(config.extraction === undefined ? {} : { extraction: config.extraction }),
     ...(config.loopFactory === undefined ? {} : { loopFactory: config.loopFactory }),
     ...(config.turnContext === undefined ? {} : { turnContext: config.turnContext }),
+    // W1900: ONE water-level plane. The nudge reads exactly what /api/status
+    // reports, because the Runtime fills that holder with its OWN
+    // `statusView()` reader — the turn runner is built before the Runtime
+    // exists, so the plane travels as a late-bound holder, exactly like the
+    // studio's questionHolder. It is never a second estimate computed here.
+    contextUsage: () => usagePlane.reader?.() ?? null,
     drainPending: () => drained([...inbox.drain("next-turn"), ...receipts()], "turn-start"),
     injections: {
       drain: () => drained([...inbox.drain("next-step"), ...receipts()], "step"),
@@ -236,6 +244,8 @@ export function compose(config: ComposeConfig): Runtime {
     agentLoop,
     plugins: pluginNamesOf(plugins, workerHost, mounted),
     shutdownHooks: [...(config.shutdownHooks ?? []), stopWatchdog(mounted)],
+    // W1900: the Runtime writes the single water-level reader here.
+    usagePlane,
   };
   return new Runtime(parts);
 }

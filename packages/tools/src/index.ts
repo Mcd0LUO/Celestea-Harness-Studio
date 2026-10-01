@@ -155,6 +155,19 @@ export {
   type MemoryToolOptions,
 } from "./tools/memory.js";
 export {
+  COMPRESS_DESCRIPTION,
+  COMPRESSION_ERROR_PREFIX,
+  CONTEXT_STATUS_DESCRIPTION,
+  DECOMPRESS_DESCRIPTION,
+  compressionTools,
+  compressSpec,
+  compressTool,
+  contextStatusSpec,
+  contextStatusTool,
+  decompressSpec,
+  decompressTool,
+} from "./tools/compression.js";
+export {
   MEMORY_ENTRIES_FILE_NAME,
   MEMORY_ENTRY_MAX_BYTES,
   MEMORY_LOG_VERSION,

@@ -20,6 +20,7 @@ import {
   definePlugin,
   SANDBOX_SERVICE,
   TOOL_REGISTRY_SERVICE,
+  type CompressionHost,
   type Context,
   type Plugin,
   type Sandbox,
@@ -105,6 +106,13 @@ export interface ToolsPluginOptions {
   imageInputAllowed?: boolean;
   /** W804: the target model id, for the read_image refusal text. */
   model?: string;
+  /**
+   * W1900 (Phase 2): the session's compression port, mounted into the DEFAULT
+   * tool set as the `compress` / `decompress` / `context_status` trio. Supplied
+   * = the session offers them; absent = the default set is byte-identical to
+   * the pre-Phase-2 one (a detached generation has no log to compress).
+   */
+  compression?: CompressionHost | null;
 }
 
 /** The wired handles a compose root keeps after mounting the plugin. */
@@ -145,6 +153,7 @@ export function assembleTools(options: ToolsPluginOptions = {}): ToolAssembly {
       ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
       ...(options.imageInputAllowed === undefined ? {} : { imageInputAllowed: options.imageInputAllowed }),
       ...(options.model === undefined ? {} : { model: options.model }),
+      ...(options.compression === undefined ? {} : { compression: options.compression }),
     });
   for (const tool of tools) registry.register(tool);
   const runCode = mountRunCode(registry, sandbox, options);

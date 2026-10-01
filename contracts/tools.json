@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Celestea engine tool specs (19 tools)",
+  "title": "Celestea engine tool specs (22 tools)",
   "generatedAt": "2026-09-10T01:20:00Z",
   "source": {
     "liveEndpoint": "http://127.0.0.1:3777/api/tools (descriptions taken verbatim from the running engine)",
@@ -62,9 +62,22 @@
       "semantics": "REPLACE, not patch: every call carries the COMPLETE list, so two concurrent updates cannot merge into a state neither author intended. The result is {ok, tasks, counts:{pending,inProgress,completed}}.",
       "executionKeepList": "W1533 also adds update_tasks to EXECUTION_TOOL_NAMES: it is not in SDK_TOOLS, so folding it would make the plan unreachable in execution mode while the user still expects to watch it (the same rule as W884 load_skill / F4 browser / B2 memory).",
       "endpoints": "W1533 adds ZERO endpoints: the list rides the existing tool dispatch and the existing tool/tool_result SSE frames, so API_ENDPOINT_COUNT stays 69."
+    },
+    "phase2Delta": {
+      "addedTools": [
+        "compress",
+        "decompress",
+        "context_status"
+      ],
+      "count": "19 -> 22",
+      "sourceRef": "packages/tools/src/tools/compression.ts (W1900 Phase 2; no Rust counterpart)",
+      "why": "trimContext and compactSession are both LOSSY AND UNAUTHORSIZED by the model: trim drops history with no record of what was dropped, and compactSession REWRITES the log. Phase 2 gives the model a derived-view compression it drives itself: compress replaces a closed range of turns with one summary block in the VIEW (the log keeps every event), decompress puts a block back, and context_status reports what is currently compressed and how full the context is.",
+      "semantics": "TURN-RANGE, turn-id based: {from_turn,to_turn} is a CLOSED interval over turn-<n> and is the only stable anchor (a Message has no id, a SessionEvent has no ordinal id, and the tool_call accumulator makes message<->event non-1:1). The engine hard-validates: the range must be turn-boundary aligned, both turns must exist, and to_turn MUST BE STRICTLY LESS THAN the current turn - compressing the turn in flight is refused by the engine, not by this description. Re-compressing a range that already covers a block MERGES (the old summary is consumed: a summary of summaries). decompress takes one block's {from_turn,to_turn} and restores the raw turns. None of the three writes a session event: the block list lives in <session-dir>/compression.json.",
+      "executionKeepList": "All three also join EXECUTION_TOOL_NAMES: none is in SDK_TOOLS, so folding them would make compression unreachable in execution mode while the system prompt still tells the model it has the tool (the same rule as W884 load_skill / W1533 update_tasks).",
+      "endpoints": "Phase 2 adds ZERO endpoints: all three ride the existing tool dispatch and the existing tool/tool_result SSE frames, and the block count / ranges / water level reach the host through the existing context_usage surface and the context_status result, so API_ENDPOINT_COUNT stays 69."
     }
   },
-  "count": 19,
+  "count": 22,
   "tools": [
     {
       "name": "ask_user_question",
@@ -779,6 +792,84 @@
         "additionalProperties": false
       },
       "sourceRef": "packages/tools/src/tools/tasks.ts (W1533; no Rust counterpart)"
+    },
+    {
+      "name": "compress",
+      "description": "Replace a CLOSED RANGE of earlier turns with one summary block, so the same information costs far fewer context tokens. This is a tool, not an obligation: compress only when the context is genuinely getting full (context_status tells you), and only a COLD range - never the turn you are answering in. Send {from_turn, to_turn} as turn numbers (turn 1 is the first turn of this session; context_status lists them), never message numbers or indexes. The engine refuses a range that does not line up with turn boundaries, a turn that does not exist, or any range whose to_turn is the current turn or later. Write the summary for your own future self: what was decided, what was learned, what is still open, and where the evidence is (file paths, ids, commands) - not a transcript and not a narration of what you are doing now. The history is not deleted: the log keeps every original event, and if the summary turns out to be wrong or insufficient you can call decompress with the same range to get the original turns back. Re-compressing a range that already contains a block merges into it (your summary then replaces the old one, so carry its still-relevant content forward). The result is {ok:true, block:{from_turn,to_turn,summary,created_turn,context_ratio}, merged:<how many earlier blocks were absorbed>}; a refused range returns a structured error naming the reason and changes nothing.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "from_turn": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "First turn of the range to compress, as a turn NUMBER (1 = the first turn of this session). Inclusive."
+          },
+          "to_turn": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Last turn of the range to compress. Inclusive, and MUST be strictly less than the current turn - the turn in flight cannot be compressed. Use context_status to see the numbers."
+          },
+          "summary": {
+            "type": "string",
+            "description": "The replacement text, written for your own future self: decisions made, facts learned with their evidence (paths, ids, commands), open questions, and anything you must not forget. It is the only trace of those turns you will have in the view, so do not write a narration or a transcript, and do not leave out the details you would otherwise have to re-derive."
+          },
+          "desc": {
+            "type": "string",
+            "description": "Optional one-line label (max 80 chars) describing what this call is doing; shown on the tool card in the UI. Keep it short."
+          }
+        },
+        "required": [
+          "from_turn",
+          "to_turn",
+          "summary"
+        ],
+        "additionalProperties": false
+      },
+      "sourceRef": "packages/tools/src/tools/compression.ts (W1900 Phase 2; no Rust counterpart)"
+    },
+    {
+      "name": "decompress",
+      "description": "Undo a compress: the original turns of one block go back into the view, in full, exactly as they were (nothing was ever deleted from the log - compression only changed what the model sees). Compression is meant to be reversible, so a summary that lost a detail you need is a normal situation and not a failure: call decompress with the block's own {from_turn,to_turn} and read the original turns again. Pass a range that matches NO current block and nothing changes. Note the cost: the restored turns take their tokens back, so decompress the smallest block that has what you are missing rather than everything, and re-compress it afterwards if you no longer need it. The result is {ok:true, from_turn, to_turn, restored_turns:<how many turns came back>}; a range with no block returns {ok:false, code:'no_such_block'} and changes nothing.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "from_turn": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "First turn of the block to restore - the from_turn of an existing compress call. Inclusive."
+          },
+          "to_turn": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Last turn of the block to restore - the to_turn of that same compress call. Inclusive."
+          },
+          "desc": {
+            "type": "string",
+            "description": "Optional one-line label (max 80 chars) describing what this call is doing; shown on the tool card in the UI. Keep it short."
+          }
+        },
+        "required": [
+          "from_turn",
+          "to_turn"
+        ],
+        "additionalProperties": false
+      },
+      "sourceRef": "packages/tools/src/tools/compression.ts (W1900 Phase 2; no Rust counterpart)"
+    },
+    {
+      "name": "context_status",
+      "description": "Report how full this session's context is, and what is currently compressed. Read-only: it changes nothing. Use it when you are unsure whether to compress (that is the normal case - compression is a tool, not a routine) and before you pick a range. The result is {context:{used,window,ratio,method,estimated,projected}, turn:{current,turns}, blocks:[{from_turn,to_turn,created_turn,context_ratio,summary_chars}], current_turn}. method is 'usage_prompt_tokens' when the provider reported a real prompt size, 'assembled_estimate' when the figure is an estimate of the request that would be sent now, and 'none' before anything has been generated. ratio is used/window and is the number to weigh your decision against: 0.5 is the point where a cold range is worth compressing, 0.8 is where the engine starts insisting. The ranges in blocks are exactly the ranges decompress accepts.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "desc": {
+            "type": "string",
+            "description": "Optional one-line label (max 80 chars) describing what this call is doing; shown on the tool card in the UI. Keep it short."
+          }
+        },
+        "additionalProperties": false
+      },
+      "sourceRef": "packages/tools/src/tools/compression.ts (W1900 Phase 2; no Rust counterpart)"
     }
   ]
 }

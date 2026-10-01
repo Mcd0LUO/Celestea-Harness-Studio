@@ -61,9 +61,12 @@ describe("apps/studio contract surface", () => {
     // the fake adapter, which has none — the real adapter's key set is asserted in
     // `runtime/real-runtime.test.ts`). W787: capability 1-P1 always adds
     // `recovery`. W870 adds `model_covered` (is `model` this session's own
-    // override?). The SET is asserted, so an undeclared field still fails here.
+    // override?). W1900 (Phase 2) always adds `compression` (the blocks folding
+    // this session's view). The SET is asserted, so an undeclared field still
+    // fails here.
     expect(Object.keys(status).sort()).toEqual([
       "busy",
+      "compression",
       "context_usage",
       "effective_model",
       "fallback",
@@ -84,7 +87,7 @@ describe("apps/studio contract surface", () => {
     // W783: 10 -> 11 (`ask_user_question`); W804: 11 -> 12 (`read_image`);
     // W7: 12 -> 13 (`stop_worker`); W884: 13 -> 14 (`load_skill`);
     // F4: 14 -> 16 (`browser_open` + `browser_act`); W1533: 18 -> 19 (`update_tasks`).
-    expect(loadTools().tools).toHaveLength(19);
+    expect(loadTools().tools).toHaveLength(22);
   });
 
   it("404s unknown /api/* paths with the JSON envelope (never the SPA)", async () => {

@@ -174,6 +174,12 @@
             "type": "object{session:string|null,recovered_turns:array<string>,dangling_turns:integer,degraded:boolean,last_outcome:string|null}",
             "required": false,
             "note": "E-P1 (capability 1, W787): the QUERIED session's checkpoint view — the turn ids this engine closed after a crash (checkpoint.json `repaired[]`), the `turn_start` rows still open, whether the session log refused a write (writeErrorCount>0) and the phase of the log's last `turn_end`. PURE ADDITION to an existing endpoint (P1 adds NO endpoint); an adapter without checkpointing answers the empty block, so the key is always present. The block describes the session's LIVE generation: a session with no composed instance answers the empty block (a status poll never builds an engine) — the durable record of a repair is the sidecar's `repaired[]` and the `session_repaired` audit line."
+          },
+          {
+            "name": "compression",
+            "type": "object{enabled:boolean,blocks:integer,ranges:array<[integer,integer]>,last_ratio:number|null}",
+            "required": false,
+            "note": "W1900 (Phase 2): what this session is currently COMPRESSING. `blocks` is how many summary blocks are folding the model-visible view, `ranges` are their [from_turn,to_turn] pairs in log order (never overlapping — the same ranges `decompress` accepts), and `last_ratio` is the context ratio at the moment the newest block was written (a HISTORICAL reading: it shows whether the model chose the operator's own trigger; the LIVE level is `context_usage.ratio` beside it). `enabled:false` means this session has no compression sidecar (detached, opened before the file existed, or the process is switched off with CELESTEA_MEMORY_COMPRESSION) — always present, because a client must not have to tell \"nothing is compressed\" from \"the server is old\"."
           }
         ]
       },
@@ -188,7 +194,8 @@
         "W755: `usage.total` is a cross-step, repeatedly-billed sum (every step re-sends the whole prompt), NOT an occupancy reading — never divide it by a context window. Occupancy is `context_usage` only.",
         "W785: `cost` is a PURE ADDITION and is present ONLY when the queried session's rows exist in the process ledger (`session_total`/`turn_total` are `null` — never 0 — when nothing was priced).",
         "W787: `recovery.degraded` is true when the session log's own `writeErrorCount()>0` (disk and memory diverged, G1-6) OR the sidecar's sticky `degraded.log_write_errors>0`; the sticky value keeps a past fork visible after a healthy restart.",
-        "W787: `recovery.dangling_turns` counts `turn_start` rows minus `turn_end` rows in the LIVE log (the same rule as `analyzeReplay().danglingTurns`), and `recovered_turns` lists the `checkpoint.json` `repaired[]` turn ids — a repaired crash therefore reports `dangling_turns:0` together with a non-empty `recovered_turns`."
+        "W787: `recovery.dangling_turns` counts `turn_start` rows minus `turn_end` rows in the LIVE log (the same rule as `analyzeReplay().danglingTurns`), and `recovered_turns` lists the `checkpoint.json` `repaired[]` turn ids — a repaired crash therefore reports `dangling_turns:0` together with a non-empty `recovered_turns`.",
+        "W1900: `compression` describes a VIEW, never the log. The log is append-only and holds every original event; a block only changes what `deriveMessages()` renders, which is why `blocks` can fall back to 0 (a `decompress`) while the log grew. `ranges` empty + `enabled:true` is the normal state of a healthy session that has never needed to compress, and it is not an error."
       ],
       "probe": {
         "checked": true,
@@ -223,7 +230,7 @@
             "name": "tools",
             "type": "array<{name:string,description:string}>",
             "required": false,
-            "note": "schemas() of the queried session's generation; sorted by name; up to 19 tools in standard mode (read_image is mounted only when the session has an attachment store), the 13 execution-mode names in execution mode"
+            "note": "schemas() of the queried session's generation; sorted by name; up to 22 tools in standard mode (read_image is mounted only when the session has an attachment store), the 16 execution-mode names in execution mode"
           }
         ]
       },

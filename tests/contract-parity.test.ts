@@ -46,6 +46,8 @@ import {
   loadTools,
   validateSessionEvent,
   type AskUserQuestionRequest,
+  type CompressionHost,
+  type CompressionPort,
   type Sandbox,
   type SessionEvent,
   type UserQuestionService,
@@ -68,6 +70,12 @@ const WORKER_TOOLS = ["send_message", "spawn_worker", "stop_worker", "worker_sta
 const QUESTION_TOOLS = ["ask_user_question"];
 /** W804: mounted only once the host supplies a session attachment store. */
 const READ_IMAGE_TOOL = "read_image";
+/**
+ * W1900 (Phase 2): the compression trio. Conditional on the same rule as
+ * `read_image` — a host with no live session log has nothing to compress, so
+ * the tools are not mounted rather than mounted-and-always-failing.
+ */
+const COMPRESSION_TOOLS = ["compress", "context_status", "decompress"];
 
 /** The golden fixtures are exported on demand (`pnpm golden:export`). */
 const HAS_FIXTURES = existsSync(fixturePath("index.json"));
@@ -208,11 +216,12 @@ describe("W744 · all 8 builtin tool specs match the implementation registry", (
 
   it("leaves no contract tool uncovered (worker trio + W783 question tool come from elsewhere)", () => {
     // W783: 10 -> 11; W804: 11 -> 12; W7: 12 -> 13; W884: 13 -> 14; F4: 14 -> 16;
-    // B2: 16 -> 18; W1533: 18 -> 19. ask_user_question, read_image, the browser
-    // pair and the W7 worker tools are each covered by their own check below;
+    // B2: 16 -> 18; W1533: 18 -> 19; W1900 (Phase 2): 19 -> 22.
+    // ask_user_question, read_image, the browser pair, the compression trio and
+    // the W7 worker tools are each covered by their own check below;
     // remember/forget/update_tasks are in REGISTRY_TOOLS (always mounted).
-    expect(CONTRACT.tools).toHaveLength(19);
-    expect(uncoveredTools(CONTRACT, specs, [...WORKER_TOOLS, ...QUESTION_TOOLS, READ_IMAGE_TOOL, ...BROWSER_TOOLS])).toEqual([]);
+    expect(CONTRACT.tools).toHaveLength(22);
+    expect(uncoveredTools(CONTRACT, specs, [...WORKER_TOOLS, ...QUESTION_TOOLS, READ_IMAGE_TOOL, ...BROWSER_TOOLS, ...COMPRESSION_TOOLS])).toEqual([]);
   });
 
   /**
@@ -266,6 +275,24 @@ describe("W744 · all 8 builtin tool specs match the implementation registry", (
     for (const name of BROWSER_TOOLS) expect(withStore.map((s) => s.name)).toContain(name);
     expect(describeFindings(compareToolSpecs(CONTRACT, withStore.filter((s) => BROWSER_TOOLS.includes(s.name))))).toBe("");
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * W1900 (Phase 2): the compression trio is OPTIONAL for the same structural
+   * reason — `builtinTools` mounts it only when the host injects a
+   * `CompressionHost`, i.e. only when there is a live session log, a turn in
+   * flight and a sidecar store. Both halves are asserted so neither "the tools
+   * never appear" nor "they always appear" can pass silently, and the mounted
+   * specs are compared to the frozen contract entries field for field.
+   */
+  it("mounts the compression trio when (and only when) a compression port is supplied", () => {
+    const without = assembleTools({ guard: null, env: {}, sandbox: stubSandbox() }).registry.schemas().map((s) => s.name);
+    for (const name of COMPRESSION_TOOLS) expect(without).not.toContain(name);
+
+    const withPort = assembleTools({ guard: null, env: {}, sandbox: stubSandbox(), compression: compressionStub() }).registry.schemas();
+    for (const name of COMPRESSION_TOOLS) expect(withPort.map((s) => s.name)).toContain(name);
+    expect(withPort.map((s) => s.name)).toEqual([...REGISTRY_TOOLS, ...COMPRESSION_TOOLS].sort());
+    expect(describeFindings(compareToolSpecs(CONTRACT, withPort.filter((s) => COMPRESSION_TOOLS.includes(s.name))))).toBe("");
   });
 
   it("the mounted question tool parks on the service and returns its answers verbatim", async () => {
@@ -324,6 +351,23 @@ function questionStub(): { service: UserQuestionService; seen: AskUserQuestionRe
     },
   };
   return { service, seen };
+}
+
+/**
+ * W1900 (Phase 2): an inert compression port. The parity check only READS the
+ * three specs, so the port's methods are never called — but they must still be
+ * present, because a host that hands over a port is asserting that a real log,
+ * turn and store are behind it.
+ */
+function compressionStub(): CompressionHost {
+  const port: CompressionPort = {
+    events: () => [],
+    currentTurn: () => 1,
+    blocks: () => [],
+    save: () => undefined,
+    usage: () => null,
+  };
+  return { port: () => port, usage: () => null };
 }
 
 /** A sandbox that never runs: the specs are read, no command is executed. */
