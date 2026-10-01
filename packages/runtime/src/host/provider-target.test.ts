@@ -26,6 +26,13 @@ interface TestProfile {
   base_url: string;
   api_key_env: string;
   context_window: number;
+  /**
+   * W2066: `ProfileSlot` requires the wire protocol too — it is the third
+   * thing that moves with the route, and `applyProviderTarget` writes it back.
+   * (This file landed with W1900 and did not carry the field; the union with
+   * main's W2066 is what surfaced it.)
+   */
+  request_format: string;
 }
 
 const FALLBACK = 131_072;
@@ -51,6 +58,7 @@ function baseProfile(over: Partial<TestProfile> = {}): TestProfile {
     base_url: "http://profile.test/v1",
     api_key_env: "CELESTEA_API_KEY",
     context_window: FALLBACK,
+    request_format: "chat_completions",
     ...over,
   };
 }

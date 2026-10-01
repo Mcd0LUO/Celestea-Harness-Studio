@@ -124,6 +124,15 @@ async function runTurn(app: Hono, input: string): Promise<number> {
   return Number(body["turn"]);
 }
 
+/** Wait until the mock upstream has seen at least `n` requests. */
+async function waitRequests(seen: { length: number }, n: number, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (seen.length < n) {
+    if (Date.now() > deadline) throw new Error(`upstream saw ${seen.length} requests, wanted ${n}`);
+    await sleep(5);
+  }
+}
+
 async function waitIdle(studio: StudioApp, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (studio.services.runtime.isBusy()) {
@@ -150,7 +159,15 @@ describe("live LLM assembly (mock upstream, no real network)", () => {
       [textDelta("收"), textDelta("到"), usageChunk(240, 4), DONE_FRAME],
     ]);
     try {
-      const host = makeLiveHost({ baseUrl: upstream.v1BaseUrl, model, env: { CELESTEA_REASONING_EFFORT: "xhigh-custom" } });
+      // This test counts the ENGINE's own requests, so the background
+      // memory-extraction pass is turned OFF here: it is a SECOND, independent
+      // model call per turn (its own subject, pinned by the next test), and
+      // leaving it on would make "one request per step" unassertable.
+      const host = makeLiveHost({
+        baseUrl: upstream.v1BaseUrl,
+        model,
+        env: { CELESTEA_REASONING_EFFORT: "xhigh-custom", CELESTEA_MEMORY_EXTRACTION: "off" },
+      });
       await runTurn(host.app, "用 run_shell 执行 echo ts-live-ok 然后回复收到");
       await waitIdle(host.studio);
 
@@ -179,7 +196,7 @@ describe("live LLM assembly (mock upstream, no real network)", () => {
       expect(health["base_url"]).toBe(upstream.v1BaseUrl);
       expect((await jsonOf(host.app, "/api/config"))["model"]).toBe(model);
 
-      // The real request the engine sent upstream.
+      // The real request the engine sent upstream: exactly one per step.
       expect(upstream.requests).toHaveLength(2);
       const first = upstream.requests[0];
       expect(first?.url).toBe("/v1/chat/completions");
@@ -299,6 +316,51 @@ describe("live LLM assembly (mock upstream, no real network)", () => {
       expect(await (await host.app.request("/api/health")).text()).not.toContain("stored-secret-key");
       expect(await (await host.app.request("/api/providers")).text()).not.toContain("stored-secret-key");
       expect(await (await host.app.request("/api/config")).text()).not.toContain("stored-secret-key");
+    } finally {
+      await upstream.close();
+    }
+  });
+});
+
+/**
+ * Phase 1 · the background extraction pass is a SECOND model call.
+ *
+ * It is DEFAULT ON, so a production turn costs one more upstream call than the
+ * loop's own steps — a whole extra BILLED request, on the session's own model,
+ * pinned to the cheap reasoning tier and a 2048-token output cap. That is a
+ * deliberate design choice rather than an accident, so it is pinned here: the
+ * suite above counts the ENGINE's requests and turns this pass OFF for that
+ * reason, and whoever counts requests next should not have to discover it.
+ *
+ * It has its own describe because it is its own subject (and its own line
+ * budget), not because it is a detail of the assembly suite.
+ */
+describe("live LLM · the background extraction pass is a second model call", () => {
+  it("costs exactly one extra call, and it is the extraction pass", async () => {
+    const model = "mock-v4-flash";
+    const upstream = await startMockProvider([
+      [textDelta("好"), usageChunk(10, 2), DONE_FRAME],
+      [textDelta('{"ops":[]}'), usageChunk(5, 1), DONE_FRAME],
+    ]);
+    try {
+      const host = makeLiveHost({ baseUrl: upstream.v1BaseUrl, model });
+      await runTurn(host.app, "please remember that this project always uses pnpm");
+      await waitIdle(host.studio);
+      await waitRequests(upstream.requests, 2);
+      expect(upstream.requests).toHaveLength(2);
+      const extraction = upstream.requests[1]?.body;
+      expect(extraction?.["model"]).toBe(model);
+      expect(extraction?.["max_tokens"]).toBe(2048);
+      expect(extraction?.["reasoning_effort"]).toBe("low");
+      // An EMPTY tool list is dropped by the request builder entirely (the turn
+      // request above carries the registry's schemas), so "no tools" is an
+      // absent key, not `[]`.
+      expect(extraction?.["tools"]).toBeUndefined();
+      // The system prompt rides as the leading system MESSAGE on this wire
+      // (chat_completions), not as a top-level field.
+      const messages = extraction?.["messages"] as Array<{ role: string; content: unknown }> | undefined;
+      expect(messages?.[0]?.role).toBe("system");
+      expect(JSON.stringify(messages?.[0]?.content)).toContain("memory-extraction pass");
     } finally {
       await upstream.close();
     }
