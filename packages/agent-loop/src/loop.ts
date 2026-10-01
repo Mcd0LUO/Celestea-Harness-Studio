@@ -339,8 +339,10 @@ export class DefaultAgentLoop implements AgentLoop {
 
   /**
    * W1900: the turn the nudge names. The log owns the counter, so the number is
-   * read from the newest `turn_start` rather than guessed — and 1 is the floor
-   * so a turn id can never render as `turn-0` in the text the model reads.
+   * read from the newest `turn_start` rather than guessed. The floor is 0
+   * because that IS the first turn (turn-id.ts mints `turn-0` first): the
+   * nudge quotes the same number `context_status` lists and the `compress`
+   * range takes, and a floor of 1 would name a turn the log does not have.
    */
   private currentTurnNumber(seams: Seams): number {
     const events = seams.session.events();
@@ -350,7 +352,7 @@ export class DefaultAgentLoop implements AgentLoop {
       const parsed = parseTurnNumber(event.id);
       if (parsed !== null) return parsed;
     }
-    return 1;
+    return 0;
   }
 
   /** Start one model response; interruptible, never throws on provider failure. */

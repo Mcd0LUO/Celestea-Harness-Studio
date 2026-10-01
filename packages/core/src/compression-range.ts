@@ -17,6 +17,17 @@
  *   2. **A turn is the atom.** A range is a turn-number interval, so it never
  *      splits a turn, and a turn boundary always carries a complete
  *      tool_call/tool_result group.
+ *   3. **A turn number IS the log's id.** `formatTurnId(n)` mints `turn-<n>`
+ *      and the first turn of a session is `turn-0` (turn-id.ts: empty log ->
+ *      maxTurnNumber() + 1 = 0). Every number in this module — a block's
+ *      `from_turn`/`to_turn`, `currentTurn`, and the numbers the tools show
+ *      the model — is THAT number with no offset and no second numbering.
+ *      (W1900 first shipped a 1-based tool API on top of this 0-based id
+ *      space: `from >= 1` put every session's first turn permanently out of
+ *      reach, and `context_status` listed 0-based turns while the `compress`
+ *      description said "turn 1 is the first turn", so a model following the
+ *      description compressed the wrong range and a model following the
+ *      listing was rejected by the schema.)
  *
  * Turn ids are the ONLY stable anchor a caller can hold: a [Message] has no
  * id, and a [SessionEvent] has no ordinal id either (see projection.ts — the
@@ -28,7 +39,7 @@
  * rendering: the schema that adds those lives next door.
  */
 
-import { maxTurnNumber, parseTurnNumber } from "./turn-id.js";
+import { parseTurnNumber } from "./turn-id.js";
 import type { SessionEvent } from "./types.js";
 
 /**
@@ -65,7 +76,10 @@ export function isValidRange(range: TurnRange): boolean {
   return (
     Number.isSafeInteger(range.from) &&
     Number.isSafeInteger(range.to) &&
-    range.from >= 1 &&
+    // 0 is the FIRST turn (see invariant 3). Negative numbers name no turn at
+    // all — they are what a missing/blank argument degrades to, so they stay
+    // refused rather than silently reading as turn-0.
+    range.from >= 0 &&
     range.to >= range.from
   );
 }
@@ -97,7 +111,15 @@ export function validateRange(
   // `unknown_turn` then only fires for a range that stays in the past but names
   // a turn the log has no record of (a gap, or a sidecar written elsewhere).
   if (range.to >= currentTurn) return "current_turn";
-  if (maxTurnNumber(events) < range.to) return "unknown_turn";
+  // BOTH ends must be turns the LOG actually has. The first cut only asked
+  // `maxTurnNumber(events) < range.to`, which accepted a `to_turn` sitting in a
+  // GAP: a log of turns 0,1,3,4 asked for 0..2 passed, and the overlay then
+  // covered the gap AND everything after it — including the turn in flight
+  // (compression.ts's `end < 0 -> events.length`). A gap is a legal log shape
+  // (a crash, a partial replay), so it has to be refused HERE, where the model
+  // is told, rather than absorbed silently by the view.
+  const present = turnNumbersOf(events);
+  if (!present.includes(range.from) || !present.includes(range.to)) return "unknown_turn";
   return null;
 }
 
@@ -195,6 +217,29 @@ export function turnEndIndex(events: readonly SessionEvent[], turn: number, from
   return events.length;
 }
 
+
+/**
+ * The index of the first `turn_start` whose number is GREATER than `turn`, or
+ * the end of the log when there is none.
+ *
+ * This is [turnEndIndex] for a turn that is NOT in the log — the same forward
+ * walk, without the "the turn must be present" precondition. It is what the
+ * overlay may cover when a block's `to_turn` cannot be found: everything up to
+ * the next real turn boundary, and the tail only when nothing later exists.
+ * Covering `events.length` unconditionally (W1900) meant a block whose
+ * `to_turn` fell in a gap swallowed every later turn.
+ */
+export function turnBoundaryAfter(events: readonly SessionEvent[], turn: number, from: number): number {
+  for (let i = from; i < events.length; i += 1) {
+    const ev = events[i];
+    if (ev === undefined) break;
+    if (ev.type === "turn_start") {
+      const n = parseTurnNumber(ev.id);
+      if (n !== null && n > turn) return i;
+    }
+  }
+  return events.length;
+}
 
 /** Every turn number the log actually has, ascending (empty when none). */
 export function turnNumbersOf(events: readonly SessionEvent[]): number[] {

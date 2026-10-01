@@ -128,11 +128,28 @@ describe("W1900 · overlayCompressions (the view changes, the log does not)", ()
     expect(texts(overlayCompressions(events, [block(7, 9, "stale")]))).toEqual(
       texts(overlayCompressions(events, [])),
     );
-    // ...while a block over-claiming past the end of the log covers up to it.
+    // ...while a block over-claiming past the END of the log covers up to it —
+    // there is no later turn it could be stealing.
     expect(texts(overlayCompressions(events, [block(2, 99, "tail to the end")]))).toEqual([
       "q1 hello",
       "a1 hello",
       blockText(block(2, 99, "tail to the end")),
+    ]);
+  });
+
+  it("stops a block at the next REAL turn boundary when its to_turn is missing", () => {
+    // The log has a gap (turns 1,2,4,5 — 3 never happened) and a stale sidecar
+    // claims 1..3. W1900 read the missing end as "cover to the end of the log",
+    // which hid turns 4 AND 5 — the most recent history, and the turn in
+    // flight — behind a summary that was never about them. A block may only
+    // cover what it can have meant, so it stops at turn 4.
+    const events = [...turn(1, "one"), ...turn(2, "two"), ...turn(4, "four"), ...turn(5, "five")];
+    expect(texts(overlayCompressions(events, [block(1, 3, "stale")]))).toEqual([
+      blockText(block(1, 3, "stale")),
+      "q4 four",
+      "a4 four",
+      "q5 five",
+      "a5 five",
     ]);
   });
 
@@ -191,10 +208,37 @@ describe("W1900 · range rules (a turn is the atom)", () => {
 
   it("refuses an inverted or non-integer range", () => {
     expect(isValidRange({ from: 3, to: 2 })).toBe(false);
-    expect(isValidRange({ from: 0, to: 1 })).toBe(false);
+    // NEGATIVE is what a missing/blank argument degrades to: still refused.
+    expect(isValidRange({ from: -1, to: 1 })).toBe(false);
+    // ...but 0 is not an error: it is the session's FIRST turn (see the
+    // turn-numbering test below). W1900 refused it, which put turn-0 out of
+    // reach for the whole life of every session.
+    expect(isValidRange({ from: 0, to: 1 })).toBe(true);
     expect(isValidRange({ from: 1.5, to: 2 })).toBe(false);
     expect(isValidRange({ from: 2, to: 2 })).toBe(true);
     expect(validateRange(turns(3), { from: 3, to: 1 }, 4)).toBe("inverted");
+    expect(validateRange([...turn(0, "zero"), ...turn(1, "one")], { from: 0, to: 0 }, 2)).toBeNull();
+  });
+
+  it("refuses a turn number that sits in a GAP, instead of covering past it", () => {
+    // A log of turns 0 and 2 (turn 1 never happened: a crash, a partial
+    // replay). W1900 only asked `maxTurnNumber(events) < to_turn`, so 0..1
+    // passed and the overlay then covered up to the end of the log — hiding
+    // turn 2, the newest thing the model had. A gap is a legal log shape, so
+    // the refusal has to happen HERE, where the model is told the reason.
+    const events = [...turn(0, "zero"), ...turn(2, "two")];
+    expect(validateRange(events, { from: 0, to: 1 }, 3)).toBe("unknown_turn");
+    expect(validateRange(events, { from: 0, to: 2 }, 3)).toBeNull();
+  });
+
+  it("reads turn 0 as the FIRST turn of the session, with no offset anywhere", () => {
+    // The numbering the tools, the sidecar and context_status all share: the
+    // log's own id. `nextTurnNumber([]) === 0`, so turn-0 is the first turn.
+    expect(turnNumbersOf(turns(3))).toEqual([1, 2, 3]);
+    const fromZero = [...turn(0, "zero"), ...turn(1, "one"), ...turn(2, "two")];
+    expect(turnNumbersOf(fromZero)).toEqual([0, 1, 2]);
+    // The first turn is a legal TARGET, not just a legal number.
+    expect(validateRange(fromZero, { from: 0, to: 1 }, 3)).toBeNull();
   });
 
   it("reads turn numbers off the log, ignoring ids it does not own", () => {

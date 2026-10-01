@@ -32,7 +32,7 @@
  */
 
 import { balanceToolCalls, deriveMessagesFrom } from "./projection.js";
-import { normalizeBlocks, turnEndIndex, turnStartIndex } from "./compression-range.js";
+import { normalizeBlocks, turnBoundaryAfter, turnEndIndex, turnStartIndex } from "./compression-range.js";
 import type { CompressionRejection } from "./compression-range.js";
 import type { Message } from "./message.js";
 import type { SessionEvent } from "./types.js";
@@ -126,10 +126,14 @@ export function overlayCompressions(
     const start = turnStartIndex(events, block.from_turn, index);
     if (start < 0) continue; // the log has no such turn: keep projecting what it does have
     const end = turnEndIndex(events, block.to_turn, index);
-    // A not-found `to_turn` means the block over-claims past the end of the
-    // history (a sidecar replayed into a shorter session). Covering up to the
-    // end of the log is the only reading that loses nothing.
-    const stop = end < 0 ? events.length : end;
+    // A not-found `to_turn` means the block does not line up with THIS log
+    // (a stale sidecar: a shorter session, a renumbered one after /compact).
+    // W1900 covered to the end of the log, which "loses nothing" only when the
+    // block was the last thing in it — with turns after the gap it swallowed
+    // them, including the turn in flight. So cover what the block can have
+    // meant: up to the next real turn boundary, and the tail only when the
+    // block reaches past every turn this log has.
+    const stop = end < 0 ? turnBoundaryAfter(events, block.to_turn, start) : end;
     if (start > index) messages.push(...deriveMessagesFrom(events.slice(index, start)));
     messages.push({ role: "user", content: [{ type: "text", content: blockText(block) }], tool_call_id: null });
     index = Math.max(start, stop);

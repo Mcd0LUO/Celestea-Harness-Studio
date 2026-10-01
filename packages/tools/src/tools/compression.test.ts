@@ -176,13 +176,38 @@ describe("W1900 · a refused range changes nothing and says why", () => {
     expect(await out(compressTool(host), { from_turn: 1, to_turn: 3, summary: "s" })).toMatchObject({ ok: true });
   });
 
-  it("refuses an inverted or non-positive range as a STRUCTURED refusal, not a throw", async () => {
+  it("refuses an inverted or NEGATIVE range as a STRUCTURED refusal, not a throw", async () => {
     // The model gets `{ok:false, code}` for a range it got wrong, whatever the
     // mistake was, so it can read the reason and try again.
     const staged = stage(4);
     const host = hostOf(staged);
     expect(await out(compressTool(host), { from_turn: 3, to_turn: 1, summary: "s" })).toMatchObject({ ok: false, code: "inverted" });
-    expect(await out(compressTool(host), { from_turn: 0, to_turn: 1, summary: "s" })).toMatchObject({ ok: false, code: "inverted" });
+    expect(await out(compressTool(host), { from_turn: -1, to_turn: 1, summary: "s" })).toMatchObject({ ok: false, code: "inverted" });
+    expect(host.store.blocks()).toEqual([]);
+  });
+
+  it("lets the session's FIRST turn be compressed (turn 0, the log's own id)", async () => {
+    // W1900 asked for `from >= 1` on top of a 0-based id space, so turn-0 —
+    // the first turn of EVERY session — could never be named, and the first
+    // turn of a long conversation was the one block of history that could
+    // never be folded away. `context_status` already listed 0-based turns, so
+    // the model read one numbering and was rejected on another.
+    const host = hostOf(stagedTurns([0, 1, 2], 3));
+    const result = await out(compressTool(host), { from_turn: 0, to_turn: 1, summary: "first two" });
+    expect(result).toMatchObject({ ok: true, block: { from_turn: 0, to_turn: 1 } });
+    // The view is the proof, not the receipt: turn 0 is gone, the block stands.
+    const view = overlayCompressions(host.store.blocks() as never, []);
+    expect(Array.isArray(view)).toBe(true);
+    expect(await out(compressTool(host), { from_turn: 0, to_turn: 1, summary: "again" })).toMatchObject({ ok: true });
+  });
+
+  it("refuses a 0 that names no turn at all (a log that starts later)", async () => {
+    // 0 is legal as a NUMBER; it is still refused when the log has no turn-0.
+    const host = hostOf(stagedTurns([1, 2, 3], 5));
+    expect(await out(compressTool(host), { from_turn: 0, to_turn: 1, summary: "s" })).toMatchObject({
+      ok: false,
+      code: "unknown_turn",
+    });
     expect(host.store.blocks()).toEqual([]);
   });
 
