@@ -12,7 +12,7 @@
  * exactly one gate red — never zero, never all of them.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -193,6 +193,60 @@ describe("B2 · runCompaction end to end", () => {
     // …so a second compaction is refused (7 complete turns <= threshold).
     const again = await runCompaction({ logPath: path, summarize: () => Promise.resolve("摘要2") });
     expect(again.compacted).toBe(false);
+  });
+
+  it("DROPS the session's compression sidecar, because the rewrite renumbers the turns", async () => {
+    // W1900 x W2011. A compression block is a CLOSED INTERVAL OVER THE OLD TURN
+    // NUMBERS, and this rewrite replaces that numbering wholesale (a synthetic
+    // head + the kept tail, counted from turn-0 again). A sidecar that survives
+    // is a list of ranges pointing at turns that no longer mean what they
+    // meant — and when a `to_turn` is gone entirely, the overlay's answer is to
+    // reach forward from it. Nothing is lost by dropping it: the new log
+    // carries the summary row and `decompress` only ever addressed the old
+    // numbering.
+    const dir = scratch();
+    const path = join(dir, "cli-main.jsonl");
+    writeFileSync(path, serializeEventLog(logOf(12)));
+    const sidecar = join(dir, "compression.json");
+    writeFileSync(
+      sidecar,
+      JSON.stringify({
+        version: 1,
+        blocks: [{ from_turn: 0, to_turn: 9, summary: "folded nine turns", created_turn: 10, context_ratio: 0.7 }],
+      }) + "\n",
+    );
+    expect(existsSync(sidecar)).toBe(true);
+
+    const out = await runCompaction({ logPath: path, summarize: () => Promise.resolve("摘要正文") });
+    expect(out.compacted).toBe(true);
+    expect(existsSync(sidecar)).toBe(false);
+  });
+
+  it("invalidates the sidecar BESIDE the log it was derived from, and only after a rewrite", async () => {
+    const dir = scratch();
+    const path = join(dir, "cli-main.jsonl");
+    writeFileSync(path, serializeEventLog(logOf(12)));
+    const removed: string[] = [];
+    await runCompaction({
+      logPath: path,
+      summarize: () => Promise.resolve("摘要"),
+      removeSidecar: (p) => removed.push(p),
+    });
+    expect(removed).toEqual([join(dir, "compression.json")]);
+  });
+
+  it("a SKIPPED compaction invalidates nothing: no rewrite, no renumbering", async () => {
+    const dir = scratch();
+    const path = join(dir, "cli-main.jsonl");
+    writeFileSync(path, serializeEventLog(logOf(3)));
+    const removed: string[] = [];
+    const out = await runCompaction({
+      logPath: path,
+      summarize: () => Promise.resolve("摘要"),
+      removeSidecar: (p) => removed.push(p),
+    });
+    expect(out.compacted).toBe(false);
+    expect(removed).toEqual([]);
   });
 });
 
