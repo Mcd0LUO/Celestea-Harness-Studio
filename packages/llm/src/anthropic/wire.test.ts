@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { userMessage, type ToolSpec } from "../seam.js";
+import { systemMessage, userMessage, type ToolSpec } from "../seam.js";
 import { anthropicUrl, buildAnthropicBody, DEFAULT_MAX_TOKENS } from "./wire.js";
 
 const TOOL: ToolSpec = {
@@ -38,6 +38,28 @@ describe("W2068 — buildAnthropicBody", () => {
     // The type is the proof: `system` is not a role on this protocol at all, so a
     // body that carried it could not be built without a cast.
     expect(body.messages.map((m) => m.role)).toEqual(["user"]);
+  });
+
+  it("1b: a system message INSIDE the conversation is hoisted, never dropped", () => {
+    // Exactly what the loop's context-compression nudge is: an ephemeral
+    // system-role message appended at the TAIL of the request. This protocol has
+    // no such role in `messages`, so the text moves into the top-level `system`
+    // beside the prompt. Before W1900 the adapter dropped it, which deleted the
+    // water level from every anthropic_messages route — silently.
+    const body = buildAnthropicBody(
+      { system: "identity", messages: [userMessage("hi"), systemMessage("[context-compression] 61%")] },
+      { model: "m1" },
+    );
+    expect(body.system).toBe("identity\n\n[context-compression] 61%");
+    // The prompt still LEADS: the hoist appends, so nothing already there moves.
+    expect(body.system?.startsWith("identity")).toBe(true);
+    expect(body.messages.map((m) => m.role)).toEqual(["user"]);
+  });
+
+  it("1c: a text-less system message does not open an empty system field", () => {
+    const body = buildAnthropicBody({ messages: [{ role: "system", content: [], tool_call_id: null }] }, { model: "m1" });
+    expect(body.system).toBeUndefined();
+    expect(body.messages).toEqual([]);
   });
 
   it("3: max_tokens is ALWAYS present (the endpoint 400s without it)", () => {

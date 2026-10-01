@@ -121,8 +121,9 @@ function messageFor(msg: Message): AnthropicMessage[] {
       { retryable: false },
     );
   }
-  // The seam has no `system` message here: the prompt is hoisted by
-  // buildAnthropicBody, so a stray one is dropped rather than silently doubled.
+  // Unreachable from buildAnthropicBody, which HOISTS system messages into the
+  // top-level field before reaching here (see its comment). Kept as a guard so a
+  // future caller cannot reintroduce a system-role entry on this protocol.
   if (msg.role === "system") return [];
   if (msg.role === "tool") return [{ role: "user", content: toolResultBlocks(msg) }];
   if (msg.role === "assistant") return [{ role: "assistant", content: assistantBlocks(msg) }];
@@ -133,7 +134,24 @@ function messageFor(msg: Message): AnthropicMessage[] {
 /** Build the serialized Messages body for one request draft. */
 export function buildAnthropicBody(req: ModelRequestDraft, opts: AnthropicBodyOptions): AnthropicBody {
   const messages: AnthropicMessage[] = [];
-  for (const message of req.messages ?? []) messages.push(...messageFor(message));
+  // W1900: the loop appends an EPHEMERAL system-role message to the request (the
+  // context-compression water-level nudge). Point 1 above means this protocol has
+  // no such role INSIDE the conversation — but "no such role" is not "no such
+  // text": dropping it (this file's pre-W1900 reading) silently deleted the water
+  // level from EVERY anthropic_messages route, and that is the route a
+  // MiniMax-style third-party row uses. Hoisting the text into the top-level
+  // `system` is the only lossless option this protocol offers; the cost is its
+  // POSITION (it is read with the prompt rather than last), which is a far
+  // smaller loss than the text itself.
+  const hoisted: string[] = [];
+  for (const message of req.messages ?? []) {
+    if (message.role === "system") {
+      const text = collectMessageText(message.content);
+      if (text !== "") hoisted.push(text);
+      continue;
+    }
+    messages.push(...messageFor(message));
+  }
 
   const tools = (req.tools ?? []).map(mapAnthropicTool);
   const requested = req.max_tokens ?? opts.maxOutputTokens ?? null;
@@ -144,8 +162,12 @@ export function buildAnthropicBody(req: ModelRequestDraft, opts: AnthropicBodyOp
       : DEFAULT_MAX_TOKENS;
 
   const body: AnthropicBody = { model: opts.model, max_tokens: cap, messages, stream: true };
-  // (1): the system prompt is a top-level field, not a message.
-  if (req.system !== null && req.system !== undefined && req.system !== "") body.system = req.system;
+  // (1): the system prompt is a top-level field, not a message. The prompt leads
+  // and any hoisted message is APPENDED after it, so nothing that was already in
+  // this field moves; an empty result leaves the field off entirely rather than
+  // sending `""`.
+  const system = [...(req.system === null || req.system === undefined || req.system === "" ? [] : [req.system]), ...hoisted].join("\n\n");
+  if (system !== "") body.system = system;
   if (tools.length > 0) body.tools = tools;
   // `reasoningEffort` is accepted and ignored: no such field on this endpoint,
   // and forwarding one would make the engine's effort knob a lie.
