@@ -59,13 +59,13 @@
 | 历史修复 | 悬空 `tool_call` 在**投影层**补合成 cancelled 结果（插入到派生消息，**不改日志**） | `packages/core/src/projection.ts:159`（`balanceToolCalls`；`packages/session/src/log/derive.ts` 是稳定重导出路径） |
 | turn 终态 | 只对**当轮**解析：日志有 `turn_end` 则用它；否则 throw / `cancelled` / `interrupted` | `packages/runtime/src/turn-runner.ts:239-263` |
 | 会话实例状态 | `turnNo/profileEpoch/lastOutcome/inFlight/lastActiveAt` 全在内存；`rebuild()` 把 `turnNo` 归零 | `packages/runtime/src/session-registry.ts:41-51,273-281` |
-| 配置世代 | `RealEngine.baseEpoch` 从 0 起（进程级），实例 epoch 落后即重建 | `apps/studio/src/runtime/real-runtime-adapter.ts:126,384-387` |
+| 配置世代 | `RealEngine.baseEpoch` 从 0 起（进程级），实例 epoch 落后即重建 | `apps/studio/src/runtime/real-runtime-adapter.ts:206,705-706` |
 | 注入排队 | 两 lane（`next-turn`/`next-step`）内存队列，同 id 去重；**不落盘** | `packages/runtime/src/inbox.ts:1-60` |
 | worker 表 | 有 TSV 解析/序列化/原子写 + `proc=` 归属；**studio 侧默认落盘 `<data dir>/worker-registry.tsv`（`workerRegistryPath()`；`null` 才是纯内存）** | `packages/workers/src/registry.ts:89-100,118-121,289-300`；`apps/studio/src/runtime/session-compose.ts:173-184` |
 | worker 驱动 | `brief turn` → 回执（每轮 loop 结束**执行一次**）→ mailbox 轮询；`driveIfPossible` 只在 spawn 时调用 | `packages/workers/src/driver.ts:69-102`；`registry.ts:223-242` |
 | 回执协议 | 写 `results/<wid>-<short>.md`（同名覆盖）+ 投递一行 `WORKER_<wid>_DONE|FAILED`；**幂等键 = mailbox 内存序号** | `packages/workers/src/receipt.ts:70-89`；`mailbox.ts:26-27`；`packages/runtime/src/worker-wiring.ts:110-123` |
 | 用量 | 5 计数器；每个 `usage` 帧 `record()` 累加；`total` 跨 turn 累计、`latest` = 最后一次响应 | `packages/llm/src/usage.ts:11-46`；`packages/agent-loop/src/loop.ts:229-230`；`packages/runtime/src/usage.ts:34-56` |
-| 用量视图 | `Statusline.usage: UsageBlock & {total}`（按会话取） | `packages/core/src/types.ts:369`（`usage`）与 `:372`（`UsageBlock`） |
+| 用量视图 | `Statusline.usage: UsageBlock & {total}`（按会话取） | `packages/core/src/types.ts:465`（`usage`）与 `:478`（`UsageBlock`） |
 | LLM 失败 | 单次尝试、零重试；非 2xx → `LlmError("stream request failed: <status>: …","generate")`，**状态码只在文案里** | `packages/llm/src/client.ts:132-146,169-176` |
 | 超时 | 三档 connect 15s / response 60s / idle 90s；无总请求超时（有意） | `packages/llm/src/timeouts.ts:26-58` |
 | provider 选择 | 宿主侧 `providers.json` + profile（`base_url`/`api_key_env`）；`LlmRegistry` last-wins 但 studio 只构造**一个** | `apps/studio/src/runtime/provider-target.ts`、`llm-assembly.ts:99-115`、`packages/core/src/llm.ts:28-46` |

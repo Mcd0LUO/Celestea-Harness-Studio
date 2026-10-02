@@ -61,4 +61,15 @@ export const statusline = {
   'statusline.tps.idle': '本轮暂无新采样',
   'statusline.tps.inactive': '会话当前未运行',
   'statusline.tps.meanTitle': '{why} · 显示最近 {n} 次采样的均值',
+  // ---- agent_swarm 批次名册（§7.2 状态栏徽标 + 弹层）----
+  'statusline.swarm.badge': '并行 {done}/{total}',
+  'statusline.swarm.title': '并行批次 {count} 个（点击查看成员）',
+  'statusline.swarm.empty': '没有进行中的并行批次',
+  'statusline.swarm.phase.running': '进行中',
+  'statusline.swarm.phase.failed': '失败',
+  'statusline.swarm.phase.done': '已完成',
+  'statusline.swarm.phase.cancelled': '已取消',
+  'statusline.swarm.batchModel': '模型 {model}',
+  'statusline.swarm.modelInherit': '沿用当前会话模型',
+  'statusline.swarm.memberNo': '成员 {id}',
 } as const;

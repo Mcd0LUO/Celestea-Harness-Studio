@@ -264,7 +264,13 @@ const DEAD_KEY_ALLOW = new Set(['common.brand']);
  * 前缀命中即视为「可能被引用」，宁可漏报不可误报。
  * 新增动态拼接时必须在此登记，并在注释里写明拼接点。
  */
-const DYNAMIC_KEY_PREFIXES = ['settings.plugins.cat.'];
+const DYNAMIC_KEY_PREFIXES = [
+  'settings.plugins.cat.',
+  // statusline/swarm.ts 的相位组头按 PHASES 数组拼键
+  // （t('statusline.swarm.phase.' + phase)）—— 四个相位键都由该前缀覆盖，
+  // 与 plugins 分类键同一类拼接，静态扫描看不见。
+  'statusline.swarm.phase.',
+];
 
 /** 收集一个字典文件里所有字符串 key（护栏 B 用）。 */
 function keysOf(file) {

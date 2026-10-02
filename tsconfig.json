@@ -20,6 +20,9 @@
       "@celestea/workers": [
         "./packages/workers/src/index.ts"
       ],
+      "@celestea/swarm": [
+        "./packages/swarm/src/index.ts"
+      ],
       "@celestea/runtime": [
         "./packages/runtime/src/index.ts"
       ],

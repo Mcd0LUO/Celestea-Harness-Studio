@@ -453,6 +453,12 @@ export class SessionComposer {
         });
       },
       workers: this.workerWiring(sessionId, profile),
+      // agent_swarm (feature §5.3): the swarm plugin needs the SAME loopFactory
+      // the host turn uses, because a member IS a one-shot turn. Passing it here
+      // is what makes the tool exist at all — `ensureSwarmWiring` mounts nothing
+      // without a loopFactory (a member turn cannot be built), so omitting this
+      // line silently produced "unknown tool: agent_swarm" in production.
+      swarm: this.swarmWiring(),
       // W740: the watchdog settings come from the process environment; the
       // composition root reads them and registers the stop hook with the sweep.
       env: this.opts.env,
@@ -783,6 +789,22 @@ export class SessionComposer {
       // W729 §2.3: workers inherit the spawning session's mode by default.
       hostMode: sessionId === null ? null : (this.opts.sessionMode?.(sessionId) ?? null),
     };
+  }
+
+  /**
+   * agent_swarm wiring (feature §5.3) — `{}` is all the studio needs to pass.
+   *
+   * The composition root fills the two fields that must NOT be duplicated here:
+   * `loopFactory` (the SAME factory the host turn above uses, because a member
+   * IS a one-shot turn) and `agentConfig` (derived from this session's profile,
+   * so a member inherits the host's model / system prompt / step budget).
+   *
+   * Why this line exists at all: `ensureSwarmWiring` mounts NOTHING without a
+   * wiring object, so omitting it left production with `unknown tool:
+   * agent_swarm` — the swarm-live test caught exactly that.
+   */
+  private swarmWiring(): Record<string, never> {
+    return {};
   }
 
   /** E §2.3 P0 ①: the configured table path (see `worker-table.ts` for the rules). */

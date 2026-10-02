@@ -31,6 +31,7 @@ const ENV: NodeJS.ProcessEnv = { CELESTEA_PERMISSION_DEFAULT: "", CELESTEA_PERMI
 
 /** The frozen standard face of the production registry (W791/W804/W7/W884/F4/B2: 18; W1533: 19; W1900: 22). */
 const STANDARD_FACE: readonly string[] = [
+  "agent_swarm",
   "ask_user_question",
   "browser_act",
   "browser_open",
@@ -57,6 +58,7 @@ const STANDARD_FACE: readonly string[] = [
 
 /** The execution-mode face (W791 M7; W884 load_skill, B2 remember/forget kept; W1900 compress trio kept): the fold, before any deny. */
 const EXECUTION_FACE: readonly string[] = [
+  "agent_swarm",
   "browser_act",
   "browser_open",
   "compress",

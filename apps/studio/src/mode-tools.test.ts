@@ -28,8 +28,8 @@ import type { OfflineStep } from "./runtime/offline-llm.js";
 
 // W1533: 18 -> 19 (`update_tasks` joins both faces -- it is in the execution keep list).
 // W1900: 19 -> 22 -- the compression trio is in the keep list, so BOTH faces grow.
-const EXECUTION_FACE = ["browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"];
-const STANDARD_FACE = ["ask_user_question", "browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "list_dir", "load_skill", "process_control", "read_file", "read_image", "remember", "run_code", "run_shell", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status", "write_file"];
+const EXECUTION_FACE = ["agent_swarm", "browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"];
+const STANDARD_FACE = ["agent_swarm", "ask_user_question", "browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "list_dir", "load_skill", "process_control", "read_file", "read_image", "remember", "run_code", "run_shell", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status", "write_file"];
 const EXECUTION_MARK = "Execution mode — prefer one program over many round trips";
 
 const harnesses: StudioHarness[] = [];
@@ -105,7 +105,7 @@ describe("W791 P1 mode tool face (real engine)", () => {
     const h = engine();
     await activate(h, "sample-ws/plain");
     await activate(h, "sample-ws/std");
-    expect((await getJson(h.app, "/api/tools?session=sample-ws%2Fplain")).body["tools"]).toHaveLength(22);
+    expect((await getJson(h.app, "/api/tools?session=sample-ws%2Fplain")).body["tools"]).toHaveLength(23);
 
     const res = await getJson(h.app, "/api/sessions/sample-ws%2Fplain/mode", jsonRequest("POST", { mode: "execution" }));
     expect(res.status).toBe(200);

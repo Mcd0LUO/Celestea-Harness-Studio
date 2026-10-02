@@ -144,6 +144,12 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/swarm:
+    dependencies:
+      '@celestea/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/tools:
     dependencies:
       '@celestea/core':

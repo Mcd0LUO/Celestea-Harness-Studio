@@ -48,7 +48,7 @@ const SOURCE_GLOBS = ["packages/*/src/**/*.ts", "apps/studio/src/**/*.ts", "apps
 const TEST_GLOBS = ["**/*.test.ts", "**/*.test-util.ts", "**/*.spec.ts"];
 
 /** 第 1 层：只允许依赖 core。 */
-const TIER1 = ["session", "llm", "tools", "agent-loop", "workers"];
+const TIER1 = ["session", "llm", "tools", "agent-loop", "workers", "swarm"];
 /** 第 2 层：装配层，允许依赖 core + 第 1 层。 */
 const TIER2 = ["runtime"];
 

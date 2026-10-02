@@ -22,6 +22,7 @@
 | [`feature-memory-extraction.md`](./feature-memory-extraction.md) | 设计（P0–P2 已实现） | **记忆提炼与长对话成本**的路线设计：移植 ZCode 记忆系统的评估结论（只拿「后台自动提炼」）、与既有反模式决策的冲突、Phase 0-2 分期，以及 Phase 1 必须现在定的三个接缝 | 本文；前作见 [`archive/research/memory-store.md`](./archive/research/memory-store.md) |
 | [`baseline-phase0a.md`](./baseline-phase0a.md) | 当前 | **Phase 0a 实测基线**：前缀缓存命中率（第三方网关 B 渠道，综合 91.4%）、常驻上下文堆积曲线、trim 触发外推；含 CONTEXT_WINDOW 元数据化修复与流式 tool_call name 累加 bug 两条附带发现 | 回答 [`feature-memory-extraction.md`](./feature-memory-extraction.md) §4 的三问 |
 | [`iteration-e/`](./iteration-e/README.md) | 设计 | 迭代方向 E（能力深水区，分册）：断点恢复 / 可恢复多 agent / 成本账本 / 模型降级的目标契约、分期与验收标准 | [`README.md`](./iteration-e/README.md)；落地后回写 [`ARCHITECTURE.md`](./ARCHITECTURE.md) |
+| [`feature-agent-swarm.md`](./feature-agent-swarm.md) | 已实现 | **批量并行子代理**（`agent_swarm` 工具）：N 个同形子任务一次展开为并行轻量 turn，自适应限流调度 + XML 汇总；含与 worker 的分工、上游陷阱规避表与 P0–P2 分期 | 本文（顶部「落地后的三处偏离」记录实现与设计的差异）；包表见 [`ARCHITECTURE.md`](./ARCHITECTURE.md) |
 | [`modes-standard-vs-execution.md`](./modes-standard-vs-execution.md) | 设计（**P0 已实现，W729**） | 特性设计：**会话双模式**（标准模式 / 执行模式，即 DSH PTC 对应物）的目标契约、分期与可机械检验的验收标准；§10 是 P0 落地回填 | 本文；PTC 语义来源见归档的 DSH 评估（W253/W254，已于 W881 清理出公开仓） |
 | [`deployment.md`](./deployment.md) | 当前 | **部署与安全模型**：生产 systemd + nginx、隧道访问、安全模型（含 Windows 差异表） | 本文；登录门见 [`archive/decisions/feature-studio-auth.md`](./archive/decisions/feature-studio-auth.md) |
 | [`configuration.md`](./configuration.md) | 当前 | **配置**：`CELESTEA_HOME` 解析顺序与目录布局、环境变量全表、模型接入、权限档位 | 本文；数据文件 schema 见 [`data-files.md`](./data-files.md) |

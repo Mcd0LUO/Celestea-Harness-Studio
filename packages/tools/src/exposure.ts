@@ -91,6 +91,12 @@ export const EXECUTION_TOOL_NAMES: readonly string[] = [
   "compress",
   "decompress",
   "context_status",
+  // W-swarm: `agent_swarm` is an ORCHESTRATION tool and is NOT SDK-covered
+  // (SDK_TOOLS stays the four file tools), so folding it would make batch
+  // subagent work unreachable in execution mode -- the same "prompt must not
+  // lie" rule that kept load_skill (W884), the browser pair (F4), the memory
+  // write pair (B2), update_tasks (W1533) and the compression trio (W1900).
+  "agent_swarm",
 ];
 
 /**

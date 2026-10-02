@@ -163,6 +163,7 @@ export const shell = {
   'shell.statusline.modeTitle': '工作方式（点击切换）',
   'shell.statusline.laneTitle': '提交车道：插话 / 排队',
   'shell.statusline.goalTitle': '当前目标',
+  'shell.statusline.swarmTitle': '并行批次（点击查看成员）',
   'shell.statusbar.sessionTitle': '当前聚焦会话 · 可切换其它运行中的会话',
   'shell.statusbar.cacheTitle': '缓存命中：最近一次请求',
   'shell.statusbar.connecting': '连接中…',

@@ -12,7 +12,7 @@
  *   L3 apps/studio                                    → 许依赖任意 packages
  *   scripts/ 与 tests/ 是工具链，不受分层约束
  */
-const TIER1 = ["session", "llm", "tools", "agent-loop", "workers"];
+const TIER1 = ["session", "llm", "tools", "agent-loop", "workers", "swarm"];
 const TIER2 = ["runtime"];
 const PACKAGES = ["core", ...TIER1, ...TIER2];
 const pkgPath = (names) => `^packages/(${names.join("|")})/`;

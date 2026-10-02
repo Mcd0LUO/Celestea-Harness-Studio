@@ -124,6 +124,13 @@
               <button id="slGoal" class="sl-goal hidden" type="button" data-i18n-title="shell.statusline.goalTitle" data-i18n-aria-label="shell.statusline.goalTitle">
                 <span class="sl-goal-badge" id="slGoalBadge"></span>
               </button>
+              <!-- agent_swarm batch roster badge: shows done/total while a swarm batch
+                   is active, click to expand the member list. Source of truth =
+                   statusline/swarm.ts — with no swarm field in the snapshot it stays
+                   .hidden. -->
+              <button id="slSwarm" class="sl-swarm hidden" type="button" data-i18n-title="shell.statusline.swarmTitle" data-i18n-aria-label="shell.statusline.swarmTitle">
+                <span class="sl-swarm-badge" id="slSwarmBadge"></span>
+              </button>
               <span class="sl-hint" id="slHint"></span>
             </div>
           </div>
