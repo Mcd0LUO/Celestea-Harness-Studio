@@ -13,12 +13,17 @@
  * Always present, never throwing: `compressionViewOf(null)` is the honest
  * "this session has nothing compressed" block, which is exactly what a status
  * poll of a session that was never composed must report.
+ *
+ * W9261: "never composed" is not "nothing compressed". A session that folded
+ * history and was then evicted still has blocks in its sidecar, so the adapter
+ * reads that file (`compressionViewOfDir`) when there is no live generation —
+ * otherwise the status surface answers `blocks: 0` for a session that has three.
  */
 
-import { compressionViewOf, type CompressionView } from "@celestea/runtime";
+import { compressionViewOf, compressionViewOfDir, type CompressionView } from "@celestea/runtime";
 
 /** The `compression` key of `GET /api/status` (see the module doc). */
 export type CompressionStatusView = CompressionView;
 
 /** The block of a session's compression state, or the disabled one. */
-export { compressionViewOf };
+export { compressionViewOf, compressionViewOfDir };

@@ -101,7 +101,14 @@ export interface UsageStepRecord extends LedgerModelInfo {
   step: number;
   attempt: number;
   usage: Usage | null;
-  /** true = the provider reported no usage: the cost is UNKNOWN, not 0. */
+  /**
+   * true = this row's cost is UNKNOWN, not 0. Two ways that happens: the
+   * provider reported NO usage at all, or it reported one whose INPUT side is
+   * zero while it counted output (a streaming gateway that only measures the
+   * completion — see the rule in `book`). The counters are recorded verbatim
+   * either way; this flag is what keeps the aggregate from calling the total
+   * complete.
+   */
   billed_unknown: boolean;
   error_kind: string | null;
   http_status: number | null;
@@ -519,6 +526,18 @@ export class UsageLedger implements UsageAccounting, LedgerStepSink, TurnLedgerH
     acc.nextStep = step;
     const price = usage === null ? null : priceFor(this.file.pricing, ref.info.model);
     const cost = usage !== null && price !== null ? costOf(usage, price) : null;
+    // W9261 (real-channel finding): an INPUT side of ZERO is not a measurement.
+    // `billed_unknown` says "the cost is UNKNOWN, never 0" — and a usage frame
+    // that reports completion tokens while claiming `prompt_tokens: 0` is
+    // exactly that for the input half. Observed on a real gateway (MiniMax
+    // through the celestea gateway): the SAME request reports prompt_tokens=10
+    // non-streaming and 0 streaming, with or without
+    // `stream_options.include_usage`. Booking that 0 as a fact would make every
+    // priced input cost silently zero, which is the failure this flag exists to
+    // prevent. The counters themselves stay EXACTLY as the provider sent them
+    // (usage.ts stays a faithful parser); this only refuses to call the row
+    // complete, so `cost_complete` stays false and the total stays "a floor".
+    const inputUnknown = usage === null || (usage.prompt_tokens === 0 && (usage.completion_tokens > 0 || usage.total_tokens > 0));
     const record: UsageStepRecord = {
       v: LEDGER_VERSION,
       ts: this.file.stamp(),
@@ -532,7 +551,7 @@ export class UsageLedger implements UsageAccounting, LedgerStepSink, TurnLedgerH
       model: ref.info.model,
       base_url_host: ref.info.base_url_host,
       usage: usage === null ? null : { ...usage },
-      billed_unknown: usage === null,
+      billed_unknown: inputUnknown,
       error_kind: outcome.error_kind ?? null,
       http_status: outcome.http_status ?? null,
       retryable: outcome.retryable ?? null,
@@ -551,7 +570,7 @@ export class UsageLedger implements UsageAccounting, LedgerStepSink, TurnLedgerH
     if (usage !== null) acc.usage = usageAdd(acc.usage, usage);
     if (cost !== null) acc.cost = acc.cost === null ? cost : costAdd(acc.cost, cost);
     if (usage !== null && cost === null) acc.unpriced.add(ref.info.model ?? "(unknown model)");
-    if (usage === null) acc.billedUnknown += 1;
+    if (inputUnknown) acc.billedUnknown += 1;
   }
 
   /** The accumulator of the step's turn, created on first use. */
@@ -587,7 +606,7 @@ export interface LedgerTotals {
   cost_complete: boolean;
   /** Rows that carried usage the table could not price (never silently 0). */
   unpriced_records: number;
-  /** Rows whose provider reported no usage: the cost is UNKNOWN. */
+  /** Rows whose cost is UNKNOWN (no usage at all, or an input side that was never measured). */
   billed_unknown_records: number;
   unpriced_models: string[];
 }
@@ -614,9 +633,14 @@ export function aggregateUsage(records: readonly UsageLedgerRecord[], session?: 
       totals.currency = record.price.currency;
       totals.price_version = record.price.version;
     }
-    if (record.usage === null) {
-      totals.billed_unknown_records += 1;
-    } else {
+    // The ROW's own flag, not a re-derivation from `usage === null`: a row can
+    // carry usage whose input half is unknown (W9261 — a streaming gateway that
+    // only measures the completion), and its tokens must still be summed while
+    // the aggregate stops claiming completeness.
+    // Extraction rows carry no `billed_unknown` field — their failure mode is
+    // `status: "error"` on the row itself — so only step rows are counted here.
+    if (record.kind !== "extraction" && record.billed_unknown) totals.billed_unknown_records += 1;
+    if (record.usage !== null) {
       totals.tokens = usageAdd(totals.tokens, record.usage);
       if (record.priced_by === "unpriced") {
         totals.unpriced_records += 1;

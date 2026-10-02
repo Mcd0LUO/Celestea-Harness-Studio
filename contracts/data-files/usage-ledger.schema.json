@@ -22,7 +22,7 @@
     "noBodyRule": "a row never contains prompt/message text, tool arguments or credentials; only counters, ids, names and prices"
   },
   "kinds": {
-    "ok": "a response arrived; usage is the provider's own counters (or null when the provider sent no usage frame, then billed_unknown=true)",
+    "ok": "a response arrived; usage is the provider's own counters VERBATIM (or null when the provider sent no usage frame). billed_unknown=true whenever the cost is not known: no usage at all, or a usage whose INPUT side is zero while it counted output — observed streaming on a real gateway, which reports prompt_tokens=0 where the same request reports 10 non-streaming (W9261)",
     "error": "the step failed (non-2xx / timeout / torn stream); usage carries the counters observed before the failure, or null",
     "turn_total": "the summary row of one turn: Σ of its step rows (token equality with the details is an assertion, §3.4 C2)",
     "extraction": "one background memory-extraction call (Phase 1): spend that belongs to NO turn — it counts in the session totals (honest cost) but is deliberately never folded into a turn_total row, because there is no turn to fold it into"
@@ -73,7 +73,7 @@
           "model": { "type": ["string", "null"] },
           "base_url_host": { "type": ["string", "null"] },
           "usage": { "$ref": "#/schema/$defs/usage" },
-          "billed_unknown": { "type": "boolean", "description": "true = no usage frame arrived: the cost is UNKNOWN, never 0" },
+          "billed_unknown": { "type": "boolean", "description": "true = this row's cost is UNKNOWN, never 0. Either no usage frame arrived, or the frame counted output while claiming prompt_tokens: 0 — an input side nobody measured (W9261: a streaming gateway that only measures the completion). `usage` still carries the provider's counters verbatim; this flag is what keeps the aggregate from calling the total complete" },
           "error_kind": { "enum": ["generate", "stream", "timeout", null] },
           "http_status": { "type": ["integer", "null"], "description": "W723 LlmError.httpStatus (null = no response arrived)" },
           "retryable": { "type": ["boolean", "null"], "description": "W723 LlmError.retryable; null = not structurally known (mid-stream)" },

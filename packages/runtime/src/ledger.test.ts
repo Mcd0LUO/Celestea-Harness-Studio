@@ -273,6 +273,38 @@ describe("C4: failures are booked as unknown cost", () => {
   });
 });
 
+describe("W9261: a zero INPUT side is unknown, not a measurement", () => {
+  it("flags billed_unknown when the frame counts output but claims prompt_tokens 0", async () => {
+    // The real shape: MiniMax through the celestea gateway reports
+    // `{"completion_tokens":12,"prompt_tokens":0,"total_tokens":12}` while
+    // STREAMING, and `prompt_tokens:10` for the same request non-streaming.
+    // The counters are kept verbatim (usage.ts is a faithful parser) — but the
+    // input half is not a measurement, so the row must not claim completeness.
+    const dir = tmpDir();
+    writePricing(dir, "2026-09-11");
+    const r = rig([okStep(0, 12)], dir);
+    await drain(await r.llm.generate(request()));
+
+    const row = r.rows()[0];
+    expect(row?.usage?.prompt_tokens).toBe(0);
+    expect(row?.usage?.completion_tokens).toBe(12);
+    expect(row?.billed_unknown).toBe(true);
+    const totals = aggregateUsage(r.file.read());
+    expect(totals.billed_unknown_records).toBe(1);
+    expect(totals.cost_complete).toBe(false);
+  });
+
+  it("leaves a frame that measured BOTH halves alone", async () => {
+    const dir = tmpDir();
+    writePricing(dir, "2026-09-11");
+    const r = rig([okStep(10, 12)], dir);
+    await drain(await r.llm.generate(request()));
+    const row = r.rows()[0];
+    expect(row?.billed_unknown).toBe(false);
+    expect(aggregateUsage(r.file.read()).cost_complete).toBe(true);
+  });
+});
+
 describe("C6/C7/C8: idempotency, price versions, no body text", () => {
   it("does not book the same step twice", async () => {
     const dir = tmpDir();

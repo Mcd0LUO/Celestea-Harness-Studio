@@ -12,6 +12,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json --incremental --tsBuildInfoFile node_modules/.cache/tsc/root.tsbuildinfo",
     "start": "tsx apps/cli/src/main.ts web",
+    "stop": "node scripts/studio-stop.mjs",
     "start:studio": "pnpm --dir apps/studio start",
     "test": "vitest run",
     "test:watch": "vitest",
