@@ -373,10 +373,13 @@ export {
   fallbackMode,
   selectSandbox,
   selectSandboxDetailed,
+  type RunnerHost,
   type SandboxFallbackMode,
   type SandboxGrantView,
+  type SandboxRunnerCandidate,
   type SandboxSelection,
   type SelectOptions,
+  type SkippedRunner,
 } from "./sandbox/provider.js";
 export {
   countUidThreads,
