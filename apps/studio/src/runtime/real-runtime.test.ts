@@ -431,7 +431,10 @@ describe("GET /api/sessions/{id}/context over the real engine", () => {
     // F3: 16 -> 18 — the memory write pair (remember/forget) joins the face.
     // W1533: 18 -> 19 — `update_tasks` (the model's todo list) is mounted too.
     // W1900: 19 -> 22 — the compression trio (compress/decompress/context_status).
-    expect(toolViews).toHaveLength(22);
+    // W-swarm: 22 -> 23 — `agent_swarm`. It only became VISIBLE once session-compose
+    // actually passed the wiring (before that the tool existed but was never mounted,
+    // and the count stayed 22 — the live-engine test caught that, not this one).
+    expect(toolViews).toHaveLength(23);
     expect(tools).toContain("ask_user_question");
     expect(tools).toContain("read_image");
     for (const view of toolViews) {

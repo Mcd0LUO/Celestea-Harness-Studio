@@ -13,6 +13,7 @@ const alias = {
   "@celestea/workers": r("./packages/workers/src/index.ts"),
   "@celestea/runtime": r("./packages/runtime/src/index.ts"),
   "@celestea/studio": r("./apps/studio/src/index.ts"),
+  "@celestea/swarm": r("./packages/swarm/src/index.ts"),
 };
 
 /**

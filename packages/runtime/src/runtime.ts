@@ -54,6 +54,8 @@ import type { FrameSink, TurnOptions, TurnRunner } from "./turn-runner.js";
 import type { TurnFrame } from "./frames.js";
 import type { UsageAccounting } from "./usage.js";
 import type { Profile } from "./profile.js";
+import type { SwarmHost } from "./swarm-wiring.js";
+import type { SwarmRegistry } from "@celestea/swarm";
 import type { WorkerHost } from "./worker-wiring.js";
 
 export type ShutdownHook = () => void | Promise<void>;
@@ -73,6 +75,8 @@ export interface RuntimeParts {
   runner: TurnRunner;
   /** Worker wiring + the W740 watchdog mounted over it (null when off). */
   workerHost: WorkerHost | null;
+  /** Swarm wiring handle (null when off or when the host gave no loopFactory). */
+  swarmHost: SwarmHost | null;
   llm: LlmRegistry | null;
   tools: ToolRegistry | null;
   agentLoop: unknown | null;
@@ -195,6 +199,18 @@ export class Runtime {
 
   get workers(): WorkerRegistry | null {
     return this.p.workerHost?.registry ?? null;
+  }
+
+  /**
+   * The session's batch roster (feature §7) — null when swarm is off or the host
+   * mounted no loopFactory (a member turn cannot be built without one).
+   *
+   * The host reads the roster through HERE (the `workers` shape) rather than a
+   * Context token: the roster is session-scoped, and a process-global token would
+   * let one session's panel read another session's batch.
+   */
+  get swarm(): SwarmRegistry | null {
+    return this.p.swarmHost?.registry ?? null;
   }
 
   /**

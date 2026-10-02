@@ -32,6 +32,7 @@ import { engineOf, makeEngineHarness } from "./test-util.js";
  * disappears — or one that silently survives — fails here either way.
  */
 const STANDARD_FACE: readonly string[] = [
+  "agent_swarm",
   "ask_user_question",
   "browser_act",
   "browser_open",
@@ -60,7 +61,7 @@ const STANDARD_FACE: readonly string[] = [
 const READ_ONLY_FACE: readonly string[] = STANDARD_FACE.filter((name) => name !== "write_file");
 
 /** The execution-mode face (W791 M7; W884 keeps load_skill; W1900 keeps the compression trio): the mode fold, before any permission. */
-const EXECUTION_FACE: readonly string[] = ["browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"].sort();
+const EXECUTION_FACE: readonly string[] = ["agent_swarm", "browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"].sort();
 
 const READ_ONLY_SESSION = "sample-ws/ro";
 const BYSTANDER_SESSION = "sample-ws/full";

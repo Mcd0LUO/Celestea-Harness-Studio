@@ -197,7 +197,10 @@ export const FROZEN_COUNTS = {
   // W1900 (Phase 2): 19 -> 22 (`compress` + `decompress` + `context_status`, the
   // model-driven context compression face; the block list lives in a session
   // sidecar, so still ZERO endpoints).
-  tools: 22,
+  // W-swarm: 22 -> 23 (`agent_swarm`, the one-call batch of parallel lightweight
+  // subagent turns; members are unregistered and write no receipt, and the roster
+  // is in-memory on the existing statusline surface, so still ZERO endpoints).
+  tools: 23,
 } as const;
 
 /** One frozen-count divergence, with everything an operator needs to act. */

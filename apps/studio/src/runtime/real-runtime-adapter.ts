@@ -59,6 +59,7 @@ import {
   type SessionRuntime,
 } from "@celestea/runtime";
 import { costBlockView, usageLedgerView } from "./ledger-view.js";
+import { swarmRosterOf, withSwarmRoster } from "./swarm-view.js";
 import { join } from "node:path";
 import { CapacityError, toolSpecView, type PendingQuestionView, type QuestionAnswerOutcome } from "../runtime-adapter.js";
 import { HostAutowake, autowakeLog, autowakeStateOf } from "./host-autowake.js";
@@ -650,7 +651,7 @@ class RealEngine implements RealRuntimeAdapter {
   /** The requested session's statusline (no instance yet = an empty one). */
   statusline(session?: string | null): Statusline {
     const entry = this.registry.peek(session ?? null);
-    if (entry !== null) return entry.runtime.statusline();
+    if (entry !== null) return withSwarmRoster(entry.runtime.statusline(), swarmRosterOf(entry.runtime.swarm, session ?? null, entry.sessionId));
     // W755: a cold session measures nothing — `coldStatusline` owns that shape.
     //
     // W2059: the model must come from the SESSION's profile, not the process base.

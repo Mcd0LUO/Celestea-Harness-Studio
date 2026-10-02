@@ -128,3 +128,60 @@
 }
 .sl-goal.hidden { display: none; }
 .sl-goal-badge { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- agent_swarm batch roster badge (#slSwarm; active batch only) ----
+   Geometry intentionally reuses the .sl-goal capsule (same 16px height /
+   radius 999 / 10.5px mono type) so the statusline row does not grow a
+   second badge rhythm. `.hidden` is the load-bearing rule: swarm.ts hides
+   the button whenever the snapshot carries no swarm field, and the test
+   suite asserts on exactly this class. */
+.sl-swarm {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border: 1px solid var(--c-accent-ring);
+  border-radius: 999px;
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+  font-size: 10.5px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.sl-swarm.hidden { display: none; }
+.sl-swarm-badge { white-space: nowrap; }
+
+/* Roster popup: one collapsible group per member phase, batches as tabs. */
+.swarm-popup { max-height: 320px; overflow-y: auto; }
+.swarm-batch-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.swarm-batch-tab {
+  padding: 1px 7px;
+  border: 1px solid var(--c-border-l2);
+  border-radius: 999px;
+  background: none;
+  color: var(--c-text-2);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.swarm-batch-tab.is-active { border-color: var(--c-accent-ring); color: var(--c-accent); }
+.swarm-batch-model { color: var(--c-text-3); font-size: 10.5px; margin-bottom: 6px; }
+.swarm-group-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--c-text-2);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.swarm-group-count { color: var(--c-text-3); font-family: var(--mono); }
+.swarm-member { display: flex; gap: 6px; padding: 1px 0 1px 14px; font-size: 11px; }
+.swarm-member-id { color: var(--c-text-3); font-family: var(--mono); }
+.swarm-member.is-failed .swarm-member-label { color: var(--c-danger, var(--c-text-1)); }
+.swarm-empty { color: var(--c-text-3); font-size: 11px; }

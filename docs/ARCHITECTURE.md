@@ -11,7 +11,7 @@
 
 ## 0. 一页红线
 
-1. **依赖只能向下**：`core ← session / llm / tools / agent-loop / workers ← runtime ← apps/studio`。反向依赖、同层横向依赖、跨层上跳都是错误。
+1. **依赖只能向下**：`core ← session / llm / tools / agent-loop / workers / swarm ← runtime ← apps/studio`。反向依赖、同层横向依赖、跨层上跳都是错误。
 2. **跨包只走包入口**：只允许 `import ... from "@celestea/<pkg>"`；`@celestea/<pkg>/src/...`（深层导入）和 `../../other/src/x.js`（相对路径跨包）一律拒绝。
 3. **公开 API 收口在 `src/index.ts`**：包外能看到的只有该包入口导出的符号。
 4. **规模硬线**：单文件 ≤ 450 行（建议 ≤ 300）、单函数 ≤ 100 行、控制流嵌套 ≤ 4 层、形参 ≤ 5 个、回调嵌套 ≤ 4 层。
@@ -28,7 +28,7 @@
 | 层 | 包 | 允许依赖 | 说明 |
 |---|---|---|---|
 | **L0** | `packages/core` | **无**（仅 `node:` 标准库） | 语义内核：契约类型 + seam 定义。零 `@celestea/*` 依赖 |
-| **L1** | `packages/session`、`packages/llm`、`packages/tools`、`packages/agent-loop`、`packages/workers` | `core` | 每个包实现 core 的一组 seam；**彼此之间不得互相依赖** |
+| **L1** | `packages/session`、`packages/llm`、`packages/tools`、`packages/agent-loop`、`packages/workers`、`packages/swarm` | `core` | 每个包实现 core 的一组 seam；**彼此之间不得互相依赖** |
 | **L2** | `packages/runtime` | `core` + 全部 L1 | 装配层：把插件挂进 `Context`，对外只给「已装配的引擎」 |
 | **L3** | `apps/studio` | 任意 `packages/*` | 宿主应用：Hono 路由 / 进程入口 / 输出渲染 |
 | 旁路 | `scripts/`、`tests/` | 任意 | 工具链与验证，不构成产品依赖，不受分层约束 |
@@ -39,9 +39,9 @@
                 apps/studio            （L3 宿主，只有它能同时看见所有包）
                      │
                   runtime              （L2 装配：compose → Context）
-        ┌────────┬────┴────┬────────┬────────┐
-     session    llm      tools  agent-loop  workers     （L1 实现，互不依赖）
-        └────────┴─────────┴────────┴────────┘
+        ┌────────┬────┴────┬────────┬────────┬────────┐
+     session    llm      tools  agent-loop  workers   swarm   （L1 实现，互不依赖）
+        └────────┴─────────┴────────┴────────┴────────┘
                      │
                     core              （L0 零依赖：类型 + seam）
 ```
@@ -91,6 +91,7 @@
 | `packages/tools` | `Tool` 与 `ToolGuard` 的实现与注册表：工具 spec、guard 链、dispatch | `crates/tools`、`crates/workers/src/tools.rs` | `src/index.ts` |
 | `packages/agent-loop` | `AgentLoop` 的实现：turn/step 驱动、上下文裁剪、协作式取消、五态 outcome | `crates/agent-loop` | `src/index.ts` |
 | `packages/workers` | worker 注册表（`registry.tsv` 解析/序列化）、worker 驱动与看门狗插件 | `crates/workers` | `src/index.ts` |
+| `packages/swarm` | 批量并行子代理（`agent_swarm` 工具）：六道硬校验、自适应限流调度器、成员相位状态机与结果 XML 渲染 | —（本仓新增，无参考对应） | `src/index.ts` |
 | `packages/runtime` | 装配层：按 profile `compose` 出 `Context`（LLM 注册表、会话日志、工具注册表、agent loop、worker 接线） | `crates/runtime/src/compose.rs` | `src/index.ts` |
 | `apps/studio` | 宿主应用：Hono 应用与契约全部端点路由、进程入口、profile 解析 | `studio/src/main.rs` | `src/index.ts` |
 

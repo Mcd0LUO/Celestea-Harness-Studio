@@ -16,6 +16,9 @@
  *   4b. watchdog             W740: mount the liveness watchdog over the resolved
  *                            worker registry and keep its stop handle, so the
  *                            sweep timer dies with `shutdown`/`release`;
+ *   4c. swarm wiring         mount the swarm plugin AFTER the tools plugin, so the
+ *                            `agent_swarm` tool actually lands in the tool registry;
+ *                            a host with no `loopFactory` mounts nothing (§5.3);
  *   5. seam resolution       session (required) + llm / tools / agentLoop
  *                            (optional, and `null` when no plugin provides them);
  *   6. driver attach         hand Llm/ToolRegistry/AgentLoop to the worker
@@ -69,6 +72,7 @@ import { createUsageTracker, type UsageAccounting } from "./usage.js";
 import type { InjectionLane, PendingInjection } from "@celestea/core";
 import { createSessionInbox, type SessionInbox } from "./inbox.js";
 import { checkpointInboxSink } from "./inbox-checkpoint.js";
+import { ensureSwarmWiring, type SwarmWiring } from "./swarm-wiring.js";
 import { ensureWorkerWiring, type WorkerHost, type WorkerWiring } from "./worker-wiring.js";
 import { checkpointStoreOf } from "@celestea/session";
 import {
@@ -110,6 +114,11 @@ export interface ComposeConfig {
   extraction?: MemoryExtractionScheduler;
   /** Worker orchestration wiring; `false` disables it. */
   workers?: WorkerWiring | false;
+  /**
+   * Batch sub-agent wiring (`agent_swarm`); `false` disables it (default: off until
+   * the host passes a `loopFactory` — a member turn cannot be built without one).
+   */
+  swarm?: SwarmWiring | false;
   /**
    * W740: the liveness watchdog over this generation's worker registry.
    * `false` never mounts it; a partial object overrides the resolved settings
@@ -179,6 +188,13 @@ export function compose(config: ComposeConfig): Runtime {
   attachDrivers(workerHost, { llm: resolveDriverLlm(ctx, llm), tools, agentLoop });
 
   const agentConfig = agentConfigFromProfile(config.profile, config.agentConfig ?? {});
+  // 4c. swarm wiring: mounted AFTER the tools plugin (the plugin registers the tool
+  // into the tool registry) and AFTER `agentConfig` is derived, because a member
+  // inherits the host's model / system prompt / step budget from it.
+  const swarmHost =
+    config.swarm === false || config.swarm === undefined
+      ? null
+      : ensureSwarmWiring(ctx, { ...config.swarm, agentConfig, ...(config.loopFactory === undefined ? {} : { loopFactory: config.loopFactory }) });
   const inbox = config.inbox ?? createSessionInbox();
   // E §1.3 P1 ①: the lanes + the accepted-id ledger live in this session's
   // checkpoint sidecar when the log is a checkpointed persistent one; an
@@ -239,6 +255,7 @@ export function compose(config: ComposeConfig): Runtime {
     inbox,
     runner,
     workerHost: watchdogHostOf(workerHost, mounted),
+    swarmHost,
     llm,
     tools,
     agentLoop,
