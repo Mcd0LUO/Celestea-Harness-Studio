@@ -11,13 +11,18 @@
  *   contracts/probe-evidence.json 更是**不匹配任何规则** ⇒ 被提交进公开仓。
  *
  *   它们全部【只被 writeFileSync 写、全仓无一处读】（核实见报告）：
- *     scripts/compare-replay.ts:196-198  → reports/replay-diff.{json,md}
+ *     scripts/compare-replay.ts:65-67    → reports/replay-diff.{json,md}
  *     scripts/replay-e2e.ts:12           → reports/replay-e2e.{json,md}
- *     scripts/verify-contracts.ts:347    → contracts/probe-evidence.json
- *     scripts/verify-contracts.ts:354    → reports/contract-probe.md
+ *     scripts/contracts/report.ts:78     → contracts/probe-evidence.json
+ *     scripts/contracts/report.ts:80     → reports/contract-probe.md
+ *
+ *   行号在 2026-10-02 更新过一次：EX-02/03/04 三处重构把写盘点搬进了
+ *   scripts/golden/* 与 scripts/contracts/*。这些注释**没有任何门禁盯着**（文档锚点有
+ *   tests/doc-conventions.test.ts 的 ③b/③c，注释没有），所以它们是最容易悄悄烂掉的一类。
  *
  *   ★ 更糟的是 probe-evidence.json 已经【腐烂】：它记录 sseEvents=9 / tools=12，
- *     而契约真值是 10 / 19 —— 没有任何门禁保证它与契约同步，它只会越来越错。
+ *     而契约真值是 10 / 22（tools 从 19 又涨到 22）—— 没有任何门禁保证它与契约同步，
+ *     它只会越来越错。
  *
  * 本文件把「靠 .gitignore 的措辞正确」换成「靠索引事实」：
  *   只要 `git ls-files` 里出现这些产物，无论 .gitignore 写成什么，都红。

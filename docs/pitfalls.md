@@ -34,6 +34,7 @@
 | P16 | responses 端点的两个静默陷阱 | 打满 token 上限时**终帧改名**（`response.incomplete`）；`max_tokens` 被 200 接受但不生效 |
 | P17 | usage 藏在哪个帧 / 它该**发出来** | responses 只在终帧带 usage；anthropic 拆成两帧要合并。两者都**曾完全不发出** usage 事件 |
 | P18 | 流式 usage 的 `prompt_tokens` 可能是 0 | 那是「**没测**」不是「没花」：账本记 `billed_unknown`，绝不替上游猜数（同一请求非流式给 10、流式给 0） |
+| P19 | adapter 声称协议却不拥有它的鉴权 | 探测必须**镜像引擎**，不能按协议规范「纠正」—— 否则它两个方向都会说谎 |
 
 ---
 
@@ -301,14 +302,13 @@ originalId: p?.id                          // 打开编辑器时记录
 **`apps/studio/src/runtime/w2065-session-base-url.test.ts` 的双上游实机用例转红**
 （请求落回网关那台）。只有后者能证明"请求真的发去了新端点"。
 
-**同源的诚实边界（本次未修，另记）**：TS 引擎目前只会说 OpenAI 兼容方言
-（`apps/studio/src/runtime/engine-profile.ts` 的 `ENGINE_REQUEST_FORMAT` 硬编码
-`chat_completions`，`packages/llm` 完全不消费 `request_format`）。
-所以一条声明为 `anthropic_messages` 的 provider 现在**端点对了、线格式仍不对** ——
-**同源的诚实边界（W2066 已处理，见 P15）**：`request_format` 曾是**只写不读**的字段 ——
-UI 有下拉框（`apps/web/src/ui/providers/form.ts:111`）、schema 冻结了枚举、API 回显它，
-而 `packages/llm` 对它**零引用**，引擎无条件说 OpenAI 方言。端点修对之后，一条声明
-`anthropic_messages` 的行会**用 OpenAI 方言把 anthropic 的会话发出去**。
+**同源的诚实边界（写作时的判断，已由 W2066/W2067 关闭）**：这段原文说「TS 引擎只会说 OpenAI
+兼容方言（`ENGINE_REQUEST_FORMAT` 硬编码 `chat_completions`，`packages/llm` 完全不消费
+`request_format`）」。**今天不成立**：`ENGINE_REQUEST_FORMAT` 已降级为「没有任何 provider 行
+认领该模型时的默认值」（`apps/studio/src/runtime/engine-profile.ts:28` 的注释即契约），协议跟着
+`ProviderRow` 走，`packages/llm/src/factory.ts` 的 `defaultAdapterRegistry()` 注册了三个
+adapter（chat_completions / responses / anthropic_messages），未知格式按名 fail-closed 抛
+`NO_ADAPTER`。**缺口换了位置、没有消失**：adapter 缺协议原生鉴权 —— 见 P19。
 
 ---
 
@@ -321,8 +321,10 @@ UI 有下拉框（`apps/web/src/ui/providers/form.ts:111`）、schema 冻结了�
 **根因（三个边界各丢一次）**：`apps/studio/src/runtime/engine-profile.ts` 的
 `ENGINE_REQUEST_FORMAT` 硬编码 `chat_completions`；`llm-assembly.ts` 的 `llmProfileOf`
 在**进 llm 包的边界**上把格式裁掉（宿主视图里连字段都没有）；`packages/llm` 全包零引用。
-`apps/studio/src/store/provider-probe.ts:133` 是全仓唯一诚实的地方 —— 它拒绝探测非
-chat_completions 的行且**不发请求**，W2066 沿用的就是它的形状。
+`apps/studio/src/store/provider-probe.ts` 当时是全仓唯一诚实的地方 —— 它拒绝探测非
+chat_completions 的行且**不发请求**，W2066 沿用的就是它的形状。（**2026-10-02 更新**：探测现在按
+`request_format` 发头，三种协议都能探；未知格式仍**带名** fail-closed。它的头必须**镜像引擎**、
+不能按协议规范「纠正」—— 见 P19。）
 
 **正确做法（W2066）**：
 
@@ -473,6 +475,38 @@ curl -sN "$BASE/chat/completions" -H "authorization: Bearer $KEY" -H 'content-ty
 提炼那一半在 `packages/runtime/src/ledger-extraction.test.ts`：
 「a FAILED extraction that measured nothing is UNKNOWN, not free」与
 「an extraction error that DID observe usage stays priced」两条。
+
+## P19 · adapter 声称一个协议，却不拥有它的鉴权：探测必须**镜像引擎**
+
+**症状**：给一条声明 `anthropic_messages` 的 provider 点「测试」。若探测**按协议规范**发
+`x-api-key` + `anthropic-version`，它会说「这个提供商很好」；而引擎真正发出去的是
+`Authorization: Bearer`，到真实 Anthropic 端点上是 401。反过来，在一个只认 Bearer 的网关上，
+探测报「坏了」而引擎其实跑得通。**两个方向都是谎话** —— 而探测按钮唯一的承诺就是「这一行能不能用」。
+
+**根因（实读，2026-10-02）**：`packages/llm` 的三个 adapter（chat_completions / responses /
+anthropic_messages）共用同一个 transport，而那个 transport 的请求头构造
+（`packages/llm/src/transport.ts:95`）对**所有**协议一律发 `authorization: Bearer`；
+`packages/llm/src/anthropic/wire.ts` 只拥有请求**体**。于是「协议」在实现里并不包含它的原生鉴权。
+
+**正确做法**：
+
+1. **探测镜像引擎，不替引擎「按规范纠正」。** 探测的真源是引擎的 transport，不是协议文档。
+   `apps/studio/src/store/provider-probe.ts` 的 `probeAuth` 对三种格式都发引擎实际会发的头，
+   并在注释里**写死了这条耦合**：adapter 长出协议原生鉴权时，它必须同步改。
+2. **没有对应适配器的格式仍带名 fail-closed**（`该请求格式暂不支持自动测试：<格式>`），
+   在 SSRF 解析之前、一个字节出去之前就拒绝。
+
+**仍未修的那一半（诚实边界）**：adapter 缺协议原生鉴权这件事本身**没有被修** —— 修它需要一个
+**真实的 anthropic 端点**来验证，而当前部署里没有（网关是 OpenAI 兼容的）。所以一条
+`anthropic_messages` 行今天仍可能 401。登记在此，**不假装修好**。
+
+**代码位置**：`apps/studio/src/store/provider-probe.ts`（`probeAuth` / `PROBE_PROTOCOLS`）、
+`packages/llm/src/transport.ts:95`（引擎侧的真源）、`packages/llm/src/anthropic/adapter.ts`。
+
+**怎么验证**：`apps/studio/src/provider-probe-ssrf.test.ts` 的 W9271 用例组断言三种格式
+**实际发出的 URL 与鉴权头**（不联网，注入 recorder），并断言未知格式时上游零请求。
+变异负控制：把 anthropic 的头改成 `x-api-key`（= 按协议规范而不镜像引擎）⇒ 对应用例必须红 ——
+这条正是把「镜像 vs 规范」的差异暴露出来的那次。
 
 ## 附：容易误记的几件事
 

@@ -134,10 +134,10 @@ macOS-only 的 Seatbelt，写白名单 = 工作区 + `~/.zcode*` + 系统 temp +
 | **没有读侧策略** | `BWRAP_PROMISES` 只有 `readonly_root`（整根只读），没有「洞」的概念 | 无法表达「读大部分，但拒 `~/.ssh`」—— 而这是 Claude 的核心能力 |
 | **网络是开关不是策略** | `CELESTEA_SANDBOX_NET=0/1` + `CELESTEA_HTTP_ALLOW/DENY` | 没有「域名白名单 + 代理强制」；开了 net 就是全通 |
 | **Windows 上 OS 隔离为零** | `probe.ts:136` 非 linux 直接 reject bwrap；`rlimit.ts:36` → `none` | 只剩路径守卫（`deployment.md` §4.1 已如实登记）|
-| **没有强制拒绝清单** | 无 `DANGEROUS_FILES` 等价物 | agent 可写 `.bashrc` / `.gitconfig` / `.mcp.json` —— 与 ZCode 的「意外防护」定位同一水位 |
-| **提权是任意放宽而非「宽一档」** | grants 的 `write_roots` 可指向任意绝对目录 | 缺 DSH 的 `WIDER_MODES` 约束 |
+| ~~**没有强制拒绝清单**~~ ✅ **已修（2026-10-02）** | `packages/tools/src/guard/write-deny-list.ts` + 接线在 `path-guard.ts:391` | 已补：文件 `.bashrc`/`.bash_profile`/`.zshrc`/`.profile`/`.gitconfig`/`.gitmodules`/`.mcp.json`/`.ripgreprc`，目录 `.vscode`/`.idea`，多段前缀 `.claude/commands`。**两条残留**：① 只做了路径守卫这一半，bwrap 侧 `--ro-bind /dev/null` 未做（§4 P0）；② `CELESTEA_TOOL_GUARD=0` 会整体关掉守卫链，因而也关掉这份清单（既有语义） |
+| **提权是任意放宽而非「宽一档」** | grants 的 `write_roots` 可指向任意绝对目录 | 缺 DSH 的 `WIDER_MODES` 约束。**2026-10-02 补充**：放宽已经**打不穿**强制拒绝清单 —— deny 接在 `checkWrite` 的唯一出口、排在根判定之前，所以 grants / preset / `allPaths` / `CELESTEA_TOOL_ROOTS` 只能放大「可写根」，不能缩小那份下限 |
 | **无凭据掩码** | 无对应实现 | 沙箱内进程能读到环境里的 key |
-| **runner 链是硬编码二选一** | `provider.ts:120` | 加 macOS/Windows runner 要改分支，不是加数据 |
+| ~~**runner 链是硬编码二选一**~~ ✅ **已修（2026-10-02）** | 原 `provider.ts:120`，现遍历在 `packages/tools/src/sandbox/provider.ts:244` | 已补：候选链 `[bwrap, ...注入, userspace]` + 功能探测；新增 runner 是**往链里加一个候选对象**，遍历函数不用改。跳过的每一级把理由记进 `skippedRunners`（降级不再无声） |
 
 ### 3.3 与「开放所有权限」的关系
 
@@ -152,13 +152,29 @@ macOS-only 的 Seatbelt，写白名单 = 工作区 + `~/.zcode*` + 系统 temp +
 
 ## 4. 建议的演进路线（按性价比排序）
 
-### P0 · 强制拒绝清单（抄 Claude，成本最低，收益最直接）
+### P0 · 强制拒绝清单（抄 Claude，成本最低，收益最直接）—— ✅ **路径守卫这一半已做（2026-10-02）**
 
 加一份**不可被 preset 放宽**的写拒绝清单：`.bashrc` `.bash_profile` `.zshrc` `.profile`
 `.gitconfig` `.gitmodules` `.mcp.json` `.ripgreprc`，目录 `.vscode` `.idea` `.claude/commands`。
 **理由**：这些文件是「agent 写一次、用户下次自己执行」的执行面 —— 正是 ZCode 自己承认
-超出范围的攻击面，而它**不需要任何新机制**：在 `bwrap-argv.ts` 里加 `--ro-bind /dev/null <path>`
-或 `--tmpfs` 即可，路径守卫里加一条 deny。
+超出范围的攻击面，而它**不需要任何新机制**：路径守卫里加一条 deny。
+
+**落地情况**：`packages/tools/src/guard/write-deny-list.ts` 实现了清单本体（平台参数化：
+win32 折叠大小写与分隔符，POSIX 不折叠），接在 `PathGuardPolicy.checkWrite` 的**唯一出口**
+`allowWrite()` 里、排在根判定**之前** —— 所以四条放宽路径都打不穿它。拒绝是结构化带名字的
+`toolguard: code=path_dangerous_write`，与 `path_forbidden`（「现在不在你的根里」）可区分。
+只拦写不拦读（读 `.gitconfig` 是合法诊断，且读不执行）。
+
+**这一条还差一半**：原文的第二半 —— 在 `bwrap-argv.ts` 里加 `--ro-bind /dev/null <path>`
+或 `--tmpfs` —— **未做**。它比守卫那一半更强（活在守卫链之外，因此 `CELESTEA_TOOL_GUARD=0`
+关不掉它），但本轮 `packages/tools/src/sandbox/**` 划给了 runner 候选链那个 worker，为避免
+同文件冲突而留作后续项。**不要把这一条整体读成已闭合。**
+
+**一条要写下来的代价**：清单按**路径分量**匹配、与工作区位置无关，所以**工作区内的**
+`.vscode/`、仓库根 `.gitconfig` / `.mcp.json` 同样会被拒 —— 包括「给本仓库写
+`.vscode/settings.json`」这类合法动作。这是**忠实实现本清单**的必然结果（收窄成「仅 $HOME 之下
+才拒」会让同一个写操作因工作区恰好落在哪儿而放行/拒绝，且会让负控制失去意义）。
+报错是带名字的、不是静默；逃生舱是显式的 `CELESTEA_TOOL_GUARD=0`。
 
 ### P1 · 读侧「洞」（抄 Claude 的 deny-then-allow）
 
@@ -172,10 +188,17 @@ macOS-only 的 Seatbelt，写白名单 = 工作区 + `~/.zcode*` + 系统 temp +
 完整抄 Claude 需要 `--unshare-net` + Unix socket 代理桥，是**大工程**，建议只做
 「HTTP 走代理 + 文档写明裸 TCP 不受控」。
 
-### P3 · runner 链数据化（抄 DSH 的 seam）
+### P3 · runner 链数据化（抄 DSH 的 seam）—— ✅ **已做（2026-10-02）**
 
-把 `provider.ts:120` 的二选一改成候选链 + 功能探测，让 `windows-acl` 这类
-新 runner 是**加数据**而不是**改分支**。这条同时是 §3.2 里 Windows 缺口的**前置条件**。
+把原 `provider.ts:120` 的二选一改成候选链 + 功能探测，让 `windows-acl` 这类新 runner 是
+**加数据**而不是**改分支**。这条同时是 §3.2 里 Windows 缺口的**前置条件**。
+
+**落地情况**：`packages/tools/src/sandbox/provider.ts:244` 的 `walkRunnerChain` 只遍历、不认任何
+provider 名；链是 `[bwrap, ...SelectOptions.runners, userspace]`，每一级自带
+`usable / unusableReason / select / 可选 refuse`。行为逐字保持（`fail` 的拒绝文案、`kind`、
+payload 都没变），被跳过的每一级把理由记进 `SandboxSelection.skippedRunners`。
+「加一个 runner 不用改遍历」由 `sandbox/w9270-runner-chain.test.ts` 注入假候选机械证明。
+**前置条件已就位，但 `windows-acl` 本身仍未写** —— 链准备好了，rung 还是空的。
 
 ### 不建议抄的
 

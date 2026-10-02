@@ -374,11 +374,11 @@ packages/llm/src/{seam.ts:114-119, wire.ts:17,60,62,66,70, index.ts:32,34}
 
 ### 5.6 红线：golden 导出与脱敏
 
-**现状**（`scripts/export-golden.ts`）：
+**现状**（`scripts/export-golden.ts` 的编排已按职责拆到 `scripts/golden/*`，故下列锚点指向**新真源**而不是那个入口文件）：
 
-- `:70-90` 每个写出的文本都过 `redactor.redact(text)` + `redactor.assertClean(redacted, relPath)`；脱敏 secret 来自 `collectKnownSecrets`（`packages/core/src/redact.ts:178-206`：providers.json 的 `api_key`、npmrc token、4 个 env key）。
-- `:278-280` 有一条硬检查：`/api/providers` 响应里出现字符串 `"api_key"` 就**拒绝导出**。
-- `:185-196` 导出 `cli-main.jsonl`、`messages-expected.json`、`derive-messages-expected.json`。
+- `scripts/golden/write.ts:54-55` 每个写出的文本都过 `redactor.redact(text)` + `redactor.assertClean(redacted, relPath)`；脱敏 secret 来自 `collectKnownSecrets`（`packages/core/src/redact.ts:254`：providers.json 的 `api_key`、npmrc token、4 个 env key）。
+- `scripts/golden/fetch.ts:253-254` 有一条硬检查：`/api/providers` 响应里出现字符串 `"api_key"` 就**拒绝导出**。
+- `scripts/golden/fetch.ts:105-110` 导出 `cli-main.jsonl`、`messages-expected.json`、`derive-messages-expected.json`。
 
 **红线要求（写进实现契约）**：
 
