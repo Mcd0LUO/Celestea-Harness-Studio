@@ -376,7 +376,7 @@ describe.skipIf(CHROME === null || !posixProcessGroups)("W2027 ③ · 端到端�
       expect(processesMatching(profileDir!), "★★ 窗口内 SIGTERM 之后不得留下任何 Chrome 进程（孤儿）").toEqual([]);
       expect(existsSync(profileDir!), "★ profile 目录必须被删掉（只杀进程不删目录 = 半拉子收尾）").toBe(false);
     });
-  }, 90000);
+  }, 150000);
 });
 
 describe.skipIf(CHROME === null || !posixProcessGroups)("W2027 ④ · 端到端：boot 完成后仍然干净（W2021 不许被破坏）", () => {
@@ -394,7 +394,10 @@ describe.skipIf(CHROME === null || !posixProcessGroups)("W2027 ④ · 端到端�
     });
 
     try {
-      await waitUntil("boot 完成（探针打印 BOOTED）", () => probe.stdout().includes("BOOTED"), 60000);
+      // W9263: 120 s（不是 60 s）是为了覆盖 chrome.mjs 的**一次重试**（2 × 25 s 启动窗口）
+      // 加上应用 boot —— 不是给轮询加预算。断言一个字没动；重试本身由 chrome.mjs 负责，
+      // 且失败那次会往 stderr 打一行 "chrome launch attempt 1/2 failed"。
+      await waitUntil("boot 完成（探针打印 BOOTED）", () => probe.stdout().includes("BOOTED"), 120000);
     } catch (error) {
       throw new Error(String(error) + "\n子进程 stderr：\n" + probe.stderr().slice(-1500));
     }
@@ -412,7 +415,7 @@ describe.skipIf(CHROME === null || !posixProcessGroups)("W2027 ④ · 端到端�
     expect(processesMatching(booted.profileDir), "★ 不得留下任何 Chrome 进程").toEqual([]);
     expect(existsSync(booted.profileDir), "profile 目录必须被删掉").toBe(false);
     expect(listenersOn(backend), "★ backend 端口不得还有人监听").toEqual([]);
-  }, 90000);
+  }, 150000);
 
   it("正常路径：boot 完成 → app.close() ⇒ 干净退出（无信号、无额外延迟）", async () => {
     const backend = await pickFreePort();
@@ -426,7 +429,8 @@ describe.skipIf(CHROME === null || !posixProcessGroups)("W2027 ④ · 端到端�
     });
 
     try {
-      await waitUntil("boot 完成 → close() 完成", () => probe.stdout().includes("CLOSED"), 60000);
+      // W9263: 同上 —— 覆盖 chrome.mjs 的一次重试（2 × 25 s）之后应用才 boot 完。
+      await waitUntil("boot 完成 → close() 完成", () => probe.stdout().includes("CLOSED"), 120000);
     } catch (error) {
       throw new Error(String(error) + "\n子进程 stderr：\n" + probe.stderr().slice(-1500));
     }
@@ -438,6 +442,6 @@ describe.skipIf(CHROME === null || !posixProcessGroups)("W2027 ④ · 端到端�
     expect(existsSync(booted.profileDir), "★ 正常路径 profile 必须被删").toBe(false);
     expect(listenersOn(backend), "★ 正常路径不得留下监听端口").toEqual([]);
     expect(await canBind(cdp), "CDP 端口可再 bind").toBe(true);
-  }, 90000);
+  }, 150000);
 });
 
