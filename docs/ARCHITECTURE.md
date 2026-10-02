@@ -181,10 +181,13 @@ apps/studio → runtime.compose(profile)
 > **测试文件的唯一放宽**：单条用例（`it(...)` 的回调）是线性的 arrange-act-assert，块上限放宽到 **150 行**（`arch/size-tests`）。
 > 文件级 450 行、嵌套深度、参数个数、回调嵌套对测试**同样生效**；超过 150 行的用例应拆成多条 `it()`，而不是把断言堆在一起。
 >
-> **单函数 80 → 100 的放宽（证据与边界）**：实测把阈值提到 100 后，非测试源码里**只剩 3 个文件**越线，
-> 且这 3 个全在 §5 的例外表里（EX-02/03/04）——**当前干净的文件一个都没被放过**，
+> **单函数 80 → 100 的放宽（证据与边界）**：放宽时实测非测试源码里只剩 3 个文件越线，
+> 且这 3 个全在当时的例外表里（EX-02/03/04）——**当前干净的文件一个都没被放过**，
 > 也就是说这次放宽**不减少任何现存覆盖**，只是给新代码 20 行余量。放宽后规则仍承重：
-> EX-02/03/04 在 100 下依旧是 error，例外表没有被稀释。回滚 = 把 `eslint.config.js` 的
+> 那 3 个文件在 100 下依旧是 error，例外表没有被稀释。
+> **2026-10-02 更新**：那 3 个文件连同 EX-01（`redact.ts`）都已按各自的拆分方案重构完毕，
+> §5 的例外表现在是**空表**，`ARCH_STRICT=1 pnpm lint` 输出 0 条 —— 所以「放宽会放过干净文件」
+> 这条判断至今没有被证伪：阈值仍然承重，例外表没有变成挡箭牌。回滚 = 把 `eslint.config.js` 的
 > `MAX_LINES_PER_FUNCTION` 改回 80（本节与 §0/附录B 的数字同步改回），无其它文件依赖该常量。
 
 ### 4.2 超限时的四种拆分范式（按优先级）
@@ -212,13 +215,19 @@ apps/studio → runtime.compose(profile)
 
 | ID | 文件 | 超限项（实测） | 原因 | 拆分方案 | 移除阶段 |
 |---|---|---|---|---|---|
-| EX-01 | `packages/core/src/redact.ts` | `discover()` 与 `collectKnownSecrets()` 嵌套 5 层（限 4）。（`createRedactor` 原 81 行，随单函数上限 80 → 100 已回到上限内，该项豁免已移除） | P0 遗留代码：脱敏规则表与凭据上下文直接内联在函数体内 | 把 `DEFAULT_RULES` / `CREDENTIAL_CONTEXTS` / 环境变量名单提到模块级常量表，并抽出 `collectProviderKeys()`，两个函数即可回到 ≤4 层 | P1（core 收口时；`packages/core` 归 W271 领地） |
-| EX-02 | `scripts/export-golden.ts` | `main()` 252 行（限 100）；嵌套 5 层（限 4） | P0 一次性黄金样本导出脚本：探针清单 → 拉取 → 脱敏 → 写盘全在一个线性 `main()` 里 | 拆 `scripts/golden/{probe,fetch,redact,write}.ts`，`main()` 只保留步骤编排 | P1 工具链整理 |
-| EX-03 | `scripts/verify-contracts.ts` | `main()` 169 行（限 100） | P0 校验脚本：22 端点 × 断言的线性探针清单 | 探针清单抽成数据表（数组字面量）+ `runProbe()` 循环 | P1 工具链整理 |
-| EX-04 | `scripts/compare-replay.ts` | `main()` 115 行（限 100） | P0 对拍脚本：依次跑 A–E 五组对比并汇总写报告 | 每组对比抽成独立 `compareX()`，`main()` 只做调度与汇总 | P1 工具链整理 |
+| （空） | — | — | — | — | — |
 
-**当前状态**：`ARCH_STRICT=1 pnpm lint` 的输出恰好是上表 4 个文件、7 条错误（单函数上限 80 → 100 后，EX-01 的 `createRedactor` 81 行不再越线，故 8 → 7）——**没有隐藏例外**。
-除上述之外，全部文件在当前配置下 0 error、0 warning（`tests/fixtures.test.ts` 的陈旧 `eslint-disable` 注释已于 W881 随失效测试分支一并删除）。
+**当前为空**（2026-10-02）。此前登记过四条，各自的重构落地后拆除 —— 拆除判据不是「时间到了」，
+而是 `ARCH_STRICT=1 pnpm lint` 的输出（它忽略全部例外、只报真实违规）：四条拆完后是 **0 条**，
+也就是说这四条此前都还承重，拆掉它们是真的把越线消掉了，不是把阈值放宽。
+
+- EX-01 `packages/core/src/redact.ts` —— 嵌套 5 层（限 4）→ 规则表与凭据上下文提到模块级常量表 + 抽出 `collectProviderKeys()`
+- EX-02 `scripts/export-golden.ts` —— `main()` 252 行（限 100）+ 嵌套 5 层 → 拆 `scripts/golden/{probe,fetch,redact,write}.ts`
+- EX-03 `scripts/verify-contracts.ts` —— `main()` 169 行（限 100）→ 探针清单数据表化 + `runProbe()` 循环
+- EX-04 `scripts/compare-replay.ts` —— `main()` 115 行（限 100）→ 每组对比各归一 `compareX()`
+
+**当前状态**：`ARCH_STRICT=1 pnpm lint` 的输出是 **0 个文件、0 条错误** —— 例外表清零后没有任何隐藏违规。
+全部文件在当前配置下 0 error、0 warning（`tests/fixtures.test.ts` 的陈旧 `eslint-disable` 注释已于 W881 随失效测试分支一并删除）。
 
 **例外的三条纪律**
 

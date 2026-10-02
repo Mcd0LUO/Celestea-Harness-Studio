@@ -22,9 +22,12 @@ const MAX_LINES = 450;
  * 单函数规模上限（跳过空行与注释）。
  *
  * 80 → 100 的放宽依据（证据在 docs/ARCHITECTURE.md §4.1 注）：实测把阈值提到 100 时，
- * 非测试源码里**只剩 3 个文件**越线，且这 3 个全在 ARCH_EXCEPTIONS 里（EX-02/03/04），
+ * 非测试源码里只剩 3 个文件越线，且这 3 个全在当时的 ARCH_EXCEPTIONS 里（EX-02/03/04），
  * 也就是说「当前干净的文件一个都没被放过」—— 放宽**不减少任何现存覆盖**，只是给新代码 20 行余量。
- * 放宽后规则仍然承重：EX-02/03/04 在 100 下依旧是 error，例外表没有被稀释。
+ *
+ * **2026-10-02 更新**：那 3 个文件（连同 EX-01 的 redact.ts）都已按各自的拆分方案重构完毕，
+ * ARCH_EXCEPTIONS 现在是**空表**，`ARCH_STRICT=1 pnpm exec eslint .` 输出 0 条 ——
+ * 所以「放宽到 100 会放过干净文件」这条判断至今没有被证伪：阈值承重，例外表没有变成挡箭牌。
  * 回滚：把本常量改回 80 即可（无其它文件依赖这个数），ARCHITECTURE.md §4.1 与本注释同步改回。
  */
 const MAX_LINES_PER_FUNCTION = 100;
@@ -57,42 +60,17 @@ const linesPerFunction = (max) => ["error", { max, skipBlankLines: true, skipCom
  * 只放宽被点名文件被点名的那一条规则，不用通配符、不放宽整目录。
  * 复核：`ARCH_STRICT=1 pnpm lint` 会忽略全部例外，输出即为「例外清单清零后的真实违规」。
  */
-const ARCH_EXCEPTIONS = [
-  {
-    id: "EX-01",
-    files: ["packages/core/src/redact.ts"],
-    // 单函数上限 80 → 100 后，createRedactor（81 行）已落在新上限之内，
-    // 这条 max-lines-per-function 豁免随之失效（留着反而把该文件钉死在 90），故移除。
-    rules: { "max-depth": ["error", 5] },
-    reason: "P0 遗留：discover() 与 collectKnownSecrets() 控制流嵌套 5 层（规则表内联在函数里）",
-    plan: "把 DEFAULT_RULES / CREDENTIAL_CONTEXTS / 环境变量名单提到模块级常量表，并抽出 collectProviderKeys()，两个函数即可回到 ≤4 层",
-    removeIn: "P1（core 收口时，W271 领地）",
-  },
-  {
-    id: "EX-02",
-    files: ["scripts/export-golden.ts"],
-    rules: { "max-lines-per-function": linesPerFunction(260), "max-depth": ["error", 5] },
-    reason: "P0 一次性导出脚本：main() 249 行线性编排（探针清单 → 拉取 → 脱敏 → 写盘）",
-    plan: "拆 scripts/golden/{probe,fetch,redact,write}.ts，main() 只保留步骤编排",
-    removeIn: "P1 工具链整理",
-  },
-  {
-    id: "EX-03",
-    files: ["scripts/verify-contracts.ts"],
-    rules: { "max-lines-per-function": linesPerFunction(170) },
-    reason: "P0 校验脚本：main() 162 行线性探针清单（20 端点 × 断言）",
-    plan: "探针清单抽成数据表（数组字面量）+ runProbe() 循环",
-    removeIn: "P1 工具链整理",
-  },
-  {
-    id: "EX-04",
-    files: ["scripts/compare-replay.ts"],
-    rules: { "max-lines-per-function": linesPerFunction(125) },
-    reason: "P0 对拍脚本：main() 115 行依次跑 A–E 五组对比并汇总写报告",
-    plan: "每组对比抽成独立 compareX()，main() 只做调度与汇总",
-    removeIn: "P1 工具链整理",
-  },
-];
+/**
+ * **当前为空**（2026-10-02）：EX-01..EX-04 全部拆除。拆除的依据不是「时间到了」，而是
+ * `ARCH_STRICT=1 pnpm exec eslint .` 的输出 —— 它忽略全部例外、只报真实违规，
+ * 现在输出 **0 条**。也就是说这四条豁免此前都还承重，拆掉它们的四个重构是真的把越线消掉了，
+ * 而不是把阈值放宽（放宽的话这里会多出新的越线文件）。
+ *
+ * 空表仍然承重：任何新代码越线立刻是 error。新增例外必须**同时**改本节与
+ * `docs/ARCHITECTURE.md` §5，并写清 原因 / 拆分方案 / 移除阶段 ——
+ * `tests/doc-conventions.test.ts` ⑧ 会逐条比对两处，缺一即红。
+ */
+const ARCH_EXCEPTIONS = [];
 
 /**
  * 生成「只放宽被点名文件被点名规则」的 override 条目。
