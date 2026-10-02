@@ -69,3 +69,5 @@ export * from "./skills.js";
 export * from "./skill-catalog.js";
 export * from "./memory.js";
 export * from "./contracts/index.js";
+
+export * from "./shit-mountain.js"; // 💩 屎山纪念碑，欢迎参观
