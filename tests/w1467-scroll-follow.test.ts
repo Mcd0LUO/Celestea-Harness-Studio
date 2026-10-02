@@ -20,10 +20,9 @@ import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { bundleFrontend, El, installDom, restoreDom } from "./lib/w1467-dom.js";
 
-const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 
 interface ScrollMod {
   autoscroll: (ctx: unknown, force?: boolean) => void;

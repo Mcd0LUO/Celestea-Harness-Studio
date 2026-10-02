@@ -29,14 +29,6 @@ interface ModalitiesMod {
     onLayout?: () => void,
   ): ModalityGroup;
 }
-interface ModelRowHandle {
-  id: ElLike;
-  inputModalities: ModalityGroup;
-  outputModalities: ModalityGroup;
-}
-interface FormMod {
-  buildProviderForm(p: unknown, hooks: unknown): { root: ElLike; rows: ModelRowHandle[] };
-}
 interface I18nMod {
   setLocale(l: string): void;
 }
@@ -44,25 +36,6 @@ interface I18nMod {
 const OPTIONS = ['text', 'image', 'audio'] as const;
 const INPUT_DEFAULT = ['text', 'image'] as const;
 const posts: string[] = [];
-
-const jsonReply = (status: number, payload: unknown): unknown => ({
-  ok: status < 300,
-  status,
-  json: async () => payload,
-});
-
-/** 只打桩 POST /api/providers（保存）；其余一律 404，便于断言「真的没打别的口」。 */
-function stubSave(): void {
-  vi.stubGlobal('fetch', async (url: unknown, init?: { body?: unknown; method?: string }) => {
-    const u = String(url);
-    const method = (init?.method ?? 'GET').toUpperCase();
-    if (u.startsWith('/api/providers') && method === 'POST') {
-      posts.push(init?.body === undefined ? '' : String(init.body));
-      return jsonReply(200, { ok: true, id: 'p1' });
-    }
-    return jsonReply(404, { ok: false, error: 'not stubbed' });
-  });
-}
 
 async function makeGroup(values?: readonly string[]): Promise<ModalityGroup> {
   const mod = (await import(/* @vite-ignore */ at('ui/providers/modalities.ts'))) as ModalitiesMod;

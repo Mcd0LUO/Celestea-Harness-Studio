@@ -116,7 +116,7 @@ describe('F1 · 选段提及（DOM）', () => {
   });
 
   it('发送：请求 input 含定界行 + header + "> " 正文；气泡含 .quote-block', async () => {
-    const { pane, calls, tray, model } = await boot();
+    const { calls, tray, model } = await boot();
     ((await import(/* @vite-ignore */ at('ui/quote/select.ts'))) as SelectMod).installQuoteSelection();
     await tray.addQuote({ source: { kind: 'assistant', session: 'ws/s1', turn: 2, label: 'Studio' }, text: '引用正文' });
     ((await import(/* @vite-ignore */ at('ui/send.ts'))) as SendMod).dispatchSend('你好');

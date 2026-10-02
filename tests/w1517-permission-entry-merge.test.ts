@@ -36,7 +36,6 @@ import {
 } from './lib/w795-dom.js';
 
 const indexHtml = (): string => readFileSync(join(WEB, 'index.html'), 'utf8');
-const src = (rel: string): string => readFileSync(join(WEB, 'src', rel), 'utf8');
 /** 盾牌图标路径（W701 的既有图标；合并**不新画**图标，逐字沿用）。 */
 const SHIELD_PATH = 'M8 1.6 13.2 3.4v4.2c0 3.1-2.1 5.6-5.2 6.8-3.1-1.2-5.2-3.7-5.2-6.8V3.4z';
 

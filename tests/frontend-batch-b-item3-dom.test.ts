@@ -101,7 +101,6 @@ const HTML =
   '<button id="btnCancel" class="btn btn-soft hidden">取消</button>' +
   '<button id="btnSend" class="btn btn-accent">发送</button></div></div></main></div></div>';
 
-const el = (tag: string): ElLike => doc.createElement(tag);
 
 
 // ============================================================================

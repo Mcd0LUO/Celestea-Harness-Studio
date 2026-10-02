@@ -18,8 +18,7 @@
  * `this.bumpEpoch()` ⇒ 本文件 ①②③ 全红。
  */
 import { afterEach, describe, expect, it } from "vitest";
-import type { Profile } from "@celestea/runtime";
-import { makeHarness, type StudioHarness } from "../apps/studio/src/harness.test-util.js";
+import { type StudioHarness } from "../apps/studio/src/harness.test-util.js";
 import { engineOf, makeEngineHarness } from "../apps/studio/src/runtime/test-util.js";
 
 const harnesses: StudioHarness[] = [];

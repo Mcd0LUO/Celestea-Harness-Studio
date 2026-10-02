@@ -30,7 +30,6 @@ const WEB = join(dirname(fileURLToPath(import.meta.url)), "..", "apps", "web");
 const at = (rel: string): string => pathToFileURL(join(WEB, "src", rel)).href;
 const css = (rel: string): string => readFileSync(join(WEB, "src", "styles", rel), "utf8");
 const HOST = "sample-ws/s1";
-const OTHER = "sample-ws/s2";
 const OWN = "worker:sample-ws_s1-session-0";
 const GHOST = "worker:sample-ws_s1-session-1";
 const ORPHAN = "worker:sample-ws_s1-session-2";

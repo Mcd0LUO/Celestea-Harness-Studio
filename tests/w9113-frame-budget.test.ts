@@ -17,7 +17,7 @@
 //   · chat.ts 把 paced 换成直接执行 → ③ 红。
 // ============================================================================
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { at, doc, HTML as FIXTURE_HTML, resetHarness } from './lib/w795-dom.js';
+import { at, doc, HTML as FIXTURE_HTML } from './lib/w795-dom.js';
 
 interface BudgetMod {
   FRAME_BUDGET_MS: number;

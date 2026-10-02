@@ -6,7 +6,7 @@
  * 真实模块（pathToFileURL 动态 import ui/messages/user.ts），真实 DOM。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { at, doc, resetHarness, type ElLike } from "./lib/w795-dom.js";
+import { at, resetHarness, type ElLike } from "./lib/w795-dom.js";
 
 interface ViewCtxMod {
   initViewCtx(): unknown;

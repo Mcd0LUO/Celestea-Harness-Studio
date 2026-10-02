@@ -374,7 +374,6 @@ describe("W784 真实帧回放（W783 实机原文）", () => {
   });
 
   it("未决列表条目 → 用服务端读时剩余量定倒计时（本地钟不参与判定）", () => {
-    const info = F.questionInfoOf(LIST_ITEM);
     const now = 1_700_000_000_000; // 与 expires_at 相差甚远：故意用一个「离谱」的本地钟
     expect(F.remainingMsOf(LIST_ITEM, now)).toBe(296993);
     expect(F.deadlineOf(LIST_ITEM, now)).toBe(now + 296993);

@@ -68,7 +68,6 @@ interface CompactMod {
 }
 
 const doc = (globalThis as unknown as { document: DocLike }).document;
-const Ev = (globalThis as unknown as { Event: new (t: string, i?: { bubbles?: boolean }) => unknown }).Event;
 
 const HTML =
   '<div id="app"><aside id="sidebar"></aside><div id="sidebarResizer"></div><span id="btnSidebar"></span>' +

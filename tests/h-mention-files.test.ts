@@ -40,7 +40,7 @@ describe('H · @提及工作区文件（只传路径）', () => {
   async function boot(): Promise<{ cmd: CommandsMod; input: ElLike; urls: string[]; bodies: string[] }> {
     const ctxMod = (await import(/* @vite-ignore */ at('ui/viewctx.ts'))) as ViewCtxMod;
     ctxMod.initViewCtx();
-    const pane = ctxMod.ensurePane('ws/s1', 'session', '甲会话');
+    ctxMod.ensurePane('ws/s1', 'session', '甲会话');
     ctxMod.activatePane('ws/s1', 'session', '甲会话');
     ctxMod.setPaneMeta('ws/s1', { workspace: 'celestea_studio-ts' }); // 会话归属的工作区名
     // 工作区注册表：名字 → 绝对路径（workspacePath 据此解析）。

@@ -54,7 +54,6 @@ const doc = (globalThis as unknown as { document: Doc }).document;
 const Ev = (globalThis as unknown as { Event: new (t: string) => unknown }).Event;
 const click = (n: El | null | undefined): void => void n?.dispatchEvent(new Ev("click"));
 const text = (n: El | null | undefined): string => n?.textContent ?? "";
-const all = (root: El | null, sel: string): El[] => (root ? Array.from(root.querySelectorAll(sel)) : []);
 const wait = (ms = 40): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // ---- 真实服务接线 ----------------------------------------------------------------

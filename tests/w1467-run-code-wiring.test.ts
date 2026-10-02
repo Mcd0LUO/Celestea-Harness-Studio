@@ -18,13 +18,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { userspaceSandboxWith } from "@celestea/tools";
-import { SESSION_LOG_SERVICE, TOOL_REGISTRY_SERVICE, type SessionEvent, type SessionLog } from "@celestea/core";
+import { TOOL_REGISTRY_SERVICE, type SessionEvent } from "@celestea/core";
 import type { Profile } from "@celestea/runtime";
 import type { StudioHarness } from "../apps/studio/src/harness.test-util.js";
 import { createOfflineLlm } from "../apps/studio/src/runtime/offline-llm.js";
 import { SessionComposer } from "../apps/studio/src/runtime/session-compose.js";
 import { sessionWorkspaceOf } from "../apps/studio/src/store/sessions.js";
-import { makeEngineHarness, plantSession, turns } from "../apps/studio/src/runtime/test-util.js";
+import { makeEngineHarness, turns } from "../apps/studio/src/runtime/test-util.js";
 
 const harnesses: StudioHarness[] = [];
 afterEach(() => { for (const h of harnesses.splice(0)) h.cleanup(); });

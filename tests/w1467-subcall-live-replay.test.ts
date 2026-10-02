@@ -18,10 +18,9 @@ import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { bundleFrontend, depthOfCards, El, installDom, restoreDom, treeSkeleton } from "./lib/w1467-dom.js";
 
-const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const WIN = globalThis as unknown as Record<string, unknown>;
 
 interface ToolcardsMod {

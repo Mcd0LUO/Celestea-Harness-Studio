@@ -166,30 +166,17 @@ function boundaryPatterns({ coreLeaf = false, noApps = false, tier1 = false } = 
 /**
  * 冻结清单（棘轮：只许**缩短**，不许加长）。
  * key = 相对本配置目录的路径（正斜杠）；value = 该文件里已存在的未使用绑定名。
- * 这 24 处全在 `tests/`（本轮文件边界外，属别的 worker 的领地）：
- * 本轮把 `packages/` / `apps/studio/src` / `apps/cli/src` / `scripts` 全部清零，未留一条冻结项。
+ * `packages/` / `apps/studio/src` / `apps/cli/src` / `scripts` 早已全部清零，未留一条冻结项。
+ * `tests/` 的 24 处也已在 W9272 清零（19 个文件 → 只剩下面 2 条**活样本**）。
  * 清理方向：把某个文件清干净后，**同时**删掉它在这里的条目（ARCH_STRICT=1 会因陈旧项报错）。
  */
 const UNUSED_VARS_FROZEN = {
-  "tests/frontend-batch-b-item3-dom.test.ts": ["el"],
-  "tests/frontend-r3-b6-dom.test.ts": ["Ev"],
-  "tests/h-mention-files.test.ts": ["pane"],
-  "tests/question-card.test.ts": ["info"],
-  "tests/quote-selection.test.ts": ["pane"],
-  "tests/session-gone-real-backend.test.ts": ["all"],
-  "tests/w1467-run-code-wiring.test.ts": ["SESSION_LOG_SERVICE", "SessionLog", "plantSession"],
-  "tests/w1467-scroll-follow.test.ts": ["ROOT"],
-  "tests/w1467-subcall-live-replay.test.ts": ["ROOT"],
-  "tests/w1471-worker-back-to-leader-dom.test.ts": ["OTHER"],
-  "tests/w1517-permission-entry-merge.test.ts": ["src"],
-  "tests/w1536-provider-modalities.test.ts": ["FormMod", "stubSave"],
-  "tests/w1542-toolcard-dup.test.ts": ["fileURLToPath"],
-  "tests/w887-version.test.ts": ["existsSync", "readdirSync"],
-  "tests/w888-inbox-block-dom.test.ts": ["doc"],
+  // ★ 仅存的 2 条冻结项，都是 tests/w9214-unused-vars-ratchet.test.ts 的**活样本**：
+  //   删掉任何一条，该文件里「冻结名保持绿」/「陈旧项提醒收紧」两条用例就会红。
+  //   （msgs 见该文件 :55 与 :61 的两条用例；KEY 见 :73 的「已清干净 ⇒ 提醒收紧」。）
+  //   ⇒ 想清理这 2 个文件里的未使用绑定，必须**同时**换掉那条用例的样本，不能单删表项。
   "tests/w895l-plugin-library.test.ts": ["KEY"],
-  "tests/w9113-frame-budget.test.ts": ["resetHarness"],
   "tests/w9204-rail-layout.test.ts": ["msgs"],
-  "tests/w9208-config-epoch.test.ts": ["Profile", "makeHarness"],
 };
 
 const UNUSED_VARS_RULE = tseslint.plugin.rules["no-unused-vars"];
