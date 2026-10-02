@@ -1,39 +1,34 @@
 // ============================================================================
 // Celestea Studio — shared type contracts
-// SSE  GET /api/events  event: status|text|thinking|tool|tool_result|done
-//      data 为 {"turn":N,"seq":M,"payload":{...}}
-//   HTTP  POST /api/turn {input} · POST /api/cancel · POST /api/config {patch}
-//         GET /api/health · GET /api/tools · GET /api/config · GET /api/sessions
-//         GET /api/status · POST /api/clear
+//
+// 这是**唯一公开面**：全仓所有 `from './types.js'` / `'../types.js'` 的既有路径
+// 一行都不用改。实体定义按职责拆到 ./types/*.ts，本文件只做再导出。
+//
+//   ./sse        SSE envelope / meta / 各 payload
+//   ./status     statusline 快照 + 用量计数 + status 载荷
+//   ./session    会话 / 工作区 / 轮次 的 REST 线格式
+//   ./provider   模型提供商族
+//   ./prompt     提示词系统族
+//   ./grants     会话权限放宽族
+//   其余已拆出的族：attachment / batch / config / context / exec / fs-list /
+//   fs-read / goal / health / history / mode / permission / plugin / question /
+//   session-model / terminal / tool-events / usage。
+//
+// 拆分的理由：撞上了前端模块体积棘轮（tools/module-size-baseline.json 登记行数，
+// 只许降不许升）。拆分后本文件回到默认 450 行上限内，故**已从例外表删除该条登记**。
+//
+// `SseEventName` 是**唯一没有搬走**的实体：门禁 tools/check-sse-events.mjs 不用
+// TS 解析器，而是对本文件**逐字正则**抓这一条 type 联合的成员字面量（也不跟
+// `./types/sse` 跨文件找），所以它必须逐字留在 `src/types.ts` 本体。改它必须
+// 同步 contracts/sse-events.json 与 packages/core。
+//
+//   ⚠ 同理：这段说明**绝不能**在本文件里写出该 type 声明的逐字外形 —— 门禁的正则
+//   匹配到的是「第一个出现的那个形状」，注释里写一遍就会让门禁抓空。
+//
 // 视图层合同（AssistantView / ToolOpView）见 ui/view.ts（与 API 合同分离）。
 // ============================================================================
-import type { OkResp } from './types/batch';
-import type { SessionMode } from './types/mode';
 
-// ---- SSE -------------------------------------------------------------------
-
-/** SSE envelope: every event carries { turn, seq, payload }. */
-export interface SseEnvelope {
-  /** W514: envelope version (2 = carries `session`; absent/1 = legacy single-session). */
-  v?: number;
-  /** W514: target session id — the frontend routes every frame by this field. */
-  session?: string;
-  turn?: number;
-  seq?: number;
-  payload?: Record<string, unknown>;
-}
-
-/**
- * W514: fields the envelope contributes to every payload (the SSE client merges
- * them flat). All optional — a legacy backend omits them and the frontend falls
- * back to the single-session behaviour.
- */
-export interface SseMeta {
-  v?: number;
-  session?: string;
-  turn?: number;
-  seq?: number;
-}
+// ---- SSE / 状态 -------------------------------------------------------------
 
 /**
  * SSE event names. W1479: the SAME closed set as the server's `SSE_EVENT_NAMES`
@@ -59,474 +54,83 @@ export type SseEventName =
   /** W1528：工作台终端的 pty 字节（契约第 10 名；载荷见 types/terminal.ts）。 */
   | 'terminal';
 
-export type ConnState = 'connecting' | 'online' | 'down';
+export type {
+  CompactPayload,
+  ConnState,
+  DonePayload,
+  SseEnvelope,
+  SseMeta,
+  TextPayload,
+  ThinkingPayload,
+} from './types/sse';
 
-// ---- statusline / runtime status ------------------------------------------
+export type {
+  ContextUsage,
+  InjectedMessagePayload,
+  StatusPayload,
+  StatusSnapshot,
+  UsageCounters,
+  UsageSnapshot,
+} from './types/status';
 
-export interface ContextUsage {
-  used: number;
-  window: number;
-  ratio: number;
-}
+// ---- 会话 / 工作区 / 轮次 ---------------------------------------------------
 
-/** Statusline snapshot (GET /api/status + SSE status 增量字段，共享合同). */
-export interface StatusSnapshot {
-  model?: string;
-  reasoning_effort?: string | null;
-  steps?: number;
-  tokens_per_sec?: number;
-  context_usage?: ContextUsage;
-  /** W263: engine token usage (latest LLM stream + cumulative `total`). */
-  usage?: UsageSnapshot;
-  /** W237/W514: the session this snapshot describes (GET /api/status?session=). */
-  session?: string | null;
-  /** W514: whether that session currently has a turn running (may be absent). */
-  busy?: boolean;
-  /**
-   * W701（设计 §5.7）：该会话当前生效的放宽项名称列表（不含路径细节）。
-   * 仅用于侧栏会话叶子的小盾牌标记；字段缺失 = 旧服务，不显示标记。
-   */
-  grants_active?: string[];
-  /**
-   * W788：该会话的工作方式（标准/执行）。随快照**按会话**缓存（statusline 的
-   * cache: Map<session, StatusSnapshot>）；缺省 = 老服务不返回该字段，徽标隐藏。
-   */
-  mode?: SessionMode;
-  /**
-   * W870（只读附加字段，GET /api/status）：本快照的 `model` 是否来自该会话自己的
-   * `session.json.model` 覆盖。选择器据此如实标「本会话已固定模型」—— 这样的会话
-   * 本来就不跟全局默认走。缺省 = 老服务不返回该字段，不显示该行。
-   */
-  model_covered?: boolean;
-}
+export type {
+  ActivateResp,
+  CompactResp,
+  FsBrowseResp,
+  SessionCreateReq,
+  SessionCreateResp,
+  SessionInfo,
+  SessionsResp,
+  TurnResp,
+  WorkspaceInfo,
+  WorkspacesResp,
+} from './types/session';
 
-/**
- * W263: one usage block — provider-reported counters of one LLM stream.
- * `cache_hit_ratio` = cache_read / prompt_tokens (0 when prompt_tokens == 0).
- */
-export interface UsageCounters {
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  cache_read: number;
-  cache_hit_ratio: number;
-  reasoning_tokens: number;
-}
+// ---- 模型提供商（W236） ------------------------------------------------------
 
-/** W263: latest stream + cumulative (`total`) usage counters. */
-export interface UsageSnapshot extends UsageCounters {
-  total?: UsageCounters;
-}
+export type {
+  ProviderFetchResp,
+  ProviderInfo,
+  ProviderModelSpec,
+  ProviderTestResp,
+  ProvidersResp,
+} from './types/provider';
 
-/** status SSE payload: turn lifecycle + optional statusline fields. */
-export interface StatusPayload extends StatusSnapshot {
-  /** W514: envelope version (2 = carries `session`). */
-  v?: number;
-  /** W514: `session` is inherited from StatusSnapshot (may be null on legacy). */
-  seq?: number;
-  phase?: 'start' | 'completed' | 'cancelled' | 'error' | 'lagged';
-  turn?: number;
-  error?: string;
-  hint?: string;
-  /**
-   * W263: the backend nests the statusline snapshot under `statusline`
-   * ({"phase":"progress","statusline":{...}}); flat fields stay supported.
-   */
-  statusline?: StatusSnapshot;
-  /**
-   * W805（设计 §7.6）：上游 400 归类为「图像不支持」时的降级状态帧字段。
-   * 该帧的 envelope.turn=0（进程级提示），前端不得据此结束当前轮次。
-   */
-  reason?: string;
-  /**
-   * W805/W1479: a UNION by `phase` — `error` carries the image-downgrade prose
-   * (a string); `progress` carries the injected message (an object). Typed
-   * `string`-only before, so the object was unreachable and the live injection
-   * lane rendered nothing until a refresh replayed the transcript.
-   */
-  message?: string | InjectedMessagePayload;
-  placeholder?: string;
-  http_status?: number;
-  /** W1479: where the injected message LANDED. Only `context` = in the history. */
-  placement?: 'queued' | 'steering' | 'context';
-}
+// ---- 提示词系统（W245） ------------------------------------------------------
 
-/** W1479: the `progress`-frame shape of `StatusPayload.message`. */
-export interface InjectedMessagePayload {
-  kind?: string;
-  from?: string;
-  lane?: string;
-  summary?: string;
-}
+export type {
+  PromptInfo,
+  PromptsResp,
+  PromptSection,
+  PromptUpsertReq,
+} from './types/prompt';
 
-export interface TextPayload extends SseMeta {
-  delta: string;
-}
+// ---- 会话权限（W701 提权通道；契约见 docs/archive/decisions/feature-session-grants.md §6） ---
 
-export interface ThinkingPayload extends SseMeta {
-  delta: string;
-}
+export type {
+  EffectiveGrants,
+  GrantCap,
+  GrantEntry,
+  GrantReq,
+  GrantResp,
+  GrantRevokeResp,
+  GrantsResp,
+  GrantScope,
+  GrantTokenResp,
+  RevokeReq,
+} from './types/grants';
 
-// W1467：ToolPayload / ToolResultPayload 搬到 ./types/tool-events.ts（模块体积棘轮），
-// 这里原样再导出，调用方零改动。
-import type { ToolPayload } from './types/tool-events';
+// ---- 工具类事件（W1467） -----------------------------------------------------
+
 export type { ToolPayload, ToolResultPayload } from './types/tool-events';
 
-export interface DonePayload extends SseMeta {
-  text?: string;
-  tool_calls?: ToolPayload[];
-}
+// ---- 文件列举（H：@提及） ----------------------------------------------------
 
-/** compact 类事件（W259：/compact 压缩完成；payload 带会话 id）。 */
-export interface CompactPayload {
-  session?: string;
-  kept_turns?: number;
-  note?: string;
-  rebound?: boolean;
-}
+export type { FsListEntry, FsListResp } from './types/fs-list';
 
-// ---- REST -------------------------------------------------------------------
-
-export interface SessionInfo {
-  id?: string;
-  title?: string;
-  /** W514: 'session' | 'worker' (absent on legacy backends). */
-  kind?: 'session' | 'worker' | string;
-  /** W514: a turn is running on this session (absent on legacy backends). */
-  busy?: boolean;
-  /** W513/W866: worker rows carry their registry wid / status / state. */
-  wid?: string;
-  status?: string;
-  state?: string;
-  /**
-   * W1470b：该 worker 行属于**上一代**（重启前的进程留下的持久化行，当前没有活实例拥有它）。
-   * 当前代的行不带这个键 —— 与 `archived` 同一约定（只有为真时才出现）。
-   */
-  inherited?: boolean;
-  workspace?: string | null;
-  events?: number;
-  live?: boolean;
-  model?: string;
-  file?: string;
-  size?: number;
-  modified?: number;
-  archived?: boolean;
-  /** W237：是否为当前活跃会话 */
-  active?: boolean;
-  /**
-   * W515：谱系父会话 id（对齐 DSH 的 parentSessionId）。
-   * 兼容三种写法：parent / parentSessionId / parent_session；缺失 → 现状平坦展示。
-   */
-  parent?: string | null;
-  parentSessionId?: string | null;
-  parent_session?: string | null;
-  /**
-   * W701：该会话当前生效的放宽项名称列表（可选字段；服务给出时优先用它，
-   * 省掉逐会话查询）。缺失 = 走按需查询 / 不显示标记。
-   */
-  grants_active?: string[];
-}
-
-export interface SessionsResp {
-  ok?: boolean;
-  sessions?: SessionInfo[];
-  error?: string;
-}
-
-// ---- 会话历史（GET /api/sessions/{id}/messages）见 ./types/history（W805 拆出）
-
-// ---- 工作区 / 会话管理（W236） ------------------------------------------------
-
-export interface WorkspaceInfo {
-  name: string;
-  path?: string;
-  sessions?: number;
-}
-
-export interface WorkspacesResp {
-  ok?: boolean;
-  workspaces?: WorkspaceInfo[];
-  active_session?: string | null;
-  error?: string;
-}
-
-/** POST /api/sessions/{id}/activate 响应。 */
-export interface ActivateResp {
-  ok?: boolean;
-  active_session?: string;
-  error?: string;
-}
-
-/** POST /api/sessions/{id}/compact 响应（W259：三态——压缩/无需压缩/错误）。 */
-export interface CompactResp {
-  ok?: boolean;
-  /** true=已压缩；false=历史不足，无需压缩（note 给出说明）。 */
-  compacted?: boolean;
-  kept_turns?: number;
-  note?: string;
-  error?: string;
-}
-
-export type { FsListEntry, FsListResp } from './types/fs-list'; // H：文件列举（@提及）
-export interface FsBrowseResp { // GET /api/fs/browse?path=（只列目录）
-  path?: string;
-  parent?: string | null;
-  dirs?: string[];
-  roots?: string[];
-  error?: string;
-}
-
-export interface SessionCreateReq {
-  workspace?: string | null;
-  title: string;
-  /** W243：可选模型（空=跟随默认）。 */
-  model?: string;
-  /** W245：绑定提示词（空=跟随默认）。 */
-  prompt?: string;
-  /**
-   * W788：工作方式（设计 §2.2；缺省 standard）。前端只在**非默认**（execution）
-   * 时携带该键，让默认路径与今天逐字节一致（K8：无 mode 键 = standard）。
-   */
-  mode?: SessionMode;
-}
-
-/** POST /api/sessions 响应（W243 起携带新会话 id）。 */
-export interface SessionCreateResp extends OkResp {
-  id?: string;
-}
-
-// ---- 模型提供商（W236） --------------------------------------------------------
-
-export interface ProviderModelSpec {
-  id: string;
-  name: string;
-  reasoning_efforts?: string[];
-  context_window?: number | null;
-  max_output_tokens?: number | null;
-  /** W804/W805：逐模型能力位（缺省 = 乐观支持图像输入，配置是唯一权威）。 */
-  input_modalities?: string[];
-  output_modalities?: string[];
-}
-
-export interface ProviderInfo {
-  id: string;
-  name?: string;
-  note?: string;
-  base_url?: string;
-  request_format?: string;
-  models?: ProviderModelSpec[];
-  is_default?: boolean;
-  has_key?: boolean;
-}
-
-export interface ProvidersResp {
-  ok?: boolean;
-  providers?: ProviderInfo[];
-  default_model?: string | null;
-  error?: string;
-}
-
-export interface ProviderTestResp {
-  ok?: boolean;
-  latency_ms?: number;
-  model_count?: number;
-  error?: string;
-}
-
-export interface ProviderFetchResp {
-  ok?: boolean;
-  models?: { id: string }[];
-  error?: string;
-}
-
-// ---- 提示词系统（W245） -----------------------------------------------------------
-
-export interface PromptSection {
-  id: string;
-  name: string;
-  template: string;
-  order: number;
-  scope: 'builtin' | 'global' | 'workspace';
-}
-
-export interface PromptInfo {
-  id: string;
-  name: string;
-  is_default?: boolean;
-  /** 段覆盖（编辑弹窗打开时必须回填，否则保存会清掉旧覆盖）。 */
-  section_overrides?: Record<string, string>;
-  scope: 'global' | 'workspace';
-  shadowed?: boolean;
-}
-
-export interface PromptsResp {
-  ok?: boolean;
-  /** 显式 scope（后端固定声明；客户端不再从空值推断）。 */
-  scope?: 'global' | 'workspace';
-  sections?: PromptSection[];
-  prompts?: PromptInfo[];
-  default_prompt?: string | null;
-  active_prompt?: string | null;
-  error?: string;
-}
-
-/** POST /api/prompts upsert 载荷（P0-4：不传 workspace=全局）。 */
-export interface PromptUpsertReq {
-  workspace?: string;
-  id: string;
-  name: string;
-  section_overrides: Record<string, string>;
-  is_default?: boolean;
-}
-
-// 通用回执（OkResp/ClearResp/CancelResp）、批量请求体与批量响应（含 failed[]）
-// 见 ./types/batch（W792）—— 为守住本文件模块体积棘轮而整族拆出，此处再导出。
-export type { BatchFailedItem, BatchIdsReq, BatchNamesReq, BatchOpResp, CancelResp, ClearResp, OkResp } from './types/batch';
-
-export interface TurnResp {
-  ok?: boolean;
-  turn?: number;
-  /**
-   * W514: true = the input was injected into the running turn (no new turn),
-   * false/absent = a new turn was started with `turn` as its id.
-   */
-  injected?: boolean;
-  /**
-   * W515/W847: the backend echo of where the input LANDED — the authoritative
-   * terminal state. "steering" = 已插话 (drained at the running turn's next step
-   * boundary), "queued" = 已排队 (drained at the next turn start), "context" =
-   * this input IS the new turn. The UI renders from this, NOT from `injected`:
-   * before W847 a busy + mode=queue response still carried injected:true, and
-   * rendering from `injected` overwrote the queued note with "已插话".
-   */
-  placement?: 'queued' | 'steering' | 'context';
-  /** W515: true = 已按「排队（下一回合投递）」接收（mode='queue'）。 */
-  queued?: boolean;
-  /** W515: 后端回声的投递车道（'next-step' | 'next-turn'）。 */
-  inbox_target?: string;
-  /** W514: session the turn (or the injection) belongs to. */
-  session?: string;
-  /**
-   * W866: a turn addressed at an engine-memory worker (`session: 'worker:<sid>'`)
-   * is DELIVERED to that worker's inbox instead of starting a filesystem-session
-   * turn. `worker` echoes the inner session id and `status`/`state` carry the
-   * worker's own registry row (a settled worker still accepts the message, it
-   * just will not run another turn).
-   */
-  worker?: string;
-  status?: string;
-  state?: string;
-  error?: string;
-}
-
-// W870：配置族（ModelInfo / ConfigAvailable / ConfigInfo / ConfigPatch /
-// ConfigSaveResp）整段搬到 ./types/config，这里原样再导出 —— 调用方零改动。
-export type { ConfigAvailable, ConfigInfo, ConfigPatch, ConfigSaveResp, ModelInfo } from './types/config';
-
-// ---- 会话权限（W701 提权通道；契约见 docs/archive/decisions/feature-session-grants.md §6） -------------
-
-/** 6 项能力位（设计 §2.2）。 */
-export type GrantCap =
-  | 'network'
-  | 'read_roots'
-  | 'write_roots'
-  | 'net_hosts'
-  | 'tool_extra'
-  | 'unsandboxed';
-
-/** 能力范围：布尔类为空对象；目录/站点/工具类为列表。 */
-export interface GrantScope {
-  roots?: string[];
-  hosts?: string[];
-  tools?: string[];
-  [key: string]: unknown;
-}
-
-/** 一条授权记录（GET /grants 的 grants[]）。 */
-export interface GrantEntry {
-  id?: string;
-  cap?: GrantCap | string;
-  scope?: GrantScope;
-  granted_at?: number;
-  granted_by?: string;
-  expires_at?: number | null;
-  uses_left?: number | null;
-  note?: string;
-  /** 服务端判定：该条已过期（读取时判定，设计 §2.3）。 */
-  expired?: boolean;
-}
-
-/** 生效结果快照（服务端返回；UI 只原样展示，绝不改写措辞）。 */
-export interface EffectiveGrants {
-  network?: boolean;
-  read_roots?: string[];
-  write_roots?: string[];
-  net_hosts?: string[];
-  tool_extra?: string[];
-  unsandboxed?: boolean;
-  [key: string]: unknown;
-}
-
-export interface GrantsResp {
-  ok?: boolean;
-  session?: string;
-  grants?: GrantEntry[];
-  effective?: EffectiveGrants;
-  /** 每种能力的有效期上限（秒）；缺失 = 不限制（前端只用文档默认值 1800）。 */
-  max_ttl_sec?: Record<string, number>;
-  /** 降低隔离运行是否在本部署中开放（设计 §2.2 注 3 / §8.1）。 */
-  unsandboxed_available?: boolean;
-  /**
-   * W757：本次放宽的站点清单在当前部署下是否真的生效。
-   * false = 会话确实带着站点清单，但本部署未启用站点策略，这份清单不会改变可访问范围。
-   * 是否生效是部署事实，不随前端变化；旧服务不返回该字段（undefined）时按「不显示」处理。
-   */
-  net_hosts_effective?: boolean;
-  /** 服务返回的提示条目（条目被忽略 / 文件读不出 / 放宽不生效等）；可能缺失或为空。 */
-  warnings?: string[];
-  error?: string;
-}
-
-export interface GrantTokenResp {
-  ok?: boolean;
-  token?: string;
-  expires_at?: number;
-  error?: string;
-}
-
-/** 授予请求体（POST /grants）。 */
-export interface GrantReq {
-  cap: GrantCap;
-  scope?: GrantScope;
-  ttl_sec?: number;
-  uses_left?: number | null;
-  note?: string;
-}
-
-export interface GrantResp {
-  ok?: boolean;
-  grant?: GrantEntry;
-  effective?: EffectiveGrants;
-  error?: string;
-}
-
-/** 撤销请求体（DELETE /grants）；两者都省略 = 全部撤销。 */
-export interface RevokeReq {
-  cap?: GrantCap;
-  grant_id?: string;
-}
-
-export interface GrantRevokeResp {
-  ok?: boolean;
-  revoked?: string[];
-  effective?: EffectiveGrants;
-  error?: string;
-}
-
-// ---- W784：模型向用户提问（契约见 docs/archive/decisions/feature-ask-user.md §3） ------------------
-// 线格式实现见 ./types/question；W726 上下文快照见 ./types/context；只读自省端点
-// 见 ./types/health、工作方式（W788）见 ./types/mode —— 都是为守住本文件的模块体积
-// 棘轮（≤ 登记行数）而拆出，此处原样再导出，调用方零改动。
+// ---- W784：模型向用户提问（契约见 docs/archive/decisions/feature-ask-user.md §3） ----
 
 export type {
   PendingQuestionInfo,
@@ -539,6 +143,8 @@ export type {
   QuestionsResp,
 } from './types/question';
 
+// ---- W726 上下文快照 --------------------------------------------------------
+
 export type {
   ContextCounts,
   ContextMessage,
@@ -547,10 +153,30 @@ export type {
   SessionContextResp,
 } from './types/context';
 
+// ---- 只读自省端点 -----------------------------------------------------------
+
 export type { HealthCapabilities, HealthInfo, ToolInfo, ToolsResp } from './types/health';
+
+// ---- 附件（W805 多模态） -----------------------------------------------------
+
 export type { AttachmentRef, ImageMediaType, TurnAttachmentInput } from './types/attachment';
+
+// ---- 会话历史（GET /api/sessions/{id}/messages） ----------------------------
+
 export type { HistoryMsg, HistoryRole, MessagesResp } from './types/history';
 
+// ---- 工作方式（W788） --------------------------------------------------------
+
 export type { SessionMode, SessionModeResp } from './types/mode';
-/** W870：会话级模型切换的线格式（PUT /api/sessions/{id}/model）。 */
+
+// ---- 会话级模型切换（PUT /api/sessions/{id}/model） -------------------------
+
 export type { SessionModelResp } from './types/session-model';
+
+// ---- 通用回执 / 批量请求体与响应（W792） -------------------------------------
+
+export type { BatchFailedItem, BatchIdsReq, BatchNamesReq, BatchOpResp, CancelResp, ClearResp, OkResp } from './types/batch';
+
+// ---- W870 配置族 ------------------------------------------------------------
+
+export type { ConfigAvailable, ConfigInfo, ConfigPatch, ConfigSaveResp, ModelInfo } from './types/config';

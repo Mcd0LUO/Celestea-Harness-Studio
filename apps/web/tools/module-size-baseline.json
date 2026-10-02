@@ -4,10 +4,8 @@
   "note2": "W886 i18n 收口（Batch5-8）：新增 src/ui/inputbar.ts 412（400→412，**按真实 wc -l 登记**）：4 个占位符模块级常量改为惰性函数（语言切换后必须跟着变）+ i18n import，净增 12 行；chat.ts 保持 429（i18n import +1 已用注释压缩抵消，棘轮未动）。 W1512：inputbar.ts 412→386 —— 发送/终止合并为同一控件的两态（照 DSH），文案与两态渲染整段外移到 src/ui/inputbar/button-labels.ts（67 行，零业务、可直接单测）；本体回到默认 400 行上限内，故**删除本条登记**（门禁的陈旧项规则：条目 ≤400 即应删除）。",
   "note3": "W9103（使用统计页 + 左下角设置入口）：src/api.ts 400→413（**按真实 wc -l 登记**）。基线恰好是默认上限 400，本轮 +13 行**全部是新增的两个取数封装本身**：`usageLedger()`（GET /api/usage/ledger，group_by=day|model + 可选 epoch 秒 since/until）与 `authCheck()`（GET /auth/check），外加 1 行 import type（线上形状放 src/types/usage.ts，与 ./types/goal、./types/plugin 同款——types.ts 自身有棘轮，本轮不追加它的行数）。**未动任何既有 API 封装**（逐字节未改），未放宽默认 400 行上限。",
   "note4": "W9106（灵动条预览卡「几乎立即渲染」）：src/ui/rail.ts 498→492（**棘轮向下收紧到真实 wc -l**，上限 498→492）。净 −6 行的构成：新增能力（railHintPlugin 的 delayMs: 0 + 注释，+7 行）与**纯搬家**（W872 的「视口中间命中条」呈现整段外移到新模块 src/ui/rail-center-view.ts，46 行：.is-center 态 + 命中文案 + 跨会话切换/重置时的复位，几何与判定算式一字未动，判定仍在 src/ui/rail-center.ts）相抵。rail-center-view.ts 在默认 450 行以内、不登记。**未放宽默认上限，未删除任何断言**。",
+  "note5": "W9268（拆掉最后一个超大前端模块）：src/types.ts 556→182（**纯搬家**，实体按职责拆到 ./types/{sse,status,session,provider,prompt,grants}.ts，六个新文件 29–150 行，全部远低于默认 450）。本文件保留为**唯一公开面**（只做再导出），故全仓 60 个调用方一行未改；改动前后具名导出声明的集合逐名相等（43 = 43，MISSING/EXTRA 皆空）。同时删掉两条**陈旧**登记：src/types.ts:559（真实 556）与 src/ui/rail.ts:492（真实 444，早已 ≤ 默认 450）⇒ limits 置空，回到「无例外」状态。**未放宽默认上限、未删除任何断言**。\n\n⚠️ 一条不变量：SseEventName 联合**逐字留在 src/types.ts 本体**，没有随其余实体搬走 —— tools/check-sse-events.mjs 不解析 TS、不跨文件查找，只对该文件做正则抓取；搬走它门禁会静默抓不到事件名（本轮实测：在注释里写出该正则的逐字外形也会被误抓，已在源码注释留警告）。",
   "capturedAt": "2026-09-18T21:58+0800",
   "defaultLimit": 450,
-  "limits": {
-    "src/types.ts": 559,
-    "src/ui/rail.ts": 492
-  }
+  "limits": {}
 }
