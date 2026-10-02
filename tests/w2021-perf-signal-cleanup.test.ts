@@ -354,6 +354,20 @@ describe.skipIf(CHROME === null || !posixProcessGroups)("W2021 ③ · 端到端�
     expect(await canBind(backend), "★ backend 端口必须可以被立刻重新 bind（不泄漏）").toBe(true);
     expect(listenersOn(backend), "★ 不得还有人在监听 backend 端口").toEqual([]);
     expect(await canBind(cdp), "★ CDP 端口必须可以被立刻重新 bind（Chrome 真的死了）").toBe(true);
+    // 2026-10-02（本会话第三次 Chrome 收尾类 CI 红；ubuntu/node 24 shard 2）：
+    // 这里原本是**瞬时断言** —— 上一行已经证明主 Chrome 真的死了（CDP 端口可立刻重新
+    // bind），但它 fork 出来的 utility 子进程（实测残留的是
+    // `--type=utility --utility-sub-type=network.mojom.NetworkService`）由 OS
+    // **异步** reap，在 4 核 runner 上会晚于这一行。
+    // 「断言某个异步清理在**当前这一瞬间**已经完成」与「下界断言写成定时器预算本身」
+    // 是同一类错误（AGENT.md §6）：等条件本身成立，不要赌它已经成立。
+    // 超时**不在这里抛**：下面的断言才是权威，它会把残留的**具体进程**打出来 ——
+    // 比一句 waitUntil 超时有用得多，而且真的泄漏时它照样红。
+    await waitUntil(
+      "Chrome 进程全部退出（含 utility 子进程）",
+      () => processesMatching(ready.profileDir).length === 0,
+      15000,
+    ).catch(() => undefined);
     expect(processesMatching(ready.profileDir), "★ 不得留下任何 Chrome 进程").toEqual([]);
     expect(existsSync(ready.profileDir), "profile 目录必须被删掉").toBe(false);
   }, 90000);
