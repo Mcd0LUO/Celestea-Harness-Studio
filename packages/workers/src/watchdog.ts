@@ -4,7 +4,7 @@
  * The architecture doc is explicit about the SHAPE: liveness judgement must be
  * "注册为独立插件（参考 `WatchdogPlugin`），不要塞进后端实现里" — an
  * independent plugin, never a branch inside the driver or the registry backend.
- * This module is the TS port of `celestea_harness/crates/workers/src/watchdog.rs`
+ * This module is the TS port of `retired-engine/crates/workers/src/watchdog.rs`
  * (W186) and the only owner of the question "is this RUNNING row still alive?".
  *
  * One tick (= one sweep) walks this process's RUNNING rows and adjudicates:

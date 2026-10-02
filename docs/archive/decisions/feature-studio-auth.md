@@ -7,7 +7,7 @@
 
 > 状态：**历史参考**（本决策**已实现**）。本文是当时的决策依据与验收记录，**不再随代码更新**；现行行为见 [`docs/README.md`](../../README.md) 与 [`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md)。原状态：已实现（W767）。本文件是设计依据的记录；落地见 @@apps/studio/src/auth/@@ 与 @@apps/studio/src/handlers/auth.ts@@。
 
-> 目标：`studio.celestea.top` 不再依赖 nginx HTTP Basic（无 cookie、每天重登），改由 **Studio 自己**签发 30 天登录 cookie。
+> 目标：`studio.example.com` 不再依赖 nginx HTTP Basic（无 cookie、每天重登），改由 **Studio 自己**签发 30 天登录 cookie。
 >
 > ⛔ 本篇只描述 **Studio 自己**的机制：凭据文件 `DEFAULT_AUTH_HTPASSWD_FILE`（`/etc/nginx/.htpasswd-studio`）是 Studio 自己的只读输入，secret 落在 Studio 自己的数据目录。不引用、不读取任何其它服务的凭据或门户机制。
 
@@ -46,7 +46,7 @@ studio_auth = <b64url(user)> . <b64url(rand16)> . <expUnix> . <b64url(HMAC-SHA25
 - secret：`<data dir>/studio-auth.secret`，32 随机字节、base64url 存盘、**0600**，首次使用时创建；`<data dir>` 与 `workspaces.json` 同目录（`createStudioEngine` 用同一个推导），可用 `CELESTEA_AUTH_SECRET_FILE` 覆盖。重启复用同一文件 → 不会把所有人踢下线；文件过短/损坏则重新生成。
 - 密码文件路径可用 `CELESTEA_AUTH_HTPASSWD_FILE` 覆盖（默认 `DEFAULT_AUTH_HTPASSWD_FILE`）。
 
-## 2. nginx（`/etc/nginx/sites-available/studio.celestea.top.ssl`）
+## 2. nginx（`/etc/nginx/sites-available/studio.example.com.ssl`）
 
 - 去掉 `auth_basic` / `auth_basic_user_file`。
 - `location = /login`、`location = /auth/login`：免认证，`proxy_pass http://127.0.0.1:3777`。
@@ -54,10 +54,10 @@ studio_auth = <b64url(user)> . <b64url(rand16)> . <expUnix> . <b64url(HMAC-SHA25
 - `location /`：`auth_request /__auth_check;` + `error_page 401 = @need_login;`，其余 proxy 参数（http1.1 / Host / X-Real-IP / X-Forwarded-* / `proxy_buffering off` / read+send timeout / chunked）保持原样。
 - `location @need_login { return 302 /login; }`。
 
-**回滚**：备份文件 `…/studio.celestea.top.ssl.bak-w767-<时间戳>`，回滚即
+**回滚**：备份文件 `…/studio.example.com.ssl.bak-w767-<时间戳>`，回滚即
 
 ```bash
-sudo cp /etc/nginx/sites-available/studio.celestea.top.ssl.bak-w767-<时间戳> /etc/nginx/sites-available/studio.celestea.top.ssl
+sudo cp /etc/nginx/sites-available/studio.example.com.ssl.bak-w767-<时间戳> /etc/nginx/sites-available/studio.example.com.ssl
 sudo nginx -t && sudo systemctl reload nginx
 ```
 

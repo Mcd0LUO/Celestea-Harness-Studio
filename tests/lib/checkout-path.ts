@@ -5,13 +5,13 @@
  * checkout 路径」。原来的实现是 `'/src/' + basename(REPO)`，而 `REPO = process.cwd()`
  * —— 在**链接工作树**（`git worktree add`）里 cwd 的 basename 是**工作树目录名**
  * （如 `w1516-cpu-sync`），不是仓库名。于是这条门禁在 worker 工作树里**静默空转**：
- * 它比对的是 `/src/w1516-cpu-sync`，而文档里写的是 `/src/celestea_studio-ts`，
+ * 它比对的是 `/src/w1516-cpu-sync`，而文档里写的是 `/srv/celestea/studio`，
  * 永远不相等 ⇒ 一条也不会报。这是**假绿**，比漏报更危险（W1518 交付时发现）。
  *
  * 修法：仓库名从 **`<repo>/.git` 文件本身**读，不问 cwd，也不起 git 子进程。
  *   · `.git` 是**目录** → 本目录就是 checkout ⇒ 仓库名 = `basename(repo)`；
  *   · `.git` 是**文件**（链接工作树 / 子模块）→ 内容形如
- *     `gitdir: /src/celestea_studio-ts/.git/worktrees/<name>` ⇒ 找到路径里的
+ *     `gitdir: /srv/celestea/studio/.git/worktrees/<name>` ⇒ 找到路径里的
  *     `.git` 组件，取它**父目录**的 basename = 仓库名。
  *
  * 为什么不起 `git rev-parse`：实测（W1519）在 worker 工作树里 git **根本跑不起来** ——

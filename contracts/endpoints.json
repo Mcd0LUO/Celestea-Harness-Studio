@@ -4,7 +4,7 @@
   "generatedAt": "2026-09-10T01:20:00Z",
   "phase": "P0 contract freeze",
   "source": {
-    "doc": "/src/celestea_studio-ts/docs/archive/decisions/feature-session-grants.md",
+    "doc": "/srv/celestea/studio/docs/archive/decisions/feature-session-grants.md",
     "routes": "frozen from the retired backend implementation (original source file deleted 2026-09-15); kept as contracts/route-table.snapshot.json (38 route() declarations = 43 method+path, minus 4 static = 39 API endpoints)",
     "liveServer": "http://127.0.0.1:3777 (read-only probes only)",
     "routeSnapshot": "contracts/route-table.snapshot.json",

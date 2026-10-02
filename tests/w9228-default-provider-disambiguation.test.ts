@@ -5,7 +5,7 @@
  * 缺陷（修复前实测的形状）：两个 provider 列同名模型 ⇒ 两个 option 的 value 都是
  * `m.id`，界面上分不出选的是哪一个；change 时只发 `model`，后端
  * （handlers/providers.ts 的 provider_id 缺省分支）取**第一个**列出该 id 的 provider，
- * 并把它自己的 base_url 一起切成端点 ⇒ 用户选的是「基元 / deepseek-flash」，
+ * 并把它自己的 base_url 一起切成端点 ⇒ 用户选的是「备用渠道 / deepseek-flash」，
  * 生效的可能是网关端点。
  *
  * 本文件钉住**修复的那一半**（选中的 option 带着真实 provider_id，请求体真的发出
@@ -42,7 +42,7 @@ const posts: Array<Record<string, unknown>> = [];
 /** 两个 provider 列**同名**模型 —— 生产里 deepseek-flash 的真实形状。 */
 const DUP = [
   { id: 'gateway', name: 'Celestea 网关', models: [{ id: 'deepseek-flash', name: 'deepseek-flash' }] },
-  { id: 'jiyuan', name: '基元', models: [{ id: 'deepseek-flash', name: 'deepseek-flash' }] },
+  { id: 'backup', name: '备用渠道', models: [{ id: 'deepseek-flash', name: 'deepseek-flash' }] },
 ];
 
 function stubFetch(): void {
@@ -90,7 +90,7 @@ describe('W9228 · 默认模型卡片：撞名模型必须按 (provider, model) 
     const sel = await render(DUP, null);
     const options = Array.from(sel.options);
     expect(options, '两个同名模型各占一行').toHaveLength(2);
-    expect(options.map((o) => o.dataset['providerId']), '修复前两者都是 undefined').toEqual(['gateway', 'jiyuan']);
+    expect(options.map((o) => o.dataset['providerId']), '修复前两者都是 undefined').toEqual(['gateway', 'backup']);
     expect(options.map((o) => o.dataset['model'])).toEqual(['deepseek-flash', 'deepseek-flash']);
   });
 
@@ -98,7 +98,7 @@ describe('W9228 · 默认模型卡片：撞名模型必须按 (provider, model) 
     const sel = await render(DUP, null);
     choose(sel, 1);
     await vi.waitFor(() => expect(posts.length).toBe(1));
-    expect(posts[0]).toEqual({ model: 'deepseek-flash', provider_id: 'jiyuan' });
+    expect(posts[0]).toEqual({ model: 'deepseek-flash', provider_id: 'backup' });
   });
 
   it('③ 选中第一个同名模型 ⇒ provider_id 是它自己（不是「缺省」）', async () => {

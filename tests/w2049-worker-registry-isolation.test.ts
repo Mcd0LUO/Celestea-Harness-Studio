@@ -46,7 +46,7 @@ const ENV_TABLE = join(tmpdir(), "w2049-env.tsv");
 /** `override` 分支的输入（会被 `resolve`）。 */
 const OVERRIDE_TABLE = join(tmpdir(), "w2049-ov.tsv");
 /** DSH 集群的 worker 运行根（\`workerBase\`）。本仓**只**拿它当反例，不去读写它。 */
-const FLEET_ROOT = "/server-center/runtime/worker-exec";
+const FLEET_ROOT = "/srv/ops/runtime/worker-exec";
 
 /** 生产源码根（\`.test.ts\` 不算生产源码：它们只在注释里引报告出处）。 */
 const PROD_ROOTS = [

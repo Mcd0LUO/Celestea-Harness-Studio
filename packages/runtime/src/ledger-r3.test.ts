@@ -2,7 +2,7 @@
  * W836 R3 batch F — ledger accounting / view / memory.
  *
  * Probes taken verbatim from the authoritative plan
- * `/server-center/runtime/worker-exec/results/W826-R3修复计划-A-core-llm-runtime.md`
+ * `/srv/ops/runtime/worker-exec/results/W826-R3修复计划-A-core-llm-runtime.md`
  * (§三 批次 F):
  *   - P1-3: a failed first write must not poison the rest of the turn;
  *   - P2-5: the idempotency-key set is bounded (evicted per closed turn);

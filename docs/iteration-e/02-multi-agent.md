@@ -36,7 +36,7 @@
 
 | 表 | 拥有者 | 职责 |
 |---|---|---|
-| `/server-center/runtime/worker-exec/registry.tsv` | `celes-worker-spawn`（DSH 侧） | DSH 拉起的外部 worker（外部 fleet） |
+| `/srv/ops/runtime/worker-exec/registry.tsv` | `celes-worker-spawn`（DSH 侧） | DSH 拉起的外部 worker（外部 fleet） |
 | `<data dir>/worker-registry.tsv`（studio-ts，默认路径可配） | studio-ts | studio 自己 spawn 的 worker（引擎内会话） |
 
 理由：DSH 插件的巡检/重派/硬删已服务于"外部 worker 是独立 DSH 会话"这一事实，而 studio-ts 的 worker 是**引擎内会话**（`worker:<sid>`，`worker-bridge.ts:29-49`），生命周期完全不同。强行合并会得到一张两套语义纠缠的表。

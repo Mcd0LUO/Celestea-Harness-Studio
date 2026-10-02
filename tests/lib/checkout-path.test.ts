@@ -30,13 +30,13 @@ function fakeCheckout(name: string): string {
 
 describe('repoDirNameFrom（纯函数：.git 形态 → 仓库名）', () => {
   it('主工作树：.git 是目录 ⇒ 仓库名 = 该目录的 basename', () => {
-    expect(repoDirNameFrom(true, '', '/src/celestea_studio-ts')).toBe('celestea_studio-ts');
+    expect(repoDirNameFrom(true, '', '/srv/celestea/studio')).toBe('studio');
   });
 
   it('链接工作树：.git 是文件 ⇒ 从 gitdir 路径反推**主** checkout 的 basename', () => {
-    const content = 'gitdir: /src/celestea_studio-ts/.git/worktrees/w1516-cpu-sync\n';
+    const content = 'gitdir: /srv/celestea/studio/.git/worktrees/w1516-cpu-sync\n';
     // 关键：入参 repo 是工作树目录，答案必须是**主**仓库名 —— 这正是修掉的那个 bug。
-    expect(repoDirNameFrom(false, content, '/opt/celestea/dev-workspaces/w1516-cpu-sync')).toBe('celestea_studio-ts');
+    expect(repoDirNameFrom(false, content, '/opt/dev-workspaces/w1516-cpu-sync')).toBe('studio');
   });
 
   it('相对 gitdir 也认（按 repo 解析）', () => {

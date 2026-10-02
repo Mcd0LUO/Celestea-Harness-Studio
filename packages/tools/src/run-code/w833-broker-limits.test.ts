@@ -1,7 +1,7 @@
 /**
  * W833 (R3 B1) — run_code hard wall clock + effective-config render.
  *
- * Source: /server-center/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
+ * Source: /srv/ops/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
  * §B1: W812 P1-1 + A2 (慢 sub-call / 回复写满 pipe 越过 120s，可永久挂起) and
  * W812 P2-2 (composeRender 用模块常量而非 ctx.config).
  *

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * R3 W838 · B6 —— 其余 UI 行为（第 9 批 web 前端）。
- * 来源：/server-center/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md
+ * 来源：/srv/ops/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md
  *   F5：会话容器 drop 后提问卡片（live 强引用 + 倒计时 ticker）必须同步回收。
  *   F9：初始「已收起」时 --sidebar-w 必须保持 0px（y1224 不被 applyWidth 覆写）。
  *   F10：/compact 去重按会话记录 —— A 刚压缩不得吞 B 的 compact SSE。

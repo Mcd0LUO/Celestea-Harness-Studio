@@ -142,7 +142,7 @@ describe("W9110 the all-paths CAPABILITY — every volume, one name", () => {
     // The single remaining "is this a whole volume?" definition (the §4.3.3
     // grant rule). POSIX spells it "/", win32 spells it per drive — which is
     // exactly why it cannot be the allPaths expression.
-    expect(volumeRootOf("/src/celestea_studio-ts/ws/s1", "linux")).toBe("/");
+    expect(volumeRootOf("/srv/celestea/studio/ws/s1", "linux")).toBe("/");
     expect(volumeRootOf("C:\\Users\\me\\proj\\ws\\s1", "win32")).toBe("C:\\");
     expect(volumeRootOf("D:\\data\\ws\\s1", "win32")).toBe("D:\\");
     // The two drive roots are DIFFERENT strings — one string root can never

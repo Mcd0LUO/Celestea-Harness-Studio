@@ -23,12 +23,12 @@
 
 ## 线上依赖已同步改指
 
-- `/server-center/runtime/bin/sync-models.py` → `celestea_studio-ts/scripts/model-sync/sync-models.py`
-- `/server-center/runtime/bin/sync-upstream-models.py` → `celestea_studio-ts/scripts/model-sync/sync-upstream-models.py`
+- `/srv/ops/runtime/bin/sync-models.py` → `celestea_studio-ts/scripts/model-sync/sync-models.py`
+- `/srv/ops/runtime/bin/sync-upstream-models.py` → `celestea_studio-ts/scripts/model-sync/sync-upstream-models.py`
 - cron `/etc/cron.d/celes-studio-models`、`/etc/cron.d/celes-sync-upstream-models` 的「脚本真源」注释已更新
 - `celestea-studio-ts.service` 的 `WorkingDirectory` / `CELESTEA_TOOL_ROOTS` / 数据目录已指向新位置
 
 ## 本仓现状
 
-工作树已于 W781 收束后**删除**（`/src/celestea_studio` 整个目录连同 `.git`）；构建产物目录在删除前已清理，回收 4.2 GiB。
-**回滚**见 `/server-center/runtime/backups/celestea-merge-20260914-213707/`。
+工作树已于 W781 收束后**删除**（`/srv/celestea/studio` 整个目录连同 `.git`）；构建产物目录在删除前已清理，回收 4.2 GiB。
+**回滚**见 `/srv/ops/runtime/backups/celestea-merge-20260914-213707/`。

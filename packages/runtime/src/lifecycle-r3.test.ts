@@ -2,7 +2,7 @@
  * W836 R3 batch G — shutdown ordering (P1-5) and session-log fd lifecycle (P1-4).
  *
  * Probes from the authoritative plan
- * `/server-center/runtime/worker-exec/results/W826-R3修复计划-A-core-llm-runtime.md`
+ * `/srv/ops/runtime/worker-exec/results/W826-R3修复计划-A-core-llm-runtime.md`
  * (§三 批次 G), observed with EXTERNAL quantities as that plan demands: the
  * checkpoint sidecar on disk and `/proc/self/fd`.
  */

@@ -2,7 +2,7 @@
  * B4 / W819-7 (R3): read_image is a READ tool — its path argument must be
  * arbitrated with read semantics, not the fail-closed write floor.
  *
- * Source: \`/server-center/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md\`
+ * Source: \`/srv/ops/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md\`
  * §B4 W819-7 — "真实 registry + PathGuard 派发 read_image({path: <read root 内
  * png>}) → allow；对只写根外路径 → 以 read 语义（path_forbidden）拒绝。走
  * registry.dispatch，不直接调 policy。"

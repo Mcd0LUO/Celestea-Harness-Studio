@@ -63,7 +63,7 @@
     "enabled": true,
     "targets": [
       { "name": "primary", "provider": "celestea", "model": "deepseek-chat", "requestFormat": "chat_completions" },
-      { "name": "backup", "provider": "基元", "model": "gpt-x", "baseUrl": "https://backup.example/v1", "apiKeyEnv": "BACKUP_API_KEY" }
+      { "name": "backup", "provider": "备用渠道", "model": "gpt-x", "baseUrl": "https://backup.example/v1", "apiKeyEnv": "BACKUP_API_KEY" }
     ],
     "policy": { "maxAttempts": 2, "cooldownMs": 60000, "failureThreshold": 3 }
   },

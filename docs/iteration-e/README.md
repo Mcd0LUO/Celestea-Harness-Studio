@@ -6,7 +6,7 @@
 > 能力 1 P0（W730：`checkpoint.json` sidecar + boot 幂等合成 `turn_end: interrupted` + `turnNo` 从日志恢复，§1.7）
 > **已实现**；能力 2 与各自 P1/P2 仍为设计。
 > 范围：`packages/session`、`packages/runtime`、`packages/workers`、`packages/llm`、`apps/studio/src/runtime`、
-> `apps/studio/src/store`、`contracts/`；与仓库外 `celes-worker-spawn` 插件（`/src/dsh_plugins/celes-worker-spawn`）的协同边界。
+> `apps/studio/src/store`、`contracts/`；与仓库外 `celes-worker-spawn` 插件（`/srv/dsh/plugins/celes-worker-spawn`）的协同边界。
 > 前置：`docs/ARCHITECTURE.md`（分层与 seam 纪律）、`docs/archive/decisions/feature-session-independence.md`（W513，已实现）、
 > `docs/archive/decisions/feature-session-grants.md`（W516，已实现）。
 > 一句话目标：**进程重启不再是语义断点**——会话能从中断处继续、worker 能被重新认领、花掉的每一分钱有账可查、上游劣化时回退是显式且可计费的。
@@ -69,7 +69,7 @@
 | LLM 失败 | 单次尝试、零重试；非 2xx → `LlmError("stream request failed: <status>: …","generate")`，**状态码只在文案里** | `packages/llm/src/client.ts:132-146,169-176` |
 | 超时 | 三档 connect 15s / response 60s / idle 90s；无总请求超时（有意） | `packages/llm/src/timeouts.ts:26-58` |
 | provider 选择 | 宿主侧 `providers.json` + profile（`base_url`/`api_key_env`）；`LlmRegistry` last-wins 但 studio 只构造**一个** | `apps/studio/src/runtime/provider-target.ts`、`llm-assembly.ts:99-115`、`packages/core/src/llm.ts:28-46` |
-| 外部协同方 | `celes-worker-spawn`（纯 JS，无 shell）：DSH 侧 registry.tsv + 30s 巡检 + 重派 + 硬删；`watch.enabled` 默认 **false** | `/src/dsh_plugins/celes-worker-spawn/README.md:169-205` |
+| 外部协同方 | `celes-worker-spawn`（纯 JS，无 shell）：DSH 侧 registry.tsv + 30s 巡检 + 重派 + 硬删；`watch.enabled` 默认 **false** | `/srv/dsh/plugins/celes-worker-spawn/README.md:169-205` |
 
 **一句话现状**：**日志层面的恢复已经做完了（并且做得很好），缺的是「运行态 + 编排态 + 经济态 + 可用性态」这四层。**
 
@@ -132,7 +132,7 @@
 
 | ID | 项 | 状态 | 影响 |
 |---|---|---|---|
-| U1 | newapi 定价公式与字段结构 | **未验证**：`/src/CelesteaTeamAPI/newapi-ops/PRICING-ARCHITECTURE.md` 本次读取被拒（`Permission denied`），仅有 LTS `biz/newapi.md:15` 的指针与 I1–I3 不变量 | 能力 3 的 P0 **不依赖**它（`pricing.json` 可运维提供 + `unpriced` 兜底）；P1 同步脚本落地前需确权 |
+| U1 | newapi 定价公式与字段结构 | **未验证**：`/srv/celestea/team-api/newapi-ops/PRICING-ARCHITECTURE.md` 本次读取被拒（`Permission denied`），仅有 LTS `biz/newapi.md:15` 的指针与 I1–I3 不变量 | 能力 3 的 P0 **不依赖**它（`pricing.json` 可运维提供 + `unpriced` 兜底）；P1 同步脚本落地前需确权 |
 | U2 | 性能数字（fsync 延迟、账本写放大、checkpoint 写频率、SSE 帧增量） | **未实测**：本文所有开销判断均为定性 | 若 step 级记账不可接受，退化为 turn 级批量写（代价：崩溃丢一轮成本） |
 | U3 | 真实崩溃时序（kill -9 + 部分写 + OS 缓冲丢弃） | **未实测**：torn tail 行为只有单测覆盖（`log/file.ts`、`jsonl.ts`） | `syncEachAppend` 默认值是否要改，需实测后裁决（P1 议题） |
 | U4 | 两套 registry（studio vs `celes-worker-spawn`）是否最终应合并 | **待裁决**：本文取"并存 + 禁止双写"；未读生产 `workerBase/registry.tsv` 现状（避免误判在线 fleet） | 若裁决为合并，能力 2 的 P0 路径与 B6 断言需重写 |

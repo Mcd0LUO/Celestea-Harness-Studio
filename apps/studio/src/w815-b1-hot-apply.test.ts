@@ -4,7 +4,7 @@
  * Every case drives the REAL Hono handler (`app.request` via `makeHarness`),
  * never a bare store/helper: the batch is about the request's effect order, which
  * only the composed app can show.
- * Source: /server-center/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md
+ * Source: /srv/ops/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md
  * (B1 · W815-1/3/4/6/7 + N2 acceptance probes).
  */
 import { existsSync, readFileSync } from "node:fs";

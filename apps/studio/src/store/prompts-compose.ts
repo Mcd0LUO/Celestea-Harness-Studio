@@ -17,7 +17,7 @@ export interface PromptVarInput {
   model: string;
   provider: string;
   base_url: string;
-  /** W768: the workspace NAME (`CelesteaTeamAPI`). */
+  /** W768: the workspace NAME (`example-team-api`). */
   workspace: string;
   /** W768: the workspace ROOT PATH — the same value the tools run in. */
   workspace_dir: string;

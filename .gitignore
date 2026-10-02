@@ -42,7 +42,7 @@ fixtures/sessions/*
 .celestea/credentials/
 .celestea/credentials
 # 仓内临时产物（worker 的 CDP/变异脚本、一次性导出等）。
-# 它躺在工作树内（/src/celestea_studio-ts/tmp），git 会把它当未跟踪内容看到 ——
+# 它躺在工作树内（/srv/celestea/studio/tmp），git 会把它当未跟踪内容看到 ——
 # 一次 `git add -A` 就会把临时脚本提交进公开仓。锚定根目录，避免误伤同名子目录。
 /tmp/
 # 更老的根上产物（.celestea-trash/.celestea-archived/.celestea-prompts.json）

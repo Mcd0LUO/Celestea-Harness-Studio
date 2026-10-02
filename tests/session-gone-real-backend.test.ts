@@ -11,7 +11,7 @@
  *
  * 本文件**零造假数据**：数据面全走真 HTTP（唯一 fetch 包装器只把相对路径补成绝对 URL 并记账）；
  * 服务不可达时整文件跳过。用例会短暂把服务端 active 会话设为自己建的临时会话，
- * `afterAll` 里**拨回**测试开始时的那个（用户要求为 CelesteaTeamAPI/中转哥-…），
+ * `afterAll` 里**拨回**测试开始时的那个（用户要求为 example-team-api/example-operator-…），
  * 并真删自己建的会话、清掉 `.celestea-trash` 里自己的条目。
  */
 import { readdirSync, readFileSync, rmSync } from "node:fs";
@@ -59,11 +59,11 @@ const wait = (ms = 40): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // ---- 真实服务接线 ----------------------------------------------------------------
 const BASE = process.env["CELESTEA_E2E_BASE"] ?? "http://127.0.0.1:3777";
-const WS = "CelesteaTeamAPI";
+const WS = "example-team-api";
 const TRASH = join("/src", WS, ".celestea-trash");
 const STAMP = String(Date.now()).slice(-7);
 /** 用户要求的收尾状态（测试开始时的 active 若不是它，就拨回测试开始时的那个）。 */
-const WANT_ACTIVE = "CelesteaTeamAPI/中转哥-1789192958.416000000";
+const WANT_ACTIVE = "example-team-api/example-operator-1789192958.416000000";
 
 const seen: Array<{ method: string; path: string }> = [];
 const realFetch = globalThis.fetch;

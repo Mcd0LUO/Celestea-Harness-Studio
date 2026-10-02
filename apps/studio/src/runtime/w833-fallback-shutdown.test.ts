@@ -1,7 +1,7 @@
 /**
  * W833 (R3 B8 / W816 F4) — the real adapter shutdown FLUSHES the fallback audit.
  *
- * Source: /server-center/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
+ * Source: /srv/ops/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
  * §B8 W816 F4: production never flushed the fallback pending ledger, so a
  * SIGTERM dropped in-flight platform audit POSTs. The discriminator here is
  * deterministic: the audit endpoint holds the response; shutdown must stay

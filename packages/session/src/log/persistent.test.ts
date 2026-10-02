@@ -162,7 +162,7 @@ describe("PersistentSessionLog", () => {
   });
 
   it("sanitizes the session id into a file inside the directory", () => {
-    expect(fileNameFor("CelesteaTeamAPI/scratch-1")).toBe("CelesteaTeamAPI_scratch-1.jsonl");
+    expect(fileNameFor("example-team-api/scratch-1")).toBe("example-team-api_scratch-1.jsonl");
     expect(fileNameFor("")).toBe("session.jsonl");
     const dir = tempDir();
     expect(filePathFor(dir, "../../etc/passwd")).toBe(join(dir, ".._.._etc_passwd.jsonl"));

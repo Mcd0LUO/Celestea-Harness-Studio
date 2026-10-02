@@ -1,7 +1,7 @@
 // W750 · 内置模型图标（按模型 id 前缀自动识别）；W778 换成真实厂商图标。
 //
 // 纯函数、零外部依赖、零 DOM：既能被浏览器打包，也能被服务端 vitest 跨仓直测
-// （先例：src/security/scope-hash.ts ← /src/celestea_studio-ts/tests/*.test.ts）。
+// （先例：src/security/scope-hash.ts ← /srv/celestea/studio/tests/*.test.ts）。
 //
 // W778 变更（此前是「几何外框 + 家族首字母」的现画图标）：
 //   · 图标本体 = `@lobehub/icons-static-svg@1.95.0`（MIT）的真实单色图标，

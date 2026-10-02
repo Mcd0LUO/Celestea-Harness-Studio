@@ -473,7 +473,7 @@ describe('文档不变量', () => {
  * 只钉**本仓自己的** checkout 路径，不钉别的绝对路径：
  *   · `/var/lib/celestea-agent` 是产品默认值（configuration.md 必须写它）；
  *   · `/api/...`、`/compact` 是路由字面量；
- *   · `/src/celestea_harness`、`/src/dsh_plugins` 是**外部仓库的引用**（已删除的
+ *   · `/srv/celestea/engine-ref`、`/srv/dsh/plugins` 是**外部仓库的引用**（已删除的
  *     参照实现 / 兄弟项目）—— 那是引述，不是本机的路径事实。
  *   把后三类也钉上会逼着人删掉有用的交叉引用，是更糟的交换。
  *

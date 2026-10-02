@@ -1,7 +1,7 @@
 /**
  * W833 (R3 B7 / W816 F3) — POST /api/worker/spawn with an unknown session.
  *
- * Source: /server-center/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
+ * Source: /srv/ops/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
  * §B7 W816 F3: real HTTP POST with a session that does not resolve must answer
  * 404 and compose NO ghost instance / worker row; a legal session still 200s.
  *

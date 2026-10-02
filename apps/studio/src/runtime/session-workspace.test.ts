@@ -1,7 +1,7 @@
 /**
  * W768 — a session's tools/沙箱 must run in THAT session's workspace.
  *
- * The bug: the system prompt named the session's workspace (`CelesteaTeamAPI`)
+ * The bug: the system prompt named the session's workspace (`example-team-api`)
  * while `pwd` reported the process-wide launch directory (then the old frontend
  * repo root), because the sandbox cwd came from
  * a process-wide env knob (`CELAESTEA_RUN_SHELL_WORKDIR`) that cannot describe

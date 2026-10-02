@@ -1,6 +1,6 @@
 {
-  "id": "CelesteaTeamAPI/test-1788787479.196315272",
-  "workspace": "CelesteaTeamAPI",
+  "id": "example-team-api/test-1788787479.196315272",
+  "workspace": "example-team-api",
   "sessionDir": "test-1788787479.196315272",
   "slug": "test-1788787479.196315272",
   "roles": [
@@ -9,7 +9,7 @@
     "normal-multi-turn"
   ],
   "source": {
-    "logPath": "/src/CelesteaTeamAPI/test-1788787479.196315272/cli-main.jsonl",
+    "logPath": "/srv/celestea/team-api/test-1788787479.196315272/cli-main.jsonl",
     "sizeBytes": 20603,
     "sha256": "deeb95769169e3e5d40a7713162adef504efc485adff1426c43acec11c61a85d",
     "mtime": "2026-09-09T14:07:11.926Z",

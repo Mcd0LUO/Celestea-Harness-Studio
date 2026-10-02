@@ -1,7 +1,7 @@
 /**
  * B3 / W812 P2-1 (R3) — the transport body cap off-by-one, end to end.
  *
- * Source: /server-center/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
+ * Source: /srv/ops/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
  * §B3 W812 P2-1: an http response body of exactly the cap must report
  * truncated=false. A real loopback server answers exactly the cap, then the
  * cap+1, so collectBody's decision is exercised through the real request path.

@@ -1,20 +1,20 @@
 {
   "source": {
-    "path": "/src/celestea_studio/workspaces.json",
+    "path": "/srv/celestea/studio/workspaces.json",
     "note": "raw data file (read-only); no secrets by schema"
   },
   "body": {
     "workspaces": [
       {
-        "path": "/src/CelesteaTeamAPI"
+        "path": "/srv/celestea/team-api"
       },
       {
-        "path": "/src/celestea_harness"
+        "path": "/srv/celestea/engine-ref"
       },
       {
-        "path": "/server-center"
+        "path": "/srv/ops"
       }
     ],
-    "active_session": "celestea_harness/harness架构哥-1788933931.279221103"
+    "active_session": "retired-engine/example-session-1788933931.279221103"
   }
 }

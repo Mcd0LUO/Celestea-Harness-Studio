@@ -2,7 +2,7 @@
  * B2 / W812 P1-3 (R3) — read_image must reject an oversize file BEFORE buffering
  * it, through the REAL guarded registry.
  *
- * Source: /server-center/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
+ * Source: /srv/ops/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
  * §B2 W812 P1-3: "在允许根放一个 >4MiB 文件（可 truncate 稀疏文件），经真 guard +
  * registry 调 read_image，断言 too_large，并...证明未整块进内存".
  *

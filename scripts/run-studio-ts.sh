@@ -3,12 +3,12 @@
 # Resolves CELESTEA_API_KEY from dsh credentials; never persists the key.
 #
 # W781（2026-09-14）：前端/后端已并成同一仓，运行数据移出仓外。
-#   代码   /src/celestea_studio-ts      （唯一仓：apps/studio 后端 + apps/web 前端）
+#   代码   /srv/celestea/studio      （唯一仓：apps/studio 后端 + apps/web 前端）
 #   数据   /var/lib/celestea-agent      （0750 celestea:celesdev；密钥文件 0600）
 #   前端产物 apps/web/dist              （STUDIO_STATIC_ROOT，先 `cd apps/web && pnpm build`）
 set -euo pipefail
 
-REPO=/src/celestea_studio-ts
+REPO=/srv/celestea/studio
 DATA=/var/lib/celestea-agent
 
 cd "$REPO"
@@ -32,12 +32,12 @@ export CELESTEA_AUTH_SECRET_FILE="${CELESTEA_AUTH_SECRET_FILE:-$DATA/studio-auth
 export CELESTEA_USAGE_LEDGER_FILE="${CELESTEA_USAGE_LEDGER_FILE:-$DATA/usage-ledger.jsonl}"
 
 # --- 工具沙箱：本仓 + /tmp（读根白名单，fail-closed） ---
-# W1467：删掉 /src/celestea_harness。该目录（引擎参照实现原址）已于 2026-09-11 删除
+# W1467：删掉 /srv/celestea/engine-ref。该目录（引擎参照实现原址）已于 2026-09-11 删除
 # （见 docs/README.md 与 docs/ARCHITECTURE.md），但这条声明一直留着 —— 而 PathGuard
 # 对不可用的 root 是 **fail-closed**（code=tool_roots_invalid）：只要列表里挂着一个
 # 不存在的路径，read_file / list_dir / write_file 等**全部**路径类工具被整体拒绝，
 # 哪怕目标路径本身在 $REPO 内。2026-09-23 真实事故：本会话所有文件工具不可用，
-# 报 "CELESTEA_TOOL_ROOTS entry '/src/celestea_harness' does not exist — failing closed"。
+# 报 "CELESTEA_TOOL_ROOTS entry '/srv/celestea/engine-ref' does not exist — failing closed"。
 # 不要在这里加回任何可能不存在的路径；确需只读外部根时，先确认目录存在再登记。
 export CELESTEA_TOOL_ROOTS="${CELESTEA_TOOL_ROOTS:-$REPO:/tmp}"
 export CELESTEA_TOOL_WORKDIR="${CELESTEA_TOOL_WORKDIR:-$REPO}"

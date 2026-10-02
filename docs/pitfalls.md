@@ -6,7 +6,7 @@
 > `src/workspaces.rs` / `src/compact.rs` …）。W1518 逐条复核了每一条在现役 TypeScript 实现
 > （`apps/studio/src/**`、`apps/web/src/**`、`packages/**`）里是否仍然成立：
 > **行为仍存在的条目保留下来，并把 `file:line` 换成 TS 的真源**；只有退役后端才有的条目已删除。
-> 判定口径见 [`feature-docs-drift-cleanup.md`](./feature-docs-drift-cleanup.md) §3；逐条证据在 W1518 交付报告里。
+> 判定口径（W1518 那轮的完整记录）见归档的 [`archive/decisions/feature-docs-drift-cleanup.md`](./archive/decisions/feature-docs-drift-cleanup.md) §3；逐条证据在 W1518 交付报告里。
 
 > **每条都来自真实修复**。改相关代码之前先读对应条目。
 > 格式：症状 → 根因 → 正确做法 → 代码位置 → 怎么验证。
@@ -110,7 +110,7 @@ originalId: p?.id                          // 打开编辑器时记录
 
 **根因**：后端 `context_window` / `max_output_tokens` 只接受 JSON number。
 
-**正确做法**：后缀解析在**前端** `numOrNull`（`apps/web/src/ui/providers/form.ts:46-58`）：小写化 + 去空白，正则 `^(\d+(?:\.\d+)?)([km])?$`，`k = ×1000`、`m = ×1_000_000`，`Math.round`；非法/负数 → `null`（即"留空 = 不限制"）。调用点在同文件 `:30-31`。
+**正确做法**：后缀解析在**前端** `numOrNull`（`apps/web/src/ui/providers/form.ts:60-71`）：小写化 + 去空白，正则 `^(\d+(?:\.\d+)?)([km])?$`，`k = ×1000`、`m = ×1_000_000`，`Math.round`；非法/负数 → `null`（即"留空 = 不限制"）。调用点在同文件 `:30-31`。
 
 ---
 
@@ -186,7 +186,7 @@ originalId: p?.id                          // 打开编辑器时记录
 
 ## P10 · session id 里的 `/` 必须 `%2F` 编码
 
-**症状**：`GET /api/sessions/server-center/my-session/messages` → 404 / 路由不匹配。
+**症状**：`GET /api/sessions/srv/ops/my-session/messages` → 404 / 路由不匹配。
 
 **根因**：session id 是 `"<workspace>/<session>"`，而路由的 `{id}` 是**单段**路径参数；未编码的 `/` 会被当成路径分隔符。
 

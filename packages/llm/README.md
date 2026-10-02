@@ -1,6 +1,6 @@
 # @celestea/llm — OpenAI-compatible LLM provider (P2a)
 
-Parity target: `celestea_harness/crates/llm` (+ `crates/runtime/src/compose.rs`
+Parity target: `retired-engine/crates/llm` (+ `crates/runtime/src/compose.rs`
 for profile resolution). Raw SSE transport, usage/cache-hit parsing, three
 timeout tiers, free-form `reasoning_effort` passthrough.
 

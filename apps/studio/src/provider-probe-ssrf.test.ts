@@ -2,7 +2,7 @@
  * B3 / W815-13 (= W819-6): the provider probe must go through the deployment's
  * SSRF target policy instead of calling the host fetch directly.
  *
- * Source: \`/server-center/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md\`
+ * Source: \`/srv/ops/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md\`
  * §B3 — "验收探针：设 CELESTEA_HTTP_DENY=127.0.0.0/8，POST /api/providers/test
  * 指向 http://127.0.0.1/… → 期望 ok:false 且 fetch recorder 未被调用；指向允许
  * 地址 → 正常。走真实 handler。"

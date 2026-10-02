@@ -79,7 +79,7 @@ export interface WireMessage {
 
 ### 3.6 本节「待验证」清单
 
-- 基元 provider 的线格式（未实测，§2.3）。
+- 备用渠道 provider 的线格式（未实测，§2.3）。
 - `deepseek-v4-pro` 的 tool-role 图片在**其他消息组合**下是否有可用的变体（只测了 A/B/D）；不打算依赖。
 - 单条 `user` 消息的图片数量上限、总 base64 体积上限（§5.3 定的是我们的自限，不是上游实测值）。**待验证**。
 
@@ -117,6 +117,12 @@ export type Content = TextContent | ToolCallContent | ImageContent;   // ← 唯
 ### 4.2 逐处改动清单（非测试代码，含 `file:line` 证据）
 
 下列清单由 `packages/core/src/message.ts:45` 的联合类型出发，用穷举 grep 得到（§4.6 附命令与输出），不是凭印象列举。
+
+> **「现状」列是 P0 落地前的基线快照，不是当前状态。** 本册状态是「设计（已实现 P0）」，
+> 清单里的「必须怎么改」多数已经改完（例如 `core/src/projection.ts` 现已有 image 分支）。
+> 因此本节的 `file:line` 只在**当时**成立，改动落地后行号会漂 —— 读时请把它当**改动依据**而非**代码位置**；
+> 现行实现位置以 [`ARCHITECTURE.md`](../ARCHITECTURE.md) 与代码本身为准。
+> 保留原值是因为删掉它们就丢掉了「为什么这样改」的设计依据（AGENT.md §7 规则 1）。
 
 #### A. `packages/core` —— 真正的冻结契约
 
@@ -358,7 +364,7 @@ packages/llm/src/{seam.ts:114-119, wire.ts:17,60,62,66,70, index.ts:32,34}
 
 | 机制 | 交互 | 设计结论 |
 | --- | --- | --- |
-| `CELESTEA_TOOL_ROOTS=/src/celestea_studio_ts:/src/celestea_harness:/tmp` | 会话目录可能**不在** roots 内（如 `/server-center/...`） | **`read_image(path=...)` 走 `read_file` 同一沙箱守卫**（越界拒绝）；**但 `attachment_id` 形式由宿主直接解析**，不经过沙箱——因为附件本来就是宿主自己写进会话目录的。两个入口并存（§6.1） |
+| `CELESTEA_TOOL_ROOTS=/srv/celestea/studio:/srv/celestea/engine-ref:/tmp` | 会话目录可能**不在** roots 内（如 `/srv/ops/...`） | **`read_image(path=...)` 走 `read_file` 同一沙箱守卫**（越界拒绝）；**但 `attachment_id` 形式由宿主直接解析**，不经过沙箱——因为附件本来就是宿主自己写进会话目录的。两个入口并存（§6.1） |
 | 上传落盘 | 上传请求由 studio 进程处理，写 `<session-dir>/attachments/`；该路径由会话 id 推导，**不接受客户端指定路径** | 无路径穿越面 |
 | `.celestea-trash/` | 会话目录整体 `rename` | 附件跟随；回收站里的附件仍可被管理员手工恢复 |
 | `.celestea-archived/` | 同上，可逆 | 归档会话的历史消息仍能渲染图片（读归档目录） |
@@ -425,7 +431,7 @@ packages/llm/src/{seam.ts:114-119, wire.ts:17,60,62,66,70, index.ts:32,34}
 ```json
 {
   "ok": true,
-  "path": "/src/celestea_studio-ts/logo.png",
+  "path": "/srv/celestea/studio/logo.png",
   "media_type": "image/png",
   "bytes": 20481,
   "width": 512,

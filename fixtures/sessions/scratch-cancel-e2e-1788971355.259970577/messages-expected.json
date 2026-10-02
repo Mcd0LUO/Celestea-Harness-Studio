@@ -1,7 +1,7 @@
 {
   "source": {
-    "endpoint": "GET /api/sessions/CelesteaTeamAPI/scratch-cancel-e2e-1788971355.259970577/messages",
-    "session": "CelesteaTeamAPI/scratch-cancel-e2e-1788971355.259970577",
+    "endpoint": "GET /api/sessions/example-team-api/scratch-cancel-e2e-1788971355.259970577/messages",
+    "session": "example-team-api/scratch-cancel-e2e-1788971355.259970577",
     "fetchedFrom": "http://127.0.0.1:3777"
   },
   "messages": [

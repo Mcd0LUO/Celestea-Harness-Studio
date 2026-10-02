@@ -5,7 +5,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| 仓库 | /src/celestea_studio-ts（main @ 45cd013） |
+| 仓库 | /srv/celestea/studio（main @ 45cd013） |
 | 任务 | 用 Node 原生 fetch + 全局 WebSocket 直连 CDP，驱动 ~/.cache/ms-playwright 里的 chrome-headless-shell，判断「零依赖 computer-use」可行性 |
 | 性质 | **只读 spike**：未改产品源码/配置，未跑 pnpm build/test/check，未重启服务，未 apt/联网装包；唯一新建文件 = 本报告 |
 | 机器 | Linux，无 DISPLAY/Wayland/X socket；Xvfb 已装但**本 spike 未用到**（headless 模式不需要） |

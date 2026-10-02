@@ -162,7 +162,7 @@ $ pgrep -af 'dsh/lib/bin.js'
 - 内建 preset key = `standard` / `ptc` / `minimal` / `cordis` —— [015] `packages/preset/agent-presets/src/display.ts:42-47`；[013] 同目录同键。preset 目录名同 —— [015] `.../presets/`（本 session 复核 `ls` 得 `cordis minimal ptc standard`）。
 - `presets/ptc/preset.yml` 自述 `name: PTC 模式`。
 - **旧名 `code` 的残留（漂移证据）**：
-  - 仓库外插件 `/src/dsh_plugins/celes-worker-spawn/README.md:68` 仍写 `| code | PTC 模式 |`。
+  - 仓库外插件 `/srv/dsh/plugins/celes-worker-spawn/README.md:68` 仍写 `| code | PTC 模式 |`。
   - 本 session 注入的 `spawn_worker` schema 描述也仍写 `code（PTC）`。
   - → **宿主内建 key 已是 `ptc`，插件文档/工具描述滞后**。任何映射必须用 `ptc`；本引擎契约层**永不出现** `agentPreset`（沿用 `docs/modes-standard-vs-execution.md` M14 门禁）。
 - 与本 session 实际安装树相比的偏差：无法核实（`/opt/dsh` root-only）。**待验证** U6。

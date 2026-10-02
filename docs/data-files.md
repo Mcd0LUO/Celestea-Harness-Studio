@@ -192,7 +192,7 @@ pretty JSON → `providers.json.tmp` → `OpenOptions` 带 `mode(0o600)` → `wr
 
 ### 2.6 数值字段
 
-后端 `context_window` / `max_output_tokens` 只接受 **JSON number**（`Option<u64>`）。前端的 `k`/`m` 后缀（`1m = 1000000`、`1.5m`、`128k`）是**前端输入糖**（`frontend/src/ui/providers.ts:285-296` 的 `numOrNull`），不会出现在请求体里；用 curl 传 `"1k"` 会被 serde 拒绝。
+后端 `context_window` / `max_output_tokens` 只接受 **JSON number**。前端的 `k`/`m` 后缀（`1m = 1000000`、`1.5m`、`128k`）是**前端输入糖**（`apps/web/src/ui/providers/form.ts:60-71` 的 `numOrNull`），不会出现在请求体里；用 curl 直接传 `"1k"` 会被后端的 number 校验拒绝。
 
 ---
 
@@ -271,7 +271,7 @@ pretty JSON → `providers.json.tmp` → `OpenOptions` 带 `mode(0o600)` → `wr
 
 ### 4.1 格式
 
-引擎 v1 持久化格式：**一行一个 `SessionEvent`**，serde 内部 tag 为 `"type"`、variant 名 snake_case（参照实现 `/src/celestea_harness/crates/core/src/session_log.rs:44-85`；该仓已于 2026-09-11 删除，现行真源见 [`../contracts/session-event.schema.json`](../contracts/session-event.schema.json)）。
+引擎 v1 持久化格式：**一行一个 `SessionEvent`**，serde 内部 tag 为 `"type"`、variant 名 snake_case（参照实现 `/srv/celestea/engine-ref/crates/core/src/session_log.rs:44-85`；该仓已于 2026-09-11 删除，现行真源见 [`../contracts/session-event.schema.json`](../contracts/session-event.schema.json)）。
 
 ```jsonc
 {"type":"turn_start","id":"turn-1"}

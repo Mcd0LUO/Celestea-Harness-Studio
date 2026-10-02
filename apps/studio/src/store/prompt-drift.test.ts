@@ -22,8 +22,9 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  ENV_PUBLIC_SITE,
   ENV_SERVICE_NAME,
-  PUBLIC_SITE,
+  PUBLIC_SITE_DEFAULT,
   SERVICE_FALLBACK,
   deploymentFacts,
   studioRepoRoot,
@@ -41,10 +42,14 @@ const FRONTEND_DIR = join(REPO_ROOT, "apps", "web");
 const BUILTIN_SECTIONS_FILE = fileURLToPath(new URL("./builtin-sections.ts", import.meta.url));
 
 /**
- * 绝对路径字面量：`/src/…`、`/opt/…`、`/var/…`、`/home/…`、`/etc/…`。
+ * 绝对路径字面量：`/src/…`、`/srv/…`、`/opt/…`、`/var/…`、`/home/…`、`/etc/…`。
  * 前置边界 `(?:^|[^\w])` 避免误伤；`apps/web/dist` 这类相对路径不命中。
+ *
+ * `srv` 也在列内：把示例路径换成 `/srv/...` 之后**不能**顺手把门禁改弱 ——
+ * 反过来（门禁只认旧前缀、示例已换新）会让「模板不得硬编码绝对路径」这条断言静默失效，
+ * 而那正是它存在的理由。真实踩到：去掉 `src` 后下面「自证伪」那条用例立刻变红。
  */
-const ABS_PATH = /(?:^|[^\w])\/(?:src|opt|var|home|etc)\//;
+const ABS_PATH = /(?:^|[^\w])\/(?:src|srv|opt|var|home|etc)\//;
 
 /** 老仓库目录（W781 已删除）：提示词里再出现它一定是手写残留。 */
 const RETIRED_DIR = /\/src\/celestea_studio(?![-\w])/;
@@ -66,7 +71,7 @@ const FIXTURE_VARS = toPromptVars({
   studio_static_root: "/derived/repo/apps/web/dist",
   studio_service: "derived.service",
   studio_bind: "127.0.0.1:3777",
-  studio_site: PUBLIC_SITE,
+  studio_site: PUBLIC_SITE_DEFAULT,
 });
 
 describe("W782 · builtin 模板不得硬编码部署位置", () => {
@@ -105,7 +110,7 @@ describe("W782 · builtin 模板不得硬编码部署位置", () => {
   });
 
   it("自证伪：把字面量塞回模板，上面那条断言必须红", () => {
-    const polluted = renderTemplate("Code changes: the frontend is /src/celestea_studio-ts/apps/web and …", FIXTURE_VARS);
+    const polluted = renderTemplate("Code changes: the frontend is /srv/celestea/studio/apps/web and …", FIXTURE_VARS);
     expect(ABS_PATH.test(polluted), "门禁对硬编码字面量必须命中").toBe(true);
     // 同一句话变量化之后不再命中，且渲染出注入值。
     const clean = renderTemplate("Code changes: the frontend is {{studio_frontend_dir}} and …", FIXTURE_VARS);
@@ -128,10 +133,19 @@ describe("W782 · 部署事实是运行时派生的（单一真源）", () => {
     expect(facts.frontendDir).toBe(FRONTEND_DIR);
     expect(facts.staticRoot).toBe("/srv/custom-dist");
     expect(facts.bind).toBe("127.0.0.1:3777");
-    expect(facts.publicSite).toBe(PUBLIC_SITE);
+    expect(facts.publicSite).toBe(PUBLIC_SITE_DEFAULT);
     // 本套件自身可能就跑在 systemd 下（cgroup 给得出 unit 名），所以这里只断言
     // 形状与回退常量二选一，具体优先级由下一条用例逐层钉死。
     expect(facts.service.endsWith(".service")).toBe(true);
+  });
+
+  it("public site 优先级：CELESTEA_PUBLIC_SITE 覆盖 > 中性缺省值（不含任何真实域名）", () => {
+    // 缺省必须是 RFC 2606 保留的 example.com：一个真实站点被写进开源包的常量里，
+    // 会让每个安装都在提示词里宣称一个自己并不拥有的站点。
+    expect(PUBLIC_SITE_DEFAULT).toBe("https://studio.example.com");
+    expect(deploymentFacts(CFG, {}).publicSite).toBe(PUBLIC_SITE_DEFAULT);
+    expect(deploymentFacts(CFG, { [ENV_PUBLIC_SITE]: "" }).publicSite).toBe(PUBLIC_SITE_DEFAULT);
+    expect(deploymentFacts(CFG, { [ENV_PUBLIC_SITE]: "https://ops.example.net" }).publicSite).toBe("https://ops.example.net");
   });
 
   it("unit 名优先级：env 覆盖 > cgroup > 常量回退", () => {
@@ -164,10 +178,10 @@ describe("W782 · 部署事实是运行时派生的（单一真源）", () => {
     const h = makeHarness({ session: { name: "s1" } });
     try {
       const out = await renderFor(h, "sample-ws/s1");
-      for (const expected of [REPO_ROOT, FRONTEND_DIR, h.staticRoot, PUBLIC_SITE, "127.0.0.1:3777", h.workspace]) {
+      for (const expected of [REPO_ROOT, FRONTEND_DIR, h.staticRoot, PUBLIC_SITE_DEFAULT, "127.0.0.1:3777", h.workspace]) {
         expect(out, `渲染文本缺少派生值 ${expected}`).toContain(expected);
       }
-      // 注意：**不能**断言「不含 /src/celestea_studio-ts」——本仓今天的仓根恰好
+      // 注意：**不能**断言「不含 /srv/celestea/studio」——本仓今天的仓根恰好
       // 就是那个字符串，派生出来的值与当年的硬编码值在这里重合。真正有意义的是
       // 「值随运行时变」（见下面两条 config / env 覆盖用例）与「模板里没有字面量」
       // （见文件头的反向断言），以及 W781 之前那个**已退役**目录不许再出现。
@@ -201,6 +215,17 @@ describe("W782 · 部署事实是运行时派生的（单一真源）", () => {
     }
   });
 
+  it("单一真源：env 覆盖公开站点 → 渲染文本里就是那个站点", async () => {
+    const h = makeHarness({ session: { name: "s1" } });
+    try {
+      const out = await renderFor(h, "sample-ws/s1", { [ENV_PUBLIC_SITE]: "https://ops.example.net" });
+      expect(out).toContain("https://ops.example.net");
+      expect(out).not.toContain(PUBLIC_SITE_DEFAULT);
+    } finally {
+      h.cleanup();
+    }
+  });
+
   it("环境段逐条在位：7 个事实一个都没丢，且工作目录仍是会话工作区", async () => {
     const h = makeHarness({ session: { name: "s1" } });
     try {
@@ -208,7 +233,7 @@ describe("W782 · 部署事实是运行时派生的（单一真源）", () => {
       const text = environmentSectionOf(out);
       // ① 后端仓根 ② unit 名 ③ 监听地址 ④ 公开站点 ⑤ 工作目录（W768 语义）
       // ⑥ 前端目录 ⑦ 静态根。
-      for (const expected of [REPO_ROOT, "127.0.0.1:3777", PUBLIC_SITE, h.workspace, FRONTEND_DIR, h.staticRoot]) {
+      for (const expected of [REPO_ROOT, "127.0.0.1:3777", PUBLIC_SITE_DEFAULT, h.workspace, FRONTEND_DIR, h.staticRoot]) {
         expect(text, `environment 段缺少 ${expected}`).toContain(expected);
       }
       expect(text).toMatch(/systemd unit [\w.@-]+\.service on 127\.0\.0\.1:3777/);

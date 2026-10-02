@@ -51,12 +51,12 @@ export const SESSION_LOG_ID = "cli-main";
  * renders and the ROOT PATH the tools/sandbox must run in.
  *
  * They travel together because they are the same fact seen twice: two
- * independent lookups (a prompt that says "CelesteaTeamAPI" and a shell that
+ * independent lookups (a prompt that says "example-team-api" and a shell that
  * starts in whatever the process was launched from) drifted apart into a bug the
  * model then reasoned from. A caller that needs either one resolves this value.
  */
 export interface SessionWorkspace {
-  /** Workspace key: the basename of `path` (`CelesteaTeamAPI`). */
+  /** Workspace key: the basename of `path` (`example-team-api`). */
   name: string;
   /** Absolute workspace root — the session's cwd and containment root. */
   path: string;

@@ -1,13 +1,13 @@
 {
   "generatedAt": "2026-09-09T17:28:54.740Z",
   "studio": "http://127.0.0.1:3777",
-  "studioRepo": "/src/celestea_studio",
+  "studioRepo": "/srv/celestea/studio",
   "mode": "read-only (GET + passive SSE + direct file reads)",
   "redaction": {
     "secretsRegistered": 2,
     "secretsDiscovered": 11,
     "sources": [
-      "/src/celestea_studio/providers.json (read-only)",
+      "/srv/celestea/studio/providers.json (read-only)",
       "/home/celestea/.npmrc (_authToken)"
     ],
     "replacements": 63,
@@ -21,7 +21,7 @@
   },
   "sessions": [
     {
-      "id": "CelesteaTeamAPI/scratch-cancel-e2e-1788971355.259970577",
+      "id": "example-team-api/scratch-cancel-e2e-1788971355.259970577",
       "slug": "scratch-cancel-e2e-1788971355.259970577",
       "roles": [
         "session-log",
@@ -35,7 +35,7 @@
       "sseFrames": 6
     },
     {
-      "id": "CelesteaTeamAPI/scratch-timeout-1788962615.856629520",
+      "id": "example-team-api/scratch-timeout-1788962615.856629520",
       "slug": "scratch-timeout-1788962615.856629520",
       "roles": [
         "session-log",
@@ -49,7 +49,7 @@
       "sseFrames": 3
     },
     {
-      "id": "CelesteaTeamAPI/test-1788787479.196315272",
+      "id": "example-team-api/test-1788787479.196315272",
       "slug": "test-1788787479.196315272",
       "roles": [
         "session-log",

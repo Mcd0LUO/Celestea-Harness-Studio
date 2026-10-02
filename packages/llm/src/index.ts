@@ -1,7 +1,7 @@
 /**
  * @celestea/llm — OpenAI-compatible LLM provider (P2a public API).
  *
- * Parity target: `celestea_harness/crates/llm` — raw SSE transport, usage /
+ * Parity target: `retired-engine/crates/llm` — raw SSE transport, usage /
  * cache-hit parsing, three timeout tiers, free-form reasoning_effort.
  *
  * Only this barrel is the package's public surface: provider internals

@@ -66,7 +66,7 @@ grep -rn 'API_ENDPOINT_COUNT\|must hold 51\|50 -> 51' packages apps tests contra
 ### 11.4 本轮**没有**做的事（重要）
 
 - **未跑 `pnpm check`**：本轮是设计稿，未改任何代码、contracts、tests、fixtures（`git status` 里与本任务相关的改动**只有本文件**）。跑全量检查只会看到 W798（全仓退役后端词汇清理）与其它并发任务的路径噪声，无诊断价值。若验收方要求，可单独跑并登记 `git status --porcelain`。
-- **未探测基元**（凭据边界，§2.3）。
+- **未探测备用渠道**（凭据边界，§2.3）。
 - **未实测**上游的单消息图片数/体积上限、远程 URL 图片、Files API（均标 **待验证**）。
 
 ### 11.5 环境事实（实测）
@@ -74,10 +74,10 @@ grep -rn 'API_ENDPOINT_COUNT\|must hold 51\|50 -> 51' packages apps tests contra
 ```
 studio 进程: node tsx src/main.ts (pid 2741249, user celestea)
 CELESTEA_PROVIDERS_FILE=/var/lib/celestea-agent/providers.json  (mode 0600, plaintext api_key)
-CELESTEA_TOOL_ROOTS=/src/celestea_studio-ts:/src/celestea_harness:/tmp
-workspaces: /src/CelesteaTeamAPI, /src/celestea_harness, /server-center
+CELESTEA_TOOL_ROOTS=/srv/celestea/studio:/srv/celestea/engine-ref:/tmp
+workspaces: /srv/celestea/team-api, /srv/celestea/engine-ref, /srv/ops
 会话目录: <workspace>/<session-dir>/{cli-main.jsonl, session.json, ...}
-上游: http://127.0.0.1:3001/v1 (celestea) / https://tokenrhythm.studio/v1 (基元)
+上游: http://127.0.0.1:3001/v1 (celestea) / https://third-party-gateway.example/v1 (备用渠道)
 仓库图像库: 无 (grep sharp|jimp|image-size|file-type = 0 命中)
 ```
 

@@ -4,7 +4,7 @@
  * downgrade (the plan's option (b)) stops OFFERING it while keeping stored
  * entries readable, echoed and warned about.
  *
- * Source: \`/server-center/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md\`
+ * Source: \`/srv/ops/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md\`
  * §B4 W819-8 — "选 (b)：GET /api/grants 与前端 grants 面板不再把 tool_extra
  * 列为可授（快照断言）".
  */

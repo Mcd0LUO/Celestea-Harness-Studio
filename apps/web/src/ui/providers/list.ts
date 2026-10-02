@@ -51,7 +51,7 @@ export function renderDefaultPicker(container: HTMLElement, host: ProviderListHo
       const o = document.createElement('option');
       o.value = m.id;
       // W9228（W9225/W9227 跨格线索 C4 · W9202 审计 P1-4）：模型 id 在 provider
-      // 之间**不唯一**（生产里 `deepseek-flash` 同时挂在网关与「基元」下），而
+      // 之间**不唯一**（生产里 `deepseek-flash` 同时挂在网关与「备用渠道」下），而
       // option 的 value 只放 m.id ⇒ 两个同名模型产生两个 value 相同的 option，
       // 用户在界面上分不出选的是哪一个，change 时也只发 model —— 后端
       // （handlers/providers.ts 的 provider_id 缺省分支）便取**第一个**列出该 id 的
