@@ -39,7 +39,7 @@
 
 import { closeSync, openSync, renameSync, statSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { usageAdd, zeroUsage, type SessionEvent, type SessionLog, type TurnOutcome, type Usage } from "@celestea/core";
+import { usageAdd, usageIsEmpty, zeroUsage, type SessionEvent, type SessionLog, type TurnOutcome, type Usage } from "@celestea/core";
 import {
   costAdd,
   costOf,
@@ -606,7 +606,10 @@ export interface LedgerTotals {
   cost_complete: boolean;
   /** Rows that carried usage the table could not price (never silently 0). */
   unpriced_records: number;
-  /** Rows whose cost is UNKNOWN (no usage at all, or an input side that was never measured). */
+  /**
+   * Rows whose cost is UNKNOWN: no usage at all, an input side that was never
+   * measured (W9261), or a FAILED background extraction that measured nothing.
+   */
   billed_unknown_records: number;
   unpriced_models: string[];
 }
@@ -637,9 +640,15 @@ export function aggregateUsage(records: readonly UsageLedgerRecord[], session?: 
     // carry usage whose input half is unknown (W9261 — a streaming gateway that
     // only measures the completion), and its tokens must still be summed while
     // the aggregate stops claiming completeness.
-    // Extraction rows carry no `billed_unknown` field — their failure mode is
-    // `status: "error"` on the row itself — so only step rows are counted here.
-    if (record.kind !== "extraction" && record.billed_unknown) totals.billed_unknown_records += 1;
+    // Extraction rows carry no `billed_unknown` field (the disk format is frozen),
+    // and their failure mode is `status: "error"` — which also books
+    // `zeroUsage()` when the call died before any usage frame arrived. So the SAME
+    // rule as W9261 applies to them: a zero nobody measured is UNKNOWN, not free.
+    // Narrowed to the measured-nothing case, because an error row that DID observe
+    // usage carries a real cost for what it observed.
+    const unknownCost =
+      record.kind === "extraction" ? record.status === "error" && usageIsEmpty(record.usage) : record.billed_unknown;
+    if (unknownCost) totals.billed_unknown_records += 1;
     if (record.usage !== null) {
       totals.tokens = usageAdd(totals.tokens, record.usage);
       if (record.priced_by === "unpriced") {
