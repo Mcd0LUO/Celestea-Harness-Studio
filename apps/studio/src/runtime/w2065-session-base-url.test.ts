@@ -90,6 +90,10 @@ function makeHost(gwUrl: string, mmUrl: string, listed: { gw?: string[]; minimax
   for (const [k, v] of Object.entries(process.env)) if (!k.startsWith("CELESTEA_")) env[k] = v;
   env["CELESTEA_API_KEY"] = "test-key";
   env["CELESTEA_TOOL_ROOTS"] = workspace;
+  // Phase 1 extraction is OPT-IN (default off). Turned ON here on purpose: the
+  // second turn's extra request is the proof that a model switch also reaches
+  // the DERIVED calls, not just the turn (see the second test's assertion).
+  env["CELESTEA_MEMORY_EXTRACTION"] = "on";
   const config = loadStudioConfig({ cwd: root, env, paths: { staticRoot } });
   const studio = createStudioApp({ config, env });
   return { app: studio.app, studio };

@@ -360,7 +360,8 @@ export class SessionComposer {
     const read = reader?.read(sessionId, dir) ?? { grants: EMPTY_GRANTS, warnings: [] };
     // W728: the ledger must exist before the Llm wrapper (every step books).
     const ledger = this.usageLedger(sessionId, dir);
-    // Phase 1: background memory extraction (best-effort; CELESTEA_MEMORY_EXTRACTION=off).
+    // Phase 1: background memory extraction — OPT-IN (CELESTEA_MEMORY_EXTRACTION=on);
+    // absent/off is the default, because it is an extra billed call per turn.
     const extraction = this.memoryExtraction(sessionId, dir, workspace, profile, ledger);
     // W783: the question wiring of THIS generation. The runtime handle does not
     // exist until `compose()` below returns, so the wiring reaches it through a
