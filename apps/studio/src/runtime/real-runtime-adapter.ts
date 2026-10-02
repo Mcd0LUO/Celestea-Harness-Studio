@@ -104,7 +104,7 @@ import {
 import { watchdogCount, watchdogOf, watchdogRunningOf, workerStatusOf } from "./watchdog-view.js";
 import { hasLiveWorkersOf } from "./worker-live.js";
 import { recoveryViewOf, type RecoveryView } from "./recovery-view.js";
-import { compressionViewOf, type CompressionStatusView } from "./compression-view.js";
+import { compressionViewOf, compressionViewOfDir, type CompressionStatusView } from "./compression-view.js";
 import { workerTablePath, workerTableStateOf, type WorkerTableState } from "./worker-table.js";
 import { clearSession, compactSession, type SessionLifecycleDeps } from "./session-lifecycle.js";
 import { releaseSessionOf, releaseSettleMs } from "./session-release.js";
@@ -759,11 +759,20 @@ class RealEngine implements RealRuntimeAdapter {
 
   /**
    * W1900: `/api/status.compression` of one session. It PEEKS like
-   * `recoveryView` — a status poll must never compose a session, and an
-   * uncomposed session simply has nothing compressed.
+   * `recoveryView` — a status poll must never compose a session.
+   *
+   * W9261: "never compose" is not "assume nothing compressed". A session that
+   * folded history and was then evicted still has its blocks in
+   * `<session dir>/compression.json`, and answering `blocks: 0` for it is a
+   * false statement about that session — on the very surface an operator reads.
+   * So when there is no live generation the sidecar is read from disk (one small
+   * JSON read, exactly what `recoveryView` already does for the checkpoint).
    */
   compressionView(session: string | null): CompressionStatusView {
-    return compressionViewOf(this.registry.peek(session)?.runtime.session ?? null);
+    const live = this.registry.peek(session)?.runtime.session ?? null;
+    if (live !== null) return compressionViewOf(live);
+    const dir = session === null ? null : (this.opts.resolveSession?.(session)?.dir ?? null);
+    return dir === null ? compressionViewOf(null) : compressionViewOfDir(dir);
   }
 
   /**

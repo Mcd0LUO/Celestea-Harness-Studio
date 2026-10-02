@@ -33,6 +33,7 @@
 | P15 | `request_format` 只写不读 | 字段有 UI、有 schema、有回显，但 `packages/llm` 零引用；协议是**路由的属性**，变化单元是 adapter |
 | P16 | responses 端点的两个静默陷阱 | 打满 token 上限时**终帧改名**（`response.incomplete`）；`max_tokens` 被 200 接受但不生效 |
 | P17 | usage 藏在哪个帧 / 它该**发出来** | responses 只在终帧带 usage；anthropic 拆成两帧要合并。两者都**曾完全不发出** usage 事件 |
+| P18 | 流式 usage 的 `prompt_tokens` 可能是 0 | 那是「**没测**」不是「没花」：账本记 `billed_unknown`，绝不替上游猜数（同一请求非流式给 10、流式给 0） |
 
 ---
 
@@ -419,6 +420,49 @@ wire 用例红；删掉 `response.incomplete` 分支 -> 截断用例红。
 `packages/llm/src/anthropic/decode.test.ts` 各有一条
 「usage 事件出现在终态之前且两半都非零」的端到端断言，跑的是真实录制帧；
 变异负控制把 emit 停掉 → 两条都红。
+
+---
+
+## P18 · 流式 usage 的 `prompt_tokens` 可能是 0：那是「没测」，不是「没花」
+
+**症状**：同一网关、同一模型、同一条请求 —— **非流式**回 `prompt_tokens:10`，**流式**回
+`prompt_tokens:0`（`completion_tokens` 照常有值）。于是整条用量账本的输入侧全是 0：
+`/api/status.usage.total.prompt_tokens=0`、`/api/usage/ledger` 的 `totals.prompt_tokens=0`。
+只要该模型进了价格表，输入侧成本就会被算成 0 —— **静默偏低**，正是账本 `billed_unknown`
+这个字段存在的理由。
+
+**复现**（直连，不经引擎；`stream_options.include_usage` 加不加都一样）：
+
+```bash
+BASE=http://<网关>/v1; KEY=<key>; M=MiniMax-M3.1-Flash-Preview
+# 非流式 → prompt_tokens 正确
+curl -s  "$BASE/chat/completions" -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"say PONG\"}],\"max_tokens\":16}"
+# 流式 → prompt_tokens: 0
+curl -sN "$BASE/chat/completions" -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d "{\"model\":\"$M\",\"messages\":[{\"role\":\"user\",\"content\":\"say PONG\"}],\"max_tokens\":16,\"stream\":true,\"stream_options\":{\"include_usage\":true}}"
+```
+
+**根因**：网关只在流式路径上统计 completion，输入侧直接给 0。**不是本仓解析器的 bug** ——
+`packages/llm/src/usage.ts` 的 `usageFromObject` 是 Rust 端 `extract_usage` 的 1:1 移植，
+如实记录上游给的值。改它等于让「忠实解析」变成「替上游猜数」，那是更糟的错。
+
+**正确做法**：把「**没测**」与「**测出来是 0**」分开。
+
+- 账本行仍按上游原值记录计数（`usage` 一字不改）；
+- 但「输入侧为 0 而输出侧非 0」的行，`billed_unknown` 记 `true` ⇒ `cost_complete:false`、
+  聚合总量是「**下限**而非全部」，而不是一个看起来完整的 0；
+- `aggregateUsage()` 按**行自己的** `billed_unknown` 计数，不再从 `usage === null` 反推
+  （否则行上的标记与聚合口径会分叉）。
+
+**代码位置**：`packages/runtime/src/ledger.ts` 的 `book()`（`inputUnknown`）与 `aggregateUsage()`；
+契约描述在 `contracts/data-files/usage-ledger.schema.json` 的 `kinds.ok` 与 `billed_unknown`。
+
+**怎么验证**：`packages/runtime/src/ledger.test.ts` 的
+「W9261: a zero INPUT side is unknown, not a measurement」两条 ——
+`okStep(0, 12)` 必须 `billed_unknown:true` 且 `cost_complete:false`；`okStep(10, 12)` 必须 `false`。
+变异负控制：把 `inputUnknown` 改回 `usage === null` ⇒ 第一条红。
+
 ## 附：容易误记的几件事
 
 | 误记 | 事实 |

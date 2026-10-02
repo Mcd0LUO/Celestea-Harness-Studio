@@ -1,0 +1,6 @@
+{"ts":1790918716,"session":"","event":"degraded_by_policy","cap":"sandbox","provider":"userspace","reason":"bwrap not found on PATH (set CELESTEA_SANDBOX_BWRAP to pin one)"}
+{"ts":1790918716,"session":"","event":"degraded_by_policy","cap":"sandbox","provider":"userspace","reason":"bwrap not found on PATH (set CELESTEA_SANDBOX_BWRAP to pin one)"}
+{"ts":1790918756,"session":"","event":"degraded_by_policy","cap":"sandbox","provider":"userspace","reason":"bwrap not found on PATH (set CELESTEA_SANDBOX_BWRAP to pin one)"}
+{"ts":1790918756,"session":"","event":"degraded_by_policy","cap":"sandbox","provider":"userspace","reason":"bwrap not found on PATH (set CELESTEA_SANDBOX_BWRAP to pin one)"}
+{"ts":1790918797,"session":"","event":"degraded_by_policy","cap":"sandbox","provider":"userspace","reason":"bwrap not found on PATH (set CELESTEA_SANDBOX_BWRAP to pin one)"}
+{"ts":1790918797,"session":"","event":"degraded_by_policy","cap":"sandbox","provider":"userspace","reason":"bwrap not found on PATH (set CELESTEA_SANDBOX_BWRAP to pin one)"}

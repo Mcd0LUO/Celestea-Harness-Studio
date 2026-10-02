@@ -10,11 +10,24 @@
  * `/api/status`'s `compression.last_ratio` would echo the lie).
  */
 
-import { InMemorySessionLog, MemoryCompressionStore, compressedLog } from "@celestea/session";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { FileCompressionStore, InMemorySessionLog, MemoryCompressionStore, compressedLog } from "@celestea/session";
 import type { ContextUsageFacts, SessionLog } from "@celestea/core";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { compressionHostOf, compressionViewOf, newestTurnOf } from "./compression-host.js";
+import { compressionHostOf, compressionViewOf, compressionViewOfDir, newestTurnOf } from "./compression-host.js";
+
+const scratchDirs: string[] = [];
+afterEach(() => {
+  while (scratchDirs.length > 0) rmSync(scratchDirs.pop() as string, { recursive: true, force: true });
+});
+function scratch(): string {
+  const dir = mkdtempSync(join(tmpdir(), "compression-view-"));
+  scratchDirs.push(dir);
+  return dir;
+}
 
 const USAGE: ContextUsageFacts = { used: 61_000, window: 100_000, ratio: 0.61, estimated: false, method: "usage_prompt_tokens", projected: false };
 
@@ -66,6 +79,22 @@ describe("W1900 · the port speaks the host's water level", () => {
     ]);
     expect(compressionViewOf(log).last_ratio).toBe(0.42);
     expect(compressionViewOf(log).ranges).toEqual([[0, 0], [1, 2]]);
+  });
+
+  it("reads a session's SIDECAR when there is no live log (W9261)", () => {
+    // A session that folded history and was then evicted still has its blocks on
+    // disk. `compressionViewOf(null)` would answer "nothing compressed", which is
+    // false for that session — and /api/status is where an operator looks.
+    const dir = scratch();
+    new FileCompressionStore(dir).save([
+      { from_turn: 0, to_turn: 2, summary: "folded", created_turn: 3, context_ratio: 0.42 },
+    ]);
+    expect(compressionViewOfDir(dir)).toEqual({ enabled: true, blocks: 1, ranges: [[0, 2]], last_ratio: 0.42 });
+  });
+
+  it("keeps saying 'nothing compressed' for a directory with NO sidecar", () => {
+    // `enabled:false` keeps its contract meaning: this session has no sidecar.
+    expect(compressionViewOfDir(scratch())).toEqual({ enabled: false, blocks: 0, ranges: [], last_ratio: null });
   });
 
   it("newestTurnOf answers the log's own last turn, and -1 when there is none", () => {

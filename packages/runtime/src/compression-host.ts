@@ -35,7 +35,8 @@ import {
   type ContextUsageFacts,
 } from "@celestea/core";
 import type { SessionLog, Statusline } from "@celestea/core";
-import { compressionStoreOf, type CompressionStore } from "@celestea/session";
+import { existsSync } from "node:fs";
+import { FileCompressionStore, compressionPathFor, compressionStoreOf, type CompressionStore } from "@celestea/session";
 import { compressionEnabled } from "./compression-switch.js";
 
 /**
@@ -211,6 +212,11 @@ export interface CompressionView {
   last_ratio: number | null;
 }
 
+/** The honest "this session has no sidecar" block, fresh each time (never shared). */
+function disabledView(): CompressionView {
+  return { enabled: false, blocks: 0, ranges: [], last_ratio: null };
+}
+
 /**
  * The `CompressionView` of a session (an always-present, never-throwing block).
  *
@@ -220,12 +226,35 @@ export interface CompressionView {
  * poll then sees why `blocks` is 0 without having to know the layering.
  */
 export function compressionViewOf(log: SessionLog | null | undefined): CompressionView {
-  if (!compressionEnabled()) return { enabled: false, blocks: 0, ranges: [], last_ratio: null };
+  if (!compressionEnabled()) return disabledView();
   const store = compressionStoreOf(log ?? null);
-  if (log === null || log === undefined || store === null) {
-    return { enabled: false, blocks: 0, ranges: [], last_ratio: null };
-  }
-  const blocks = store.blocks();
+  if (log === null || log === undefined || store === null) return disabledView();
+  return viewOfBlocks(store.blocks());
+}
+
+/**
+ * The same view for a session with NO live generation, read from its SIDECAR.
+ *
+ * W9261: `compressionViewOf(null)` answers "this session has nothing compressed",
+ * which is the right answer for a session that never compressed — but NOT for one
+ * that folded history and was then evicted: its blocks are still on disk, and
+ * `blocks: 0` is a false statement about that session. `/api/status` is exactly
+ * where an operator checks, so the poll must read the sidecar instead of assuming
+ * its absence.
+ *
+ * Cheap by construction: one small JSON read, the same shape of work
+ * `recoveryViewOf` already does for the checkpoint sidecar — and it never
+ * COMPOSES a session (that is the property the peek-only rule protects).
+ * `enabled` keeps its contract meaning: false = this session has no sidecar.
+ */
+export function compressionViewOfDir(dir: string): CompressionView {
+  if (!compressionEnabled()) return disabledView();
+  if (!existsSync(compressionPathFor(dir))) return disabledView();
+  return viewOfBlocks(new FileCompressionStore(dir).blocks());
+}
+
+/** The block list -> view mapping, in ONE place so the two readers cannot drift. */
+function viewOfBlocks(blocks: readonly CompressionBlock[]): CompressionView {
   // The block written LAST, not the one that STARTS latest. `blocks()` hands back
   // NORMALIZED (sorted by `from_turn`) blocks, so "the last element" is the range
   // with the largest start — a different block the moment the model compresses a
