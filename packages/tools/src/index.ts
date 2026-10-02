@@ -115,6 +115,20 @@ export {
 export { absolutize, canonicalExisting, isDirectory, isInside, resolveExistingTarget, resolveWriteTarget } from "./guard/paths.js";
 // W9226 (P0): the `toolDeny` guard — a DENIAL must reach `run_code` sub-calls too.
 export { toolDenyGuard, TOOL_DENIED_CODE } from "./guard/tool-deny.js";
+// W9269 (P0): the MANDATORY write deny list — a FLOOR under every widening knob
+// (grants / preset / allPaths / CELESTEA_TOOL_ROOTS). Exported from the package
+// entry because the seam is useless to a host that cannot read the list: the
+// code a caller branches on, the entries themselves, and the pure matcher.
+export {
+  DANGEROUS_WRITE_CODE,
+  DANGEROUS_WRITE_DIR_PREFIXES,
+  DANGEROUS_WRITE_DIRS,
+  DANGEROUS_WRITE_FILES,
+  dangerousWriteDecision,
+  denyListMatch,
+  isDangerousWrite,
+  type DenyListMatch,
+} from "./guard/write-deny-list.js";
 
 // --- tools --------------------------------------------------------------------
 export { readFileTool, readFileSpec } from "./tools/read-file.js";

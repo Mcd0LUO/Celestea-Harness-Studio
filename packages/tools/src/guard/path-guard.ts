@@ -48,6 +48,14 @@ import { contractError } from "../errors.js";
 import { pathDelimiter } from "../platform/paths.js";
 import type { SessionFsScope } from "../sandbox/config.js";
 import { absolutize, isDirectory, isInside, resolveExistingTarget, resolveWriteTarget } from "./paths.js";
+import { dangerousWriteDecision, denyListMatch } from "./write-deny-list.js";
+
+/**
+ * W9269: re-exported so a consumer of the path guard gets the deny-list
+ * contract code from the SAME module that enforces it, instead of re-deriving
+ * the string (or importing the list module purely for the constant).
+ */
+export { DANGEROUS_WRITE_CODE, denyListMatch, isDangerousWrite } from "./write-deny-list.js";
 
 export const ENV_TOOL_ROOTS = "CELESTEA_TOOL_ROOTS";
 export const ENV_TOOL_WORKDIR = "CELESTEA_TOOL_WORKDIR";
@@ -197,6 +205,12 @@ export interface PathGuardPolicyInit {
   allPaths?: boolean;
   /** Set when the declared roots were unusable → every path call is denied. */
   failClosedReason?: string | null;
+  /**
+   * W9269: the platform the write deny list is judged under (case + separator
+   * rules). Defaults to the HOST at the call site, per the AGENT.md §8 / W885
+   * "platform is a parameter" rule, so a win32 test is provable on a Linux host.
+   */
+  platform?: string;
 }
 
 /**
@@ -241,6 +255,8 @@ export class PathGuardPolicy {
    */
   readonly allPathsWrite: boolean;
   readonly failClosedReason: string | null;
+  /** W9269: platform the deny list is judged under (defaults to the host). */
+  readonly platform: string;
 
   constructor(init: PathGuardPolicyInit) {
     this.workspace = init.workspace;
@@ -256,6 +272,7 @@ export class PathGuardPolicy {
     this.allPathsWrite = explicit || hasAllPathsRoot(declaredWrite);
     this.allPaths = this.allPathsRead && this.allPathsWrite;
     this.failClosedReason = init.failClosedReason ?? null;
+    this.platform = init.platform ?? process.platform;
   }
 
   /**
@@ -268,7 +285,12 @@ export class PathGuardPolicy {
    * operator declared, and grants keep appending. No env entry is dropped, so a
    * session cannot end up narrower than the posture it was composed under.
    */
-  static fromEnv(env: NodeJS.ProcessEnv = process.env, grants: PathGuardGrants = {}, scope: SessionFsScope | null = null): PathGuardPolicy {
+  static fromEnv(
+    env: NodeJS.ProcessEnv = process.env,
+    grants: PathGuardGrants = {},
+    scope: SessionFsScope | null = null,
+    platform: string = process.platform,
+  ): PathGuardPolicy {
     const workspaceRaw = scope?.workspace ?? envString(env, ENV_TOOL_WORKDIR) ?? process.cwd();
     const workspace = resolveExistingTarget(workspaceRaw, process.cwd()) ?? resolve(workspaceRaw);
     const grantRead = [...(grants.readRoots ?? [])];
@@ -286,7 +308,13 @@ export class PathGuardPolicy {
      * case (`scripts/run-studio-ts.sh` always sets it). Every field now travels
      * through this object, so a fourth exit cannot forget one either.
      */
-    const base = { workspace, readRoots: grantRead, writeRoots, workspaceWritable: grants.workspaceWritable, allPaths };
+    // W9269: the platform travels in the SAME shared `base` as every other
+    // field, for the reason the W9205 comment above gives: fromEnv has three
+    // exits and a field that is not in `base` is a field one of them silently
+    // drops. Here the loss would be quieter still -- the deny list would fall
+    // back to the HOST's case/separator rules, so a win32 session audited from
+    // a posix host would answer "allowed" for .BASHRC.
+    const base = { workspace, readRoots: grantRead, writeRoots, workspaceWritable: grants.workspaceWritable, allPaths, platform };
     const raw = envString(env, ENV_TOOL_ROOTS);
     if (raw === undefined) return new PathGuardPolicy(base);
     const entries = parseToolRoots(raw);
@@ -333,11 +361,39 @@ export class PathGuardPolicy {
   checkWrite(target: string): ToolDecision {
     const blocked = this.failClosed();
     if (blocked !== null) return blocked;
+    // The MANDATORY write deny list (W9269) is the LAST gate: every branch that
+    // would otherwise ALLOW a write — the allPathsWrite short circuit, an
+    // unresolvable target, and a target inside a writable root — is funnelled
+    // through `allowWrite()`, which re-checks the deny list FIRST. That ordering
+    // is the whole point: grants / a preset / allPaths / CELESTEA_TOOL_ROOTS can
+    // only ever change the *root set* that gets here, and none of them can make
+    // a deny-listed target writable because the deny is applied after all of
+    // them, on the single allow path. Putting it before the root tests instead
+    // would make a denied path fall through to `path_forbidden` under a narrow
+    // policy (the wrong, non-actionable code) and — worse — a future allow branch
+    // added after the deny would silently bypass it. One exit, deny last.
+    return this.allowWrite(target);
+  }
+
+  /**
+   * The single allow path for a write. Applies the deny list, then the root
+   * test, so the deny wins over every widening mechanism.
+   */
+  private allowWrite(target: string): ToolDecision {
+    // W9269: the deny list is judged on the CANONICAL write target — the place
+    // the bytes would ACTUALLY land, with symlinks resolved — not on the string
+    // the caller typed. The lexical form is checked too, as a second, cheaper
+    // opinion: a symlink inside the workspace pointing at $HOME would otherwise
+    // carry a directory-prefix denial straight past a lexical-only test
+    // (`<ws>/link/.vscode/x` has no `.vscode` component of its own).
+    const canonical = resolveWriteTarget(target, this.workspace);
+    const judged = canonical ?? absolutize(target, this.workspace);
+    const match = denyListMatch(judged, this.platform) ?? denyListMatch(target, this.platform);
+    if (match !== null) return dangerousWriteDecision(judged, match, this.platform);
     // W9110: see checkRead — the capability short circuits, fail-closed does not.
     // W9205: the WRITE half. This is the line the P0 turned on: it used to read
     // the combined flag, which the workspace alone could set to true.
     if (this.allPathsWrite) return ALLOW;
-    const canonical = resolveWriteTarget(target, this.workspace);
     if (canonical === null) return ALLOW;
     if (this.writeRoots.some((root) => isInside(canonical, root))) return ALLOW;
     return deny("path_forbidden", this.writeDenyMessage(target));
