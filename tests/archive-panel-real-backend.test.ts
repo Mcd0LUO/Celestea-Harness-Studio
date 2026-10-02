@@ -15,7 +15,7 @@
  *      界面既没报错也没变化」（静默失败）。
  *   ③ 交互口径（用户裁决）：确认后**立即**生效（乐观移除、无「…中」占位），失败才回滚。
  *
- * 自建会话一律以 w792- 开头（工作区 CelesteaTeamAPI），收尾时连回收目录条目一并清理。
+ * 自建会话一律以 w792- 开头（工作区 example-team-api），收尾时连回收目录条目一并清理。
  */
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -72,7 +72,7 @@ const wait = (ms = 40): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 // ---- 真实服务接线 ----------------------------------------------------------------
 const BASE = process.env["CELESTEA_E2E_BASE"] ?? "http://127.0.0.1:3777";
-const WS = "CelesteaTeamAPI";
+const WS = "example-team-api";
 const TRASH = join("/src", WS, ".celestea-trash");
 const STAMP = String(Date.now()).slice(-7);
 

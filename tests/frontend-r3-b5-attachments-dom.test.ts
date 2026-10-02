@@ -6,7 +6,7 @@
  * 但该文件会因此超过 eslint 的 max-lines 400（480 行），故按仓库规矩拆到本文件；
  * 用例内容与探针语义一字未改。
  *
- * 来源：/server-center/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md
+ * 来源：/srv/ops/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md
  *   B5 验收探针：F1/F11 revoke 生命周期、F2 读失败不静默丢、F3 失败回滚原会话、
  *   F4 config-saved 重算能力位、F8 同批只拒溢出项。全部用 jsdom + pathToFileURL
  *   加载真实模块，驱动真实 dispatchSend / 真实事件派发，不复刻逻辑。
@@ -158,7 +158,7 @@ async function bootInputbar(): Promise<{ bar: InputbarMod; view: { activeSession
 const trayItems = (): number => Array.from(doc.querySelectorAll(".attach-tray .attach-item")).length;
 // ============================================================================
 // R3 W838 · B5 —— 附件模块生命周期（第 9 批 web 前端）
-// 来源：/server-center/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md
+// 来源：/srv/ops/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md
 //   的 B5 验收探针（F1/F11 revoke 生命周期、F2 读失败不静默丢、F3 失败回滚原会话、
 //   F4 config-saved 重算能力位、F8 同批只拒溢出项）。全部走真实模块 + 真实路径。
 // ============================================================================

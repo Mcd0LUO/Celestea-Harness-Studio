@@ -3,7 +3,7 @@
  * lifecycle (P1-7).
  *
  * Probes from the authoritative plan
- * `/server-center/runtime/worker-exec/results/W826-R3修复计划-A-core-llm-runtime.md`
+ * `/srv/ops/runtime/worker-exec/results/W826-R3修复计划-A-core-llm-runtime.md`
  * (§三 批次 H): a throwing `onInjected` must not lose the drained message, and a
  * long-lived caller `AbortSignal` must carry no listener after normal turns.
  */

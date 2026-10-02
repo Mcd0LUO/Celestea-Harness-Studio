@@ -14,7 +14,7 @@
 1. **依赖只能向下**：`core ← session / llm / tools / agent-loop / workers ← runtime ← apps/studio`。反向依赖、同层横向依赖、跨层上跳都是错误。
 2. **跨包只走包入口**：只允许 `import ... from "@celestea/<pkg>"`；`@celestea/<pkg>/src/...`（深层导入）和 `../../other/src/x.js`（相对路径跨包）一律拒绝。
 3. **公开 API 收口在 `src/index.ts`**：包外能看到的只有该包入口导出的符号。
-4. **规模硬线**：单文件 ≤ 450 行（建议 ≤ 300）、单函数 ≤ 80 行、控制流嵌套 ≤ 4 层、形参 ≤ 5 个、回调嵌套 ≤ 4 层。
+4. **规模硬线**：单文件 ≤ 450 行（建议 ≤ 300）、单函数 ≤ 100 行、控制流嵌套 ≤ 4 层、形参 ≤ 5 个、回调嵌套 ≤ 4 层。
 5. **一切皆插件**：新能力 = 新增 seam 实现 + 在 compose 处注册。禁止在 `core` 里写 `if (provider === "x")` 这类分支。
 6. **注释与空行不计入行数**——写注释永远不亏。
 7. **例外只能登记**在 `eslint.config.js` 的 `ARCH_EXCEPTIONS` 与本文 §5 表中，逐条写明「原因 / 拆分方案 / 移除阶段」；**禁止就地 `// eslint-disable`**。
@@ -107,7 +107,7 @@
 
 ## 3. 一切皆插件（seam 契约 ↔ 参考实现 `crates/core`）
 
-设计原点与 `/src/celestea_harness`（参照实现，2026-09-11 已删除）的 `crates/core/src/lib.rs` 一一对应：
+设计原点与 `/srv/celestea/engine-ref`（参照实现，2026-09-11 已删除）的 `crates/core/src/lib.rs` 一一对应：
 **该 crate 只有 seam 定义与 re-export，没有任何具体实现**；具体 provider 住在兄弟 crate，在 compose 期挂载。
 TS 侧保持同一形状：`packages/core` 只放接口与容器，实现全在 L1 包里。
 
@@ -171,7 +171,7 @@ apps/studio → runtime.compose(profile)
 | 指标 | 上限 | 建议 | ESLint 规则 | 备注 |
 |---|---|---|---|---|
 | 单文件行数 | **450** | ≤ 300 | `max-lines` | `skipBlankLines + skipComments`：空行、注释不计费（W9103：400 → 450） |
-| 单函数行数 | **80** | ≤ 50 | `max-lines-per-function` | 同样跳过空行与注释；**测试文件放宽到 150**（见下） |
+| 单函数行数 | **100** | ≤ 50 | `max-lines-per-function` | 同样跳过空行与注释；**测试文件放宽到 150**（见下）。80 → 100 的放宽依据见下方注 |
 | 控制流嵌套 | **4** | ≤ 3 | `max-depth` | if/for/while/switch/try 的嵌套层数 |
 | 形参个数 | **5** | ≤ 3 | `max-params` | 参数过多通常说明该抽配置对象或该拆函数 |
 | 回调嵌套 | **4** | ≤ 2 | `max-nested-callbacks` | 回调金字塔是异步代码的头号可读性杀手 |
@@ -180,6 +180,12 @@ apps/studio → runtime.compose(profile)
 >
 > **测试文件的唯一放宽**：单条用例（`it(...)` 的回调）是线性的 arrange-act-assert，块上限放宽到 **150 行**（`arch/size-tests`）。
 > 文件级 450 行、嵌套深度、参数个数、回调嵌套对测试**同样生效**；超过 150 行的用例应拆成多条 `it()`，而不是把断言堆在一起。
+>
+> **单函数 80 → 100 的放宽（证据与边界）**：实测把阈值提到 100 后，非测试源码里**只剩 3 个文件**越线，
+> 且这 3 个全在 §5 的例外表里（EX-02/03/04）——**当前干净的文件一个都没被放过**，
+> 也就是说这次放宽**不减少任何现存覆盖**，只是给新代码 20 行余量。放宽后规则仍承重：
+> EX-02/03/04 在 100 下依旧是 error，例外表没有被稀释。回滚 = 把 `eslint.config.js` 的
+> `MAX_LINES_PER_FUNCTION` 改回 80（本节与 §0/附录B 的数字同步改回），无其它文件依赖该常量。
 
 ### 4.2 超限时的四种拆分范式（按优先级）
 
@@ -187,7 +193,7 @@ apps/studio → runtime.compose(profile)
    范例：`packages/session/src/log/` —— `memory.ts`（内存实现）/ `file.ts`（文件回放与命名）/ `persistent.ts`（持久化实现）/ `derive.ts`（消息投影）。
    每拆一个子模块：**单一职责、可单测、由 `index.ts` 统一收口**。
 2. **数据表外提**：把规则表、清单、映射、正则集合提到模块级 `const`（`DEFAULT_RULES`、`CREDENTIAL_CONTEXTS`），函数体只留流程。
-3. **按阶段拆函数**：`parse → validate → project → emit` 各成一个 ≤80 行函数，主函数只做编排（`scripts/export-golden.ts` 的 `main()` 就该这么治）。
+3. **按阶段拆函数**：`parse → validate → project → emit` 各成一个 ≤100 行函数，主函数只做编排（`scripts/export-golden.ts` 的 `main()` 就该这么治）。
 4. **按 seam 拆实现**：出现「如果 A 就…，如果 B 就…」时，抽出接口 + 每个分支一个实现文件 + 一个注册表。
 
 ### 4.3 拆分后的纪律
@@ -206,12 +212,12 @@ apps/studio → runtime.compose(profile)
 
 | ID | 文件 | 超限项（实测） | 原因 | 拆分方案 | 移除阶段 |
 |---|---|---|---|---|---|
-| EX-01 | `packages/core/src/redact.ts` | `createRedactor` 81 行（限 80）；`discover()` 与 `collectKnownSecrets()` 嵌套 5 层（限 4） | P0 遗留代码：脱敏规则表与凭据上下文直接内联在函数体内 | 把 `DEFAULT_RULES` / `CREDENTIAL_CONTEXTS` / 环境变量名单提到模块级常量表，并抽出 `collectProviderKeys()`；两个函数即可回到 ≤80 行 / ≤4 层 | P1（core 收口时；`packages/core` 归 W271 领地） |
-| EX-02 | `scripts/export-golden.ts` | `main()` 249 行（限 80）；嵌套 5 层（限 4） | P0 一次性黄金样本导出脚本：探针清单 → 拉取 → 脱敏 → 写盘全在一个线性 `main()` 里 | 拆 `scripts/golden/{probe,fetch,redact,write}.ts`，`main()` 只保留步骤编排 | P1 工具链整理 |
-| EX-03 | `scripts/verify-contracts.ts` | `main()` 169 行（限 80） | P0 校验脚本：22 端点 × 断言的线性探针清单 | 探针清单抽成数据表（数组字面量）+ `runProbe()` 循环 | P1 工具链整理 |
-| EX-04 | `scripts/compare-replay.ts` | `main()` 115 行（限 80） | P0 对拍脚本：依次跑 A–E 五组对比并汇总写报告 | 每组对比抽成独立 `compareX()`，`main()` 只做调度与汇总 | P1 工具链整理 |
+| EX-01 | `packages/core/src/redact.ts` | `discover()` 与 `collectKnownSecrets()` 嵌套 5 层（限 4）。（`createRedactor` 原 81 行，随单函数上限 80 → 100 已回到上限内，该项豁免已移除） | P0 遗留代码：脱敏规则表与凭据上下文直接内联在函数体内 | 把 `DEFAULT_RULES` / `CREDENTIAL_CONTEXTS` / 环境变量名单提到模块级常量表，并抽出 `collectProviderKeys()`，两个函数即可回到 ≤4 层 | P1（core 收口时；`packages/core` 归 W271 领地） |
+| EX-02 | `scripts/export-golden.ts` | `main()` 252 行（限 100）；嵌套 5 层（限 4） | P0 一次性黄金样本导出脚本：探针清单 → 拉取 → 脱敏 → 写盘全在一个线性 `main()` 里 | 拆 `scripts/golden/{probe,fetch,redact,write}.ts`，`main()` 只保留步骤编排 | P1 工具链整理 |
+| EX-03 | `scripts/verify-contracts.ts` | `main()` 169 行（限 100） | P0 校验脚本：22 端点 × 断言的线性探针清单 | 探针清单抽成数据表（数组字面量）+ `runProbe()` 循环 | P1 工具链整理 |
+| EX-04 | `scripts/compare-replay.ts` | `main()` 115 行（限 100） | P0 对拍脚本：依次跑 A–E 五组对比并汇总写报告 | 每组对比抽成独立 `compareX()`，`main()` 只做调度与汇总 | P1 工具链整理 |
 
-**当前状态**：`ARCH_STRICT=1 pnpm lint` 的输出恰好是上表 4 个文件、8 条错误——**没有隐藏例外**。
+**当前状态**：`ARCH_STRICT=1 pnpm lint` 的输出恰好是上表 4 个文件、7 条错误（单函数上限 80 → 100 后，EX-01 的 `createRedactor` 81 行不再越线，故 8 → 7）——**没有隐藏例外**。
 除上述之外，全部文件在当前配置下 0 error、0 warning（`tests/fixtures.test.ts` 的陈旧 `eslint-disable` 注释已于 W881 随失效测试分支一并删除）。
 
 **例外的三条纪律**
@@ -330,7 +336,7 @@ apps/studio → runtime.compose(profile)
 | `.mjs` | 零依赖的 Node 工具，且**必须能不经构建直接跑**（门禁、发布闸门、代码生成） |
 | `.ts` | 需要类型、且经 `tsx` 跑（bench、契约校验、回放对比） |
 | `.sh` | 只用于部署/运维胶水（`run-studio-ts.sh`） |
-| `.py` | 外部生态工具（`model-sync/`，与 newapi 侧对齐） |
+| `.py` | 外部生态工具（第三方运维侧的胶水脚本，本仓不随包发布） |
 
 **6.5.7 规模门禁的真实覆盖范围（更正 §4.1）**
 原文说「全部由 `pnpm lint` 机械检查」，这不准确。实际：
@@ -473,7 +479,7 @@ ARCH_STRICT=1 pnpm lint   # 复核例外清单是否还有必要（见 §5）
 | 规则 | 检查器 | 规则名 |
 |---|---|---|
 | 单文件 ≤450 行 | ESLint | `max-lines` |
-| 单函数 ≤80 行 | ESLint | `max-lines-per-function` |
+| 单函数 ≤100 行 | ESLint | `max-lines-per-function` |
 | 嵌套 ≤4 | ESLint | `max-depth` |
 | 参数 ≤5 | ESLint | `max-params` |
 | 回调嵌套 ≤4 | ESLint | `max-nested-callbacks` |

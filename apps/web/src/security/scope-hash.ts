@@ -15,9 +15,9 @@
 // 自己的公式重算 ⇒ **每次授予都 403**。两侧必须同步改。
 //
 // 漂移守护（任一端的形状/算法动了都必须机械失败）：
-//   冻结向量   /src/celestea_studio-ts/contracts/scope-hash-vectors.json
+//   冻结向量   /srv/celestea/studio/contracts/scope-hash-vectors.json
 //   前端侧     frontend/tools/check-scope-hash.mjs（已接进 frontend `pnpm check`）
-//   服务端侧   /src/celestea_studio-ts/tests/scope-hash-vectors.test.ts（vitest）
+//   服务端侧   /srv/celestea/studio/tests/scope-hash-vectors.test.ts（vitest）
 //
 // 本文件**零 import、零 DOM**：既要被浏览器 bundle 打包，也要能被 node 直接
 // 导入（Node ≥ 22 的 TS 类型剥离）与 TS 仓的 vitest 导入做逐字对拍。

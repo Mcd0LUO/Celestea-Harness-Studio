@@ -2,7 +2,7 @@
  * W833 (R3 B8 / W816 F5 + F7) — manual-turn start payload keys and the
  * no-argument cancel() target, on the REAL engine adapter.
  *
- * Source: /server-center/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
+ * Source: /srv/ops/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
  * §B8 W816 F5: a manual turn's status "start" payload must NOT carry a source
  * key; an autowake turn carries source:"autowake".
  * §B8 W816 F7: no-argument cancel() must cancel the most recently ACTIVE busy

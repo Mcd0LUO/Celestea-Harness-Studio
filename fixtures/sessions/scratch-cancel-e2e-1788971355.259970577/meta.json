@@ -1,6 +1,6 @@
 {
-  "id": "CelesteaTeamAPI/scratch-cancel-e2e-1788971355.259970577",
-  "workspace": "CelesteaTeamAPI",
+  "id": "example-team-api/scratch-cancel-e2e-1788971355.259970577",
+  "workspace": "example-team-api",
   "sessionDir": "scratch-cancel-e2e-1788971355.259970577",
   "slug": "scratch-cancel-e2e-1788971355.259970577",
   "roles": [
@@ -8,7 +8,7 @@
     "cancelled-outcome"
   ],
   "source": {
-    "logPath": "/src/CelesteaTeamAPI/scratch-cancel-e2e-1788971355.259970577/cli-main.jsonl",
+    "logPath": "/srv/celestea/team-api/scratch-cancel-e2e-1788971355.259970577/cli-main.jsonl",
     "sizeBytes": 768,
     "sha256": "05ea068700917aef542bd239774b5b9136194a08a74c17ce85d9a67700815cda",
     "mtime": "2026-09-09T16:29:22.075Z",

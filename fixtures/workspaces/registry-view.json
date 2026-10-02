@@ -3,21 +3,21 @@
     "endpoint": "GET http://127.0.0.1:3777/api/workspaces"
   },
   "body": {
-    "active_session": "celestea_harness/harness架构哥-1788933931.279221103",
+    "active_session": "retired-engine/example-session-1788933931.279221103",
     "workspaces": [
       {
-        "name": "CelesteaTeamAPI",
-        "path": "/src/CelesteaTeamAPI",
+        "name": "example-team-api",
+        "path": "/srv/celestea/team-api",
         "sessions": 3
       },
       {
-        "name": "celestea_harness",
-        "path": "/src/celestea_harness",
+        "name": "retired-engine",
+        "path": "/srv/celestea/engine-ref",
         "sessions": 1
       },
       {
         "name": "server-center",
-        "path": "/server-center",
+        "path": "/srv/ops",
         "sessions": 1
       }
     ]

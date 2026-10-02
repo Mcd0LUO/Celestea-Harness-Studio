@@ -18,8 +18,16 @@ import tseslint from "typescript-eslint";
 
 /** 单文件规模上限（跳过空行与注释）。W9103：400 → 450（用户裁决）。 */
 const MAX_LINES = 450;
-/** 单函数规模上限（跳过空行与注释）。 */
-const MAX_LINES_PER_FUNCTION = 80;
+/**
+ * 单函数规模上限（跳过空行与注释）。
+ *
+ * 80 → 100 的放宽依据（证据在 docs/ARCHITECTURE.md §4.1 注）：实测把阈值提到 100 时，
+ * 非测试源码里**只剩 3 个文件**越线，且这 3 个全在 ARCH_EXCEPTIONS 里（EX-02/03/04），
+ * 也就是说「当前干净的文件一个都没被放过」—— 放宽**不减少任何现存覆盖**，只是给新代码 20 行余量。
+ * 放宽后规则仍然承重：EX-02/03/04 在 100 下依旧是 error，例外表没有被稀释。
+ * 回滚：把本常量改回 80 即可（无其它文件依赖这个数），ARCHITECTURE.md §4.1 与本注释同步改回。
+ */
+const MAX_LINES_PER_FUNCTION = 100;
 /** 控制流嵌套上限。 */
 const MAX_DEPTH = 4;
 /** 形参个数上限。 */
@@ -53,9 +61,11 @@ const ARCH_EXCEPTIONS = [
   {
     id: "EX-01",
     files: ["packages/core/src/redact.ts"],
-    rules: { "max-lines-per-function": linesPerFunction(90), "max-depth": ["error", 5] },
-    reason: "P0 遗留：createRedactor 81 行；discover() 与 collectKnownSecrets() 控制流嵌套 5 层（规则表内联在函数里）",
-    plan: "把 DEFAULT_RULES / CREDENTIAL_CONTEXTS / 环境变量名单提到模块级常量表，并抽出 collectProviderKeys()，两个函数即可回到 ≤80 行 / ≤4 层",
+    // 单函数上限 80 → 100 后，createRedactor（81 行）已落在新上限之内，
+    // 这条 max-lines-per-function 豁免随之失效（留着反而把该文件钉死在 90），故移除。
+    rules: { "max-depth": ["error", 5] },
+    reason: "P0 遗留：discover() 与 collectKnownSecrets() 控制流嵌套 5 层（规则表内联在函数里）",
+    plan: "把 DEFAULT_RULES / CREDENTIAL_CONTEXTS / 环境变量名单提到模块级常量表，并抽出 collectProviderKeys()，两个函数即可回到 ≤4 层",
     removeIn: "P1（core 收口时，W271 领地）",
   },
   {

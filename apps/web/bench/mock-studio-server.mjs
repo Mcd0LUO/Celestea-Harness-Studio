@@ -24,15 +24,15 @@ const TURN_MS = Number(val('--turn-ms', '3000'));
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
 
-const ID_A = 'CelesteaTeamAPI/sess-A';
-const ID_B = 'CelesteaTeamAPI/sess-B';
+const ID_A = 'example-team-api/sess-A';
+const ID_B = 'example-team-api/sess-B';
 const ID_W = 'server-center/W514·前端多会话';
 
 const ID_W2 = 'server-center/W520·无父worker';
 
 const sessions = [
-  { id: ID_A, title: 'A · 会话一', kind: 'session', workspace: 'CelesteaTeamAPI', model: 'deepseek-flash', events: 12, active: true },
-  { id: ID_B, title: 'B · 会话二', kind: 'session', workspace: 'CelesteaTeamAPI', model: 'deepseek-flash', events: 5 },
+  { id: ID_A, title: 'A · 会话一', kind: 'session', workspace: 'example-team-api', model: 'deepseek-flash', events: 12, active: true },
+  { id: ID_B, title: 'B · 会话二', kind: 'session', workspace: 'example-team-api', model: 'deepseek-flash', events: 5 },
   // W515 谱系：parentSessionId（DSH 语义）→ 父会话 A 的子 worker
   { id: ID_W, title: 'W514·前端多会话', kind: 'worker', workspace: 'server-center', model: 'deepseek-v4-flash', events: 7, parentSessionId: ID_A },
   // 无 parent 字段 → 归入「未关联父会话」（降级/对照）
@@ -199,7 +199,7 @@ const server = http.createServer(async (req, res) => {
     });
   }
   if (p === '/api/workspaces') {
-    return json(res, 200, { workspaces: [{ name: 'CelesteaTeamAPI', path: '/src/CelesteaTeamAPI', sessions: 2 }, { name: 'server-center', path: '/server-center', sessions: 1 }], active_session: state.active });
+    return json(res, 200, { workspaces: [{ name: 'example-team-api', path: '/srv/celestea/team-api', sessions: 2 }, { name: 'server-center', path: '/srv/ops', sessions: 1 }], active_session: state.active });
   }
   if (p === '/api/sessions') {
     const list = sessions.map((s) => {

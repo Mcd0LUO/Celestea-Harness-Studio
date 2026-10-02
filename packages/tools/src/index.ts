@@ -1,7 +1,7 @@
 /**
  * `@celestea/tools` — the tool pipeline: registry + guard chain + builtin tools.
  *
- * Parity target: `celestea_harness/crates/tools` (`registry.rs`, `guard.rs`,
+ * Parity target: `retired-engine/crates/tools` (`registry.rs`, `guard.rs`,
  * `builtin.rs`, `http.rs`, `process.rs`, `sandbox.rs`). The package implements
  * the `Tool` / `ToolGuard` / `ToolRegistry` / `Sandbox` seams declared by
  * `@celestea/core`; nothing here is reachable except through this barrel

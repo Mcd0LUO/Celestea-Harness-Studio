@@ -101,5 +101,5 @@ HTTP handler → runtime.sessionContext(id) → Runtime.contextSnapshot()
 | `capabilities.context === true` | 同上、`tests/studio-routes.test.ts` |
 | 真实引擎路径：快照 = 引擎 buildRequest（无 host 侧漂移） | `apps/studio/src/runtime/real-runtime.test.ts` |
 | W755：占用 = 真实 prompt（+前视增量）/ 引擎组装估算 / `none`；窗口缺失 `window:0,ratio:0` | `packages/runtime/src/status.test.ts` |
-| W755：夹具重放 `harness架构哥-…` → `used:155698, ratio:0.1557 ∈ [0.07,0.17]`（旧口径 0.5654） | 同上 |
+| W755：夹具重放 `example-session-…` → `used:155698, ratio:0.1557 ∈ [0.07,0.17]`（旧口径 0.5654） | 同上 |
 | 端点数 44（契约 / 常量 / 路由三方一致） | `tests/contracts.test.ts`、`apps/studio/src/app.test.ts`、`tests/studio-routes.test.ts` |

@@ -48,7 +48,7 @@ describe('G4 · 多面板工作区（第一步）', () => {
     ctxMod.activatePane('ws/s1', 'session', '甲会话');
     ctxMod.setPaneMeta('ws/s1', { workspace: 'celestea_studio-ts' });
     const store = (await import(/* @vite-ignore */ at('ui/sessiontree/store.ts'))) as WorkspaceStoreMod;
-    store.setWsList([{ name: 'celestea_studio-ts', path: '/src/celestea_studio-ts' }]);
+    store.setWsList([{ name: 'celestea_studio-ts', path: '/srv/celestea/studio' }]);
     const urls: string[] = [];
     vi.stubGlobal('fetch', async (url: unknown) => {
       const u = String(url);

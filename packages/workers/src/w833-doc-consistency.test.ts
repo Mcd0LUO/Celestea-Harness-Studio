@@ -1,7 +1,7 @@
 /**
  * W833 (R3 B9) — documentation / comment drift guard (zero behaviour).
  *
- * Source: /server-center/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
+ * Source: /srv/ops/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
  * §B9: W813 P2-attempt (the attempt comments must say first = 0; authoritative
  * contracts/data-files/registry-tsv.schema.json) and W816 F8 + A6 (the worker
  * table defaults to DISK under W787; only an explicit null is in-memory).

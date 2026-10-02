@@ -1,6 +1,6 @@
 /**
  * The model-visible message model — a 1:1 port of
- * `celestea_harness/crates/core/src/message.rs`.
+ * `retired-engine/crates/core/src/message.rs`.
  *
  * Shapes ported here:
  *   Role      enum { System, User, Assistant, Tool }      (serde lowercase)

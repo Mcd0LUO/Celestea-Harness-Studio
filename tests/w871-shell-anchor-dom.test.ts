@@ -9,7 +9,7 @@
  *
  * 本文件的几何断言全部是**具体数字区间**（不是「存在即通过」）。数字来源 =
  * headless Chromium 1280×800 上对真实 build 产物的实测（原始 json 见报告
- * /server-center/runtime/worker-exec/results/W871-圆角范围与弹层错位.md）：
+ * /srv/ops/runtime/worker-exec/results/W871-圆角范围与弹层错位.md）：
  *   结构     pre-W867: #messages L322 W958 ｜ W867(bug): L331 W940（margin 8 + border 0.5）
  *   提示卡   W867: 卡片 L330 T255.56（行右缘 303 / 行下沿 249.56）、style.left 恒 8px
  *   档位弹层 W867: 面板 L345 vs 触发键 #slPerm L1125.45（横向差 −780.45px）

@@ -99,17 +99,17 @@ GUI ──✗── HTTP /api/turn ──✗── runtime.startTurn ──✗�
 | 4 | celestea | `deepseek-v4-pro` | 200 | `SHAPES=A red circle at the top-left and a blue square at the bottom-right; COLORS=red circle and blue square; DIGIT=7` | **✅ 有视觉** |
 | 5 | celestea | `deepseek-v4.1-flash` | 200 | `SHAPES=circle at top-left, square at bottom-right, digit at bottom-left; COLORS=red circle, blue square; DIGIT=7` | **✅ 有视觉** |
 | 6 | celestea | `deepseek-v4-flash` | **400** | `Error from provider (Console Go): Upstream request failed: [400] Model only supports text input; received unsupported content type image_url.` | **❌ 无视觉** |
-| 7 | 基元 | `deepseek-flash` | **401** | `{"code":"UNAUTHORIZED","message":"未认证或登录已过期"}` | **⏳ 待验证（凭据不可得）** |
+| 7 | 备用渠道 | `deepseek-flash` | **401** | `{"code":"UNAUTHORIZED","message":"未认证或登录已过期"}` | **⏳ 待验证（凭据不可得）** |
 
 **对照组（无图）**：`glm-5.3-flash`、`deepseek-flash`、`deepseek-v4.1-flash`、`deepseek-v4-flash`、`deepseek-v4-flash-0731` 全部回 `NO_IMAGE`（未瞎编）；`deepseek-v4-pro` 无图时 `content:""` + `finish_reason:"length"`（推理段吃掉了 200 token 预算），**带图时回答具体且正确**，故判有视觉。
 
-### 2.3 基元 `deepseek-flash` 为什么是「待验证」而不是「无」
+### 2.3 备用渠道 `deepseek-flash` 为什么是「待验证」而不是「无」
 
-- `基元` 的 `base_url = https://tokenrhythm.studio/v1`，与 celestea 网关**不同源**；用 studio 环境里的 `CELESTEA_API_KEY` 打它是 **401**（实测，见上表第 7 行）——说明它需要自己的 key。
+- `备用渠道` 的 `base_url = https://third-party-gateway.example/v1`，与 celestea 网关**不同源**；用 studio 环境里的 `CELESTEA_API_KEY` 打它是 **401**（实测，见上表第 7 行）——说明它需要自己的 key。
 - 其 key 只存在于 `/var/lib/celestea-agent/providers.json` 内联字段（该文件 mode `0600`，schema `contracts/data-files/providers.schema.json` 明确标注 `api_key: PLAINTEXT secret`）。
-- 本轮边界明确要求「**不读 providers.json 明文 key（用 env）**」。env 里没有基元的 key，故**不做探针**，按验收要求标注 **待验证**，并列入 §9 需用户裁决的开放问题。
-- 间接旁证（**不作为结论**）：`基元/deepseek-flash` 与 `celestea/deepseek-flash` 同名，而后者是网关别名到 `deepseek-v4.1-flash`（§2.4），两者视觉能力**可能**一致，但未实测，不得写成既成事实。
-- **策略更新（用户裁决 2026-09-16）**：能力位改为「乐观默认 + 可配置」后，**不再需要**为基元做探针；此行保留为**事实证据**，默认值不依赖它。该开放问题**已关闭**（§9.5）。
+- 本轮边界明确要求「**不读 providers.json 明文 key（用 env）**」。env 里没有备用渠道的 key，故**不做探针**，按验收要求标注 **待验证**，并列入 §9 需用户裁决的开放问题。
+- 间接旁证（**不作为结论**）：`备用渠道/deepseek-flash` 与 `celestea/deepseek-flash` 同名，而后者是网关别名到 `deepseek-v4.1-flash`（§2.4），两者视觉能力**可能**一致，但未实测，不得写成既成事实。
+- **策略更新（用户裁决 2026-09-16）**：能力位改为「乐观默认 + 可配置」后，**不再需要**为备用渠道做探针；此行保留为**事实证据**，默认值不依赖它。该开放问题**已关闭**（§9.5）。
 
 ### 2.4 网关别名现象（重要，影响能力位设计）
 
@@ -139,7 +139,7 @@ GUI ──✗── HTTP /api/turn ──✗── runtime.startTurn ──✗�
 // [6] deepseek-v4-flash  with_image  HTTP 400
 {"error":{"message":"Error from provider (Console Go): Upstream request failed: [400] Model only supports text input; received unsupported content type 'image_url'.","type":"invalid_request_error","param":"","code":null}}
 
-// [7] 基元/deepseek-flash  with_image  HTTP 401（未持凭据）
+// [7] 备用渠道/deepseek-flash  with_image  HTTP 401（未持凭据）
 {"code":"UNAUTHORIZED","message":"未认证或登录已过期","traceId":"trace_93ccb4d7-649d-4c60-9cd4-f5b7448738fd"}
 ```
 

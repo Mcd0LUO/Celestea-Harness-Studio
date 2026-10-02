@@ -45,7 +45,7 @@ describe('H · @提及工作区文件（只传路径）', () => {
     ctxMod.setPaneMeta('ws/s1', { workspace: 'celestea_studio-ts' }); // 会话归属的工作区名
     // 工作区注册表：名字 → 绝对路径（workspacePath 据此解析）。
     const store = (await import(/* @vite-ignore */ at('ui/sessiontree/store.ts'))) as WorkspaceStoreMod;
-    store.setWsList([{ name: 'celestea_studio-ts', path: '/src/celestea_studio-ts' }]);
+    store.setWsList([{ name: 'celestea_studio-ts', path: '/srv/celestea/studio' }]);
     const urls: string[] = [];
     const bodies: string[] = [];
     vi.stubGlobal('fetch', async (url: unknown, init?: { body?: unknown }) => {
@@ -70,7 +70,7 @@ describe('H · @提及工作区文件（只传路径）', () => {
 
   it('workspacePath 由会话 workspace 名解析到绝对路径', async () => {
     const { cmd } = await boot();
-    expect(cmd.workspacePath()).toBe('/src/celestea_studio-ts');
+    expect(cmd.workspacePath()).toBe('/srv/celestea/studio');
   });
 
   it('打 @ 弹出工作区（目录 + 文件，目录项带视觉区分）', async () => {

@@ -61,12 +61,12 @@
   "unit": "per_mtok",
   "models": { "deepseek-chat": { "in": 1.0, "out": 2.0, "cache_read": 0.1 },
               "deepseek-reasoner": { "in": 2.0, "out": 8.0, "cache_read": 0.2 } },
-  "source": { "kind": "newapi-snapshot", "ref": "/src/CelesteaTeamAPI/newapi-ops/PRICING-ARCHITECTURE.md", "synced_at": 1760000000 } }
+  "source": { "kind": "newapi-snapshot", "ref": "/srv/celestea/team-api/newapi-ops/PRICING-ARCHITECTURE.md", "synced_at": 1760000000 } }
 ```
 
 **纪律（防止成为第二真相）**：
 1. 价格**不手写在引擎代码里**，由 `scripts/sync-pricing.ts`（P1）从 newapi 侧**只读**同步成快照，并记 `version`/`synced_at`/来源引用；
-2. 引擎只做 `tokens × 单价`，**不**复刻平台侧的分组倍率/计费表达式（`/server-center/docs/docs/lts/biz/newapi.md:20-24` 的 I1–I3：价格单一事实源在 newapi 侧、`ratio = 官方CNY × factor`、展示≠计费）——否则我们就是第二个计费实现；
+2. 引擎只做 `tokens × 单价`，**不**复刻平台侧的分组倍率/计费表达式（`/srv/ops/docs/docs/lts/biz/newapi.md:20-24` 的 I1–I3：价格单一事实源在 newapi 侧、`ratio = 官方CNY × factor`、展示≠计费）——否则我们就是第二个计费实现；
 
    **cache 口径（V2.6.0 修正）**：provider 的 `prompt_tokens` **已包含** cache 命中区（宿主 `turn-usage` 的 `total − output === input + cacheRead + cacheWrite`；`packages/llm/src/usage.ts` 把 `prompt_tokens` 当总数、cache 计数另取）。因此命中区**只按 `cache_read` 单价收一次**：`cost.in = max(0, prompt_tokens − cache_read) × in` 是**未命中输入**的成本，`cost.cache = cache_read × cache_read` 是命中区成本；旧口径「prompt 全额 × `in` + cache 另计」会把命中区收两次，已废弃；
 3. 表里没有的模型 → `priced_by:"unpriced"`、`cost.total = null`、聚合视图返回 `unpriced_models[]`（**禁止静默 0**）。
@@ -118,7 +118,7 @@
 
 | ID | 风险 | 缓解 |
 |---|---|---|
-| R3-1 | 定价来源未验证（本次 `/src/CelesteaTeamAPI/newapi-ops/PRICING-ARCHITECTURE.md` **读取被拒**：`Permission denied`；仅从 LTS `biz/newapi.md:15` 得到指针） | P0 **不依赖**该文件：`pricing.json` 可手工/运维提供，缺表即 `unpriced`；P1 的同步脚本落地前先确权 |
+| R3-1 | 定价来源未验证（本次 `/srv/celestea/team-api/newapi-ops/PRICING-ARCHITECTURE.md` **读取被拒**：`Permission denied`；仅从 LTS `biz/newapi.md:15` 得到指针） | P0 **不依赖**该文件：`pricing.json` 可手工/运维提供，缺表即 `unpriced`；P1 的同步脚本落地前先确权 |
 | R3-2 | 与平台计费口径不一致（倍率/分组/缓存语义） | 只记 `provider 原始 usage × 快照单价`，**声明为引擎侧估算**；差异由 P2 对账器暴露，不掩盖 |
 | R3-3 | step 粒度写放大 | append-only 单次 `writeSync`（无 fsync，除非运维开启）；轮转 + 可选 `CELESTEA_USAGE_LEDGER=off` 关闭 |
 | R3-4 | 账本含会话名/模型名（敏感面） | 字段白名单（无正文、无 key）；落盘前过 `core/redact.ts`；`0600` |

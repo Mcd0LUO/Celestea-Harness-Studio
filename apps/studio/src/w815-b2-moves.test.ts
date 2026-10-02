@@ -3,7 +3,7 @@
  *
  * Handler cases drive the REAL app (makeHarness); the W815-9/10 store cases
  * live next to the store. Source:
- * /server-center/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md
+ * /srv/ops/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md
  * (B2 · W815-5/9/10/12 + N1 acceptance probes).
  */
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';

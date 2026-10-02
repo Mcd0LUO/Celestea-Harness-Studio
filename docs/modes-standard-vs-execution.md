@@ -4,7 +4,7 @@
 > 本文其余部分保持设计原文（含写文档当日的行号与基线数字），**不回改历史结论**；
 > 与落地实现冲突的两处口径以 §10 的裁决为准。
 > 范围：`packages/core`（无改动，见 §4）、`packages/tools`、`packages/runtime`、`apps/studio/src/{store,handlers,runtime}`、
-> `contracts/`、共用前端 `apps/web/src/**`；仓库外 `celes-worker-spawn` 插件（`/src/dsh_plugins/celes-worker-spawn`）只作为**映射边界**出现。
+> `contracts/`、共用前端 `apps/web/src/**`；仓库外 `celes-worker-spawn` 插件（`/srv/dsh/plugins/celes-worker-spawn`）只作为**映射边界**出现。
 > 前置阅读：`docs/ARCHITECTURE.md`（分层/seam 纪律）、`docs/archive/decisions/feature-session-independence.md`（W513，已实现：每会话实例 + SSE `v:2` 信封）、
 > `docs/archive/decisions/feature-session-grants.md`（W516，已实现：会话级配置与审计先例）、`docs/iteration-e/README.md`（§5.3 契约清单写法）、
 > 已归档的 DSH 评估（W253 PTC 三层拆解、W254 run_code 折叠评估、W255 SDK 契约）已于 W881 清理出公开仓。
@@ -62,7 +62,7 @@
 | 会话创建 | `POST /api/sessions` 请求 `{workspace?, title, model?, prompt?}`；无 mode | `contracts/endpoints.json` `post_sessions`；前端 `frontend/src/ui/sessions.ts:743-880`、`types.ts:321-328` |
 | 运行期重建 | 配置变更 → `bumpEpoch()` + `registry.invalidateAll()`，实例在**下一轮边界**惰性重建 | `real-runtime-adapter.ts:384-387`、`archive/decisions/feature-session-independence.md` §2.2 |
 | 能力位 | `/api/health.capabilities = {grants:true}` 已是既有先例 | `apps/studio/src/handlers/health.ts:35` |
-| DSH 侧 | `celes-worker-spawn` 支持 `agentPreset` 透传（`session.create` 原生字段）；宿主预设**仅 blank 会话可切**，否则 `agent-preset-locked`；`GET {prefix}/presets` 可枚举 | `/src/dsh_plugins/celes-worker-spawn/README.md:58-76`、`HANDOFF.md:123-126`、`lib/index.js:227-282` |
+| DSH 侧 | `celes-worker-spawn` 支持 `agentPreset` 透传（`session.create` 原生字段）；宿主预设**仅 blank 会话可切**，否则 `agent-preset-locked`；`GET {prefix}/presets` 可枚举 | `/srv/dsh/plugins/celes-worker-spawn/README.md:58-76`、`HANDOFF.md:123-126`、`lib/index.js:227-282` |
 | DSH PTC 语义 | `ptc` preset = standard 减 `workflow` + `tool-presentation(mode:ptc)`；呈现层把整张注册表折叠成 `run_code` 单工具，规则段 `PTC_ONLY` 禁止直调 | 归档 DSH PTC 评估 §1.1-1.2（W881 已清理出公开仓） |
 | W254 的既有结论 | Celestea 的 `run_code` 应是**并存模式**而非唯一入口；不抄 `collapses()` 禁令；P0 验收门槛 `p≥0.8` 且 token 节省 ≥60% 才上 P1 | 归档 run_code 折叠评估 §9、§10（W881 已清理出公开仓） |
 
@@ -216,7 +216,7 @@ Hard limits: ≤20 sub-calls, wall clock ≤120s, sub-call output ≤256 KiB, pr
 
 2. **边界在哪**：
    - **Studio 引擎**（`packages/**`、`apps/studio/**`、`contracts/**`）：**不得出现** `agentPreset`/`agent_preset` 字样（M14 用正则门禁钉死）。Studio 的 `spawn_worker` 工具参数名是 **`mode`**。
-   - **DSH 侧 spawn 适配层**（`/src/dsh_plugins/celes-worker-spawn`，仓外）：把调用方给的 `mode` 翻译成 `agentPreset` 后透传 `session.create`（该插件已支持，`lib/index.js:227-282`）。翻译表是**它自己的**责任，Studio 不替它决定宿主预设名。
+   - **DSH 侧 spawn 适配层**（`/srv/dsh/plugins/celes-worker-spawn`，仓外）：把调用方给的 `mode` 翻译成 `agentPreset` 后透传 `session.create`（该插件已支持，`lib/index.js:227-282`）。翻译表是**它自己的**责任，Studio 不替它决定宿主预设名。
 3. **禁止清单**（任一条实现即视为返工）：
    - ❌ `POST /api/sessions` 接受 `agentPreset`（或任何 preset 别名字段）；
    - ❌ `session.json` 存 `agentPreset`；

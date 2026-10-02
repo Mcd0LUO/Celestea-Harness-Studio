@@ -52,7 +52,7 @@
 | `bwrap` | | 无则走 userspace 降级；**降级分支在本机跑不到** |
 | `prlimit` | | 无则 rlimit 尽力而为 |
 | `htpasswd` | | 无则登录门无法端到端验证 |
-| `python3` | | 影响 `scripts/model-sync/` 与 Python 矩阵 |
+| `python3` | | 无则跑不了 Python 侧的运维胶水（与本仓 TypeScript 门禁无关） |
 | headless Chromium 路径 | | UI 真机验证（CDP）用 |
 | CI（`.github/`） | | **没有 CI 时门禁只在人跑时存在** |
 

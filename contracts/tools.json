@@ -4,7 +4,7 @@
   "generatedAt": "2026-09-10T01:20:00Z",
   "source": {
     "liveEndpoint": "http://127.0.0.1:3777/api/tools (descriptions taken verbatim from the running engine)",
-    "schemas": "/src/celestea_harness/crates/tools/src/*.rs + crates/workers/src/tools.rs (hand-written ToolSpec.parameters, transcribed 1:1)",
+    "schemas": "/srv/celestea/engine-ref/crates/tools/src/*.rs + crates/workers/src/tools.rs (hand-written ToolSpec.parameters, transcribed 1:1)",
     "liveProbe": {
       "checked": true,
       "toolCount": 10,

@@ -4,7 +4,7 @@
  *
  * 真人用户报的案件：Studio 的 IMAGE_UNSUPPORTED 提示出现
  *   「可切换到：glm-5.3-flash、deepseek-flash、deepseek-v4-pro-0813、deepseek-v4-flash、deepseek-flash」
- * 而同一条 deepseek-flash 在 GET /api/providers 里出现两次（Celestea 网关 / 基元各一条）。
+ * 而同一条 deepseek-flash 在 GET /api/providers 里出现两次（Celestea 网关 / 备用渠道各一条）。
  *
  * 本用例走**真实模块** apps/web/src/ui/attachments.ts（pathToFileURL 动态 import，不复刻逻辑），
  * 用与线上同形的 providers 响应驱动，断言：
@@ -46,7 +46,7 @@ const PROVIDERS_SHAPE = [
     ],
   },
   {
-    id: "jiyuan",
+    id: "backup",
     models: [
       { id: "deepseek-flash", input_modalities: ["text", "image"] },
       { id: "deepseek-v4-flash" },

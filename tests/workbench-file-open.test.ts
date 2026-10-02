@@ -86,7 +86,7 @@ async function setup(fetchImpl: (url: unknown) => Promise<unknown>): Promise<{ w
   ctxMod.activatePane('ws/s1', 'session', '甲会话');
   ctxMod.setPaneMeta('ws/s1', { workspace: 'celestea_studio-ts' });
   const store = (await import(/* @vite-ignore */ at('ui/sessiontree/store.ts'))) as WorkspaceStoreMod;
-  store.setWsList([{ name: 'celestea_studio-ts', path: '/src/celestea_studio-ts' }]);
+  store.setWsList([{ name: 'celestea_studio-ts', path: '/srv/celestea/studio' }]);
   vi.stubGlobal('fetch', fetchImpl);
   const wb = (await import(/* @vite-ignore */ at('ui/workbench/index.ts'))) as WbMod;
   wb.resetPanels();
@@ -137,7 +137,7 @@ describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）'
     await clickFile(wb, 'big.ts');
     const pv = (await import(/* @vite-ignore */ at('ui/preview/panel.ts'))) as PreviewMod;
     expect(srv.calls.length, '应打 GET /api/fs/read').toBe(1);
-    expect(srv.calls[0]).toContain('path=%2Fsrc%2Fcelestea_studio-ts%2Fbig.ts');
+    expect(srv.calls[0]).toContain('path=%2Fsrv%2Fcelestea%2Fstudio%2Fbig.ts');
     expect(pv.previewIsOpen(), '★ 必须打开右侧预览面板').toBe(true);
     expect(visibleInDom(q('.preview-host')), '★ 预览宿主必须真的可见').toBe(true);
     expect(bodyText(), '预览正文非空').toContain('Hello');
@@ -169,7 +169,7 @@ describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）'
     expect(visibleInDom(host), '★ 读盘未返回时面板就必须可见（壳先出）').toBe(true);
     expect(q('.preview-skeleton'), '★ 骨架占位在位（不是白屏）').not.toBeNull();
     expect(q('.preview-title')?.textContent, '标题当帧就位').toBe('slow.ts');
-    expect(q('.preview-path')?.textContent, '路径当帧就位').toBe('/src/celestea_studio-ts/slow.ts');
+    expect(q('.preview-path')?.textContent, '路径当帧就位').toBe('/srv/celestea/studio/slow.ts');
     expect(bodyText(), '此刻还没有文件内容').not.toContain('x');
     release!();
     await flush();
@@ -304,7 +304,7 @@ describe('文件管理器 · 点目录仍然进入目录（W1545）', () => {
       const u = String(url);
       if (u.includes('/api/fs/list')) {
         const p = decodeURIComponent(/[?&]path=([^&]*)/.exec(u)?.[1] ?? '');
-        if (p.endsWith('/src')) return reply(200, { path: p, parent: '/src/celestea_studio-ts', entries: [{ name: 'main.ts', type: 'file', size: 10, mtime: null }], roots: [], truncated: false });
+        if (p.endsWith('/src')) return reply(200, { path: p, parent: '/srv/celestea/studio', entries: [{ name: 'main.ts', type: 'file', size: 10, mtime: null }], roots: [], truncated: false });
         return reply(200, { path: p, parent: null, entries: [{ name: 'src', type: 'dir', size: null, mtime: null }], roots: [], truncated: false });
       }
       return srv.fetch(url);
@@ -316,7 +316,7 @@ describe('文件管理器 · 点目录仍然进入目录（W1545）', () => {
     await flush();
     await new Promise((r) => setTimeout(r, 20));
     await flush();
-    expect(q('.wb-crumb-cur')?.textContent).toBe('/src/celestea_studio-ts/src');
+    expect(q('.wb-crumb-cur')?.textContent).toBe('/srv/celestea/studio/src');
     expect(rows().map((r) => r.querySelector('.wb-name')?.textContent)).toEqual(['main.ts']);
     expect(srv.calls.length, '进入目录不得读文件').toBe(0);
   });

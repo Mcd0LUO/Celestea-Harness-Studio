@@ -101,7 +101,7 @@ function trimSlash(url: string): string {
  * id under two providers is two different choices — the provider is what decides
  * the endpoint the request goes to — so a global `seen` set silently swallowed
  * every provider after the first one that shared an id (production: provider
- * 「基元」 vanished because it also lists `deepseek-flash`). Identical ids
+ * 「备用渠道」 vanished because it also lists `deepseek-flash`). Identical ids
  * repeated INSIDE one provider are still dropped (a store typo, not a choice).
  *
  * `active` marks the single (provider, model) pair the engine would use right

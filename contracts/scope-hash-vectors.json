@@ -17,7 +17,7 @@
   ],
   "guards": {
     "frontend": "frontend/tools/check-scope-hash.mjs（已接进 frontend package.json 的 check/check:scope-hash）",
-    "server": "/src/celestea_studio-ts/tests/scope-hash-vectors.test.ts（vitest，含直接导入前端纯函数逐字对拍）",
+    "server": "/srv/celestea/studio/tests/scope-hash-vectors.test.ts（vitest，含直接导入前端纯函数逐字对拍）",
     "vectors": "本文件（单一真源）"
   },
   "regenerate": "改了两侧任意一处的形状/算法后，必须同时更新本文件：用服务端 pipeline 重算 canonical_json/sha256（临时脚本 import apps/studio/src/store/grants.ts + frontend/src/security/scope-hash.ts，断言两者一致后再落盘）；只改一侧会立即被两侧门禁拦住。",

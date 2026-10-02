@@ -6,7 +6,7 @@
 | 项 | 值 |
 | --- | --- |
 | 任务 | 「选段提及」+「文件侧边弹出预览」调研（只调研、不改代码） |
-| 仓库 | `/src/celestea_studio-ts`（main @ 576657f） |
+| 仓库 | `/srv/celestea/studio`（main @ 576657f） |
 | 前端 | `apps/web`（无框架 TypeScript + DOM，Vite 打包） |
 | 状态 | **调研 / 设计稿，未实现**（本轮只新增本文件，未改任何既有文件、未跑 build/check、未重启服务） |
 

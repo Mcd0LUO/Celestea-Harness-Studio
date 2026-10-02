@@ -130,7 +130,7 @@ function registerModelsFetch(app: Hono, deps: Deps, table: RouteTable): string {
  *
  * W750: `provider_id` is the OPTIONAL disambiguator. Model ids are not unique
  * across providers (production: `deepseek-flash` is listed by both the gateway
- * and 「基元」), so "model id only" cannot express "switch to THAT provider" —
+ * and 「备用渠道」), so "model id only" cannot express "switch to THAT provider" —
  * the plain `find` below would keep picking the first provider that happens to
  * list the id. When `provider_id` is given the model must be one of that
  * provider's models (otherwise nothing is applied: 400/404, no partial write);

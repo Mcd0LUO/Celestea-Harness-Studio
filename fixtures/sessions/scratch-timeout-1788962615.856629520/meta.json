@@ -1,6 +1,6 @@
 {
-  "id": "CelesteaTeamAPI/scratch-timeout-1788962615.856629520",
-  "workspace": "CelesteaTeamAPI",
+  "id": "example-team-api/scratch-timeout-1788962615.856629520",
+  "workspace": "example-team-api",
   "sessionDir": "scratch-timeout-1788962615.856629520",
   "slug": "scratch-timeout-1788962615.856629520",
   "roles": [
@@ -8,7 +8,7 @@
     "error-outcome"
   ],
   "source": {
-    "logPath": "/src/CelesteaTeamAPI/scratch-timeout-1788962615.856629520/cli-main.jsonl",
+    "logPath": "/srv/celestea/team-api/scratch-timeout-1788962615.856629520/cli-main.jsonl",
     "sizeBytes": 270,
     "sha256": "b7832af1e3f2ca613c1e724a0527f2d9e147db6548500ec548ab1515bf4a25c8",
     "mtime": "2026-09-09T14:04:36.786Z",

@@ -2,7 +2,7 @@
  * W836 R3 batch I — the compaction rewrite durability contract (P2-6).
  *
  * Probe from the authoritative plan
- * `/server-center/runtime/worker-exec/results/W826-R3修复计划-A-core-llm-runtime.md`
+ * `/srv/ops/runtime/worker-exec/results/W826-R3修复计划-A-core-llm-runtime.md`
  * (§三 批次 I): the real `runCompaction` path must fsync BOTH the tmp file and
  * the parent DIRECTORY after the rename. A power loss is not reproducible in a
  * test, so the probe spies on `node:fs` and asserts the two syscalls.

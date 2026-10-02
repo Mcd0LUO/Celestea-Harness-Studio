@@ -21,7 +21,7 @@
  *     · 两个用例串行、各自等自己的回合收敛，不依赖共享全局流的“首个匹配”。
  *   断言一条不删、不放宽。
  *
- * 自建会话一律 w805- 前缀（celestea_harness 工作区），收尾连回收目录条目一并清理，
+ * 自建会话一律 w805- 前缀（retired-engine 工作区），收尾连回收目录条目一并清理，
  * 并把被本套件 activate 过的共享 active_session 拨回进入时的值（失败即断言）。
  */
 import { createHash } from "node:crypto";
@@ -32,7 +32,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { E2E_OPT_IN, reachable, requireOptIn } from "./lib/real-backend-gate.js";
 
 const BASE = process.env["CELESTEA_E2E_BASE"] ?? "http://127.0.0.1:3777";
-const WS = "celestea_harness";
+const WS = "retired-engine";
 const STAMP = String(Date.now()).slice(-7);
 /** 真实 32x32 PNG（左上红圆 + 右下蓝方块）；sha256 = attachment_id。 */
 const PNG = Buffer.from(

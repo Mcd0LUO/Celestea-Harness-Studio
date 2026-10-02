@@ -60,6 +60,8 @@ mkdir -p "$CELESTEA_HOME"
 | `CELESTEA_TOOL_ROOTS` | — | 工具可读根白名单（**fail-closed**） |
 | `CELESTEA_AUTH_SECRET_FILE` | 与 `workspaces.json` 同目录 | 登录 cookie 的 HMAC 密钥文件 |
 | `CELESTEA_AUTH_HTPASSWD_FILE` | `/etc/nginx/.htpasswd-studio` | 登录口令文件（`htpasswd -vbi` 校验） |
+| `CELESTEA_SERVICE_NAME` | 由 `/proc/self/cgroup` 推断 | system prompt 里陈述的 unit 名（覆盖推断值） |
+| `CELESTEA_PUBLIC_SITE` | `https://studio.example.com`（RFC 2606 保留域，**非真实站点**） | system prompt 里陈述的公开站点。**部署方应设为自己的域名**；不设时提示词写一个中性占位地址，而不是谎称某个真实站点 |
 
 完整清单另见 `scripts/run-studio-ts.sh`（生产实际设置的那一份）与 `data-files.md`（数据文件 schema）。
 

@@ -27,7 +27,7 @@ import { UserspaceSandbox } from "./userspace.js";
 import { buildSeccompFilter, instructionCount, openSeccompBlob, toBlobBytes } from "./seccomp.js";
 import type { HostProbe } from "./probe.js";
 
-const WORK = "/src/celestea_studio-ts";
+const WORK = "/srv/celestea/studio";
 
 /** W891: /proc/self/fd is the one Linux-only read in this otherwise pure file. */
 const PROC_FD_READABLE = existsSync("/proc/self/fd");

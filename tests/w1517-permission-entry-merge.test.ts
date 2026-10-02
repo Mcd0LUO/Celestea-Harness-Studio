@@ -5,7 +5,7 @@
  * 权威依据：`docs/feature-permission-entry-merge.md` §3（目标交互）、§4（不变量）、
  * §5（验收 B1–B6）。本文件把「只能有一个入口」「一个面板两块内容」「两块都真落到后端」
  * 「隐藏语义不变」「不留旧 id 别名」钉成机械断言；像素级几何与真机截图见报告
- * `/server-center/runtime/worker-exec/results/W1517-权限入口合并.md`。
+ * `/srv/ops/runtime/worker-exec/results/W1517-权限入口合并.md`。
  *
  * 加载**真实模块**（不是复刻逻辑）：真实 index.html 骨架 + statusline.ts（档位徽标）
  * + ui/grants.ts（能力位与唯一入口）+ ui/grants/panel/body.ts（合并面板）；

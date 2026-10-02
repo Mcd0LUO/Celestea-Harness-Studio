@@ -2,7 +2,7 @@
  * W836 R3 batch I — the watchdog mount contract (P2-1).
  *
  * Probe from the authoritative plan
- * `/server-center/runtime/worker-exec/results/W826-R3修复计划-A-core-llm-runtime.md`
+ * `/srv/ops/runtime/worker-exec/results/W826-R3修复计划-A-core-llm-runtime.md`
  * (§三 批次 I): `watchdog:{autostart:false}` must still mount the service, with
  * NO cadence timer, so the caller can drive `tick()` by hand.
  */

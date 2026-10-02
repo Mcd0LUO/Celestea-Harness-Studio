@@ -42,7 +42,7 @@
 
 后果：turn 进行中无法切会话（409）；SSE 无会话标识，前端无法分辨事件属于谁；`/api/cancel` 无法定向取消。
 
-### 1.2 TS 现状（`/src/celestea_studio-ts`）
+### 1.2 TS 现状（`/srv/celestea/studio`）
 
 TS 已经把"单一活动会话"从环境变量改成了注入式绑定，但**仍是单实例**：
 

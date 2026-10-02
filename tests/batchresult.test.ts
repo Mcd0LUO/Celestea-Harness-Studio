@@ -40,8 +40,8 @@ const REC_DELETE_PARTIAL = {
   deleted: 1,
   failed: [
     {
-      id: "CelesteaTeamAPI/w792-nope-0000000000000.000000000",
-      error: "unknown session 'CelesteaTeamAPI/w792-nope-0000000000000.000000000'",
+      id: "example-team-api/w792-nope-0000000000000.000000000",
+      error: "unknown session 'example-team-api/w792-nope-0000000000000.000000000'",
     },
   ],
 };
@@ -49,7 +49,7 @@ const REC_ACTIVE = {
   ok: true,
   deleted: 0,
   failed: [
-    { id: "CelesteaTeamAPI/live-1789000000.000000000", error: "active session 'CelesteaTeamAPI/live-1789000000.000000000' cannot be deleted" },
+    { id: "example-team-api/live-1789000000.000000000", error: "active session 'example-team-api/live-1789000000.000000000' cannot be deleted" },
   ],
 };
 const REC_UNKNOWN_WS = {
@@ -79,7 +79,7 @@ describe("W792 · failed[] 呈现", () => {
     expect(t, "不得透传英文原文").not.toContain("unknown session");
     expect(mod.batchDoneCount(REC_DELETE_PARTIAL)).toBe(1);
     expect(mod.batchFailedIds(REC_DELETE_PARTIAL)).toEqual([
-      "CelesteaTeamAPI/w792-nope-0000000000000.000000000",
+      "example-team-api/w792-nope-0000000000000.000000000",
     ]);
   });
 

@@ -245,7 +245,7 @@ Phase 2 ─ 上下文压缩（方向已定：模型驱动 + 视图叠层；启�
 - **`turn_end` 硬约束**：§5 接缝 1 保留；`schedule(log)` 只在轮次关闭后触发，天然满足「不打断进行中的轮次」。
 - **anti-pattern 缓解落地**：不每轮都提炼 → 两道跳过门 + cursor（`memory-extraction.ts:217-247`、`:360-371`）；不污染轮次成本 → 独立 `kind:"extraction"` 行、step 视图白名单；可审计 → `source{...}`；人工在环 → 直写门 + 全局层只写 + `entries.jsonl`/`forget` 召回（§2.1）。
 - **不做自我反馈**：提炼调用不写回会话日志（`generate` 的请求不落 log，§4 line 157），不会触发下一轮提炼。
-- **真实通道探针（✅ 已验证 2026-10-01）**：r4.codes / deepseek-v4-flash 真通道 E2E 全 PASS——账本出现独立 `kind:"extraction"` 行（status ok、entries 1、323 in / 134 out）、cursor sidecar `memory-extraction.json` 正常推进、`entries.jsonl` 新条目带 `source:{session,turn}` 且事实归类准确（未把临时任务状态写成持久事实）。环境事实：数据根无 `pricing.json` 时成本恒 `unpriced`（按设计，非 bug）。
+- **真实通道探针（✅ 已验证 2026-10-01）**：第三方网关 / deepseek-v4-flash 真通道 E2E 全 PASS——账本出现独立 `kind:"extraction"` 行（status ok、entries 1、323 in / 134 out）、cursor sidecar `memory-extraction.json` 正常推进、`entries.jsonl` 新条目带 `source:{session,turn}` 且事实归类准确（未把临时任务状态写成持久事实）。环境事实：数据根无 `pricing.json` 时成本恒 `unpriced`（按设计，非 bug）。
 
 ### Phase 2：上下文压缩 —— ✅ 已实现（模型驱动 + 视图叠层）
 

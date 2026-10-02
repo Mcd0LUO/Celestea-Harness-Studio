@@ -11,7 +11,7 @@
     },
     "model": "deepseek-v4.1-flash-expires-on-0910",
     "reasoning_effort": null,
-    "session": "celestea_harness/harness架构哥-1788933931.279221103",
+    "session": "retired-engine/example-session-1788933931.279221103",
     "steps": 0,
     "tokens_per_sec": 0,
     "usage": {

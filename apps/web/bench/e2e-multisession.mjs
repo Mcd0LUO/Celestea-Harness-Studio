@@ -12,8 +12,8 @@ const { chromium } = require(process.env.PW_PATH || '/tmp/w217-test/node_modules
 
 const V2 = process.env.MOCK_V2 || 'http://127.0.0.1:8791';
 const LEGACY = process.env.MOCK_LEGACY || 'http://127.0.0.1:8792';
-const ID_A = 'CelesteaTeamAPI/sess-A';
-const ID_B = 'CelesteaTeamAPI/sess-B';
+const ID_A = 'example-team-api/sess-A';
+const ID_B = 'example-team-api/sess-B';
 const ID_W = 'server-center/W514·前端多会话';
 
 const results = [];
@@ -95,7 +95,7 @@ async function runV2(browser) {
     parents: Array.from(document.querySelectorAll('.ws-worker-parent .ws-worker-parent-name')).map((n) => n.textContent),
     childRows: document.querySelectorAll('.ws-worker-row.child').length,
     childOfA: !!document.querySelector('.ws-worker-row.child[data-id="server-center/W514·前端多会话"]'),
-    badge: document.querySelector('.sess-leaf[data-id="CelesteaTeamAPI/sess-A"] .sess-worker-count')?.textContent ?? '',
+    badge: document.querySelector('.sess-leaf[data-id="example-team-api/sess-A"] .sess-worker-count')?.textContent ?? '',
     flatRows: document.querySelectorAll('.ws-worker-row:not(.child)').length,
   }));
   check('T1b Worker 组按父会话分组（谱系缩进）', lin.parents.includes('A · 会话一') && lin.childOfA && lin.childRows >= 1, JSON.stringify(lin));
@@ -215,7 +215,7 @@ async function runV2(browser) {
   await page.click('.sess-leaf[data-id="' + ID_A + '"]');
   await page.waitForFunction((sid) => document.querySelector('.sess-pane:not([hidden])')?.dataset.session === sid, ID_A, { timeout: 2000 });
   const aMark = await page.evaluate(() => {
-    const el = document.querySelector('.sess-pane[data-session="CelesteaTeamAPI/sess-A"]');
+    const el = document.querySelector('.sess-pane[data-session="example-team-api/sess-A"]');
     const c = el.querySelector('.msg.assistant .content');
     if (c) c.dataset.mark = 'probeA';
     return true;
@@ -225,7 +225,7 @@ async function runV2(browser) {
   const aAfter = await paneInfo(page, ID_A);
   check('T4 B（后台）继续接收增量（文本变长）', !!bAfter && bAfter.len > bBefore.len, `len ${bBefore.len} → ${bAfter && bAfter.len}`);
   check('T4 B 容器零重渲染（同一节点仍在）', !!bAfter && bAfter.marked === true);
-  check('T4 切换不重渲染新聚焦视图 A（标记节点仍在）', !!aAfter && (await page.evaluate(() => !!document.querySelector('.sess-pane[data-session="CelesteaTeamAPI/sess-A"] .content[data-mark="probeA"]'))), JSON.stringify(aMark));
+  check('T4 切换不重渲染新聚焦视图 A（标记节点仍在）', !!aAfter && (await page.evaluate(() => !!document.querySelector('.sess-pane[data-session="example-team-api/sess-A"] .content[data-mark="probeA"]'))), JSON.stringify(aMark));
   const others = await page.evaluate(() => Array.from(document.querySelectorAll('.sess-bar-chip')).map((c) => c.textContent));
   check('T4 会话条区分「其它运行中会话」', others.length >= 1 && others.join(' ').includes('B · 会话二'), JSON.stringify(others));
   const bDot = await page.evaluate((sid) => {

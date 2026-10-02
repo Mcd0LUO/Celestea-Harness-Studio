@@ -95,7 +95,7 @@ describe("reasoning + content + tool calls + usage", () => {
   });
 
   it("tolerates gateways that re-send the full tool name in every chunk", async () => {
-    // r4.codes shape: delta.function.name carries the complete name on every
+    // Third-party gateway shape: delta.function.name carries the complete name on every
     // chunk instead of only the first. Concatenating it produced
     // "read_fileread_fileread_file" -> "unknown tool" for every call.
     const events = await runFrames([

@@ -82,7 +82,7 @@ export class TurnAccumulator {
     const entry = this.#calls.get(fragment.index) ?? { id: "", name: "", arguments: "" };
     if (fragment.id !== undefined) entry.id = fragment.id;
     // First-wins, not concat: the OpenAI spec sends the name once, and some
-    // gateways (observed: r4.codes) re-send the FULL name in every delta chunk —
+    // gateways (observed on a third-party one) re-send the FULL name in every delta chunk —
     // += turns that into "read_fileread_fileread_file" and every call 4xx's as
     // an unknown tool. A genuinely split name has never been observed in the
     // wild; repeated-full-name has. See stream.test.ts "re-sent full name".

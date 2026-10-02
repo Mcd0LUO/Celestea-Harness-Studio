@@ -179,7 +179,7 @@ function stopPoll(): void {
 // 漂移守护（改了两侧任意一处都必须机械失败）：
 //   contracts/scope-hash-vectors.json（冻结向量，TS 仓）
 //   frontend/tools/check-scope-hash.mjs（前端侧，已接进 `pnpm check`）
-//   /src/celestea_studio-ts/tests/scope-hash-vectors.test.ts（服务端侧, vitest）
+//   /srv/celestea/studio/tests/scope-hash-vectors.test.ts（服务端侧, vitest）
 
 // ---- 装配 ----------------------------------------------------------------------
 

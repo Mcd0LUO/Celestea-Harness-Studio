@@ -1,6 +1,6 @@
 /**
  * R3 W838 · B7 —— 前端门禁工具（第 9 批）。
- * 来源：/server-center/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md
+ * 来源：/srv/ops/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md
  *   的 B7 验收探针：
  *   F6/N3：STRICT=1 时「可收紧项（tighten）」必须与陈旧项一样失败，且输出与退出码一致。
  *   F7：apps/web 的 check 必须内置 CELESTEA_BUNDLE_STRICT=1（dist 缺失不再静默退出 0）。

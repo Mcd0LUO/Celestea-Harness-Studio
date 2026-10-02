@@ -8,9 +8,9 @@
  * 重算 ⇒ 每次授予都 403（历史事故 commit 692f19c，手动修完但零测试保护）。
  *
  * 做法（简报方案②）：两端各自核对**同一份冻结向量**——
- *   真源   /src/celestea_studio-ts/contracts/scope-hash-vectors.json
+ *   真源   /srv/celestea/studio/contracts/scope-hash-vectors.json
  *   前端侧 本脚本（已接进 package.json 的 check / check:scope-hash）
- *   服务端侧 /src/celestea_studio-ts/tests/scope-hash-vectors.test.ts（vitest）
+ *   服务端侧 /srv/celestea/studio/tests/scope-hash-vectors.test.ts（vitest）
  * 任一端的形状/算法偏离该文件 ⇒ 那一端的门禁机械失败（非零退出）。
  *
  * 本脚本同时覆盖三条路径，都要求等于冻结 sha256：

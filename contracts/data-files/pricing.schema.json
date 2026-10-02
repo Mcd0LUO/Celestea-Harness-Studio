@@ -57,7 +57,7 @@
     },
     "source": {
       "kind": "manual",
-      "ref": "/src/CelesteaTeamAPI/newapi-ops/PRICING-ARCHITECTURE.md",
+      "ref": "/srv/celestea/team-api/newapi-ops/PRICING-ARCHITECTURE.md",
       "synced_at": 1760000000
     }
   },

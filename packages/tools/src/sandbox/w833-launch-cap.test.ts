@@ -1,7 +1,7 @@
 /**
  * B3 / W812 P2-1 (R3) — readCapped's off-by-one.
  *
- * Source: /server-center/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
+ * Source: /srv/ops/runtime/worker-exec/results/W827-R3修复计划-B-tools-workers-studio.md
  * §B3 W812 P2-1: a chunk that lands EXACTLY on the cap is complete, not
  * truncated. The old "<" comparison turned the exact-cap case into truncated=true.
  */

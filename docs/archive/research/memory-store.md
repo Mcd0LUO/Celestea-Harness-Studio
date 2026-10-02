@@ -138,7 +138,7 @@
 - **letta-code MemFS**：读到两个内置 skill 正文 [原文]（`syncing-memory-filesystem`、`initializing-memory/ROOT_MEMORY.md`）；**MemFS 的 Git 同步/编译实现未读源码**。
 - **Cursor rules**：读到官方 `.md` 正文 [原文]；**Team Rules / dashboard 行为未读到**。
 - **星数为 shields.io 取整**，非精确值。
-- 本仓 W873（记忆评估）与 W876（目录归一）报告仍在 `/server-center/runtime/worker-exec/results/`，可作为本选型的内部依据。
+- 本仓 W873（记忆评估）与 W876（目录归一）报告仍在 `/srv/ops/runtime/worker-exec/results/`，可作为本选型的内部依据。
 
 ---
 

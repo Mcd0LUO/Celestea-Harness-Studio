@@ -5,9 +5,9 @@
  * Why this module exists. The `environment` prompt section (order 200) used to
  * spell out this checkout's absolute paths BY HAND:
  *
- *   "…the TypeScript service in /src/celestea_studio-ts (Hono, systemd unit
- *    celestea-studio-ts on 127.0.0.1:3777; public site https://studio.celestea.top).
- *    … the frontend is /src/celestea_studio-ts/apps/web …"
+ *   "…the TypeScript service in <repo> (Hono, systemd unit
+ *    <service> on <bind>; public site <site>).
+ *    … the frontend is <repo>/apps/web …"
  *
  * The same fact therefore existed TWICE and independently: once in the real
  * deployment (the systemd unit, the config, this checkout) and once as prose in
@@ -30,8 +30,10 @@
  *   static root <- `config.paths.staticRoot` (already an operator setting)
  *   bind        <- `config.bind` (already an operator setting)
  *   unit name   <- CELESTEA_SERVICE_NAME ?? /proc/self/cgroup ?? [SERVICE_FALLBACK]
- *   public site <- [PUBLIC_SITE] (irreducible: nothing in this process knows
- *                  which DNS name the tunnel/Nginx answers on)
+ *   public site <- CELESTEA_PUBLIC_SITE ?? [PUBLIC_SITE_DEFAULT] (irreducible:
+ *                  nothing in this process knows which DNS name the
+ *                  tunnel/Nginx answers on — so the OPERATOR sets it, and the
+ *                  fallback is a neutral placeholder, never a real hostname)
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -60,11 +62,31 @@ export const ENV_SERVICE_NAME = "CELESTEA_SERVICE_NAME";
 export const SERVICE_FALLBACK = "celestea-studio-ts.service";
 
 /**
- * The public site. Irreducible from inside this process: it is a DNS/tunnel
- * fact, not a fact about this checkout. The ONLY copy; templates reference
- * `{{studio_site}}`.
+ * Operator override for the public site stated in the prompt. Set it in the
+ * unit (`Environment=CELESTEA_PUBLIC_SITE=https://…`) to state YOUR hostname;
+ * this beats [PUBLIC_SITE_DEFAULT].
+ *
+ * Why it is an env var and not a literal: the public site is a fact about the
+ * OPERATOR's DNS, not about this software. A hard-coded real hostname would
+ * bake one deployment's identity into every install of an open-source package
+ * and make the prompt state a site the operator does not own. Same shape as
+ * [ENV_SERVICE_NAME] for the same reason.
  */
-export const PUBLIC_SITE = "https://studio.celestea.top";
+export const ENV_PUBLIC_SITE = "CELESTEA_PUBLIC_SITE";
+
+/**
+ * The public site when the operator set none: a neutral, non-resolvable
+ * placeholder. Deliberately `example.com` (RFC 2606 reserved, never a real
+ * deployment) so an unset variable produces an obviously-inexact prompt rather
+ * than a confidently wrong one.
+ */
+export const PUBLIC_SITE_DEFAULT = "https://studio.example.com";
+
+/** The effective public site: operator override first, neutral default second. */
+export function publicSite(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env[ENV_PUBLIC_SITE];
+  return override !== undefined && override !== "" ? override : PUBLIC_SITE_DEFAULT;
+}
 
 /** Parse a systemd unit out of `/proc/self/cgroup` text (pure, testable). */
 export function systemdUnitNameFromCgroup(text: string): string | null {
@@ -181,6 +203,6 @@ export function deploymentFacts(config: DeploymentConfigInput, env: NodeJS.Proce
     staticRoot: config.paths.staticRoot,
     service: override !== undefined && override !== "" ? override : (cgroupUnitName() ?? SERVICE_FALLBACK),
     bind: config.bind,
-    publicSite: PUBLIC_SITE,
+    publicSite: publicSite(env),
   };
 }
