@@ -203,6 +203,31 @@ describe("extraction rows", () => {
     expect(rows.every((x) => x.entries === 0)).toBe(true);
   });
 
+  it("a FAILED extraction that measured nothing is UNKNOWN, not free (W9261)", async () => {
+    // `extractSlice` books `zeroUsage()` when the call dies before any usage
+    // frame. Booking that 0 as a fact would make a priced session report a
+    // COMPLETE cost that silently omits every failed extraction — the same
+    // "zero is not a measurement" rule the step rows already follow.
+    const dir = tmpDir();
+    writePricing(dir);
+    const r = await rig(dir);
+    bookExtraction(r, { usage: zeroUsage(), entries: 0, status: "error" });
+
+    const totals = r.ledger.totals();
+    expect(totals.billed_unknown_records).toBe(1);
+    expect(totals.cost_complete).toBe(false);
+  });
+
+  it("an extraction error that DID observe usage stays priced (not flagged unknown)", async () => {
+    const dir = tmpDir();
+    writePricing(dir);
+    const r = await rig(dir);
+    bookExtraction(r, { usage: usage(50, 5), entries: 0, status: "error" });
+
+    const totals = r.ledger.totals();
+    expect(totals.billed_unknown_records).toBe(0);
+  });
+
   it("queryLedger folds step rows only — extraction spend stays out of the view", async () => {
     const dir = tmpDir();
     writePricing(dir);

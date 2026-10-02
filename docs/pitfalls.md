@@ -455,13 +455,24 @@ curl -sN "$BASE/chat/completions" -H "authorization: Bearer $KEY" -H 'content-ty
 - `aggregateUsage()` 按**行自己的** `billed_unknown` 计数，不再从 `usage === null` 反推
   （否则行上的标记与聚合口径会分叉）。
 
-**代码位置**：`packages/runtime/src/ledger.ts` 的 `book()`（`inputUnknown`）与 `aggregateUsage()`；
-契约描述在 `contracts/data-files/usage-ledger.schema.json` 的 `kinds.ok` 与 `billed_unknown`。
+**同一类还有一处（本轮一并修）**：后台提炼调用失败时 `extractSlice` 记的是 `zeroUsage()`，
+而 extraction 记录**没有** `billed_unknown` 字段（磁盘格式冻结）。于是「一次失败的提炼」在账本上
+表现为「0 token 的花费」，同样是静默偏低。修法与上面同源、且**不动磁盘格式**：
+`aggregateUsage()` 把「`status === "error"` 且 `usageIsEmpty`」的 extraction 行也算进
+`billed_unknown_records` ⇒ `cost_complete:false`。只算「什么都没测到」的那种 ——
+失败前已经收到 usage 帧的，其观测到的成本仍然计价。
+
+**代码位置**：`packages/runtime/src/ledger.ts` 的 `book()`（`inputUnknown`）与 `aggregateUsage()`
+（`unknownCost`，两个分支）；契约描述在 `contracts/data-files/usage-ledger.schema.json` 的
+`kinds.ok` 与 `billed_unknown`。
 
 **怎么验证**：`packages/runtime/src/ledger.test.ts` 的
 「W9261: a zero INPUT side is unknown, not a measurement」两条 ——
 `okStep(0, 12)` 必须 `billed_unknown:true` 且 `cost_complete:false`；`okStep(10, 12)` 必须 `false`。
 变异负控制：把 `inputUnknown` 改回 `usage === null` ⇒ 第一条红。
+提炼那一半在 `packages/runtime/src/ledger-extraction.test.ts`：
+「a FAILED extraction that measured nothing is UNKNOWN, not free」与
+「an extraction error that DID observe usage stays priced」两条。
 
 ## 附：容易误记的几件事
 
