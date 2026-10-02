@@ -428,15 +428,14 @@
 }
 
 /* ---- 弹层 ---- */
-/* W2007：.modal 在本仓**已无调用点**（弹窗统一走 sessions.css 的 .modal-scrim；
-   grep 全仓无写入 class="modal" 的代码路径）。它的 50 保持原值不动 —— 改一条
-   **不可达**规则的值无法用任何真机路径证明无回归；登记进门禁的 LEGACY_MAGIC 表。 */
-.modal {
-  position: fixed; inset: 0; z-index: 50;
-  background: var(--c-overlay);
-  display: flex; align-items: center; justify-content: center;
-  padding: 24px;
-}
+/* W9267：删除了 .modal 规则本身（position:fixed; inset:0; z-index:50）。
+   为什么现在能删：全仓 grep（class="modal" / classList.*modal / .modal 选择器）
+   证实它**零调用点** —— 弹窗统一走 sessions.css 的 .modal-scrim / .modal-card 体系。
+   过去它被登记在 W2007 门禁的 LEGACY_MAGIC 里「只删不改」，理由是"改一条不可达
+   规则的值无法证明无回归"；既然**零调用点**已用机械 grep 钉死，这条规则对渲染
+   没有任何贡献，直接删掉比继续把一个不可达的 50 挂在账上更干净（棘轮表也少一行
+   假债）。下方的 .modal-box / .modal-head / .modal-body / .modal-actions 仍保留 ——
+   它们是独立的类选择器、无 z-index，且被 .modal-scrim 体系在语义上共用几何。 */
 .modal-box {
   width: min(660px, 100%); max-height: 86vh;
   background: var(--c-surface-raised);

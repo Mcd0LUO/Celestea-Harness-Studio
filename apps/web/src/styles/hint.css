@@ -11,7 +11,11 @@
      时 a.left − h.left 为负，卡片被夹到边缘 ⇒ 用户报的提示错位。
      先例：ui/grants/panel/position.ts 的盾牌面板（fixed + rect 现算）。 */
   position: fixed;
-  z-index: 60;
+  /* W9267：裸 60 → 具名令牌。60 低于移动端抽屉(--z-drawer:61) ⇒ 真机 390x844
+     悬停抽屉里的会话行时，提示卡被整个抽屉盖住。--z-tooltip:65 抬到抽屉之上、
+     设置页(--z-settings:70)之下；上下界由 tests/w2007-zindex-layers.test.ts
+     从 tokens.css 解析断言。与 .railv3-card(40) 的相对序不变（60>40 ⇒ 65>40）。 */
+  z-index: var(--z-tooltip);
   max-width: min(50vw, calc(100vw - 24px));
   background: var(--tip-bg);
   border: 1px solid var(--c-border-strong);

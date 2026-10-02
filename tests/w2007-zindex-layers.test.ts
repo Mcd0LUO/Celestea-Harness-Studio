@@ -11,9 +11,10 @@
  *   用户的报障路径（展开 → 点设置）恰恰是**唯一**暴露它的路径。
  *
  * 本门禁守三条，都是机械可判的：
- *   ① 层级令牌存在且**严格有序**（--z-scrim < --z-drawer < --z-settings < --z-modal）；
+ *   ① 层级令牌存在且**严格有序**（--z-scrim < --z-drawer < --z-tooltip < --z-settings
+ *     < --z-modal；W9267 补入 --z-tooltip 提示卡这一档，见 ①′）；
  *   ② 关键选择器**必须**引用令牌（不许退回裸魔数）——这是防"顺手改回 50"的牙；
- *   ③ 裸魔数**只减不增**：现存 24 处登记在 LEGACY_MAGIC 里（棘轮），
+ *   ③ 裸魔数**只减不增**：现存 22 处登记在 LEGACY_MAGIC 里（棘轮，W9267 减 2：.hint-card 收敛成 --z-tooltip、.modal 零调用点整条删除），
  *      任何**新增**裸魔数立刻红。已登记的项被改成 token ⇒ 必须从表里删掉（防陈旧）。
  *
  * 与 W847 W8（圆角/虚线门禁）同一口径：取值从 CSS **解析**出来算，不把期望值抄一遍
@@ -78,10 +79,8 @@ const LEGACY_MAGIC: { file: string; value: number; sel: string; why: string }[] 
   { file: "commands.css", value: 25, sel: ".goal-bar", why: "目标条：常驻条，理想是 --z-dock(10)；同上，本轮不挪实际位置。" },
   { file: "components.css", value: 1, sel: ".rendered .csv-table thead th", why: "sticky 表头：表格滚动容器内部的绘制序，从不与浮层比大小。" },
   { file: "components.css", value: 60, sel: ".img-zoom", why: "图片灯箱：inset:0 铺满视口且盖住侧栏设置入口 ⇒ 与设置页不可能同时可操作（真机确认），改值不可观测。" },
-  { file: "components.css", value: 50, sel: ".modal", why: "**已无调用点**（弹窗统一走 sessions.css 的 .modal-scrim）。改一条不可达规则的值，无法用任何真机路径证明无回归。" },
   { file: "components.css", value: 95, sel: ".switch-progress", why: "会话切换顶部细条：非交互（pointer-events:none），盖住谁都不影响可点性。理想是 --z-progress；本轮不挪。" },
   { file: "contextview.css", value: 90, sel: ".ctx-scrim", why: "完整上下文浮层（.modal-scrim 的变体，更高一档）。理想与 --z-modal 同层，但它是「从状态栏开」的全屏只读层，收敛需另一次真机验证。" },
-  { file: "hint.css", value: 60, sel: ".hint-card", why: "悬停提示卡。★ 实测它低于移动端抽屉(61) ⇒ 悬停抽屉里的会话行时提示被整个盖住（同族 bug，见报告）。但 hint.css 不在本工号的文件边界内（不可改），故只登记不改。" },
   { file: "layout.css", value: 5, sel: ".sidebar-resizer", why: "侧栏拖宽条：移动端该条 display:none，桌面端不参与浮层之争。" },
   { file: "preview.css", value: 35, sel: ".preview-host", why: "文件预览宿主：贴边常驻且 pointer-events:none，理想是 --z-dock(10)；降低会改变它与 .wb-menu(60) 的既有关系。" },
   { file: "quote.css", value: 30, sel: ".quote-float", why: "选区浮标：锚在选区旁的临时浮层，理想是 --z-float(20)。" },
@@ -114,6 +113,30 @@ describe("W2007 · z-index 层级门禁", () => {
     expect(drawer, "移动端抽屉必须低于设置页（否则会话树盖住设置页）").toBeLessThan(settings);
     // 从设置页里打开的二级弹窗必须盖得住设置页
     expect(settings, "设置页必须低于二级弹窗（否则设置页里的弹窗被盖住）").toBeLessThan(modal);
+  });
+
+  it("①′ W9267：提示卡夹在抽屉与设置页之间（--z-drawer < --z-tooltip < --z-settings）", () => {
+    const t = tokenScale();
+    // 取值一律从 tokens.css **解析**出来，不把 65 抄一遍（抄一遍就自证：CSS 改了、
+    // 这里的字面量没改，两边一起错还全绿）。
+    expect(t.has("--z-tooltip"), "缺少层级令牌 --z-tooltip（提示卡这一档）").toBe(true);
+    const drawer = t.get("--z-drawer")!;
+    const tooltip = t.get("--z-tooltip")!;
+    const settings = t.get("--z-settings")!;
+    // 下界：提示卡必须高于移动端抽屉，否则悬停抽屉里的会话行时提示被整个盖住
+    //（真机 390x844 复现的那条路）。
+    expect(drawer, "移动端抽屉必须低于提示卡（否则抽屉里的会话行提示不可见）").toBeLessThan(tooltip);
+    // 上界：提示卡必须低于设置页 —— 设置页是用户明确进入的下一层，不该被一条悬停提示糊住。
+    expect(tooltip, "提示卡必须低于设置页（否则悬停提示会盖住设置页）").toBeLessThan(settings);
+  });
+
+  it("②′ W9267：.hint-card 必须引用 --z-tooltip，不许退回裸魔数", () => {
+    const hint = cssFiles().find((f) => f.name === "hint.css")!.css;
+    const i = hint.indexOf(".hint-card {");
+    expect(i, "找不到 .hint-card 规则").toBeGreaterThanOrEqual(0);
+    const body = hint.slice(hint.indexOf("{", i), hint.indexOf("}", i));
+    expect(body, "hint.css 的 .hint-card 必须用 var(--z-tooltip)").toContain("z-index: var(--z-tooltip)");
+    expect(body, "hint.css 的 .hint-card 不得再出现裸数字 z-index").not.toMatch(/z-index:\s*\d/);
   });
 
   it("② 关键选择器必须引用令牌，不许退回裸魔数（防「顺手改回 50」）", () => {
