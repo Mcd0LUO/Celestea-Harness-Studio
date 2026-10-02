@@ -215,17 +215,17 @@ Phase 2 ─ 上下文压缩（方向已定：模型驱动 + 视图叠层；启�
 
 **⑥ 组装层：studio 侧**
 
-`session-compose.ts` 的 `memoryExtraction()`（`:583-618`）按序短路：`sessionId`/目录/工作区为空 → 跳过（`:590`）；`!memoryExtractionEnabled` → 跳过（`:591`）；`resolveLlmMode(env)==="offline"` → 跳过（`:594`）。随后：`memoryStoreOf(workspace.path)`（`:595`）；effort 取 env 或默认 `"low"`（`:596`）；`liveEngineLlm({...profile, reasoning_effort:effort, max_output_tokens:2048}, env)`（`:597`）；`write` 回调包上 `{session,turn}` 溯源（`:601`）；`manifest` 回调（`:602`）；`bookExtraction` 带上 provider/model/base_url_host（`:606-612`）；cursor 指向 `join(dir,"memory-extraction.json")`（`:614`、`:79`、`:621-644`，损坏即重置）；`entryMaxBytes` 传 `MEMORY_ENTRY_MAX_BYTES`（`:615`）；stderr（`:616`）。
+`session-compose.ts` 的 `memoryExtraction()`（`:598-633`）按序短路：`sessionId`/目录/工作区为空 → 跳过（`:605`）；`!memoryExtractionEnabled`（**默认关**，见下表）→ 跳过（`:606`）；`resolveLlmMode(env)==="offline"` → 跳过（`:609`）。随后：`memoryStoreOf(workspace.path)`（`:610`）；effort 取 env 或默认 `"low"`（`:611`）；`liveEngineLlm({...profile, reasoning_effort:effort, max_output_tokens:2048}, env)`（`:612`）；`write` 回调包上 `{session,turn}` 溯源（`:616`）；`manifest` 回调（`:617`）；`bookExtraction` 带上 provider/model/base_url_host（`:621-627`）；cursor 指向 `join(dir,"memory-extraction.json")`（`:629`、`:79`、`:636-659`，损坏即重置）；`entryMaxBytes` 传 `MEMORY_ENTRY_MAX_BYTES`（`:630`）；stderr（`:631`）。
 
 **env 开关与默认值**
 
 | 变量 | 默认 | 行为 | 锚点 |
 |---|---|---|---|
-| `CELESTEA_MEMORY_EXTRACTION` | 开 | 取 `off`/`0`/`false`/`no` 关闭；其余开启 | `memory-extraction.ts:144-150`、`session-compose.ts:591` |
-| `CELESTEA_MEMORY_EXTRACTION_EFFORT` | `"low"` | 覆盖提炼调用的 `reasoning_effort`（自由字符串，逐字透传） | `session-compose.ts:81`、`:596`；`packages/llm/src/profile.ts:107` |
-| （内部）`max_transcript_bytes` | 24000 | 转录头截断上限，截断处标 `[transcript head truncated]` | `memory-extraction.ts:135`、`:250-289` |
+| `CELESTEA_MEMORY_EXTRACTION` | **关**（只有 `on` / `1` / `true` / `yes` 开） | **opt-in**。默认不开，因为它换来的不是「同一请求换个形状」而是**每个合格轮次多一次计费调用**：没要求它的部署不该花钱，也不该有哪个部署的请求数悄悄变化。（W1900 曾默认开，落地后第一件事就是打红一条数请求数的回归用例。） | `memory-extraction.ts:155-161`、`session-compose.ts:606` |
+| `CELESTEA_MEMORY_EXTRACTION_EFFORT` | `"low"` | 覆盖提炼调用的 `reasoning_effort`（自由字符串，逐字透传） | `session-compose.ts:81`、`:611`；`packages/llm/src/profile.ts:107` |
+| （内部）`max_transcript_bytes` | 24000 | 转录头截断上限，截断处标 `[transcript head truncated]` | `memory-extraction.ts:135`、`:261-300` |
 | （内部）`min_user_words` | 3 | 跳过门 2 阈值 | `memory-extraction.ts:136` |
-| （内部）`max_output_tokens` | 2048 | 请求 `max_tokens` | `memory-extraction.ts:137`、`:455-463` |
+| （内部）`max_output_tokens` | 2048 | 请求 `max_tokens` | `memory-extraction.ts:137`、`:466-474` |
 
 **测试矩阵（本地全绿）**
 
@@ -322,7 +322,7 @@ token 估算器（`context-trim.ts`，仍是唯一估算器）；`cacheHitRatio`
 |---|---|---|---|
 | ① 纯函数 | `packages/core/src/compression.ts`、`compression-range.ts` | 块 schema、区间数学（校验 / 归一化合并 / turn 索引）、叠层投影、哲学常量、水位事实投影 | `compression.ts:50`、`:95`、`:117`、`:177`；`compression-range.ts:100`、`:142`、`:172` |
 | ② 会话状态 | `packages/session/src/compression.ts`、`compression-log.ts` | `compression.json` 侧车（损坏即重置）、`deriveMessages` 叠层装饰器 | `compression.ts:29`、`:64`、`:102`；`compression-log.ts:27`、`:30` |
-| ③ 运行时接线 | `packages/runtime/src/host/engine-session.ts`、`compression-host.ts`、`compression-switch.ts`、`agent-config.ts`、`compose.ts`、`runtime.ts` | 组装点注入、宿主端口、env kill-switch、哲学并入、水位绑定 | `engine-session.ts:147-150`、`compression-host.ts:116`、`compression-switch.ts:19`、`agent-config.ts:50-51`、`compose.ts:223`、`runtime.ts:138` |
+| ③ 运行时接线 | `packages/runtime/src/host/engine-session.ts`、`compression-host.ts`、`compression-switch.ts`、`agent-config.ts`、`compose.ts`、`runtime.ts` | 组装点注入、宿主端口、env kill-switch、哲学并入、水位绑定 | `engine-session.ts:147-150`、`compression-host.ts:116`、`compression-switch.ts:27`、`agent-config.ts:50-51`、`compose.ts:223`、`runtime.ts:138` |
 | ④ 循环 | `packages/agent-loop/src/compression-nudge.ts`、`loop.ts` | nudge 文本 / 阈值 / 瞬时消息；`buildRequest` 尾部注入 | `compression-nudge.ts:62`、`:91`；`loop.ts:299-316` |
 | ⑤ 工具 | `packages/tools/src/tools/compression.ts`、`contracts/tools.json` | `compress` / `decompress` / `context_status` 三工具 + 契约 | `compression.ts:144`、`:173`、`:198`、`:228`；`tools.json:797`、`:831`、`:860` |
 | ⑥ 观测 | `apps/studio/src/runtime/compression-view.ts`、`apps/studio/src/handlers/health.ts`、`contracts/endpoints.json` | `/api/status.compression` 只报告不计算 | `health.ts:102`、`:144`；`endpoints.json:179` |
@@ -331,7 +331,9 @@ token 估算器（`context-trim.ts`，仍是唯一估算器）；`cacheHitRatio`
 
 | 变量 | 默认 | 作用 |
 |---|---|---|
-| `CELESTEA_MEMORY_COMPRESSION` | **开**（`off` / `0` / `false` / `no` 关） | 关掉哲学段、nudge 与三个工具（`packages/runtime/src/compression-switch.ts:22`；消费点 `agent-config.ts:50`、`engine-session.ts:143`、`compression-host.ts:116`）。关掉后 loop 与 Phase 2 之前的字节一致 |
+| `CELESTEA_MEMORY_COMPRESSION` | **开**（`off` / `0` / `false` / `no` 关） | 关掉哲学段、nudge 与三个工具（`packages/runtime/src/compression-switch.ts:27`；消费点 `agent-config.ts:50`、`engine-session.ts:143`、`compression-host.ts:116`）。关掉后 loop 与 Phase 2 之前的字节一致 |
+
+> 两个开关的默认**相反**，而且是有意的：压缩改变的是「既有请求带什么」，提炼是「每个合格轮次多花一次计费调用」——`memoryExtractionEnabled` 因此是 opt-in（`packages/runtime/src/memory-extraction.ts:155-161`）。拼写（`on`/`off` 那一套）两边一致，操作者只需记一套词。
 
 **测试矩阵**
 

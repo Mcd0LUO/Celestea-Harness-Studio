@@ -140,13 +140,24 @@ const DIRECT_WRITE_TOOLS: ReadonlySet<string> = new Set(["remember", "forget"]);
 /** user_message origins that are NOT real user prose. */
 const INJECTED_ORIGINS: ReadonlySet<string> = new Set(["skill", "memory", "receipt", "steering", "compact"]);
 
-/** Env switch: `CELESTEA_MEMORY_EXTRACTION=off` (or 0/false/no) disables extraction. */
+/**
+ * Env switch: `CELESTEA_MEMORY_EXTRACTION=on` (or 1/true/yes) ENABLES extraction.
+ *
+ * **OFF by default — opt-in.** Deliberately the OPPOSITE default from
+ * `CELESTEA_MEMORY_COMPRESSION`, because the two switches buy different things:
+ * compression changes what an EXISTING request carries, while extraction is an
+ * ADDITIONAL BILLED MODEL CALL on every eligible turn. An operator who has not
+ * asked for that must not pay for it, and no deployment's request count changes
+ * under it. (W1900 shipped this default-ON, and the very first thing it did was
+ * break a request-counting regression test — the honest default is the quiet
+ * one.)
+ */
 export const ENV_MEMORY_EXTRACTION = "CELESTEA_MEMORY_EXTRACTION";
 
-/** Default ON; `off` (and the usual falsey spellings) turns extraction off. */
+/** Default OFF; `on` (and the usual truthy spellings) turns extraction on. */
 export function memoryExtractionEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = (env[ENV_MEMORY_EXTRACTION] ?? "").trim().toLowerCase();
-  return !["off", "0", "false", "no"].includes(raw);
+  return ["on", "1", "true", "yes"].includes(raw);
 }
 
 /** The extraction system prompt. Constant text → prefix-cache friendly. */

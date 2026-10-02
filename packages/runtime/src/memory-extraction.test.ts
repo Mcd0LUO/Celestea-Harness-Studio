@@ -11,6 +11,7 @@ import {
   createMemoryExtractionScheduler,
   extractionSystemPrompt,
   hasEligibleUserProse,
+  memoryExtractionEnabled,
   parseExtractionOps,
   renderExtractionTranscript,
   sliceUnprocessedTurns,
@@ -213,6 +214,32 @@ describe("P1 · parseExtractionOps", () => {
     );
     expect(ops).toEqual([]);
     expect(refused).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The switch (opt-in)
+// ---------------------------------------------------------------------------
+
+describe("P1 · the extraction switch is OPT-IN", () => {
+  it("is OFF when the env says nothing at all", () => {
+    // The default is the whole point: extraction is an EXTRA BILLED model call
+    // per eligible turn, so a process that has not asked for it must not spend.
+    // W1900 shipped default-ON and the first thing it did was break a
+    // request-counting regression test.
+    expect(memoryExtractionEnabled({})).toBe(false);
+  });
+
+  it("stays off for every falsey spelling (and for junk)", () => {
+    for (const value of ["", "  ", "off", "OFF", "0", "false", "false", "no", "nope", "off please"]) {
+      expect(memoryExtractionEnabled({ CELESTEA_MEMORY_EXTRACTION: value })).toBe(false);
+    }
+  });
+
+  it("turns on only for an explicit truthy spelling, case- and space-insensitive", () => {
+    for (const value of ["on", "ON", " On ", "1", "true", "TRUE", "yes", "Yes"]) {
+      expect(memoryExtractionEnabled({ CELESTEA_MEMORY_EXTRACTION: value })).toBe(true);
+    }
   });
 });
 

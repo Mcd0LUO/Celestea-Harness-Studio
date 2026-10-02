@@ -10,9 +10,14 @@
  * The switch lives in the runtime, not in core, because it answers "may this
  * PROCESS be a compressing one?" and every layer that has to honour the answer
  * — the config projection, the log assembly, the tool mount — already depends
- * on the runtime. Same shape and the same falsey spellings as
- * `memoryExtractionEnabled` in ./memory-extraction.ts, so one operator learns
- * one rule.
+ * on the runtime.
+ *
+ * `memoryExtractionEnabled` in ./memory-extraction.ts reads the same spellings,
+ * but its DEFAULT IS THE OPPOSITE (off/opt-in), and the difference is the point:
+ * compression changes what an existing request carries, extraction adds a whole
+ * billed call per eligible turn. One operator learns one spelling; the two
+ * defaults answer different questions ("may this process rewrite the view?" vs
+ * "may this process spend money out of turn?").
  */
 
 /** Env switch: `CELESTEA_MEMORY_COMPRESSION=off` disables model-driven compression. */

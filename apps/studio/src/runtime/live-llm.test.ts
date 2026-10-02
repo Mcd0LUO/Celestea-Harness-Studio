@@ -159,14 +159,15 @@ describe("live LLM assembly (mock upstream, no real network)", () => {
       [textDelta("收"), textDelta("到"), usageChunk(240, 4), DONE_FRAME],
     ]);
     try {
-      // This test counts the ENGINE's own requests, so the background
-      // memory-extraction pass is turned OFF here: it is a SECOND, independent
-      // model call per turn (its own subject, pinned by the next test), and
-      // leaving it on would make "one request per step" unassertable.
+      // This test counts the ENGINE's own requests, and it relies on the
+      // extraction pass being OFF — which is its DEFAULT (opt-in; see the
+      // dedicated describe below). No env is set here precisely so the default
+      // stays exercised: the day someone flips it back to ON, this test's
+      // request count fails and says why.
       const host = makeLiveHost({
         baseUrl: upstream.v1BaseUrl,
         model,
-        env: { CELESTEA_REASONING_EFFORT: "xhigh-custom", CELESTEA_MEMORY_EXTRACTION: "off" },
+        env: { CELESTEA_REASONING_EFFORT: "xhigh-custom" },
       });
       await runTurn(host.app, "用 run_shell 执行 echo ts-live-ok 然后回复收到");
       await waitIdle(host.studio);
@@ -343,7 +344,9 @@ describe("live LLM · the background extraction pass is a second model call", ()
       [textDelta('{"ops":[]}'), usageChunk(5, 1), DONE_FRAME],
     ]);
     try {
-      const host = makeLiveHost({ baseUrl: upstream.v1BaseUrl, model });
+      // Opted IN explicitly: this pass is off by default because it is an extra
+      // BILLED call, so the test that pins its cost must ask for it.
+      const host = makeLiveHost({ baseUrl: upstream.v1BaseUrl, model, env: { CELESTEA_MEMORY_EXTRACTION: "on" } });
       await runTurn(host.app, "please remember that this project always uses pnpm");
       await waitIdle(host.studio);
       await waitRequests(upstream.requests, 2);
