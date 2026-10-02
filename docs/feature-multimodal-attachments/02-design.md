@@ -234,7 +234,7 @@ export type Content = TextContent | ToolCallContent | ImageContent;   // ← 唯
 | `contracts/endpoints.json` | `post_turn.request.fields` 加 `attachments`；若新增端点则 `count` 与 `endpoints` 同步 |
 | `contracts/route-table.snapshot.json:309` | `tsApiEndpoints` 与 `tsOnlyRoutes` 计数（若新增 TS-only 端点） |
 | `contracts/data-files/index.json` | 若把附件目录登记为数据文件，加一条 |
-| `scripts/export-golden.ts:75-93,185-196` | 脱敏器与导出白名单（§5.6） |
+| `scripts/golden/probe.ts:14`、`scripts/golden/redact.ts:37` | 脱敏器与导出白名单（§5.6） |
 
 ### 4.3 日志行形状（向后兼容分析）
 
@@ -276,9 +276,9 @@ export type Content = TextContent | ToolCallContent | ImageContent;   // ← 唯
 | `packages/session/src/parity.test.ts` | 与旧实现的字节对拍 | 新增字段的行需要新对拍向量；旧向量应不变（无附件） |
 | `packages/core/src/message.test.ts:54` | `JSON.stringify(assistantText("hi"))` 精确字符串 | 构造器未改则不变；改了构造器签名会红 |
 | `packages/core/src/session-log.test.ts:34-54` | 事件编解码精确形状 | 新增可选字段省略时不变 |
-| `scripts/export-golden.ts:185-196` | 导出 `messages-expected` / `derive-messages-expected` | 若产物**真的**变化才需重跑导出器（需生产 studio 可达；P0 已禁止驱动真实 turn，导出走只读 HTTP） |
+| `scripts/golden/fetch.ts:106` | 导出 `messages-expected` / `derive-messages-expected` | 若产物**真的**变化才需重跑导出器（需生产 studio 可达；P0 已禁止驱动真实 turn，导出走只读 HTTP） |
 
-**「重新导出」代价评估**：`export-golden` 是只读 HTTP 抓取（`GET /api/sessions`、`GET /api/sessions/{id}/messages`、`GET /api/health` 等）+ 本地 `deriveMessages`，**不驱动 turn**（`scripts/export-golden.ts:185` 附近；`e2e-replay.ts:52` 明确 P0 禁止 POST /api/turn）。因此重跑**不污染生产日志**。当前 fixture 里没有任何真实图片，所以按「可选字段省略」设计，重导出**预期零字节差异**——这是本次设计的**验收门槛之一**。
+**「重新导出」代价评估**：`export-golden` 是只读 HTTP 抓取（`GET /api/sessions`、`GET /api/sessions/{id}/messages`、`GET /api/health` 等）+ 本地 `deriveMessages`，**不驱动 turn**（`scripts/golden/fetch.ts:106` 附近；`e2e-replay.ts:52` 明确 P0 禁止 POST /api/turn）。因此重跑**不污染生产日志**。当前 fixture 里没有任何真实图片，所以按「可选字段省略」设计，重导出**预期零字节差异**——这是本次设计的**验收门槛之一**。
 
 **红线（§5.6）**：即使将来有会话带附件，导出器写入 `derive-messages-expected.json` 时也必须只写 `attachment_id`/`media_type`/尺寸，**绝不允许**写入 `data:` URL 或 base64；且**不得**把 `attachments/` 目录复制进 `fixtures/`。
 
