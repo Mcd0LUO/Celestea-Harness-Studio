@@ -83,6 +83,40 @@ const CREDENTIAL_CONTEXTS: readonly RegExp[] = [
 ];
 const TOKENISH = /[A-Za-z0-9_\-.+/=]{16,}/g;
 
+/**
+ * Environment variables read as provider credentials by collectKnownSecrets().
+ * Module-level so the list is data, not control flow.
+ */
+const PROVIDER_ENV_VARS = ["CELESTEA_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"] as const;
+
+/**
+ * Harvest every token-shaped substring of one credential region into `into`.
+ *
+ * EX-01: this used to be the innermost loop of discover(), which nested 5
+ * blocks deep. Extracting it is a pure move — same TOKENISH state handling
+ * (lastIndex is reset per region), same >= 16 / placeholder filter.
+ */
+function addTokensFromRegion(region: string | undefined, into: Set<string>): void {
+  if (typeof region !== "string") return;
+  TOKENISH.lastIndex = 0;
+  for (const tok of region.matchAll(TOKENISH)) {
+    const v = tok[0];
+    if (v.length >= 16 && !v.includes(PLACEHOLDER)) into.add(v);
+  }
+}
+
+/**
+ * Feed every capture group of one credential-context match into `into`.
+ *
+ * EX-01: same extraction rationale as addTokensFromRegion() — group 0 is the
+ * whole match and is skipped, exactly as the original `g = 1` loop did.
+ */
+function addGroupsFromMatch(m: RegExpMatchArray, into: Set<string>): void {
+  for (let g = 1; g < m.length; g++) {
+    addTokensFromRegion(m[g], into);
+  }
+}
+
 export function createRedactor(knownSecrets: readonly string[], extraRules: readonly RedactionRule[] = []): Redactor {
   const rules = [...extraRules, ...DEFAULT_RULES];
   const byRule: Record<string, number> = {};
@@ -100,15 +134,7 @@ export function createRedactor(knownSecrets: readonly string[], extraRules: read
     for (const re of CREDENTIAL_CONTEXTS) {
       re.lastIndex = 0;
       for (const m of text.matchAll(re)) {
-        for (let g = 1; g < m.length; g++) {
-          const region = m[g];
-          if (typeof region !== "string") continue;
-          TOKENISH.lastIndex = 0;
-          for (const tok of region.matchAll(TOKENISH)) {
-            const v = tok[0];
-            if (v.length >= 16 && !v.includes(PLACEHOLDER)) dynamic.add(v);
-          }
-        }
+        addGroupsFromMatch(m, dynamic);
       }
     }
   }
@@ -182,30 +208,49 @@ export function createRedactor(knownSecrets: readonly string[], extraRules: read
  * Collect candidate secrets from read-only sources (providers.json keys, an
  * npm auth token, environment values). Never logs them.
  */
+/**
+ * Pull the `api_key` values out of a parsed providers.json shape.
+ *
+ * EX-01: this used to be the nested `for` inside collectKnownSecrets(), which
+ * nested 5 blocks deep. Pure extraction — the guards, the >= 8 length test and
+ * the untrimmed push are all byte-for-byte what the inline loop did. In
+ * particular a key is PUSHED AS-IS (only its .trim() is measured), while the
+ * env branch pushes the trimmed value; that asymmetry is preserved.
+ */
+function collectProviderKeys(providers: unknown): string[] {
+  const keys: string[] = [];
+  if (providers === null || typeof providers !== "object" || !("providers" in providers)) return keys;
+  const list = (providers as { providers?: unknown }).providers;
+  if (!Array.isArray(list)) return keys;
+  for (const p of list) {
+    if (p === null || typeof p !== "object" || !("api_key" in p)) continue;
+    const key = (p as { api_key?: unknown }).api_key;
+    if (typeof key === "string" && key.trim().length >= 8) keys.push(key);
+  }
+  return keys;
+}
+
+/** The `_authToken=<value>` entries of a ~/.npmrc blob. */
+function collectNpmrcTokens(npmrc: string | undefined): string[] {
+  const toks: string[] = [];
+  if (!npmrc) return toks;
+  for (const m of npmrc.matchAll(/_authToken\s*=\s*(\S+)/g)) {
+    const tok = m[1];
+    if (tok && tok.length >= 8) toks.push(tok);
+  }
+  return toks;
+}
+
+/** Trimmed values of the known provider-key environment variables. */
+function collectEnvKeys(env: NodeJS.ProcessEnv | undefined): string[] {
+  const keys: string[] = [];
+  for (const name of PROVIDER_ENV_VARS) {
+    const v = env?.[name];
+    if (typeof v === "string" && v.trim().length >= 8) keys.push(v.trim());
+  }
+  return keys;
+}
+
 export function collectKnownSecrets(input: { providersJson?: unknown; npmrc?: string; env?: NodeJS.ProcessEnv }): string[] {
-  const out: string[] = [];
-  const providers = input.providersJson;
-  if (providers !== null && typeof providers === "object" && "providers" in providers) {
-    const list = (providers as { providers?: unknown }).providers;
-    if (Array.isArray(list)) {
-      for (const p of list) {
-        if (p !== null && typeof p === "object" && "api_key" in p) {
-          const key = (p as { api_key?: unknown }).api_key;
-          if (typeof key === "string" && key.trim().length >= 8) out.push(key);
-        }
-      }
-    }
-  }
-  if (input.npmrc) {
-    for (const m of input.npmrc.matchAll(/_authToken\s*=\s*(\S+)/g)) {
-      const tok = m[1];
-      if (tok && tok.length >= 8) out.push(tok);
-    }
-  }
-  const env = input.env ?? {};
-  for (const name of ["CELESTEA_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"]) {
-    const v = env[name];
-    if (typeof v === "string" && v.trim().length >= 8) out.push(v.trim());
-  }
-  return out;
+  return [...collectProviderKeys(input.providersJson), ...collectNpmrcTokens(input.npmrc), ...collectEnvKeys(input.env)];
 }
