@@ -61,4 +61,15 @@ export const statusline = {
   'statusline.tps.idle': 'No new sample this turn',
   'statusline.tps.inactive': 'The session is not running',
   'statusline.tps.meanTitle': '{why} · showing the mean of the last {n} samples',
+  // ---- agent_swarm batch roster (§7.2 statusline badge + popup) ----
+  'statusline.swarm.badge': 'Swarm {done}/{total}',
+  'statusline.swarm.title': '{count} swarm batch(es) (click for members)',
+  'statusline.swarm.empty': 'No active swarm batch',
+  'statusline.swarm.phase.running': 'Running',
+  'statusline.swarm.phase.failed': 'Failed',
+  'statusline.swarm.phase.done': 'Done',
+  'statusline.swarm.phase.cancelled': 'Cancelled',
+  'statusline.swarm.batchModel': 'Model {model}',
+  'statusline.swarm.modelInherit': 'Inherits the current session model',
+  'statusline.swarm.memberNo': 'Member {id}',
 } as const;

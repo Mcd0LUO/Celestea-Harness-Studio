@@ -76,6 +76,8 @@ const READ_IMAGE_TOOL = "read_image";
  * the tools are not mounted rather than mounted-and-always-failing.
  */
 const COMPRESSION_TOOLS = ["compress", "context_status", "decompress"];
+/** agent_swarm: mounted only when the host supplied a loopFactory (see swarm-wiring.test.ts). */
+const SWARM_TOOL = "agent_swarm";
 
 /** The golden fixtures are exported on demand (`pnpm golden:export`). */
 const HAS_FIXTURES = existsSync(fixturePath("index.json"));
@@ -216,12 +218,16 @@ describe("W744 · all 8 builtin tool specs match the implementation registry", (
 
   it("leaves no contract tool uncovered (worker trio + W783 question tool come from elsewhere)", () => {
     // W783: 10 -> 11; W804: 11 -> 12; W7: 12 -> 13; W884: 13 -> 14; F4: 14 -> 16;
-    // B2: 16 -> 18; W1533: 18 -> 19; W1900 (Phase 2): 19 -> 22.
+    // B2: 16 -> 18; W1533: 18 -> 19; W1900 (Phase 2): 19 -> 22; W-swarm: 22 -> 23.
     // ask_user_question, read_image, the browser pair, the compression trio and
     // the W7 worker tools are each covered by their own check below;
     // remember/forget/update_tasks are in REGISTRY_TOOLS (always mounted).
-    expect(CONTRACT.tools).toHaveLength(22);
-    expect(uncoveredTools(CONTRACT, specs, [...WORKER_TOOLS, ...QUESTION_TOOLS, READ_IMAGE_TOOL, ...BROWSER_TOOLS, ...COMPRESSION_TOOLS])).toEqual([]);
+    // agent_swarm is likewise CONDITIONALLY mounted (it needs a loopFactory, else
+    // no member turn can be built), so it is excluded here for the same reason the
+    // compression trio is — but it is covered by swarm-wiring.test.ts, which
+    // asserts the tool really lands in a composed registry.
+    expect(CONTRACT.tools).toHaveLength(23);
+    expect(uncoveredTools(CONTRACT, specs, [...WORKER_TOOLS, ...QUESTION_TOOLS, READ_IMAGE_TOOL, ...BROWSER_TOOLS, ...COMPRESSION_TOOLS, SWARM_TOOL])).toEqual([]);
   });
 
   /**

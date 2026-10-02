@@ -355,6 +355,66 @@ export const STATUS_PHASES = [
 
 export type StatusPhase = (typeof STATUS_PHASES)[number];
 
+/**
+ * agent_swarm：成员相位的**四组展示口径**（§7.2 折叠分组用）。
+ *
+ * 为什么只有四组而不是把 packages/swarm 的七态原样搬过来：这里是**呈现层**的
+ * 归并口径，调度器内部七态（queued / starting / running / retrying / done /
+ * failed / cancelled）保持数据侧的忠实，由组装方在投影时折叠成这四组。
+ * 也就是说「调度器的状态机」与「界面看到的分组」是两个层次，不要互相顶替。
+ */
+export const SWARM_MEMBER_PHASES = [
+  "running",
+  "failed",
+  "done",
+  "cancelled",
+] as const;
+
+export type SwarmMemberPhase = (typeof SWARM_MEMBER_PHASES)[number];
+
+/** 一个 swarm 成员的展示视图（组装方投影出来的只读快照）。 */
+export interface SwarmMemberView {
+  /** 1-based 编号口径的成员标识（与 agent_swarm 全链 1..N 的编号一致）。 */
+  id: string;
+  /** 面向用户的任务短描述（已由组装方做长度裁剪，界面不再二次截断）。 */
+  label: string;
+  phase: SwarmMemberPhase;
+  /** 成员失败时的原因摘要（phase === "failed" 时有意义，其余为空串）。 */
+  error?: string;
+}
+
+/** 一个批次（同一次 agent_swarm 调用）的展示视图。 */
+export interface SwarmBatchView {
+  /** 批次标识：多批次时界面用它做切换的稳定键。 */
+  id: string;
+  /** 批次级模型标签（该批次的模型路由结果，缺省即未指定）。 */
+  model: string;
+  members: SwarmMemberView[];
+  /** 已完成成员数（只数成功落定的 done）。 */
+  done: number;
+  /** 批次总成员数。 */
+  total: number;
+}
+
+/**
+ * Statusline.swarm 的形状（§7.1：纯内存态，**不落盘**、**不加 SSE 事件名**）。
+ *
+ * 设计与收口接线约定（请照此实现，不要另立一份真源）：
+ *   · 本字段是 **Statusline 上的可选附加字段**，不是新事件 / 新端点。组装
+ *     statusline 响应时从 SwarmRegistry 服务**投影**一份只读快照挂上来。
+ *   · 未挂载 swarm 插件 / 没有活动批次时**整个字段缺省**（不是空对象、
+ *     不是空数组）—— 前端据此零渲染：徽标保持隐藏且不报错。
+ *   · 「同一次调用 >= 2 成员才聚合成 swarm 卡片」这条阈值由**前端**
+ *     apps/web/src/statusline/swarm.ts 的纯函数持有；组装方**不得**预先过滤
+ *     单成员批次。理由：数据形状保持忠实、呈现规则归呈现层 —— 过滤只发生
+ *     一次，所以这是一份真源而不是两份。
+ */
+export interface SwarmRosterView {
+  /** 是否有**进行中**的成员（false = 全部落定，徽标可整体隐藏）。 */
+  active: boolean;
+  batches: SwarmBatchView[];
+}
+
 export interface Statusline {
   model: string;
   reasoning_effort: string | null;
@@ -403,6 +463,16 @@ export interface Statusline {
     window_source: "profile" | "fallback" | "unknown";
   };
   usage: UsageBlock & { total: UsageBlock };
+  /**
+   * agent_swarm 的批次名册快照（§7.1，**可选**附加字段）。
+   *
+   *   · 缺省 = 未挂载 swarm 插件 / 没有活动批次。老服务与旧前端读到缺省必须
+   *     照常渲染其余状态栏字段，不报错、不显示 swarm 徽标。
+   *   · 纯内存态：不落盘、不进 contracts/data-files/，因此**不新增 SSE 事件名** ——
+   *     它随既有 status 帧的快照一起更新。
+   *   · 形状见 [SwarmRosterView]（含 >= 2 成员才聚合那条阈值的归属说明）。
+   */
+  swarm?: SwarmRosterView;
 }
 
 export interface UsageBlock {

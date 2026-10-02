@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Celestea engine tool specs (22 tools)",
+  "title": "Celestea engine tool specs (23 tools)",
   "generatedAt": "2026-09-10T01:20:00Z",
   "source": {
     "liveEndpoint": "http://127.0.0.1:3777/api/tools (descriptions taken verbatim from the running engine)",
@@ -20,7 +20,7 @@
         "worker_status",
         "write_file"
       ],
-      "note": "W783: this is the FROZEN 2026-09-10 capture of the retired engine (10 tools) and is deliberately NOT rewritten. The TypeScript host now serves 11 tools; the delta is declared in `w783Delta` below."
+      "note": "W783: this is the FROZEN 2026-09-10 capture of the retired engine (10 tools) and is deliberately NOT rewritten. The TypeScript host now serves 23 tools; the delta is declared in the *Delta blocks below."
     },
     "w783Delta": {
       "addedTool": "ask_user_question",
@@ -75,9 +75,18 @@
       "semantics": "TURN-RANGE, turn-id based: {from_turn,to_turn} is a CLOSED interval over turn-<n> and is the only stable anchor (a Message has no id, a SessionEvent has no ordinal id, and the tool_call accumulator makes message<->event non-1:1). The engine hard-validates: the range must be turn-boundary aligned, both turns must exist, and to_turn MUST BE STRICTLY LESS THAN the current turn - compressing the turn in flight is refused by the engine, not by this description. Re-compressing a range that already covers a block MERGES (the old summary is consumed: a summary of summaries). decompress takes one block's {from_turn,to_turn} and restores the raw turns. None of the three writes a session event: the block list lives in <session-dir>/compression.json.",
       "executionKeepList": "All three also join EXECUTION_TOOL_NAMES: none is in SDK_TOOLS, so folding them would make compression unreachable in execution mode while the system prompt still tells the model it has the tool (the same rule as W884 load_skill / W1533 update_tasks).",
       "endpoints": "Phase 2 adds ZERO endpoints: all three ride the existing tool dispatch and the existing tool/tool_result SSE frames, and the block count / ranges / water level reach the host through the existing context_usage surface and the context_status result, so API_ENDPOINT_COUNT stays 69."
+    },
+    "swarmDelta": {
+      "addedTool": "agent_swarm",
+      "count": "22 -> 23",
+      "sourceRef": "packages/swarm/src/tool.ts (W-swarm; no Rust counterpart; design in docs/feature-agent-swarm.md)",
+      "why": "spawn_worker starts ONE resident collaboration session. When the work is instead a BATCH of 2-128 homogeneous subtasks that each want a fresh context, fanning them out one spawn_worker call per item is both slow and wrong: every member would become a resident row with its own report file, receipt and mailbox, and the main session would spend its own context merging N receipts. agent_swarm expands ONE call into a parallel batch of LIGHTWEIGHT turns, throttles them, and returns the whole batch as one structured result. The two coexist by design: resident collaboration stays with spawn_worker, batch homogeneous work comes here.",
+      "semantics": "BATCH, one-shot, no persistent state: each member is a fresh lightweight turn (own Context + in-memory session log) that is never registered in the worker registry and never writes a receipt file, so an interrupted batch is cancelled rather than resumed. Exactly four parameters plus the universal optional desc UI label: description (one line naming the batch), prompt_template (must contain the literal {{item}} placeholder), items (2-128 non-empty strings) and model (optional batch-level routing resolved by name; absent inherits the current session's model, and an unresolvable name is a STRUCTURED ERROR, never a silent fallback). Six hard validations run BEFORE any member starts - item count bounds, template presence, the {{item}} placeholder, non-empty items, and that expanding the template yields pairwise-distinct prompts - and a batch that fails them returns {ok:false, step:\"validate\", error} as a RESULT, not an exception, so the model can correct itself. A batch is also EXCLUSIVE: in one assistant reply agent_swarm must be the only tool call, because nothing in that reply's context is relevant to any member.",
+      "executionKeepList": "agent_swarm also joins EXECUTION_TOOL_NAMES: it is an ORCHESTRATION tool and is NOT in SDK_TOOLS, so folding it would make it unreachable in execution mode - the same \"prompt must not lie\" rule that kept load_skill (W884), the browser pair (F4), the memory write pair (B2), update_tasks (W1533) and the compression trio (W1900).",
+      "endpoints": "agent_swarm adds ZERO endpoints: the call rides the existing tool dispatch and the existing tool/tool_result SSE frames, and the member roster is pure in-memory progress surfaced by the host on the EXISTING statusline surface as an optional field, so API_ENDPOINT_COUNT stays 70."
     }
   },
-  "count": 22,
+  "count": 23,
   "tools": [
     {
       "name": "ask_user_question",
@@ -870,6 +879,48 @@
         "additionalProperties": false
       },
       "sourceRef": "packages/tools/src/tools/compression.ts (W1900 Phase 2; no Rust counterpart)"
+    },
+    {
+      "name": "agent_swarm",
+      "description": "Run one BATCH of 2-128 homogeneous subtasks in PARALLEL and get the whole batch back in a single result. Use it when the work splits into many same-shaped pieces that each want their own fresh context (\"summarise these 30 files\", \"apply this fix to every module under packages/\") - NOT for resident collaboration, which stays with spawn_worker. There is no spawn-per-item cost: every member is a LIGHTWEIGHT turn with its own context, registered nowhere and writing no report file, so an interrupted batch is cancelled rather than resumed. How to call it: give a one-line description of the whole batch, a prompt_template containing the literal {{item}} placeholder, and items (2-128 non-empty strings) as the per-member variable - the template is expanded once per item, and the same template runs for every item, so it must be self-contained: a member shares none of this reply's context and none of its siblings'. The batch is EXCLUSIVE: agent_swarm must be the ONLY tool call in your reply, because nothing in that reply's context is relevant to any member; if you also need another tool, do it in a separate turn. Six checks run BEFORE any member starts - item count in range, a template when there are items, the {{item}} placeholder present, every item non-empty, and every expanded prompt distinct - and a failed check comes back as a structured result you can correct and retry, never an exception. Optional model routes the whole batch by model name and inherits the current session's model when omitted; a name that does not resolve is a structured error, not a silent downgrade. Results arrive as one XML block whose <summary> gives the per-state counts and whose <subagent> entries are numbered from 1 in YOUR items order (not completion order), each carrying its state, its outcome and its escaped text - that block is the authority on what happened, so read it before answering. Members that hit provider rate limits are retried with jittered backoff, and the concurrency cap holds regardless, so a large batch will not stampede a provider.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "One short line naming the whole batch (shown as the batch's label in the UI). Keep it under 80 chars."
+          },
+          "prompt_template": {
+            "type": "string",
+            "description": "The prompt every member runs, with the literal {{item}} placeholder where the per-member text is substituted. The same template runs for every item, so it must be self-contained."
+          },
+          "items": {
+            "type": "array",
+            "description": "The per-member variable: 2 to 128 non-empty strings, each trimmed non-empty. One member per item; two items that expand to the same prompt are refused.",
+            "minItems": 2,
+            "maxItems": 128,
+            "items": {
+              "type": "string",
+              "description": "One member's worth of work: a file path, a symbol name, a subject line - whatever {{item}} stands for in your template."
+            }
+          },
+          "model": {
+            "type": "string",
+            "description": "Optional model for the WHOLE batch, resolved by registered model name; omit it to inherit the current session's model. A name that does not resolve is reported as a structured error, never silently downgraded."
+          },
+          "desc": {
+            "type": "string",
+            "description": "Optional one-line label (max 80 chars) describing what this call is doing; shown on the tool card in the UI. Keep it short."
+          }
+        },
+        "required": [
+          "description",
+          "items",
+          "prompt_template"
+        ],
+        "additionalProperties": false
+      },
+      "sourceRef": "packages/swarm/src/tool.ts (W-swarm; no Rust counterpart; design in docs/feature-agent-swarm.md)"
     }
   ]
 }

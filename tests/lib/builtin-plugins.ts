@@ -100,6 +100,49 @@ export const BUILTIN_MOUNTS: readonly MountRow[] = [
   },
   {
     kind: "plugin",
+    file: "packages/swarm/src/plugin.ts",
+    layer: "L1",
+    nameArg: "name",
+    defaultName: "celestea.swarm.Swarm",
+    viaDefinePlugin: true,
+    // The roster token lives in roster.ts (the module that owns the registry);
+    // plugin.ts re-exports SWARM_TOOL_NAME from tool.ts (one source of truth).
+    provides: ["SWARM_REGISTRY_SERVICE"],
+    note: "swarmPlugin(opts): opts.name defaults the mount name; it registers agent_swarm AND provides the roster.",
+  },
+  {
+    kind: "provide",
+    file: "packages/swarm/src/executor.ts",
+    layer: "L1",
+    token: "AGENT_LOOP_SERVICE",
+    viaDefinePlugin: false,
+    note: "Per member, on a FRESH Context: the one-shot AgentLoop that drives this member's turn.",
+  },
+  {
+    kind: "provide",
+    file: "packages/swarm/src/executor.ts",
+    layer: "L1",
+    token: "LLM_SERVICE",
+    viaDefinePlugin: false,
+    note: "Per member, on a FRESH Context: the host's Llm seam, so the member inherits the session's provider.",
+  },
+  {
+    kind: "provide",
+    file: "packages/swarm/src/executor.ts",
+    layer: "L1",
+    token: "SESSION_LOG_SERVICE",
+    viaDefinePlugin: false,
+    note: "Per member, on a FRESH Context: a fresh InMemorySessionLog per member (nothing is persisted).",
+  },
+  {
+    kind: "provide",
+    file: "packages/swarm/src/executor.ts",
+    layer: "L1",
+    token: "TOOL_REGISTRY_SERVICE",
+    viaDefinePlugin: false,
+    note: "Per member, on a FRESH Context: the member-visible tool face (orchestration tools folded).",
+  },  {
+    kind: "plugin",
     file: "packages/workers/src/watchdog.ts",
     layer: "L1",
     nameArg: "name",
@@ -143,6 +186,7 @@ export const PACKAGE_LAYER: Readonly<Record<string, MountLayer>> = {
   "packages/agent-loop": "L1",
   "packages/tools": "L1",
   "packages/workers": "L1",
+  "packages/swarm": "L1",
   "packages/runtime": "L2",
   "apps/studio": "L3",
 };

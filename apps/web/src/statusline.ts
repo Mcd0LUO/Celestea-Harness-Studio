@@ -54,6 +54,7 @@ import {
 } from './statusline/ring';
 
 import { initGoalBadge, refreshGoalBadge } from './statusline/goal'; // A3：目标徽标
+import { initSwarmBadge } from './statusline/swarm'; // agent_swarm：并行批次徽标（#slSwarm 存在时装配）
 import { t } from './i18n'; // i18n P1-a：statusline 域文案走字典
 
 const POLL_MS = 2000;
@@ -196,6 +197,7 @@ export class Statusline implements PickerHost, ModeHost {
   /** Begin polling /api/status. */
   start(): void {
     initGoalBadge(); // A3：目标徽标（#slGoal 存在时装配）
+    initSwarmBadge(); // agent_swarm：并行批次徽标（#slSwarm 存在时装配；快照无 swarm 字段时保持 .hidden）
     this.poll();
     this.timer = window.setInterval(() => this.poll(), POLL_MS);
   }

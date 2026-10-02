@@ -30,8 +30,9 @@ Celestea Agent 把「一个能读写文件、执行命令、跑代码、并行�
 ## 能力
 
 - **会话即工作区** —— 每个会话绑定一个真实目录；agent 的每一步（读文件、改代码、跑命令）都发生在那儿，日志逐行落盘、可回放。
-- **22 个内置工具** —— `read_file` `write_file` `list_dir` `load_skill` `run_shell` `run_code` `read_image` `http_request` `process_control` `remember` `forget` `ask_user_question` `send_message` `spawn_worker` `stop_worker` `worker_status` `browser_open` `browser_act` `update_tasks` `compress` `decompress` `context_status`。
+- **23 个内置工具** —— `read_file` `write_file` `list_dir` `load_skill` `run_shell` `run_code` `read_image` `http_request` `process_control` `remember` `forget` `ask_user_question` `send_message` `spawn_worker` `stop_worker` `worker_status` `browser_open` `browser_act` `update_tasks` `compress` `decompress` `context_status` `agent_swarm`。
 - **并行子 agent（worker）** —— 一个会话可派出多个 worker 会话并行干活；主会话能读它们的实时状态，也能**直接和它们对话**。
+- **批量并行子 agent（swarm）** —— 一批 2–128 个同形子任务用一次 `agent_swarm` 调用并行展开，每个成员是轻量 turn（不进 worker 注册表、不写回执文件），结果以一份 XML 汇总回来。常驻协作找 worker，批量同形任务找 swarm。
 - **沙箱执行** —— `bwrap` + `prlimit` 隔离文件系统、网络与资源；环境不具备时按策略**降级或拒绝**，不静默放行。
 - **权限档位** —— 内置 `read-only` / `write-read` / `full-access` 三档，可逐会话固定，也可由你在界面上**临时提权**（一次性授权、可撤销、全程审计、**永不可由模型自触发**）。
 - **多模型 / 多提供商** —— 任意 OpenAI 兼容端点；模型、推理档位、降级链可配，**可逐会话覆盖模型**。

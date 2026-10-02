@@ -161,6 +161,7 @@ export const shell = {
   'shell.statusline.modeTitle': 'Work mode (click to switch)',
   'shell.statusline.laneTitle': 'Submit lane: interject / queue',
   'shell.statusline.goalTitle': 'Current goal',
+  'shell.statusline.swarmTitle': 'Swarm batch (click for members)',
   'shell.statusbar.sessionTitle': 'Focused session · click to switch to another running session',
   'shell.statusbar.cacheTitle': 'Cache hits: the latest request',
   'shell.statusbar.connecting': 'Connecting…',
