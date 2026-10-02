@@ -257,12 +257,18 @@ describe("W2029 · 退出路径的日志必须与行为一致", () => {
       // W1484 test B 已钉死：这种状态下 `server.close()` 在
       // `closeAllConnections()` 之前**不可能** resolve ⇒ 必然走超时分支。
       expect(client.closed()).toBe(false);
-      const startedAt = Date.now();
+      const startedAt = performance.now();
       await expect(started.handle.stop("SIGTERM")).resolves.toBeUndefined();
-      const elapsed = Date.now() - startedAt;
+      const elapsed = performance.now() - startedAt;
       // ★ 下界证据（不是「sleep 赌」，方向相反）：只有真的走满了 drainMs 预算
       //   才可能有这个耗时；若 close() 正常 resolve，耗时会是 ~0 ⇒ 断言变红。
-      expect(elapsed).toBeGreaterThanOrEqual(40);
+      //
+      // 为什么是 35 而不是 40（W9263 · CI 实证）：Node 的定时器**允许提前约 1 ms** 触发
+      // （文档明确不保证精确），`Date.now()` 又只有 1 ms 粒度 —— ubuntu 4 核 + 并发分片下
+      // 实测到 **39** 而变红，那是**断言本身不成立**，不是被测行为错。改用单调时钟
+      // `performance.now()` 并留 5 ms 余量：它仍然干净地把「走满预算（≥35）」与
+      // 「立刻 resolve（~0）」分开 —— 而这正是本条唯一要区分的东西。
+      expect(elapsed).toBeGreaterThanOrEqual(35);
       const lines = teardownLines(capture.lines, started.boundary());
       expect(lines[0]).toBe("SIGTERM received — draining (grace 40ms)");
       // 超时被如实记录，而不是静默吞掉。
