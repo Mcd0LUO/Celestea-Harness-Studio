@@ -12,6 +12,17 @@
  *      provider that never had one).
  *
  * The HTTP client is injected so the contract is testable without network.
+ *
+ * W9271: the probe now asks the host BY request_format, the same way the ENGINE
+ * does (packages/llm factory.ts defaultAdapterRegistry speaks all three). The old
+ * gate was a single `request_format !== "chat_completions"` refusal, so a row
+ * declaring `responses` or `anthropic_messages` could be stored and displayed yet
+ * never probed - a claim the engine's own capability contradicted. A format with no
+ * probe implementation is still refused BY NAME before a socket is opened.
+ *
+ * The probe MIRRORS the engine's wire (see `probeAuth`) rather than speaking each
+ * protocol "correctly" - a probe that guessed differently from the engine would lie
+ * about the row in both directions.
  */
 
 import { HttpTargetPolicy, requestOnce } from "@celestea/tools";
@@ -20,8 +31,44 @@ import { normalizeBaseUrl } from "./providers.js";
 import { errText } from "./result.js";
 import type { RequestFormat } from "./providers.js";
 
+/**
+ * W9271: the refusal now NAMES the format. The bare constant is the prefix and is
+ * kept exported (providers.test.ts imports it), so an unknown protocol is still a
+ * structured refusal - never a guessed dialect sent on the wire.
+ */
 export const UNSUPPORTED_FORMAT = "该请求格式暂不支持自动测试";
 export const NO_API_KEY = "该提供商未配置 api_key";
+
+/** The protocols this build has an engine adapter for - and therefore can probe. */
+export const PROBE_PROTOCOLS = ["chat_completions", "responses", "anthropic_messages"] as const;
+export type ProbeProtocol = (typeof PROBE_PROTOCOLS)[number];
+
+/**
+ * W9271: the auth headers the ENGINE would send for this format; `null` for a format
+ * this build has no adapter for.
+ *
+ * Why MIRROR instead of "speaking the protocol correctly": this probe backs the
+ * 获取模型 / 测试 button, whose promise is 「this row will work」. A probe that guessed a
+ * different auth shape than the engine would lie in BOTH directions - it would bless a
+ * row the engine then 401s, or reject a row the engine serves fine. So the source of
+ * truth is the engine's own transport, not the protocol's spec.
+ *
+ * Measured fact (2026-10-02): the engine's transport
+ * (`packages/llm/src/transport.ts:95`) sends `authorization: Bearer` for EVERY
+ * protocol, `anthropic_messages` included; the anthropic adapter adds only the request
+ * BODY (`packages/llm/src/anthropic/wire.ts`). That is a real gap in the adapter - it
+ * claims a protocol whose native auth is `x-api-key` + `anthropic-version` - and it is
+ * registered as P19 in `docs/pitfalls.md`. **When that adapter grows protocol-native
+ * headers, this function must move with it**; writing the coupling down here is the
+ * point, because the alternative is a probe that silently disagrees with the engine.
+ *
+ * Returning `null` for an unknown format is the fail-closed path: the caller refuses
+ * BEFORE the SSRF check and before any byte leaves the process.
+ */
+export function probeAuth(format: string, key: string): Record<string, string> | null {
+  if (!(PROBE_PROTOCOLS as readonly string[]).includes(format)) return null;
+  return { accept: "application/json", authorization: `Bearer ${key}` };
+}
 /**
  * W815-13 (= W819-6): the target was refused by the deployment SSRF policy.
  * Deliberately generic - the resolver reason names the resolved IP, and that
@@ -130,10 +177,19 @@ function parseModels(text: string): Array<{ id: string }> | null {
 
 /** GET `<base_url>/models`; every failure is a 200 body with `ok:false`. */
 export async function probeModels(candidate: ProbeCandidate, opts: ProbeOptions): Promise<ProbeOutcome> {
-  if (candidate.request_format !== "chat_completions") return { ok: false, error: UNSUPPORTED_FORMAT };
+  // W9271: a format with no probe implementation is refused BY NAME, before the
+  // SSRF resolution and before any byte leaves the process - the same fail-closed
+  // shape packages/llm's AdapterRegistry uses for an unregistered protocol.
+  if (!(PROBE_PROTOCOLS as readonly string[]).includes(candidate.request_format)) {
+    return { ok: false, error: `${UNSUPPORTED_FORMAT}：${candidate.request_format}` };
+  }
   if ((candidate.base_url ?? "").trim() === "") return { ok: false, error: "base_url is required" };
   const { key } = resolveProbeKey(candidate, opts);
   if (key === null) return { ok: false, error: NO_API_KEY };
+  // Read-only: every protocol probes the SAME model-list endpoint. The protocols
+  // differ in how a REQUEST BODY is shaped, not in where the catalog lives.
+  const headers = probeAuth(candidate.request_format, key);
+  if (headers === null) return { ok: false, error: `${UNSUPPORTED_FORMAT}：${candidate.request_format}` };
   const url = `${candidate.base_url.replace(/\/+$/, "")}/models`;
   // W815-13: authorize the target with the SAME policy http_request uses
   // before a single byte leaves the process. An inactive policy (both env vars
@@ -165,7 +221,7 @@ export async function probeModels(candidate: ProbeCandidate, opts: ProbeOptions)
   try {
     res = await doFetch(url, {
       method: "GET",
-      headers: { authorization: `Bearer ${key}`, accept: "application/json" },
+      headers,
       ...(signal === undefined ? {} : { signal }),
     });
   } catch (e) {

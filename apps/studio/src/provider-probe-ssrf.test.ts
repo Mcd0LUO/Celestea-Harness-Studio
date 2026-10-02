@@ -20,7 +20,14 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { HttpTargetPolicy, type HostResolver } from "@celestea/tools";
 import { getJson, jsonRequest, makeHarness, type StudioHarness } from "./harness.test-util.js";
-import { probeModels, type ProbeFetch, type ProbeResponse } from "./store/provider-probe.js";
+import {
+  NO_API_KEY,
+  UNSUPPORTED_FORMAT,
+  probeModels,
+  type ProbeFetch,
+  type ProbeResponse,
+} from "./store/provider-probe.js";
+import type { RequestFormat } from "./store/providers.js";
 
 const harnesses: StudioHarness[] = [];
 const servers: Server[] = [];
@@ -131,5 +138,109 @@ describe("B3/W815-13: probeModels policy seam (recorder is the injected fetch)",
     );
     expect(out).toEqual({ ok: true, models: [{ id: "m-1" }] });
     expect(rec.called()).toBe(1);
+  });
+});
+
+/**
+ * W9271: the probe must ask the host the way the row DECLARES it, and must keep
+ * refusing a protocol it has no implementation for.
+ *
+ * Everything here is network-free (an injected recorder) and asserts the THING that
+ * actually went on the wire - the URL and the auth headers - because the old bug was
+ * invisible in the outcome: every format answered with a clean 200 refusal.
+ */
+describe("W9271: probe speaks each declared request_format, and fails closed on the rest", () => {
+  const opts = { engineBaseUrl: "http://engine.test/v1", engineKey: null as string | null };
+
+  /** Records the exact request; answers like a real OpenAI-shaped model list. */
+  function wire(): {
+    fetch: ProbeFetch;
+    calls: Array<{ url: string; method: string; headers: Record<string, string> }>;
+  } {
+    const calls: Array<{ url: string; method: string; headers: Record<string, string> }> = [];
+    return {
+      calls,
+      fetch: (url, init) => {
+        calls.push({ url, method: init.method, headers: { ...init.headers } });
+        return Promise.resolve(respond(200, JSON.stringify({ data: [{ id: "m-1" }] })));
+      },
+    };
+  }
+
+  // `blocked.test` resolves into the denied range; everything else to loopback.
+  const resolver: HostResolver = async (host) => (host === "blocked.test" ? ["10.1.2.3"] : ["127.0.0.1"]);
+  const allowAll = HttpTargetPolicy.parse("0.0.0.0/0", undefined, { resolver });
+
+  /** Probe one format and hand back BOTH the outcome and what went on the wire. */
+  const probe = async (format: string) => {
+    const w = wire();
+    const out = await probeModels(
+      { id: "a", base_url: "http://allowed.test/v1/", request_format: format as RequestFormat, api_key: "secret-key" },
+      { ...opts, fetch: w.fetch, policy: allowAll },
+    );
+    return { out, calls: w.calls };
+  };
+
+  it("chat_completions: GET <base>/models with Authorization: Bearer (unchanged)", async () => {
+    const { out, calls } = await probe("chat_completions");
+    expect(out).toEqual({ ok: true, models: [{ id: "m-1" }] });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("http://allowed.test/v1/models");
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.headers["authorization"]).toBe("Bearer secret-key");
+  });
+
+  it("responses: the same OpenAI-compatible GET + Bearer, not a refusal", async () => {
+    const { out, calls } = await probe("responses");
+    expect(out).toEqual({ ok: true, models: [{ id: "m-1" }] });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("http://allowed.test/v1/models");
+    expect(calls[0]?.method).toBe("GET");
+    expect(calls[0]?.headers["authorization"]).toBe("Bearer secret-key");
+  });
+
+  it("anthropic_messages: the SAME Bearer header the engine's transport sends (mirror, not guess)", async () => {
+    const { out, calls } = await probe("anthropic_messages");
+    expect(out).toEqual({ ok: true, models: [{ id: "m-1" }] });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("http://allowed.test/v1/models");
+    expect(calls[0]?.method).toBe("GET");
+    // MIRROR, not a guess: packages/llm/src/transport.ts:95 sends Bearer for EVERY
+    // protocol, anthropic_messages included, so a probe sending x-api-key here would
+    // call a row the engine cannot use healthy - a lie in the direction that ships a
+    // broken config. The adapter's missing protocol-native auth is registered as P19
+    // (docs/pitfalls.md); fix it THERE, and this assertion moves with it.
+    expect(calls[0]?.headers["authorization"]).toBe("Bearer secret-key");
+    expect(calls[0]?.headers["x-api-key"]).toBeUndefined();
+  });
+
+  it("refuses an UNKNOWN format by name and issues ZERO upstream requests", async () => {
+    const { out, calls } = await probe("grpc_talks");
+    expect(out.ok).toBe(false);
+    // Structured, and it NAMES the format - never a guessed dialect on the wire.
+    expect(out.error).toContain(UNSUPPORTED_FORMAT);
+    expect(out.error).toContain("grpc_talks");
+    expect(calls).toEqual([]);
+  });
+
+  it("a keyless NON-same-origin row still issues zero requests on any format", async () => {
+    const w = wire();
+    const out = await probeModels(
+      { id: "a", base_url: "http://elsewhere.test/v1", request_format: "anthropic_messages", api_key: null },
+      { ...opts, fetch: w.fetch, policy: allowAll },
+    );
+    expect(out).toEqual({ ok: false, error: NO_API_KEY });
+    expect(w.calls).toEqual([]);
+  });
+
+  it("a DENIED target is refused before the anthropic headers are ever built", async () => {
+    const w = wire();
+    const out = await probeModels(
+      { id: "a", base_url: "http://blocked.test/v1", request_format: "anthropic_messages", api_key: "secret-key" },
+      { ...opts, fetch: w.fetch, policy: HttpTargetPolicy.parse(undefined, "10.0.0.0/8", { resolver }) },
+    );
+    expect(out.ok).toBe(false);
+    expect(String(out.error)).not.toContain("10.1.2.3");
+    expect(w.calls).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NO_API_KEY, UNSUPPORTED_FORMAT, probeModels, resolveProbeKey, testProvider, type ProbeFetch, type ProbeResponse } from "./provider-probe.js";
-import { ProvidersStore } from "./providers.js";
+import { ProvidersStore, type RequestFormat } from "./providers.js";
 import { FILE_MODES_MEANINGFUL } from "@celestea/tools";
 
 const SECRET = "sk-live-DEADBEEF-0123456789";
@@ -113,8 +113,12 @@ describe("provider probe (keyless borrow)", () => {
       called += 1;
       return Promise.resolve(respond(200, "{}"));
     };
-    const fmt = await probeModels({ id: "a", base_url: "http://x", request_format: "anthropic_messages", api_key: "k" }, { ...opts, fetch: spy });
-    expect(fmt).toEqual({ ok: false, error: UNSUPPORTED_FORMAT });
+    // W9271: all three `providers.json` formats are now probed, so the fail-closed
+    // branch is exercised with a FOREIGN format — exactly what a providers.json
+    // written by a newer build (or hand-edited) can contain. The refusal names it.
+    const foreign = "grpc_talks" as RequestFormat;
+    const fmt = await probeModels({ id: "a", base_url: "http://x", request_format: foreign, api_key: "k" }, { ...opts, fetch: spy });
+    expect(fmt).toEqual({ ok: false, error: `${UNSUPPORTED_FORMAT}：grpc_talks` });
     const noKey = await probeModels({ id: "a", base_url: "http://elsewhere", request_format: "chat_completions", api_key: null }, { ...opts, fetch: spy });
     expect(noKey).toEqual({ ok: false, error: NO_API_KEY });
     expect(called).toBe(0);

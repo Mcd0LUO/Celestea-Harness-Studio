@@ -154,7 +154,7 @@ v1→v2 归一化（`normalize_registry`，`src/workspaces.rs:303-342`）：按 
 ```
 - **没有 `version` 字段、没有任何迁移逻辑**；`id/name/base_url/request_format` 无 `serde(default)` → 缺字段即反序列化失败。
 - `ProviderModel` **故意不 derive `Debug`**，防止带 key 的类型被打印（`src/providers.rs:51`）。
-- `request_format`：只有 `chat_completions` 能真正跑（引擎适配器就绪）；`responses` / `anthropic_messages` 仅存储 + 展示，探测时返回"暂不支持自动测试"（`src/providers.rs:10-13`、`39-46`）。
+- `request_format`：三种协议引擎适配器均已就绪（`packages/llm` `defaultAdapterRegistry`），探测按 `request_format` 发**只读** `GET <base_url>/models`。**探测头必须与引擎实际发的一致**：引擎的共享 transport（`packages/llm/src/transport.ts:95`）对**所有**协议都发 `Authorization: Bearer <key>`（anthropic adapter 只多一个请求体），所以探测也发它 —— 探测若自行「按协议规范」改发 `x-api-key`，就会对同一行给出与真实调用相反的结论（把引擎用不了的配置判成健康，或反之）。adapter 缺协议原生鉴权这件事本身登记为 `docs/pitfalls.md` 的 **P19**。探测**不**发对话请求；没有对应探测实现的格式仍在发包前 fail-closed，并**带格式名**返回"该请求格式暂不支持自动测试：<格式>"。
 
 ### 2.2 落盘与权限（`src/providers.rs:189-212`）
 

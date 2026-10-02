@@ -370,10 +370,14 @@ describe("providers endpoints", () => {
 
   it("reports the probe error branches without a network call", async () => {
     const h = make();
+    // W9271: an anthropic_messages row is PROBED now (x-api-key + anthropic-version),
+    // so the refused branch is a format the probe has no implementation for - the
+    // 127.0.0.1:9999 target is dead, so the outcome is a dial error, never a false ok.
     await getJson(h.app, "/api/providers", jsonRequest("POST", { id: "anth", base_url: "http://127.0.0.1:9999/v1", request_format: "anthropic_messages", api_key: "k" }));
-    const unsupported = await getJson(h.app, "/api/providers/anth/models/fetch", jsonRequest("POST"));
-    expect(unsupported.status).toBe(200);
-    expect(unsupported.body).toEqual({ ok: false, error: "该请求格式暂不支持自动测试" });
+    const probed = await getJson(h.app, "/api/providers/anth/models/fetch", jsonRequest("POST"));
+    expect(probed.status).toBe(200);
+    expect(probed.body["ok"]).toBe(false);
+    expect(String(probed.body["error"])).not.toContain("暂不支持自动测试");
 
     await getJson(h.app, "/api/providers", jsonRequest("POST", { id: "keyless", base_url: "http://127.0.0.1:9999/v1", models: [] }));
     const noKey = await getJson(h.app, "/api/providers/keyless/models/fetch", jsonRequest("POST"));
@@ -382,10 +386,21 @@ describe("providers endpoints", () => {
 
     const test = await getJson(h.app, "/api/providers/test", jsonRequest("POST", { id: "anth" }));
     expect(test.status).toBe(200);
-    expect(test.body).toEqual({ ok: false, error: "该请求格式暂不支持自动测试" });
+    expect(test.body["ok"]).toBe(false);
+    expect(String(test.body["error"])).not.toContain("暂不支持自动测试");
     const testBad = await getJson(h.app, "/api/providers/test", jsonRequest("POST", { id: "inline" }));
     expect(testBad.status).toBe(400);
     expect(testBad.body).toEqual({ ok: false, error: "base_url is required" });
+  });
+
+  it("refuses an unknown request_format by name, naming it, with no request issued", async () => {
+    const h = make();
+    await getJson(h.app, "/api/providers", jsonRequest("POST", { id: "weird", base_url: "http://127.0.0.1:9999/v1", api_key: "k" }));
+    const out = await getJson(h.app, "/api/providers/test", jsonRequest("POST", { id: "weird", request_format: "grpc_talks" }));
+    // W9271: the store validates the format on upsert; the probe refuses an unknown one
+    // by name, so a caller can tell WHICH format it is asking this build to speak.
+    expect(out.status).toBe(400);
+    expect(out.body).toEqual({ ok: false, error: "invalid request_format 'grpc_talks': expected chat_completions | responses | anthropic_messages" });
   });
 });
 

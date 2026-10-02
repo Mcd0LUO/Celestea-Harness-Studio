@@ -428,8 +428,8 @@ Phase 2 定调为**视图叠层**（§4）后，原三条接缝只剩一条硬�
 | 压缩是手动 lifecycle 操作 | `apps/studio/src/runtime/session-lifecycle.ts:56`、`:92` |
 | 缓存命中解析（三种 key 形态） | `packages/llm/src/usage.ts:25` |
 | 请求体构造（无 cache 字段） | `packages/llm/src/wire.ts:231` |
-| 引擎只走 chat_completions | `apps/studio/src/runtime/engine-profile.ts:22` |
-| 非 chat_completions 被拒 | `apps/studio/src/store/provider-probe.ts:133` |
+| 协议由 provider 行决定，未声明时回落 chat_completions | `apps/studio/src/runtime/engine-profile.ts:28` |
+| 未知 request_format 被拒（带名 fail-closed） | `apps/studio/src/store/provider-probe.ts:186` |
 | 缓存命中率（已在算，statusline 暴露） | `packages/runtime/src/usage.ts:67` |
 | trim 只动派生视图、不动 log | `packages/agent-loop/src/loop.ts:270` |
 | 压缩重写 log + 单份 `.precompact` 备份 | `packages/runtime/src/compact/rewrite.ts` |
