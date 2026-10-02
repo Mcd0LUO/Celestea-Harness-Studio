@@ -114,6 +114,30 @@ export async function launchChrome(opts = {}) {
   const exe = opts.executablePath ?? findChrome();
   if (!exe) throw new Error('chrome not found（设 W9111_CHROME=<可执行文件> 或安装 Chrome/Playwright 浏览器）');
   if (!existsSync(exe)) throw new Error('chrome executable does not exist: ' + exe);
+  // ★ W9263（CI 实证）：在负载高的 runner 上，Chrome 的 devtools 端点可能错过那 25 s
+  //   窗口 —— 同一个提交几分钟前刚绿过，所以这是**偶发的启动失败**，不是环境坏了。
+  //   一次重试（失败那次已经走过**同一条**收尾：kill child + 删 profile + 注销）把它
+  //   从「门禁变红」降级成「多花几秒」，而断言一个字没动。
+  const attempts = Math.max(1, opts.launchAttempts ?? 2);
+  let failure = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await launchAttempt(exe, opts);
+    } catch (error) {
+      failure = error;
+      if (attempt < attempts) {
+        // 可见地记一行：偶发启动失败必须能一眼看出来，而不是变成一桩悬案。
+        console.error(
+          '[perf] chrome launch attempt ' + attempt + '/' + attempts + ' failed: ' + String(error?.message ?? error).split('\n')[0],
+        );
+      }
+    }
+  }
+  throw failure;
+}
+
+/** 一次启动尝试；重试契约见 [launchChrome]。 */
+async function launchAttempt(exe, opts) {
   const profileDir = opts.userDataDir ?? mkdtempSync(join(tmpdir(), 'w9111-chrome-'));
   const port = opts.port ?? 9333;
   const args = [
