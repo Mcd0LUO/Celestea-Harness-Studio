@@ -59,6 +59,19 @@ fixtures/sessions/*
 apps/studio/webdist/
 packages/core/contracts/
 
+# 桌面应用打包产物（H/desktop）：由 desktop/scripts/build.mjs 生成 —— 中间产物 app/
+# （esbuild bundle + 前端产物 + 契约副本 + 图标）、dist/（各平台二进制）、release/
+# （bsdiff 补丁 + latest.json）。与上面的 dist/ 同一约定：绝不入库，靠脚本重建。
+# 注意：desktop/icons/ 与 desktop/update-pubkey.txt 是**源**（图标源 + 发布公钥），必须入库，
+# 所以这里只锚定三个产物目录，不写 desktop/ 通配。
+desktop/app/
+desktop/dist/
+desktop/release/
+# 桌面分发产物树（H/desktop）：release/<os-arch>/ 放安装包 + 更新清单(latest.json) + 补丁，
+# 顶层还有 SHA256SUMS.txt / index.json / README.md —— 整目录就是「一次上传」的内容。
+# 它由 desktop/scripts/build.mjs 生成，绝不入库（与 dist/ 同一约定）。
+/release/
+
 # worker 工作树（W886）：派工时在仓内 <repo>/.worktrees/<wid> 建独立 worktree，
 # 而不是 /tmp（这台机的 /tmp 是 tmpfs，node_modules 会常驻内存）。
 # 它们必须是 git 与 eslint 的盲区，否则主工作树会把它们当未跟踪文件、并 lint 半成品代码。

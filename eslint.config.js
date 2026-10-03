@@ -257,6 +257,13 @@ export default tseslint.config(
       "reports/**",
       "fixtures/**",
       "contracts/**",
+      // H/desktop：桌面打包产物。app/ 是 esbuild 打出的单文件 bundle（外加前端、契约、
+      // 图标的副本），dist/ 是各平台二进制，release/ 是补丁与 latest.json。三者都由
+      // desktop/scripts/ 生成，与 dist/ 同属产物（见 .gitignore）。不忽略的后果不只是噪声：
+      // 同一份源码会因「本机是否构建过桌面版」得到不同的 pnpm lint 结果。
+      "desktop/app/**",
+      "desktop/dist/**",
+      "desktop/release/**",
       "**/*.json",
       "**/*.md",
     ],

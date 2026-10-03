@@ -1,0 +1,201 @@
+# Desktop release artifacts for every supported platform.
+#
+# Why this workflow exists. `deno desktop` cross-compiles Linux (x64/arm64) and
+# Windows from any host, and `desktop/scripts/build.mjs --all-targets` does exactly
+# that in one command. macOS is the exception: a `.app` bundle is ad-hoc signed with
+# `codesign(1)`, and Deno's own error text says so —
+#
+#   "codesigning requires a macOS build host (uses codesign(1)).
+#    Run deno desktop on macOS, or drop macos.codesignIdentity from your deno.json
+#    when cross-building."
+#
+# — which shows up as a bare `error: No such file or directory (os error 2)` after
+# the dylib is compiled. So the three OSes are built on their own runners, and a
+# final job merges the per-platform trees into the single `release/` layout that is
+# uploaded as one artifact (`release/<os-arch>/` + SHA256SUMS.txt + index.json).
+#
+# Manual runs: `workflow_dispatch`. Tag runs: `v*`, so a release tag carries its own
+# artifacts. Upload destination is deliberately NOT wired here — the release job
+# produces one artifact directory you can publish to any host, and the app polls
+# `<baseUrl>/<os-arch>/latest.json` (see desktop/README.md §4).
+
+name: desktop-release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: desktop (${{ matrix.slug }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # One runner per OS. Linux and Windows cross-compile both their
+          # architectures from a single runner; macOS builds both arches on the
+          # Apple runner (codesign is available for either target there).
+          #
+          # `native` is the one target of the bunch whose binary this runner can
+          # actually execute (macos-14 is arm64, the other two are x64). The
+          # self-test step uses it; the cross-built sibling is structurally
+          # verified only — see desktop/README.md §7.
+          - runner: ubuntu-latest
+            slug: linux
+            targets: linux-x64 linux-arm64
+            native: linux-x64
+            artifact: release/linux-*
+          - runner: macos-14
+            slug: macos
+            targets: macos-arm64 macos-x64
+            native: macos-arm64
+            artifact: release/macos-*
+          - runner: windows-latest
+            slug: windows
+            targets: windows-x64
+            native: windows-x64
+            artifact: release/windows-*
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # `deno desktop` needs Deno >= 2.9 (it is what the desktop API shipped in).
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the workspace artifacts
+        run: pnpm run build
+
+      - name: Package this platform
+        shell: bash
+        run: |
+          for target in ${{ matrix.targets }}; do
+            node desktop/scripts/build.mjs --skip-repo-build --target "$target" --out release
+          done
+
+      # The launcher `deno desktop` produces is a GTK/WebKitGTK binary that talks
+      # to a display SERVER at startup, before the payload runs — with none it dies
+      # with a misleading "Gtk-WARNING: cannot open display:" and exit 1, printing
+      # no log lines of its own (measured on this repo's AppImage: exit 1 with no
+      # display, exit 0 under Xvfb, same binary, same args, and it is not the tray —
+      # `CELESTEA_DESKTOP_NO_TRAY=1` changes nothing). `--self-test` itself is
+      # headless-safe: it returns before any window/tray is created (main.ts), so a
+      # virtual display is all it needs. The apt step installs that display plus the
+      # GTK/WebKit stack the launcher links against — the AppImage bundles the
+      # payload, not WebKitGTK.
+      - name: Install the display the launcher needs (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb libwebkit2gtk-4.1-0
+
+      # The packaged app proves it works where it was built — resources extracted,
+      # contracts loaded, server up, static assets served — before anything is
+      # uploaded. A compile error and a PACKAGING error are different failures and
+      # only this step sees the second one (desktop/src/self-test.ts).
+      #
+      # Three details are what keep this from being a step that quietly tests
+      # nothing, which is how the first version passed on 2 of the 3 runners:
+      #
+      #   * the release/ entries for macOS and Windows are a `.zip` and a `.msi`,
+      #     neither of which is runnable as-is, so the lookup falls back to the
+      #     build tree (`desktop/dist/<slug>/`) where `deno desktop` left the app
+      #     unpacked — and it FAILS when it finds no executable at all, instead of
+      #     looping zero times and reporting success;
+      #   * the runner has no display, so Linux goes through Xvfb (see the previous
+      #     step); macOS and Windows runners run in a user session that already has
+      #     one, so they invoke the binary directly;
+      #   * a bare `.AppImage` additionally wants `libfuse.so.2`, which the ubuntu
+      #     runner image does not ship ("dlopen(): error loading libfuse.so.2").
+      #     `APPIMAGE_EXTRACT_AND_RUN=1` takes the runtime's own extract-and-run path
+      #     instead of a FUSE mount; the other platforms' binaries ignore it.
+      #
+      # The window/tray are NOT part of this: `--self-test` asserts the desktop API
+      # exists in the compiled binary and exits before either is created.
+      - name: Self-test the built app
+        shell: bash
+        env:
+          SLUG: ${{ matrix.native }}
+        run: |
+          set -euo pipefail
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          candidates="desktop-selftest-candidates.$$"
+          trap 'rm -f "$candidates"' EXIT
+
+          list() {
+            case "$SLUG" in
+              linux-*)   find "$1" -type f \( -name '*.AppImage' -o -name 'CelesteaStudio' \) 2>/dev/null || true ;;
+              macos-*)   find "$1" -type f -path '*Contents/MacOS/*' ! -name '*.dylib' 2>/dev/null || true ;;
+              windows-*) find "$1" -type f -name '*.exe' 2>/dev/null || true ;;
+              *)         echo "::error::unknown native slug: $SLUG" >&2; exit 1 ;;
+            esac
+          }
+
+          list "release/$SLUG" > "$candidates"
+          if [ ! -s "$candidates" ]; then
+            echo "release/$SLUG holds installers only — self-testing the unpacked build instead"
+            list "desktop/dist/$SLUG" > "$candidates"
+          fi
+          if [ ! -s "$candidates" ]; then
+            echo "::error::nothing executable to self-test for $SLUG (looked in release/$SLUG and desktop/dist/$SLUG)" >&2
+            exit 1
+          fi
+
+          display=()
+          if [ "${RUNNER_OS:-}" = "Linux" ]; then
+            command -v xvfb-run >/dev/null || { echo "::error::xvfb-run is missing — see the install step above" >&2; exit 1; }
+            display=(xvfb-run -a)
+          fi
+
+          while IFS= read -r binary; do
+            echo "self-test: ${display[*]:+${display[*]} }$binary"
+            "${display[@]}" "$binary" --self-test
+          done < "$candidates"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.slug }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+
+  merge:
+    name: merge release tree
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Every platform artifact, side by side. `merge-multiple` is safe here
+      # because each job uploaded only its own `release/<os-arch>/` directory.
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Regenerate SHA256SUMS.txt / index.json / README.md
+        run: node desktop/scripts/build.mjs --index-only --out release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: celestea-studio-desktop
+          path: release/
+          if-no-files-found: error
