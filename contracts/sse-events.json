@@ -71,14 +71,14 @@
       "hint": "slow client, skipped events",
       "statusline": "<statusline object>"
     },
-    "semantics": "the stream does NOT close; the client receives one lagged status and continues consuming. Skipped events are NOT replayed.",
+    "semantics": "the stream does NOT close; the client receives one lagged status and continues consuming. Skipped events are NOT replayed. `payload.dropped` (declared under `payloadExtensions.status`) is the cumulative number of frames this subscriber has lost, so a client uses it to decide how much history to re-fetch; it is a frame count, never a count of overflow bursts.",
     "codeRef": "src/main.rs:883-892"
   },
   "payloadExtensions": {
     "note": "Keys the TypeScript host adds to an event payload beyond the frozen legacy table above (W513 per-session frames + W515 injection placements). They are contract too: `payloadExtensions.<event>` is the ONLY place a host-only payload key may be declared, and the W744 parity test fails on any produced key that appears in neither the event's `payload` table nor here. W785 added the `phase:\"fallback\"` value (a payload VALUE, not a new event name) and its five companion keys under `payloadExtensions.status`; the 9 event names are untouched (K5/D8). W1467 added `parent_id` under `payloadExtensions.tool` and `payloadExtensions.tool_result`: a run_code SUB-CALL row (the program SDK bridge call) is published on the same two events as a top-level tool, and the client indents it under the card whose id equals parent_id. The 9 event names are untouched. W1528 added the terminal event (9 -> 10 names) with its payload declared in the events table itself, like question - it has no LoopEvent producer, so there is nothing to extend.",
     "status": {
       "session": "string|null (the session the frame belongs to; null = process-level)",
-      "dropped": "integer (per-session bucket overflow counter, lagged frames only)",
+      "dropped": "integer (lagged frames only: the frames this subscriber has ACTUALLY LOST, as a running cumulative total - each per-session bucket overflow discards that session’s whole backlog and the sum of the discarded frames is what is reported. A FRAME count, never a count of overflow bursts: the retired value conflated the two and counted overflow events, so at the production capacity of 512 a client that had really lost 1537 frames was told 513. The frame that TRIGGERS an overflow is never appended, so it is neither delivered nor counted. Because skipped events are NOT replayed this is the client’s only signal that frames are missing, hence the running total rather than a per-burst delta; the burst count is a host-side diagnostic on BusSubscription.droppedBursts and is deliberately not on the wire)",
       "hint": "string (the lagged hint, equal to `lagged.payload.hint`)",
       "placement": "'queued'|'steering'|'context' (W515 injection placement)",
       "boundary": "'turn-start'|'step'? (the boundary that consumed an injected message)",
@@ -213,8 +213,18 @@
       "note": "W1528: the 10th event and the FIRST that is neither a turn event nor a host status frame. data is opaque terminal output (escape sequences included) and is NOT guaranteed to be a whole UTF-8 character at a chunk boundary; the client feeds it through a streaming UTF-8 decoder. Lossy under back-pressure BY CONTRACT (the bus emits lagged rather than blocking) - a slow client loses output instead of stalling the child pipe. envelope turn is ALWAYS 0: a pty is not a turn."
     }
   ],
-  "frontendDeadListener": {
-    "name": "context",
-    "note": "frontend/src/sse.ts:34-43 subscribes to `context` but the backend never emits it"
-  }
+  "retiredDeadListeners": [
+    {
+      "name": "context",
+      "retiredBy": "W1479",
+      "note": "HISTORICAL, NOT CURRENT STATE: the frontend used to subscribe to `context` (and `inbox`), neither of which this bus can ever emit -- apps/studio/src/sse.ts asserts SSE_EVENT_NAMES on every emit, so those two subscriptions could never fire while looking wired. W1479 removed both from apps/web/src/sse.ts EVENT_NAMES; the rationale is recorded at apps/web/src/sse.ts:69-75.",
+      "status": "fixed: no frontend listener remains (verified: EVENT_NAMES is status, text, thinking, tool, tool_result, done, compact, question, terminal)",
+      "guardedBy": "apps/web/tools/check-sse-events.mjs (fails if the frontend ever listens to a name the server cannot emit)"
+    },
+    {
+      "name": "inbox",
+      "retiredBy": "W1479",
+      "note": "Same defect and same fix as `context` above; retired together with it."
+    }
+  ]
 }

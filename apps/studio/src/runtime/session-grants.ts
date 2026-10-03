@@ -98,17 +98,61 @@ interface SpendCtx {
   env: NodeJS.ProcessEnv;
 }
 
-/** Remove the one-shot entries that were just composed in (§2.3). */
+/**
+ * Spend the bounded entries that were just composed in (§2.3).
+ *
+ * B5-03: this used to handle `uses_left === 1` only, so a grant the UI/API
+ * describes as "3 uses" (`uses_left: 3`) was **never decremented** and stayed
+ * valid forever — the counter the audit line and the UI both display was pure
+ * decoration above 1. Measured before the fix: five consecutive composes left
+ * `uses_left` at 3 after every one of them.
+ *
+ * `uses_left: null` still means UNLIMITED and is untouched: "no bound" is a
+ * first-class value in the contract (`MAX_TTL_SEC`/`unsandboxed` both lean on it),
+ * and silently turning it into "1 use" would revoke live grants on upgrade.
+ *
+ * The spend keeps the file's SAFE DIRECTION: an entry is spent when it is
+ * composed, so a bounded grant can be lost early but never used twice. A failed
+ * write leaves the entry valid for one more turn (the `catch` below) — the
+ * same trade the one-shot path already documented.
+ */
 function spendOneShot(writer: GrantsAuditWriter, ctx: SpendCtx): void {
-  const spent = ctx.file.grants.filter((entry) => entry.uses_left === 1 && ctx.active.has(entry.id) && !isExpired(entry, ctx.seconds));
+  // A bounded entry = one that was just composed AND has a finite count.
+  // `uses_left === null` (unlimited) and `uses_left <= 0` (already exhausted)
+  // are deliberately NOT in this set: a 0-count entry is dropped by the read
+  // side, not re-spent here.
+  // An entry whose count REACHES 0 is REMOVED, not stored with a 0: the read
+  // side (`effectiveGrantsOf`) keys off the entry's presence and never inspects
+  // `uses_left`, so a stored 0 would keep granting (measured: a hand-written
+  // `uses_left: 0` read_roots is still in `effective.readRoots`). Removal is what
+  // makes "exhausted" mean denied.
+  const next: GrantRecord[] = [];
+  const spent: Array<{ entry: GrantRecord; left: number }> = [];
+  for (const entry of ctx.file.grants) {
+    const bounded = entry.uses_left !== null && entry.uses_left > 0;
+    const composed = ctx.active.has(entry.id) && !isExpired(entry, ctx.seconds);
+    if (!bounded || !composed) {
+      next.push(entry); // unlimited, not composed, or expired → untouched
+      continue;
+    }
+    const left = (entry.uses_left ?? 1) - 1;
+    if (left > 0) next.push({ ...entry, uses_left: left });
+    spent.push({ entry, left });
+  }
   if (ctx.dir === null || ctx.sessionId === null || spent.length === 0) return;
-  const keep: GrantRecord[] = ctx.file.grants.filter((entry) => !spent.some((s) => s.id === entry.id));
   try {
-    writeGrantsFile(ctx.dir, { version: 1, session: ctx.sessionId, updated_at: ctx.seconds, grants: keep }, { env: ctx.env, now: ctx.seconds });
+    writeGrantsFile(ctx.dir, { version: 1, session: ctx.sessionId, updated_at: ctx.seconds, grants: next }, { env: ctx.env, now: ctx.seconds });
   } catch {
     return; // best-effort: the entry stays and stays valid for one more turn
   }
-  for (const entry of spent) {
-    writer.write({ session: ctx.sessionId, event: "use", cap: entry.cap, grant_id: entry.id, uses_left: 0, detail: "one-shot grant spent" });
+  for (const { entry, left } of spent) {
+    writer.write({
+      session: ctx.sessionId,
+      event: "use",
+      cap: entry.cap,
+      grant_id: entry.id,
+      uses_left: left,
+      detail: left === 0 ? "one-shot grant spent" : `grant used, ${left} use(s) left`,
+    });
   }
 }

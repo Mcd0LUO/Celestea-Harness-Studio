@@ -84,6 +84,14 @@ export interface SwarmToolDeps extends SwarmExecutorDeps {
    * `config` meanings in one object is a silent-mispatch bug waiting to happen.
    */
   schedulerConfig?: Partial<SwarmSchedulerConfig>;
+  /**
+   * 单个成员正文的码元上限（W9290 B1-07）。缺省 / 无效 = `SWARM_MEMBER_BODY_MAX_CHARS`（20_000）。
+   *
+   * **为什么放在这里而不是 schedulerConfig**：它是**渲染**的预算，不是**调度**的预算——
+   * 一个 40 万字的成员在调度器眼里是"成功完成"，它把上下文挤爆是在渲染之后。
+   * 混进 schedulerConfig 会让「谁负责什么」变得读不出来。
+   */
+  memberBodyMaxChars?: number;
   /** Rate-limit classifier; omitted = the LlmError field test below. */
   isRateLimitError?: (error: unknown) => boolean;
   /**
@@ -216,7 +224,10 @@ async function runBatchResults(
   deps.onProgress?.(results);
   // The results travel with the XML so the roster settles from the very array the
   // XML was rendered from (one truth for the panel and for the model).
-  return { xml: renderSwarmResultSafely(results), batchResults: results };
+  return {
+    xml: renderSwarmResultSafely(results, deps.memberBodyMaxChars),
+    batchResults: results,
+  };
 }
 
 /**

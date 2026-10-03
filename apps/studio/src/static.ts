@@ -12,7 +12,7 @@
 
 import { readFileSync, statSync, realpathSync } from "node:fs";
 import { extname, resolve, sep } from "node:path";
-import type { Hono } from "hono";
+import { Context, type Hono } from "hono";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -99,28 +99,59 @@ function readStatic(root: string, rel: string): StaticFile | null {
   return { body: readFileSync(file), contentType: contentTypeFor(rel) };
 }
 
-function bytesResponse(body: Uint8Array, contentType: string, status = 200): Response {
-  return new Response(body, { status, headers: { "content-type": contentType, "cache-control": "no-cache" } });
+function bytesResponse(c: Context, body: Uint8Array, contentType: string, status = 200): Response {
+  c.header("content-type", contentType);
+  c.header("cache-control", "no-cache");
+  // `Uint8Array<ArrayBufferLike>` (what readFileSync hands back) is not assignable
+  // to the DOM `Data` type; the copy into a plain ArrayBuffer is what makes the
+  // body type-safe and costs one allocation per served file.
+  return c.newResponse(new Uint8Array(body), status as never);
 }
 
-function htmlResponse(body: string, status = 200): Response {
-  return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" } });
+function htmlResponse(c: Context, body: string, status = 200): Response {
+  c.header("content-type", "text/html; charset=utf-8");
+  c.header("cache-control", "no-cache");
+  return c.newResponse(body, status as never);
 }
 
-/** The static/SPA handler; `/api/*` is answered by the caller's 404 route. */
-export function serveStaticPath(root: string, rawPath: string): Response {
-  if (rawPath.startsWith("/api/")) return Response.json({ error: "not found" }, { status: 404 });
-  const rel = sanitizeRel(rawPath.replace(/^\/+/, "") === "" ? "index.html" : rawPath.replace(/^\/+/, ""));
-  if (rel === null) return Response.json({ error: "not found" }, { status: 404 });
+/**
+ * The static/SPA handler; `/api/*` is answered by the caller's 404 route.
+ *
+ * The Context is an OPTIONAL first argument so the exported helper keeps its
+ * original `(root, rawPath)` shape for direct callers (`static.test.ts` and any
+ * future probe). Without one we fall back to a standalone Context: that loses
+ * the middleware-prepared headers, which is precisely why `registerStatic`
+ * always passes the real one.
+ */
+export function serveStaticPath(root: string, rawPath: string): Response;
+export function serveStaticPath(c: Context, root: string, rawPath: string): Response;
+export function serveStaticPath(a: string | Context, b: string, rawPath?: string): Response {
+  // A throwaway Context for the context-free form: it can build the response,
+  // it just carries no middleware-prepared headers.
+  const c = typeof a === "string" ? new Context(new Request("http://local")) : a;
+  const root = typeof a === "string" ? a : b;
+  const path = rawPath ?? b;
+  const notFound = (): Response => c.json({ error: "not found" }, 404);
+  if (path.startsWith("/api/")) return notFound();
+  const rel = sanitizeRel(path.replace(/^\/+/, "") === "" ? "index.html" : path.replace(/^\/+/, ""));
+  if (rel === null) return notFound();
   const file = readStatic(root, rel);
-  if (file !== null) return bytesResponse(file.body, file.contentType);
+  if (file !== null) return bytesResponse(c, file.body, file.contentType);
   if (rel === "index.html" || !rel.includes(".")) {
     const index = readStatic(root, "index.html");
-    return index === null ? htmlResponse(HINT_PAGE) : bytesResponse(index.body, "text/html; charset=utf-8");
+    return index === null ? htmlResponse(c, HINT_PAGE) : bytesResponse(c, index.body, "text/html; charset=utf-8");
   }
-  return Response.json({ error: "not found" }, { status: 404 });
+  return notFound();
 }
 
 export function registerStatic(app: Hono, root: string): void {
-  app.get("*", (c) => serveStaticPath(root, new URL(c.req.url).pathname));
+  // B7-4: the Context is threaded in (it always was available) so these
+  // responses are built through `c.newResponse` rather than a bare
+  // `new Response(...)`. Hono merges middleware-prepared headers into the
+  // response only via the `c.res =` setter, so a raw Response returned by a
+  // handler silently DROPS every security header — which is exactly what
+  // happened to the static tree and the login page before this change. Every
+  // byte-level behaviour below (MIME table, traversal refusal, SPA fallback,
+  // the 404 shape) is unchanged.
+  app.get("*", (c) => serveStaticPath(c, root, new URL(c.req.url).pathname));
 }

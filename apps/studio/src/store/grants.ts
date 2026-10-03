@@ -19,7 +19,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { collectKnownSecrets, createRedactor } from "@celestea/core";
 import { readJsonIfExists, writeJsonAtomic } from "./fs-json.js";
 
@@ -86,9 +86,52 @@ export interface GrantsFile {
 
 export type GrantsRead = { exists: boolean; file?: GrantsFile; error?: string };
 
-/** The env-side secret set (`collectKnownSecrets`) used by [looksLikeCredential]. */
+/**
+ * The KNOWN secret set ([collectKnownSecrets]) used by [looksLikeCredential].
+ *
+ * B6-08: this reads `providers.json` as well as the env. It used to read **only**
+ * `env`, which quietly limited the guarantee the file states about itself
+ * (`:12-14`: "a `roots`/`hosts`/`tools` value that LOOKS like a credential is
+ * rejected … no response, audit line or UI ever echoes such a value back").
+ * That promise only held for secrets in the env — and the MAIN form a Studio key
+ * takes is a row in `providers.json`, so a scope value of
+ * `/data/<real api_key>` was accepted and PERSISTED into `grants.json` (0600 and
+ * an audit surface all the same). The exporter had the same gap and B6-01 is the
+ * same root cause seen from the other end.
+ *
+ * `collectKnownSecrets` already accepted `providersJson`; the caller simply never
+ * passed it. The path is resolved exactly like `config.ts:121` — explicit
+ * `CELESTEA_PROVIDERS_FILE`, else `CELESTEA_WORKSPACES_FILE`'s directory (the
+ * grants env is pinned to the workspaces file, so the data dir follows), else cwd.
+ *
+ * A missing / unreadable / non-object file contributes **nothing** and never
+ * throws: this is a screen that makes refusals MORE likely, so failing closed
+ * here would turn a bad providers.json into a grants outage.
+ */
 export function knownSecretsOf(env: NodeJS.ProcessEnv = process.env): string[] {
-  return collectKnownSecrets({ env });
+  return collectKnownSecrets({ providersJson: providersJsonFor(env), env });
+}
+
+/** The providers file's parsed contents, or `undefined` when unusable. */
+function providersJsonFor(env: NodeJS.ProcessEnv): unknown {
+  const path = providersFileOf(env);
+  if (path === null) return undefined;
+  const out = readJsonIfExists(path);
+  return out.exists && out.error === undefined ? out.value : undefined;
+}
+
+/**
+ * The providers file this Studio actually reads, resolved with the same priority
+ * chain as `config.ts:121` — an env override wins, else the data dir the grants
+ * env already pins (`CELESTEA_WORKSPACES_FILE`), else cwd. `null` = no chain
+ * applies (no env at all), which reads as "no known secrets beyond the env".
+ */
+function providersFileOf(env: NodeJS.ProcessEnv): string | null {
+  const explicit = env["CELESTEA_PROVIDERS_FILE"];
+  if (explicit !== undefined && explicit.trim() !== "") return explicit.trim();
+  const workspaces = env["CELESTEA_WORKSPACES_FILE"];
+  if (workspaces !== undefined && workspaces.trim() !== "") return join(dirname(workspaces.trim()), "providers.json");
+  return null;
 }
 
 /** Shape-only credential screen (W516 §5.4) — never echoes the value. */

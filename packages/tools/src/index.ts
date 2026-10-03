@@ -262,8 +262,6 @@ export {
   PROCESS_REGISTRY_SERVICE,
   ProcessRegistry,
   STDIN_WRITE_TIMEOUT_MS,
-  type CompletionSink,
-  type ProcessCompletion,
   type ProcessHandle,
   type ProcessRegistryOptions,
 } from "./process/registry.js";
@@ -431,6 +429,21 @@ export {
 } from "./run-code/limits.js";
 export { brokerRun, resolveInterpreter, type BrokerContext, type RunCodeEventSink } from "./run-code/broker.js";
 export { appendBounded, jsonByteLength, LineReader, safeUtf8, tail, truncateValue, utf8Prefix, type BoundedLine } from "./run-code/lines.js";
+// B4-04: the boot sweep for crash residue. Exported so a HOST can call it at
+// startup; the policy (what is residue) stays in the package that writes those
+// files, so the writer and the sweeper cannot drift into two name grammars.
+export {
+  isSweepable,
+  sweepCrashResidue,
+  sweepSummaryLine,
+  ATTACHMENT_TMP_PATTERN,
+  RUN_CODE_PROGRAM_PATTERN,
+  SWEEP_MAX_ENTRIES,
+  SWEEP_MIN_AGE_MS,
+  type SweepDeps,
+  type SweepReport,
+  type SweepTarget,
+} from "./run-code/crash-sweep.js";
 
 // --- browser (F4: session-scoped headless browser over zero-dep CDP) ----------
 export {

@@ -55,13 +55,13 @@ export function registerAuth(app: Hono, deps: Deps, table: RouteTable): string[]
   const login = table.get("post_auth_login");
   const check = table.get("get_auth_check");
 
-  app.on(page.method, page.honoPath, () => pageResponse(loginPage(), 200));
+  app.on(page.method, page.honoPath, (c) => pageResponse(c, loginPage(), 200));
 
   app.on(check.method, check.honoPath, (c) => {
     const user = cookieUser(c, gate);
     return user === null
-      ? jsonResponse({ ok: false, error: "unauthorized" }, 401)
-      : jsonResponse({ ok: true, user }, 200);
+      ? jsonResponse(c, { ok: false, error: "unauthorized" }, 401)
+      : jsonResponse(c, { ok: true, user }, 200);
   });
 
   app.on(login.method, login.honoPath, (c) => loginResponse(c, gate));
@@ -113,7 +113,7 @@ async function loginResponse(c: Context, gate: Gate): Promise<Response> {
   if (keys.some((key) => gate.limiter.blocked(key))) {
     return wantsJson
       ? failJson(c, 429, "too many failed login attempts", { retry_after: AUTH_WINDOW_MS / 1000 })
-      : pageResponse(loginPage("尝试次数过多，请稍后再试"), 429);
+      : pageResponse(c, loginPage("尝试次数过多，请稍后再试"), 429);
   }
   const verdict = verifyPassword(gate.htpasswdFile, creds.user, creds.pass);
   if (verdict !== "ok") {
@@ -127,12 +127,12 @@ async function loginResponse(c: Context, gate: Gate): Promise<Response> {
   for (const key of keys) gate.limiter.clear(key);
   const token = mintToken(creds.user, gate.secret(), Math.floor(Date.now() / 1000));
   return wantsJson
-    ? jsonResponse({ ok: true, user: creds.user }, 200, { "set-cookie": authCookie(token) })
-    : pageResponse(LOGIN_OK_PAGE, 200, { "set-cookie": authCookie(token) });
+    ? jsonResponse(c, { ok: true, user: creds.user }, 200, { "set-cookie": authCookie(token) })
+    : pageResponse(c, LOGIN_OK_PAGE, 200, { "set-cookie": authCookie(token) });
 }
 
 function denied(c: Context, wantsJson: boolean, status: number, error: string, pageError: string): Response {
-  return wantsJson ? failJson(c, status, error) : pageResponse(loginPage(pageError), status);
+  return wantsJson ? failJson(c, status, error) : pageResponse(c, loginPage(pageError), status);
 }
 
 /**
@@ -260,18 +260,35 @@ function clientIp(c: Context): string {
   return peer;
 }
 
-function pageResponse(body: string, status: number, extra: Record<string, string> = {}): Response {
-  return new Response(body, {
-    status,
-    headers: { "content-type": HTML, "cache-control": NO_STORE, ...extra },
-  });
+/**
+ * B7-4: these two builders go through `c`, never `new Response(...)` directly.
+ *
+ * Hono merges the headers prepared on the Context into the response through
+ * the `c.res =` setter, so a handler that RETURNS a bare `new Response()`
+ * silently bypasses every middleware header. That is not theoretical: these
+ * two functions are how `/login` and `/auth/check` answer, and with a raw
+ * Response the B7-4 security headers never reached them — `x-frame-options`
+ * and `x-content-type-options` came back null on the one public HTML surface
+ * the audit flagged. The contract of this file (a 200 carries Set-Cookie AND
+ * the navigation in the SAME response, never a 302) is unchanged; only the
+ * construction path is.
+ */
+function pageResponse(c: Context, body: string, status: number, extra: Record<string, string> = {}): Response {
+  for (const [key, value] of Object.entries({ "content-type": HTML, "cache-control": NO_STORE, ...extra })) {
+    c.header(key, value);
+  }
+  return c.newResponse(body, status as never);
 }
 
-function jsonResponse(body: unknown, status: number, extra: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": NO_STORE, ...extra },
-  });
+function jsonResponse(c: Context, body: unknown, status: number, extra: Record<string, string> = {}): Response {
+  for (const [key, value] of Object.entries({
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": NO_STORE,
+    ...extra,
+  })) {
+    c.header(key, value);
+  }
+  return c.newResponse(JSON.stringify(body), status as never);
 }
 
 function warn(message: string): void {

@@ -1,5 +1,5 @@
 {
-  "$comment": "冻结向量：前端 security/scope-hash.ts 与服务端 apps/studio/src/store/grants.ts 必须对本文件的每一条逐字给出同一个 canonical_json 与 sha256。任一端偏离即门禁失败（前端 frontend/tools/check-scope-hash.mjs / 服务端 tests/scope-hash-vectors.test.ts）。",
+  "$comment": "冻结向量：前端 security/scope-hash.ts 与服务端 apps/studio/src/store/grants.ts 必须对本文件的每一条逐字给出同一个 canonical_json 与 sha256。任一端偏离即门禁失败（前端 apps/web/tools/check-scope-hash.mjs / 服务端 tests/scope-hash-vectors.test.ts）。",
   "schema": 1,
   "kind": "scope-hash-frozen-vectors",
   "contract": "提权范围的规范序列化 + SHA-256（= 线上 scope_hash，设计 §6.4 / W516；前端 security/scope-hash.ts）",
@@ -7,7 +7,7 @@
   "must_match_verbatim": "两侧必须逐字一致：前端把摘要放进一次性令牌，服务端拿到提交体后按自己的公式重算再比对；任何一个字节不同 ⇒ 每次授予都被判 403（历史事故 commit 692f19c 就是这个原因）。",
   "shape": "{\"cap\":\"<cap>\",\"scope\":{\"<roots|hosts|tools>\":[\"…\"]}}；布尔类 cap（network/unsandboxed）恒为 {\"cap\":\"<cap>\",\"scope\":{}}。",
   "pipeline": {
-    "frontend": "canonicalScopeJson(cap, scope) → sha256(utf8(json))，见 frontend/src/security/scope-hash.ts（scopeHashOf 优先 WebCrypto，非安全上下文回落自带实现 sha256Hex）",
+    "frontend": "canonicalScopeJson(cap, scope) → sha256(utf8(json))，见 apps/web/src/security/scope-hash.ts（scopeHashOf 优先 WebCrypto，非安全上下文回落自带实现 sha256Hex）",
     "server": "validateScope(cap, scope, knownSecrets) → canonicalScopeHash(cap, validatedScope)"
   },
   "shared_domain": [
@@ -16,11 +16,11 @@
     "cap 白名单：read_roots/write_roots→roots、net_hosts→hosts、tool_extra→tools、network/unsandboxed→无范围（scope 里出现任何键都被丢成 {}）"
   ],
   "guards": {
-    "frontend": "frontend/tools/check-scope-hash.mjs（已接进 frontend package.json 的 check/check:scope-hash）",
-    "server": "/srv/celestea/studio/tests/scope-hash-vectors.test.ts（vitest，含直接导入前端纯函数逐字对拍）",
+    "frontend": "apps/web/tools/check-scope-hash.mjs（已接进 apps/web package.json 的 check/check:scope-hash）",
+    "server": "tests/scope-hash-vectors.test.ts（vitest，含直接导入前端纯函数逐字对拍）",
     "vectors": "本文件（单一真源）"
   },
-  "regenerate": "改了两侧任意一处的形状/算法后，必须同时更新本文件：用服务端 pipeline 重算 canonical_json/sha256（临时脚本 import apps/studio/src/store/grants.ts + frontend/src/security/scope-hash.ts，断言两者一致后再落盘）；只改一侧会立即被两侧门禁拦住。",
+  "regenerate": "改了两侧任意一处的形状/算法后，必须同时更新本文件：用服务端 pipeline 重算 canonical_json/sha256（临时脚本 import apps/studio/src/store/grants.ts + apps/web/src/security/scope-hash.ts，断言两者一致后再落盘）；只改一侧会立即被两侧门禁拦住。",
   "vectors": [
     {
       "name": "read_roots-single",

@@ -50,8 +50,14 @@ export interface BusSubscription {
   /** Await the next frame; resolves to null once the subscription is closed. */
   next(): Promise<BusFrame | null>;
   close(): void;
-  /** Number of times this subscriber fell behind (one lagged frame each). */
+  /**
+   * Frames actually DISCARDED for this subscriber — the same number the
+   * `lagged` marker carries (B7-3). It is a running total, so a client that
+   * reads it knows how far behind it is and can re-fetch that much.
+   */
   dropped(): number;
+  /** How many times the bucket overflowed (a severity signal, not a frame count). */
+  droppedBursts(): number;
 }
 
 /** Server-side split: keep only these sessions (plus process-level frames). */
@@ -92,7 +98,21 @@ class SessionBuckets {
   private readonly counts = new Map<string, number>();
   private waiter: Waiter | null = null;
   private closed = false;
-  private dropCount = 0;
+  /**
+   * B7-3: how many FRAMES this subscriber has lost, not how many times the
+   * bucket overflowed. Those are different units and the old code conflated
+   * them: the overflow path discards a WHOLE bucket at a time, so a single
+   * overflow can throw away hundreds of frames while the counter went up by
+   * one. Measured before the fix (2000 frames into one session, capacity 512):
+   * the marker claimed `dropped: 513` while 1537 frames were actually lost —
+   * an under-report of 1024, and the client that trusts it under-repairs.
+   *
+   * `overflows` is kept separately because it answers a different question
+   * ("how bad was the stall") that an operator reads, and because conflating
+   * the two is exactly what produced the wrong number.
+   */
+  private lostFrames = 0;
+  private overflows = 0;
 
   constructor(
     private readonly capacity: number,
@@ -105,8 +125,17 @@ class SessionBuckets {
     if (this.closed || !this.accept(frame)) return;
     const key = bucketKey(frame.envelope.session);
     if ((this.counts.get(key) ?? 0) >= this.bucketCap()) {
-      this.dropCount += 1;
-      this.append(this.lagged(frame.envelope.session, this.dropBucket(key) + 1));
+      this.overflows += 1;
+      // The +1 accounted for the frame that TRIGGERED the overflow; that frame
+      // is never appended (this branch returns), so counting it here would
+      // over-report by one per overflow. The discarded backlog is the real loss.
+      const discarded = this.dropBucket(key);
+      this.lostFrames += discarded;
+      // A cumulative count, not a per-overflow delta: contracts/sse-events.json
+      // declares the marker as the client’s only signal that "you missed
+      // things", and a per-event number would read as "this event dropped N"
+      // and under-report the session as a whole.
+      this.append(this.lagged(frame.envelope.session, this.lostFrames));
       return;
     }
     this.append(frame);
@@ -129,8 +158,14 @@ class SessionBuckets {
     waiter?.resolve(null);
   }
 
+  /** Frames actually discarded for this subscriber (the lagged marker’s number). */
   dropped(): number {
-    return this.dropCount;
+    return this.lostFrames;
+  }
+
+  /** How many times the bucket overflowed (an operator-facing severity signal). */
+  droppedBursts(): number {
+    return this.overflows;
   }
 
   /** Per-session bucket cap: the fair share, never below `minBucket`. */
@@ -234,6 +269,7 @@ export function createStudioBus(opts: StudioBusOptions = {}): StudioBus {
         queues.delete(q);
       },
       dropped: () => q.dropped(),
+      droppedBursts: () => q.droppedBursts(),
     };
   }
 

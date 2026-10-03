@@ -262,7 +262,7 @@ export type Content = TextContent | ToolCallContent | ImageContent;   // ← 唯
 5. `contracts/endpoints.json`：`post_turn.request.fields` 加 `attachments`（optional）；如采纳 §7 的新端点，则 `count 51 → 53`、`endpoints` 加两条、`source.routeTable` 说明追加。
 6. `contracts/route-table.snapshot.json`：`tsApiEndpoints` / `tsOnlyRoutes` 对应 +2（若新端点 TS-only）。
 
-`packages/core/src/contracts/index.ts:128-130` 有**硬编码的 51 断言**，改 count 必须同步；`apps/studio/src/routes.ts:54` 的 `API_ENDPOINT_COUNT = 51` 同理。
+`packages/core/src/contracts/index.ts:175-204` 的 `FROZEN_COUNTS` 里有**硬编码的 51 断言**（`endpoints: 51`，写本文时），改 count 必须同步；`apps/studio/src/routes.ts:73` 的 `API_ENDPOINT_COUNT`（写本文时 `= 51`，现已改为从 `FROZEN_COUNTS.endpoints` 派生）同理。
 
 ### 4.5 golden fixtures / 对拍测试破坏面
 

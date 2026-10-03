@@ -8,22 +8,21 @@
  * once. W6: a finished process is retained as a BOUNDED tombstone (most recent
  * `MAX_TOMBSTONES`, at most `TOMBSTONE_TTL_MS`), so a `poll` AFTER exit still
  * returns `{running:false, exit_code, signal, stdout_tail, stderr_tail}` instead
- * of `unknown handle`; a CPU-cap kill is marked `cpu_exceeded`. For a **natural**
- * exit the completion sink may fire once (a host CAN push a `[process] … exited
- * …` message into a session mailbox, though this studio host does not wire one —
- * `process_control(action=poll)` is the durable read). `kill`/`killAll` paths
- * are deliberately silent: the caller already got `{killed: true}` back.
+ * of `unknown handle`; a CPU-cap kill is marked `cpu_exceeded`. `kill`/`killAll`
+ * paths are deliberately silent: the caller already got `{killed: true}` back.
+ *
+ * B4-05: the completion sink is GONE. It was a host extension point with zero
+ * production callers — so a `run_shell(background: true)` process that ended on
+ * its own told nobody, and the only way to learn it had ended was to poll it.
+ * Rather than keep an unwired hook that only documented the gap, the API and its
+ * exports were removed: the durable read is `process_control(action=poll)`, and
+ * that is now the whole contract, with no second way to half-implement it.
  */
 
 import type { SandboxChild, SandboxExit } from "@celestea/core";
 
 import { delay, TIMED_OUT, withTimeout } from "../sandbox/async.js";
-import {
-  completionTail,
-  MAX_STREAM_BUFFER,
-  RingBuffer,
-  TAIL_BYTES,
-} from "./buffers.js";
+import { MAX_STREAM_BUFFER, RingBuffer, TAIL_BYTES } from "./buffers.js";
 
 /** Well-known token for the process registry service in a Context. */
 export const PROCESS_REGISTRY_SERVICE = "celestea.tools.ProcessRegistry";
@@ -41,17 +40,6 @@ export const MAX_TOMBSTONES = 32;
 /** W6: how long a terminal record stays pollable. */
 export const TOMBSTONE_TTL_MS = 10 * 60 * 1_000;
 
-/** One natural-exit completion handed to the sink (W251 parity). */
-export interface ProcessCompletion {
-  handle: string;
-  pid: number | null;
-  exit_code: number | null;
-  stdout_tail: string;
-  stderr_tail: string;
-  elapsed_ms: number;
-}
-
-export type CompletionSink = (completion: ProcessCompletion) => void;
 
 export interface ProcessRegistryOptions {
   killGraceMs?: number;
@@ -128,7 +116,6 @@ export class ProcessRegistry {
   private readonly options: Required<Omit<ProcessRegistryOptions, "now">>;
   private readonly now: () => number;
   private nextHandle = 0;
-  private completionSink: CompletionSink | null = null;
 
   constructor(options: ProcessRegistryOptions = {}) {
     this.options = {
@@ -142,10 +129,6 @@ export class ProcessRegistry {
     this.now = options.now ?? Date.now;
   }
 
-  /** Install (or clear) the natural-exit sink: one per registry, last wins. */
-  setCompletionSink(sink: CompletionSink | null): void {
-    this.completionSink = sink;
-  }
 
   /** Register a spawned child: takes over its pipes and starts the reaper. */
   insert(child: SandboxChild, notify = true, opts: ProcessInsertOptions = {}): ProcessHandle {
@@ -288,15 +271,9 @@ export class ProcessRegistry {
       killPath: state.killPath,
     });
     this.evictTombstones();
-    if (!entry.notify || state.killPath) return;
-    this.completionSink?.({
-      handle: entry.handle,
-      pid: entry.pid,
-      exit_code: exit.code,
-      stdout_tail: completionTail(state.stdout),
-      stderr_tail: completionTail(state.stderr),
-      elapsed_ms: this.now() - state.spawnedAt,
-    });
+    // B4-05: there is deliberately NOTHING here but the tombstone. The
+    // completion sink was removed (zero callers); a natural exit is learned by
+    // polling, and a `notify: false` entry is not announced to anyone either.
   }
 
   /** A live tombstone, or undefined (evicting it once its TTL has passed). */

@@ -54,7 +54,7 @@
 - 前端在**同一次 `POST /api/turn`** 里把附件 base64 一起发出 ⇒ 一次请求 = 一个乐观帧（§8），无需 upload 往返。
 - **P0 没有「按 id 回读附件字节」的端点**：刷新/其它客户端回放历史时，图片只能渲染为**附件元数据**（文件名 + 尺寸 + MIME），不能内联显示；本会话内可继续用 `URL.createObjectURL` 显示。**这是 P0 的已知限制**，不是 bug；字节回读端点随 P1 一并加。
 - `read_image` 读**本地文件**不需要任何上传端点；它产出的附件写入 `<session-dir>/attachments/`，模型可见性由 §6.4 的 wire 拆分保证。
-- `contracts/endpoints.json` 的 `count`、`packages/core/src/contracts/index.ts:128-130` 的硬断言、`apps/studio/src/routes.ts:54`、`tests/contracts.test.ts` 的 51 —— **P0 全部不动**。
+- `contracts/endpoints.json` 的 `count`、`packages/core/src/contracts/index.ts:187` 的 `FROZEN_COUNTS.endpoints` 硬断言、`apps/studio/src/routes.ts:73`、`tests/contracts.test.ts` 的 51 —— **P0 全部不动**。
 
 ### 7.5 逐条契约改动清单（P0，端点计数不变）
 
@@ -63,8 +63,8 @@
 | 1 | `contracts/endpoints.json` `post_turn.request.fields` | 加 `attachments`（optional，array；内联 base64 形状） | 0 |
 | 2 | `contracts/endpoints.json` `source.routeTable` | 追加 W801 说明（P0 不新增端点） | 0 |
 | 3 | `contracts/endpoints.json` `count` / `endpoints[]` | **P0 不动** | 0 |
-| 4 | `packages/core/src/contracts/index.ts:128-130` | **P0 不动**（硬断言仍是 51） | 0 |
-| 5 | `apps/studio/src/routes.ts:54` | **P0 不动**（`API_ENDPOINT_COUNT = 51`） | 0 |
+| 4 | `packages/core/src/contracts/index.ts:187` | **P0 不动**（`FROZEN_COUNTS.endpoints` 硬断言仍是 51） | 0 |
+| 5 | `apps/studio/src/routes.ts:73` | **P0 不动**（`API_ENDPOINT_COUNT`，写本文时 `= 51`） | 0 |
 | 6 | `tests/contracts.test.ts` | **51 相关断言不动**；`:23-25` 工具数 11 → 12 | 0 |
 | 7 | `apps/studio/src/handlers/health.ts:59` | capabilities 加 `multimodal: true` | 0 |
 | 8 | `contracts/data-files/providers.schema.json` | model 加 `input_modalities` / `output_modalities`；`publicView.fields` 同步 | 0 |

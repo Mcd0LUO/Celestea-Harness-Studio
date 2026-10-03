@@ -651,6 +651,30 @@ export class DefaultAgentLoop implements AgentLoop {
    * process can kill it when the turn is cancelled. The loop still stops
    * *awaiting* the batch (see [raceAbort] above) — this is what makes the
    * in-flight work actually stop rather than merely stop being watched.
+   *
+   * B3-05 (closed by B3-01, and deliberately NOT "fixed" here): the original
+   * complaint was that a cancelled turn left a process running that
+   * `process_control` could not reach — a foreground `run_shell` is not
+   * registered in the ProcessRegistry, so an orphan had no handle anywhere. The
+   * signal on [ToolInput] removes the orphan, so there is nothing left to hand
+   * over.
+   *
+   * The loop must NOT grow a path to the ProcessRegistry to "re-register" the
+   * abandoned work, for two reasons that are about ownership rather than code:
+   *   * agent-loop sits BELOW the tools package and has no reference to it (a
+   *     grep for `ProcessRegistry` here returns nothing). Adding one inverts the
+   *     dependency direction and couples every host of the loop to a process
+   *     manager it may not even use;
+   *   * the handle the loop would need is the tool's, not the loop's. A tool that
+   *     spawns is the only thing that knows the pid, and it already receives the
+   *     signal that ends the work. Registering on its behalf would also mean the
+   *     loop re-entering the tool's lifecycle at exactly the moment it has
+   *     promised to stop watching it.
+   *
+   * What the loop DOES guarantee, and what `b3-05-cancel-ownership.test.ts` pins:
+   * the in-flight tool is TOLD (the signal is on its [ToolInput]), an abandoned
+   * batch that later rejects produces no unhandled rejection, and the log keeps
+   * exactly one honest row for the call.
    */
   private dispatchBatch(registry: ToolRegistry, batch: readonly ToolCall[]): Promise<ToolOutput[]> {
     return Promise.all(batch.map((call) => dispatchCall(registry, toToolInput(call, this.signal))));

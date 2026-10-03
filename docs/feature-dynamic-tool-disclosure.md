@@ -368,7 +368,7 @@ W 组与 A 组绝对 token 不同（前缀更长、历史占比更高），但**
 
 | 项 | P0（推荐） | P1 | P2（若上 tool_search） |
 |---|---|---|---|
-| `API_ENDPOINT_COUNT`（`apps/studio/src/routes.ts:54`，现 51） | **51 不变** | 51（沿用 `GET /api/tools?session=`） | 或 52（新端点） |
+| `API_ENDPOINT_COUNT`（`apps/studio/src/routes.ts:73`，写本文时 51） | **51 不变** | 51（沿用 `GET /api/tools?session=`） | 或 52（新端点） |
 | `contracts/tools.json`（`count: 11`） | **11 不变** | 11 | **12**（`tool_search`）→ `tests/contracts.test.ts`、`tests/lib/tool-parity.ts`、`fixtures/live/tools.json`、`/api/tools` note「11 tools」全改 |
 | `packages/core` 类型 | **不改**（`ExposureOptions` 在 `packages/tools`） | 不改 | 不改 |
 | `packages/core/src/tool.ts:62-66` 注释「sorted by name」 | 改措辞为 stable disclosure order（顺序不在契约里） | — | — |

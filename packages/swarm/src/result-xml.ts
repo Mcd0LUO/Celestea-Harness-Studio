@@ -14,6 +14,7 @@
  * 面向人的同类信息走 Statusline 的 `swarm?` 字段与 zh/en 字典。
  */
 
+import { clipText } from "./text-clip.js";
 import { SWARM_MAX_SUBAGENTS, type SwarmTaskResult } from "./types.js";
 
 
@@ -187,6 +188,45 @@ export function renderSwarmSummary(results: readonly SwarmTaskResult[]): string 
   return parts.join(", ");
 }
 
+/**
+ * 单个成员正文的**默认**上限（UTF-16 码元）—— W9290 B1-07。
+ *
+ * 为什么渲染路径必须有界：成员正文是模型给的自由文本，而一批最多 128 个成员。
+ * 没有上限时，128 个各 20 万字的成员 = 25MB 直接进模型上下文——不是报错，是**静默**
+ * 把上下文挤爆，且往往在模型已经开始回答之后才发作。本包早就有 `text-clip.ts` 正是为此，
+ * 也有 `validate.ts` 的 `DUPLICATE_SNIPPET_MAX_CHARS` / `roster.ts` 的成员视图上限，
+ * 唯独渲染这一条出口一直在漏。
+ *
+ * **为什么不静默截断**：截掉多少要**写在正文里**。一个被砍掉尾巴的成员结果若看不出
+ * 被砍过，模型会以为那就是全部——于是它基于一个不完整的前提继续推理。那比截断本身更糟。
+ * 所以截断时追加一行 `…[truncated N of M code units]`（M 是原长度）。
+ */
+export const SWARM_MEMBER_BODY_MAX_CHARS = 20_000;
+
+/**
+ * 按上限裁剪成员正文，并如实标注被裁掉多少。
+ *
+ * 用 `clipText`（本包唯一的截断出口）而不是 `slice`：它不劈开代理对，emoji 不会被
+ * 截成乱码。`0` = 不限（宿主显式关闭），负数与 NaN 由 `bodyLimitChars` 归一到默认值。
+ */
+export function clipMemberBody(body: string, max: number): string {
+  if (!(max > 0) || body.length <= max) return body;
+  const dropped = body.length - max;
+  return clipText(body, max) + "\n" + `[truncated ${String(dropped)} of ${String(body.length)} code units]`;
+}
+
+/**
+ * 本次渲染该用的成员正文上限：显式 > 0 则用它，否则用默认值。
+ *
+ * **把「无效值归一到默认」而不是「让无效值变成不限」**：后者（`!(max > 0)` 对 NaN 为真）
+ * 会把一次配置笔误变成「恢复成无上限」，正是本条要消灭的失效形态。
+ */
+export function bodyLimitChars(override: number | undefined): number {
+  return override === undefined || !Number.isFinite(override) || override <= 0
+    ? SWARM_MEMBER_BODY_MAX_CHARS
+    : Math.floor(override);
+}
+
 /** body 取值：completed 用 result，其余用 error，缺失时给出占位文案。 */
 function bodyOf(result: SwarmTaskResult): string {
   if (result.outcome === "completed") return result.result ?? "";
@@ -219,7 +259,7 @@ function findIndexAlignmentMismatch(results: readonly SwarmTaskResult[]): string
  * agent_id / state / stop_reason 都是可选属性：undefined 时**整体省略**，不输出空属性。
  * agent_id 是二期 resume_agent_ids 的唯一取值来源，因此它同样走属性转义这一条路径。
  */
-export function renderSubagentElement(result: SwarmTaskResult): string {
+export function renderSubagentElement(result: SwarmTaskResult, bodyMax: number = SWARM_MEMBER_BODY_MAX_CHARS): string {
   const attrs: string[] = [];
   if (result.agentId !== undefined) {
     attrs.push(`agent_id="${escapeXmlAttribute(result.agentId)}"`);
@@ -230,7 +270,8 @@ export function renderSubagentElement(result: SwarmTaskResult): string {
   if (result.stopReason !== undefined) {
     attrs.push(`stop_reason="${escapeXmlAttribute(result.stopReason)}"`);
   }
-  const body = escapeXmlText(bodyOf(result));
+  // 上限作用在**转义之前**：转义只会让文本变长（& -> &amp;），先转义再量就量不准了。
+  const body = escapeXmlText(clipMemberBody(bodyOf(result), bodyMax));
   return `<subagent ${attrs.join(" ")}>${body}</subagent>`;
 }
 
@@ -254,6 +295,13 @@ export interface RenderSwarmResultOptions {
    * false / 未设 = 抛错（严格断言原行为，保持向后兼容与既有测试）。
    */
   degradeOnIndexMismatch?: boolean;
+  /**
+   * 单个成员正文的码元上限（W9290 B1-07）。缺省 / 无效 = `SWARM_MEMBER_BODY_MAX_CHARS`。
+   *
+   * 为什么是可配而不是写死：宿主最清楚自己的上下文窗口与计费口径；20_000 只是本仓的
+   * 保守缺省。`bodyLimitChars` 负责把无效值**归一到默认**而不是「归一到不限」。
+   */
+  memberBodyMaxChars?: number;
 }
 
 /** 渲染完整结果块。results 必须按 spec.index 升序且编号连续（除非开启 degradeOnIndexMismatch）。 */
@@ -270,6 +318,7 @@ export function renderSwarmResult(
   if (mismatch !== undefined && options.degradeOnIndexMismatch !== true) {
     throw new Error(mismatch);
   }
+  const bodyMax = bodyLimitChars(options.memberBodyMaxChars);
   const members = options.omitNotStarted === true
     ? results.filter((result) => result.state !== "not_started")
     : [...results];
@@ -281,7 +330,7 @@ export function renderSwarmResult(
   const lines = [
     `<${SWARM_RESULT_TAG}>`,
     `<summary>${escapeXmlText(summary)}</summary>`,
-    ...members.map((result) => renderSubagentElement(result)),
+    ...members.map((result) => renderSubagentElement(result, bodyMax)),
     `</${SWARM_RESULT_TAG}>`,
   ];
   return lines.join("\n");
@@ -299,9 +348,16 @@ export function renderSwarmResult(
  * 只有二次降级也失败（连单成员渲染都做不出来）时才把错误抛出：那时连"保住结果"
  * 都已不可能，抛错反而是更诚实的信号。
  */
-export function renderSwarmResultSafely(results: readonly SwarmTaskResult[]): string {
+export function renderSwarmResultSafely(
+  results: readonly SwarmTaskResult[],
+  memberBodyMaxChars?: number,
+): string {
   try {
-    return renderSwarmResult(results, { omitNotStarted: false, degradeOnIndexMismatch: true });
+    return renderSwarmResult(results, {
+      omitNotStarted: false,
+      degradeOnIndexMismatch: true,
+      ...(memberBodyMaxChars === undefined ? {} : { memberBodyMaxChars }),
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const header = [
@@ -312,7 +368,7 @@ export function renderSwarmResultSafely(results: readonly SwarmTaskResult[]): st
       .map((result) => {
         // 单成员同样可能抛（脏数据极端形态），故逐条兜住，坏的那条只出占位而不中断整批。
         try {
-          return renderSubagentElement(result);
+          return renderSubagentElement(result, bodyLimitChars(memberBodyMaxChars));
         } catch {
           return `<subagent item="${escapeXmlAttribute(String(result.spec?.item ?? ""))}" outcome="${escapeXmlAttribute(String(result.outcome))}">member could not be rendered</subagent>`;
         }

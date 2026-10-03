@@ -361,6 +361,57 @@ describe('契约文档指针可达性', () => {
     expect(checked, '扫描器必须找到仓内指针（否则本条是空转的）').toBeGreaterThan(0);
   });
 
+  /**
+   * B8-02/B8-03 —— 契约里「退役路径」的两条具体防线。
+   *
+   * ① `sse-events.json` 曾经用**现在时**断言「前端仍订阅 `context`」，而 W1479 早已
+   *    把它从 `apps/web/src/sse.ts` 的 EVENT_NAMES 里删掉。契约说的与代码做的相反，
+   *    读契约的人据此以为还有个死监听要查。已改为 `retiredDeadListeners`（历史态）。
+   *    这里钉住两件事：(a) 旧字段名不得复活；(b) 被标为 retired 的名字**真的**不在
+   *    前端监听清单里 —— 否则「retired」又是一句没人验证的空话。
+   * ② `scope-hash-vectors.json` 有 4 处仍写已更名的 `frontend/**`（W881 后是
+   *    `apps/web/**`）。上面的通用扫描器看不见它们，因为它们位于 `$comment` /
+   *    `pipeline.*` / `guards.*` / `regenerate` 这些**散文**字段里，不在
+   *    POINTER_FIELDS 内。故在此单列一条：这些字段里出现的仓内路径必须存在。
+   *
+   * 之所以不把它们并进通用扫描器：那些字段是**给人读的一句话**，里面既有真路径也有
+   * 描述性文字，判据必须比「首 token 是路径」更保守（取 `/srv/…`、`@celestea/…`
+   * 这类**明确写出来的路径形状**，而不是猜哪个词是路径）。
+   */
+  it('退役监听在契约里标为历史态，且前端确实不再监听（B8-02）', () => {
+    const sse = JSON.parse(readFileSync(join(ROOT, 'contracts', 'sse-events.json'), 'utf8')) as {
+      frontendDeadListener?: unknown;
+      retiredDeadListeners?: { name: string; retiredBy?: string; status?: string }[];
+    };
+    expect(sse.frontendDeadListener, 'frontendDeadListener 是「现在时」的错误字段名，不得复活').toBeUndefined();
+    expect(Array.isArray(sse.retiredDeadListeners), '应改为 retiredDeadListeners（历史态）').toBe(true);
+    expect(sse.retiredDeadListeners!.length, '至少要登记 context（W1479 删的那个）').toBeGreaterThan(0);
+
+    // 前端真正 addEventListener 的清单（apps/web/tools/check-sse-events.mjs 同款口径）
+    const web = readFileSync(join(ROOT, 'apps', 'web', 'src', 'sse.ts'), 'utf8');
+    const m = /const EVENT_NAMES[^=]*=\s*\[([\s\S]*?)\]/.exec(web);
+    expect(m, 'apps/web/src/sse.ts 的 EVENT_NAMES 解析不到').not.toBeNull();
+    const listening = new Set([...(m![1] as string).matchAll(/'([a-z_]+)'/g)].map((x) => x[1]!));
+    const stillListening = sse.retiredDeadListeners!
+      .map((d) => d.name)
+      .filter((n) => listening.has(n));
+    expect(stillListening, '标为 retired 的事件名仍在前端监听清单里（那就还没真的退役）').toEqual([]);
+  });
+
+  it('scope-hash-vectors.json 的散文字段里没有已更名的 frontend/** 路径（B8-03）', () => {
+    const raw = readFileSync(join(ROOT, 'contracts', 'scope-hash-vectors.json'), 'utf8');
+    const stale = [...raw.matchAll(/(^|[^\w/])frontend\/[\w./-]*/g)].map((x) => x[0].trim());
+    expect(stale, 'W881 之后前端仓在 apps/web/，不再是 frontend/').toEqual([]);
+    // 改对之后，那几处必须真的指得到现役文件（否则只是把错指向另一个错）
+    for (const rel of [
+      'apps/web/tools/check-scope-hash.mjs',
+      'apps/web/src/security/scope-hash.ts',
+      'tests/scope-hash-vectors.test.ts',
+    ]) {
+      expect(existsSync(join(ROOT, rel)), rel + '（契约现在这么写了，但它必须存在）').toBe(true);
+    }
+  });
+
   it('没有指向 git 历史里从未存在过的文件（这正是本次查出的 bug 形态）', () => {
     // 具体化那条 bug：路径存在与否必须用工作区判定；历史判定交给 review。
     // 这里只需保证上面的清单不为空且没坏 —— 空清单说明扫描器坏了（门禁空转）。

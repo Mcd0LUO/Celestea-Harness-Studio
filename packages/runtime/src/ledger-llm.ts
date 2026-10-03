@@ -108,15 +108,37 @@ export function failureOf(error: unknown): LedgerStepOutcome {
   };
 }
 
-/** A mid-stream terminal failure: no HTTP status exists (the response was 2xx). */
+/**
+ * A mid-stream terminal failure: no HTTP status exists (the response was 2xx).
+ *
+ * B2-04: `retryable` used to be `event.message.startsWith("llm timeout")` — the
+ * only prose-parsed classification left in the repo, and it disagreed with the
+ * structured `kindOf` sitting right next to it in the same object: a body whose
+ * text merely MENTIONED the prefix booked `retryable: true` while its own
+ * `kindOf` said otherwise. The row now answers from the structured field alone,
+ * which is the only thing that was ever authoritative.
+ *
+ * `retryable` is TRUE for `timeout` and FALSE for the rest, and the reason
+ * `timeout` is a real member of this union — not a hypothetical — is that this
+ * observer can sit on either side of the host adapter: the provider seam widens
+ * `StreamEvent.failed.kindOf` with `"timeout"` (see the `TODO(core-timeout-kind)`
+ * in `packages/llm/src/seam.ts`), and `apps/studio`'s `llm-assembly.ts:98` folds
+ * it back to `"stream"` only for the CORE-typed engine. `stepObservedLlm` wraps
+ * whichever Llm it is handed, so a deployment that observes the provider seam
+ * directly really does deliver `kindOf: "timeout"` here. Both spellings are
+ * honoured; neither depends on the message text.
+ *
+ * A `stream` tear books `false` rather than an uninformative `null`: the stream
+ * broke, and a byte-identical attempt is not what fixes a broken stream. This
+ * changes what a row RECORDS, never what the engine does (§3.5, observation
+ * only).
+ */
 export function streamFailure(event: { kindOf: string; message: string }): LedgerStepOutcome {
   return {
     kind: "error",
     error_kind: event.kindOf,
     http_status: null,
-    // The canonical timeout prefix survives into the message (W511/W723), so an
-    // idle-stall is still recognisable as retryable.
-    retryable: event.message.startsWith("llm timeout") ? true : null,
+    retryable: event.kindOf === "timeout",
   };
 }
 

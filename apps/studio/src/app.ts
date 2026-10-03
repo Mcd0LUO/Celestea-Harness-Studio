@@ -33,6 +33,7 @@ import { apiTokenMiddleware, registerTokenBootstrap } from "./auth/api-token.js"
 import { composeStudio, type EngineFactory, type StudioServices } from "./plugins.js";
 import { registerHandlers } from "./handlers/index.js";
 import { crossSiteRefusal } from "./handlers/common.js";
+import { securityHeaders } from "./security-headers.js";
 import { assembleSystemPromptFor } from "./handlers/config-shape.js";
 import { registerStatic } from "./static.js";
 import type { EngineProfile, RuntimeAdapter } from "./runtime-adapter.js";
@@ -48,6 +49,9 @@ import { recoverActiveSessionOnBoot } from "./runtime/boot-recovery.js";
 import { RecoveryAuditWriter } from "./runtime/recovery-audit.js";
 import { observeWorkerTableOnBoot, recoverWorkerTableOnBoot } from "./runtime/worker-recovery.js";
 import { workerTablePath } from "./runtime/worker-table.js";
+// B4-04: the crash-residue sweep, and the attachment container name it shares
+// with the writer (so the two cannot drift into different directory names).
+import { ATTACHMENTS_DIRNAME, sweepCrashResidue, sweepSummaryLine, type SweepTarget } from "@celestea/tools";
 
 export interface StudioAppOptions {
   cwd?: string;
@@ -269,6 +273,54 @@ function primeEnginePrompt(services: StudioServices, env: NodeJS.ProcessEnv): vo
   services.runtime.primeSystemPrompt?.(assembleSystemPromptFor(services, null, DEFAULT_SESSION_MODE, env));
 }
 
+/**
+ * B4-04: the directories that can hold crash residue, computed WITHOUT touching
+ * the disk.
+ *
+ * Two kinds, matching the two writers:
+ *   - `<session>/attachments` holds the store temp files;
+ *   - the workspace run-code container holds the assembled programs.
+ *
+ * Exported so the boot test can assert the SHAPE of the target list (which is
+ * the part that decides whether a real users residue is even looked at) without
+ * depending on the sweep implementation.
+ */
+export function crashResidueTargets(services: Pick<StudioServices, "sessions">): SweepTarget[] {
+  const targets: SweepTarget[] = [];
+  // `list()` rows carry no directory, so the path comes from the ONE resolution
+  // every other caller uses (sessionWorkspaceOf / dialog.ts read it the same
+  // way). A row that stops resolving is skipped: its directory is gone, so there
+  // is nothing left to sweep under it.
+  for (const row of services.sessions.list()) {
+    const resolved = services.sessions.resolve(row.id);
+    if (!resolved.ok) continue;
+    targets.push({ dir: join(resolved.value.dir, ATTACHMENTS_DIRNAME), kind: "attachments" });
+  }
+  return targets;
+}
+
+/**
+ * B4-04: run the boot sweep, in the background, never on the startup path.
+ *
+ * Returns the promise so a test can await it; production callers deliberately
+ * do NOT (see the call site), because housekeeping must not delay the first
+ * request. Every failure is absorbed: the sweep already swallows per-entry
+ * errors, and this adds the outer guarantee that a rejection here cannot become
+ * an unhandled rejection.
+ */
+export async function sweepBootResidue(
+  services: Pick<StudioServices, "sessions">,
+  log: (line: string) => void = (line) => console.log(line),
+): Promise<void> {
+  try {
+    const report = await sweepCrashResidue(crashResidueTargets(services));
+    const line = sweepSummaryLine(report);
+    if (line !== null) log("[celestea-boot] " + line);
+  } catch {
+    // Housekeeping never fails a boot: an unreadable data dir, a vanished
+    // session directory, anything. The next boot tries again.
+  }
+}
 export function createStudioApp(opts: StudioAppOptions = {}): StudioApp {
   const env = opts.env ?? process.env;
   const config = opts.config ?? loadStudioConfig({ cwd: opts.cwd, env });
@@ -279,6 +331,32 @@ export function createStudioApp(opts: StudioAppOptions = {}): StudioApp {
   host.services = services;
   const table = routeTable();
   const app = new Hono();
+
+  // B7-4: the baseline security headers, mounted FIRST so they cover every
+  // response — the static/SPA catch-all, the /api 404, the login page and the
+  // SSE stream included. Hono merges prepared headers into whatever Response a
+  // handler returns (including the pre-built streaming one), so no handler has
+  // to know this exists. See security-headers.ts for the per-header rationale
+  // and for why `connect-src` may stay 'self'.
+  app.use(securityHeaders());
+
+  // B2-05: the LAST-RESORT error face. Without it Hono's default handler answers
+  // an uncaught handler exception with `500 text/plain "Internal Server Error"`,
+  // which breaks the frozen `endpoints.json` convention
+  // `{"ok": false, "error": "…"}`: a client that parses the error branch with
+  // `resp.json()` gets a SyntaxError, so a real 500 arrives as "the response was
+  // malformed". The 23 explicit `failJson(c, 500, …)` sites were already
+  // contract-shaped; this covers the one path none of them own — an exception
+  // thrown by code that did not anticipate it.
+  //
+  // The error is REPORTED but never ECHOED: `err.message` of an unexpected throw
+  // can carry an absolute path, a SQL fragment or a credential, and the client
+  // has no business seeing it. The full error goes to the server log, where the
+  // operator can reach it, and the client gets the same generic line every time.
+  app.onError((err, c) => {
+    console.error("[celestea] unhandled route error:", err);
+    return c.json({ ok: false, error: "internal error" }, 500);
+  });
 
   // W9206-36: the cross-site gate, mounted for EVERY /api/* request — before
   // (and independently of) the token check, because it must also protect the
@@ -311,6 +389,15 @@ export function createStudioApp(opts: StudioAppOptions = {}): StudioApp {
   // log and takes its turn counter from it. A clean log, a missing checkpoint or
   // an unresolvable active session are all no-ops (fail-safe).
   recoverActiveSessionOnBoot({ workspaces: services.workspaces, sessions: services.sessions, audit: bootAudit });
+  // B4-04: sweep the residue a CRASH leaves behind (a `finally` never runs when
+  // the process is killed, so a stranded attachment tmp or run_code program
+  // used to accumulate forever under the user data root).
+  //
+  // It is FIRED, not awaited: the sweep is best-effort housekeeping and must
+  // never sit on the startup path, so a slow disk or a huge directory delays
+  // the first request by nothing at all. The targets are computed
+  // synchronously (cheap, in-memory) and only the IO is deferred.
+  void sweepBootResidue(services);
   // E §2.3 P0 ③: OBSERVE the persisted worker table (dead owner / missing host
   // session) and record it. Never re-dispatch: that is P2, behind an explicit
   // switch, and it needs the tool side-effect table first (§5.1).

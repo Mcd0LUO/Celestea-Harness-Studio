@@ -315,3 +315,75 @@ describe("dialog", () => {
     await reader?.cancel();
   });
 });
+
+/**
+ * B2-05 — the LAST-RESORT error face.
+ *
+ * The app had no `onError`, so any handler that threw an exception it did not
+ * anticipate was answered by Hono's default handler with `500 text/plain
+ * "Internal Server Error"`. That breaks the frozen `endpoints.json` convention
+ * `{"ok": false, "error": "…"}`: a client that parses its error branch with
+ * `resp.json()` gets a SyntaxError, so the failure reaches the UI as "the
+ * response was malformed" instead of "the server failed".
+ */
+describe("B2-05 — an uncaught handler exception still answers with the contract body", () => {
+  // A contract route whose injected runtime THROWS. Registering a synthetic
+  // route instead would not work: Hono matches in registration order, and both
+  // the /api/* 404 and the SPA fallback are registered before any test-added
+  // route, so the probe would be answered by one of them and the error path
+  // would never run. Driving a REAL route through a throwing runtime exercises
+  // exactly the path a production bug takes.
+  function throwingHarness(thrown: unknown) {
+    // GET /api/providers is registered as a bare one-liner (providers.ts:47:
+    // `c.json(deps.providers.response())`) with no try/catch, so a store that
+    // throws propagates straight out of the handler — the uncaught path B2-05 is
+    // about. Making the store throw reproduces it exactly.
+    const h = makeHarness({ files: { "providers.json": { providers: [] } } });
+    h.studio.services.providers.response = () => {
+      throw thrown;
+    };
+    return h;
+  }
+
+  it("returns JSON {ok:false,error} with a 500, not text/plain", async () => {
+    const h = throwingHarness(new Error("upstream blew up"));
+    const res = await h.app.request("/api/providers");
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = JSON.parse(await res.text()) as Record<string, unknown>;
+    expect(body).toEqual({ ok: false, error: "internal error" });
+  });
+
+  it("never echoes the error message, a path or a credential back to the client", async () => {
+    const secret = "sk-live-DO-NOT-ECHO-1234567890";
+    const h = throwingHarness(new Error(`failed reading D:/srv/app/store/providers.json with key ${secret}`));
+    const res = await h.app.request("/api/providers");
+    const text = await res.text();
+    // The body must be the contract envelope, and the envelope must be GENERIC.
+    // Asserting the shape here as well as the absence is what makes this case a
+    // real guard: against Hono's default handler the body is the constant text
+    // "Internal Server Error", which also contains no secret — so absence alone
+    // would pass vacuously while the contract stays broken.
+    expect(res.status).toBe(500);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(JSON.parse(text)).toEqual({ ok: false, error: "internal error" });
+    expect(text).not.toContain(secret);
+    expect(text).not.toContain("D:/srv/app");
+    expect(text).not.toContain("providers.json");
+  });
+
+  it("leaves the explicit failJson 500s on the real routes untouched", async () => {
+    // The guard is additive: a route that already builds the contract body by
+    // hand must keep its own (more specific) text.
+    const h = make();
+    const res = await h.app.request("/api/config", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ max_steps: 0 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.ok).toBe(false);
+    expect(String(body.error)).toContain("max_steps");
+  });
+});

@@ -26,6 +26,7 @@
  */
 
 import { lstatSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import { open } from "node:fs/promises";
 import { BINARY_SNIFF_BYTES, DEFAULT_READ_LIMIT, isToolFailure, readTextLines } from "@celestea/tools";
 import type { Hono } from "hono";
@@ -35,6 +36,48 @@ import { errText } from "../store/result.js";
 import type { Deps } from "./common.js";
 
 /** The frozen 200 body. */
+/**
+ * B6-06: files this endpoint must never hand out, whatever the caller asks for.
+ *
+ * Why a refusal rather than a redaction. `providers.json` is the ONE file the
+ * data-file contract marks `"secret": true` (contracts/data-files/index.json),
+ * and it holds every provider key in cleartext. `GET /api/providers` already
+ * refuses to return an `api_key` -- the public view has no such field at all,
+ * it is a type-level guarantee in store/providers.ts. This endpoint was the
+ * plaintext bypass around that guarantee: give it the path and it returns the
+ * file verbatim, and the path is not a secret (it is CELESTEA_PROVIDERS_FILE,
+ * else `<cwd>/providers.json`).
+ *
+ * Matching is by the RESOLVED path, so a symlink, a relative form or a
+ * different spelling cannot slip past, and by a small shape net for the
+ * operator who moved the data dir out from under an old config.
+ *
+ * The message names the FILE, never a value: refusing to serve a secret must
+ * not become a way to probe for one.
+ */
+export const CREDENTIAL_FILE_ERROR = "path is a credential file and is not readable over the API";
+
+/** The literal names that mark a file as a credential store, whatever its directory. */
+const CREDENTIAL_FILE_NAMES: ReadonlySet<string> = new Set(["providers.json", "studio-auth.secret"]);
+
+/** The data files Studio itself owns (config.paths), compared by resolved path. */
+export interface CredentialFiles {
+  providersFile: string;
+  authSecretFile: string;
+}
+
+/**
+ * True when `path` is a credential file this process knows about.
+ *
+ * @param path the already-trimmed absolute path from the query.
+ * @param files the host's own paths (from StudioConfig).
+ */
+export function isCredentialFile(path: string, files: CredentialFiles): boolean {
+  const resolved = resolve(path);
+  if (resolved === resolve(files.providersFile) || resolved === resolve(files.authSecretFile)) return true;
+  return CREDENTIAL_FILE_NAMES.has(basename(resolved).toLowerCase());
+}
+
 export interface FsReadBody {
   path: string;
   size: number;
@@ -118,8 +161,17 @@ function lstatOutcome(path: string): { size: number } | { error: string; code: s
 }
 
 /** Read one file for the API (exported for the unit tests). */
-export async function readFileForApi(path: string, offset: number, limit: number): Promise<ReadOutcome> {
+export async function readFileForApi(
+  path: string,
+  offset: number,
+  limit: number,
+  files?: CredentialFiles,
+): Promise<ReadOutcome> {
   if (!isAbsolutePath(path)) return { ok: false, error: `path '${path}' must be absolute`, code: "not_absolute" };
+  // B6-06: refuse BEFORE any read, so the bytes never reach this process at all.
+  if (files !== undefined && isCredentialFile(path, files)) {
+    return { ok: false, error: CREDENTIAL_FILE_ERROR, code: "credential_file" };
+  }
   const meta = lstatOutcome(path);
   if ("error" in meta) return { ok: false, error: meta.error, code: meta.code };
   const binaryBody = (kind: "binary"): FsReadBody => ({ path, size: meta.size, kind, text: "", offset, limit, totalLines: 0, truncated: false });
@@ -152,7 +204,7 @@ export async function readFileForApi(path: string, offset: number, limit: number
   }
 }
 
-export function registerFsRead(app: Hono, _deps: Deps, table: RouteTable): string {
+export function registerFsRead(app: Hono, deps: Deps, table: RouteTable): string {
   const route = table.get("get_fs_read");
   app.on(route.method, route.honoPath, async (c) => {
     const path = (c.req.query("path") ?? "").trim();
@@ -161,7 +213,12 @@ export function registerFsRead(app: Hono, _deps: Deps, table: RouteTable): strin
     if ("error" in offset) return c.json({ error: offset.error, code: offset.code }, 400);
     const limit = positiveInt(c.req.query("limit"), DEFAULT_READ_LIMIT, "limit");
     if ("error" in limit) return c.json({ error: limit.error, code: limit.code }, 400);
-    const out = await readFileForApi(path, offset.value, limit.value);
+    // B6-06: the host paths are the authority on WHICH files are secrets; the
+    // name-shape net inside is only the backstop for a moved data dir.
+    const out = await readFileForApi(path, offset.value, limit.value, {
+      providersFile: deps.config.paths.providersFile,
+      authSecretFile: deps.config.paths.authSecretFile,
+    });
     if (!out.ok) return c.json({ error: out.error, code: out.code }, 400);
     return c.json(out.body);
   });

@@ -259,7 +259,7 @@ Hard limits: ≤20 sub-calls, wall clock ≤120s, sub-call output ≤256 KiB, pr
 
 | 断言 | 位置 | P0 | P1 |
 |---|---|---|---|
-| `API_ENDPOINT_COUNT` == `contracts/endpoints.json#count` == `endpointIds.length` | `routes.ts:48`、`app.ts:85-87`、`tests/contracts.test.ts` | **43（不变）** | **44** |
+| `API_ENDPOINT_COUNT` == `contracts/endpoints.json#count` == `endpointIds.length` | `routes.ts:73`、`app.ts:248-253`（`assertCoverage`）、`tests/contracts.test.ts` | **43（不变）** | **44** |
 | `BUILTIN_SECTIONS` 长度 == 10 且 order == `[100..1000]` | `prompts.test.ts:40-42` | **不变** | **不变** |
 | 每个内置模板通过 `validateTemplate` | `prompts.test.ts:41` | 两张变体都要过 | 同 |
 | 组装结果 ≤ `PROMPT_MAX_LEN` | `prompts.test.ts:160-167` | 新增两变体断言 | 同 |
@@ -277,7 +277,7 @@ Hard limits: ≤20 sub-calls, wall clock ≤120s, sub-call output ≤256 KiB, pr
 | 1 | `SessionMode = "standard" \| "execution"` 类型 + `DEFAULT_SESSION_MODE` + `parseMode()`（数据表外提，K3） | `apps/studio/src/store/session-meta.ts`（或 `mode.ts`） |
 | 2 | `SessionMeta` 增 `mode?`；`writeSessionMeta` 增 mode（**空值不写键**，K8） | `store/session-meta.ts` |
 | 3 | `tool_access` 变体表 + `assembleSystemPrompt(..., mode)` 选变体；变体 A/B 文本按 §1.3 | `store/builtin-sections.ts`、`store/prompts-compose.ts` |
-| 4 | **提示词装配下沉到会话**：`SessionComposer` 增 `sessionMode(id)`/`sessionSystemPrompt(id)` 钩子；`profileFor(sessionId)` 同时覆盖 `model` 与 `system_prompt`；宿主在 `createRealRuntimeAdapter` 里注入（与既有 `sessionModel` 同形） | `runtime/session-compose.ts:152-156`、`apps/studio/src/app.ts:64-78`、`runtime/real-runtime-adapter.ts` |
+| 4 | **提示词装配下沉到会话**：`SessionComposer` 增 `sessionMode(id)`/`sessionSystemPrompt(id)` 钩子；`profileFor(sessionId)` 同时覆盖 `model` 与 `system_prompt`；宿主在 `createRealRuntimeAdapter` 里注入（与既有 `sessionModel` 同形） | `runtime/session-compose.ts:152-156`、`apps/studio/src/app.ts:174-183`（`sessionModel` / `sessionMode` / `sessionSystemPrompt` 三个宿主钩子）、`runtime/real-runtime-adapter.ts` |
 | 5 | `{{tools}}` 与 scope/vars 改为按**传入会话**解析（S1/S2 的前半） | `handlers/config-shape.ts:71-89` |
 | 6 | `POST /api/sessions.mode`（校验 + 400 文案 + 写盘）；`GET /api/sessions` 行 + `mode`；`GET /api/status` + `mode`；`/api/health.capabilities.session_mode` | `handlers/sessions.ts`、`handlers/health.ts`（`get_status`/`get_tools`/`get_health` 三个只读端点同在 `health.ts`） |
 | 7 | `spawn_worker` 增可选 `mode`（缺省继承父会话）+ 回执头部 `- mode:` 行 | `packages/workers/src/tools.ts`、`receipt.ts` |
@@ -402,7 +402,7 @@ Hard limits: ≤20 sub-calls, wall clock ≤120s, sub-call output ≤256 KiB, pr
 
 | # | 设计原文 | 落地口径（以此为准） | 依据 |
 |---|---|---|---|
-| C1 | D6/§5.1：P0 `API_ENDPOINT_COUNT` **保持 43** | **44**（`GET /api/sessions/{id}/context` 已在 W725 上线，43 是写文档当日的基线）。P0 **零新端点**，44 不变 | 本仓 `apps/studio/src/routes.ts:49`、`tests/contracts.test.ts` |
+| C1 | D6/§5.1：P0 `API_ENDPOINT_COUNT` **保持 43** | **44**（`GET /api/sessions/{id}/context` 已在 W725 上线，43 是写文档当日的基线）。P0 **零新端点**，44 不变 | 本仓 `apps/studio/src/routes.ts:73`、`tests/contracts.test.ts` |
 | C2 | §5.1 #6「`POST /api/sessions.mode`」在 P0 表内 | P0 的 mode **只在创建时设定**：`POST /api/sessions` 收可选 `mode`；运行期切换端点 `POST /api/sessions/{id}/mode` 属 **P1** | D6「零新端点」优先 |
 
 ### 10.2 §5.1 逐条对照

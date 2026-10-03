@@ -15,6 +15,8 @@
 import http from "node:http";
 import https from "node:https";
 
+import { createRedactor } from "@celestea/core";
+
 import { connectTimeoutError, networkError, responseHeaderTimeoutError } from "./errors.js";
 
 /** Max bytes of a non-2xx body echoed in the error message. */
@@ -107,7 +109,12 @@ export async function sendChatRequest(options: SendOptions): Promise<http.Incomi
     // TypeError. It stays retryable so a fallback chain can hand over to a
     // healthy target; the url is redacted so a credential inside it never
     // reaches the message.
-    throw networkError("invalid base_url for llm request: " + redact(options.url));
+    //
+    // B6-05: the key is handed to redact() here. It used to be omitted, so this
+    // path had NO literal fallback at all -- a provider whose base_url embeds its
+    // own key (https://user:key@host) put that key into the error message, in the
+    // one call site that already had the value in hand.
+    throw networkError("invalid base_url for llm request: " + redact(options.url, [options.apiKey]));
   }
   const transport = parsed.protocol === "https:" ? https : http;
 
@@ -153,22 +160,46 @@ export function httpStatusLabel(status: number, statusText: string | undefined):
   return statusText === undefined || statusText === "" ? String(status) : `${status} ${statusText}`;
 }
 
+/** core's placeholder literal; normalised to the casing this module emits. */
+const CORE_PLACEHOLDER = "<REDACTED>";
+
+/** The placeholder this module has always emitted (kept: fixtures pin the casing). */
+const PLACEHOLDER = "<redacted>";
+
 /**
- * Belt-and-braces: never let a credential-shaped token ride out in an error.
+ * B6-05: the shape this module ALONE used to apply, kept deliberately.
+ *
+ * It stays in the chain because it is stricter than core in one direction: it
+ * fires at 8 characters where core's bearer rule needs 16, and transport-w824
+ * pins exactly that ("Bearer abcdef123456"). Dropping it in favour of core alone
+ * regresses that suite, so the two are LAYERED, not swapped.
+ */
+const LOCAL_SHAPE = /\b(?:sk|bearer)\s*[-_A-Za-z0-9._~+/=]{8,}/gi;
+
+/**
+ * Belt-and-braces: never let a credential ride out in an error.
  *
  * W824 (W811 P0-1 + N2): the shape rule tolerates whitespace after "Bearer"
  * (the standard "Bearer <token>" form) and is case-insensitive. knownSecrets
  * are the client's OWN keys and are replaced literally, because an arbitrary
  * provider key echoed as "invalid api key: 9f8e..." has no recognizable shape;
  * this mirrors core's registered-secret pass.
+ *
+ * B6-05: that single local regex used to be the WHOLE strategy, so anything it
+ * did not spell went straight into an LlmError message -- a Set-Cookie value, a
+ * `postgres://user:pass@host/db` connection string, a bare `x-api-key:` header
+ * echo. It also re-implemented (and lagged behind) the registered-secret pass,
+ * and sendChatRequest called redact() on the base_url WITHOUT passing the key it
+ * already had in hand, so a credential inside the url had no literal fallback at
+ * all. Delegating the shape table to core closes those without a second copy of
+ * the rules to keep in sync: core is the one place the rule set lives, and this
+ * module now inherits every future rule (B6-03's hyphenated header names and
+ * B6-04's URL userinfo among them) instead of snapshotting today's subset.
+ *
+ * The placeholder is re-cased because core emits <REDACTED> and this module has
+ * always emitted <redacted> (pinned by the fixtures and by the suites below).
  */
 export function redact(text: string, knownSecrets: readonly string[] = []): string {
-  let out = text;
-  const keys = [...new Set(knownSecrets.filter((s) => typeof s === "string" && s.length >= 8))].sort(
-    (a, b) => b.length - a.length,
-  );
-  for (const key of keys) {
-    if (out.includes(key)) out = out.split(key).join("<redacted>");
-  }
-  return out.replace(/\b(?:sk|bearer)\s*[-_A-Za-z0-9._~+/=]{8,}/gi, "<redacted>");
+  const viaCore = createRedactor(knownSecrets).redact(text);
+  return viaCore.split(CORE_PLACEHOLDER).join(PLACEHOLDER).replace(LOCAL_SHAPE, PLACEHOLDER);
 }

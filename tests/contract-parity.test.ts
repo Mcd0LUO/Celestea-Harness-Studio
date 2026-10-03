@@ -565,7 +565,13 @@ describe("W744 · SSE payloads: the production runtime/frames.ts vs contracts/ss
     expect(describeFrameViolations(checkPayload(SSE, "status", payload))).toBe("");
     expect(payload["phase"]).toBe(SSE.lagged.payload["phase"]);
     expect(payload["hint"]).toBe(SSE.lagged.payload["hint"]);
-    expect(payload["dropped"]).toBe(2);
+    // B7-3: the count is FRAMES LOST, so it is 1, not 2. At capacity 1 frame
+    // "a" fills the bucket; frame "b" finds it full, so "a" is discarded and
+    // "b" is never appended — exactly one frame went missing. The old
+    // expectation of 2 was the retired accounting (discarded + 1), which also
+    // counted the triggering frame that is never delivered. Measured directly
+    // against the bus, this is the same value apps/studio/src/b7-03 asserts.
+    expect(payload["dropped"]).toBe(1);
   });
 
   it("validates a real envelope against envelopeSchema widened by the declared W513 keys", () => {

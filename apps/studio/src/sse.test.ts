@@ -79,8 +79,20 @@ describe("studio SSE bus", () => {
     const lagged = await sub.next();
     expect(lagged?.event).toBe("status");
     expect(lagged?.envelope.session).toBe("ws/a");
-    expect(lagged?.envelope.payload).toEqual({ phase: "lagged", hint: LAGGED_HINT, session: "ws/a", dropped: 3, statusline: {} });
-    expect(sub.dropped()).toBe(1);
+    // B7-3: `dropped` is the number of frames ACTUALLY DISCARDED, which here is
+    // exactly the two queued frames (a and b). The frame that TRIGGERED the
+    // overflow (c) is never appended, so it is not lost either.
+    //
+    // This assertion used to read `dropped: 3` / `sub.dropped() === 1` — it was
+    // pinning the defect, because the old code mixed two units: the marker
+    // carried `discarded + 1` while the subscriber counter counted overflow
+    // EVENTS. At capacity 2 that over-reported by one; at the real capacity 512
+    // the same line under-reported by 1024 (audit finding B7-3). Both come from
+    // asking one number to answer two questions.
+    expect(lagged?.envelope.payload).toEqual({ phase: "lagged", hint: LAGGED_HINT, session: "ws/a", dropped: 2, statusline: {} });
+    // Frames lost, and separately the number of bursts that caused them.
+    expect(sub.dropped()).toBe(2);
+    expect(sub.droppedBursts()).toBe(1);
     bus.emit("done", 1, { text: "x", tool_calls: [] }, "ws/a");
     const next = await sub.next();
     expect(next?.event).toBe("done");

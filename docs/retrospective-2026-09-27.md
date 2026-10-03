@@ -308,8 +308,8 @@ W9113 自己的报告 §9 把 rail 的 P1-1 明确列为**仍未修**，并写�
 
 - `contracts/endpoints.json` 的 `count`（现 70）；
 - `contracts/route-table.snapshot.json:404` 的 `tsApiEndpoints`（现 70）；
-- `packages/core/src/contracts/index.ts:178` 的 `FROZEN_COUNTS.endpoints`（现 70）；
-- `apps/studio/src/routes.ts:64` 的 `API_ENDPOINT_COUNT`（现 70）。
+- `packages/core/src/contracts/index.ts:187` 的 `FROZEN_COUNTS.endpoints`（现 70）；
+- `apps/studio/src/routes.ts:73` 的 `API_ENDPOINT_COUNT`（现 70）。
 
 `docs/README.md:35` 的「70 端点」已被 `tests/readme-claims.test.ts:38` 机械钉住（那是第五处，但有门禁）。
 **W9301 正在处理这件事**（把它收敛成一个真源），**进行中**——写作时工作树与 `results/` 里

@@ -269,7 +269,43 @@ describe("C4: failures are booked as unknown cost", () => {
     expect(rows[0]?.usage?.prompt_tokens).toBe(50);
     expect(rows[0]?.cost?.total).toBe(0.00006);
     expect(rows[0]?.billed_unknown).toBe(false);
-    expect(rows[0]?.retryable).toBeNull();
+    // B2-04: answered from the structured `kindOf`, which says "stream" — a torn
+    // stream is not something an identical attempt fixes. It used to book
+    // `null` only because the message "torn" did not start with "llm timeout".
+    expect(rows[0]?.retryable).toBe(false);
+  });
+
+  /**
+   * B2-04 — the row's `retryable` answers from the STRUCTURED failure, never from
+   * the message prose. The old rule was `message.startsWith("llm timeout")`,
+   * which booked `true` for any body that merely MENTIONED the prefix regardless
+   * of what `kindOf` said, and `null` for everything else.
+   *
+   * The scripted `kindOf: "timeout"` below is deliberate: this observer wraps
+   * whichever `Llm` it is handed, and the PROVIDER seam widens the union with
+   * `"timeout"` (`TODO(core-timeout-kind)` in packages/llm/src/seam.ts) — only
+   * the core-typed host adapter in `llm-assembly.ts:98` folds it back to
+   * `"stream"`. So both spellings reach this function in real deployments. The
+   * core-typed `StreamEvent` cannot express `"timeout"`, hence the cast below.
+   */
+  it("books retryable from the structured kind, not the message text", async () => {
+    const dir = tmpDir();
+    writePricing(dir, "2026-09-11");
+    // The real idle-stall text, verbatim from packages/llm/src/errors.ts — and
+    // note it does NOT begin with the canonical `llm timeout` prefix.
+    const r = rig(
+      [
+        [
+          { kind: "failed", kindOf: "timeout", message: "stream idle timeout: no data chunk for 90000ms" } as unknown as StreamEvent,
+        ],
+      ],
+      dir,
+    );
+    await drain(await r.llm.generate(request()));
+    const rows = r.rows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.error_kind).toBe("timeout");
+    expect(rows[0]?.retryable).toBe(true);
   });
 });
 

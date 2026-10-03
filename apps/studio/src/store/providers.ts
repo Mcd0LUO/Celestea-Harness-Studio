@@ -15,7 +15,7 @@
  *     chat_completions and `name` absent falls back to `id`.
  */
 
-import { readJsonIfExists, writeJsonAtomic } from "./fs-json.js";
+import { readJsonIfExists, writeJsonAtomic, type SecretFileProtection } from "./fs-json.js";
 import { badRequest, errText, fail, notFound, ok, type StoreResult } from "./result.js";
 import { isHttpUrl } from "./validate.js";
 
@@ -262,9 +262,22 @@ export class ProvidersStore {
     return { providers: this.list(), default_model: this.data.default_model };
   }
 
+  /**
+   * B6-07: the last save's protection outcome, for the tests and for a caller
+   * that wants to surface it. "not-enforced" is the honest answer on Windows,
+   * where chmod cannot express 0600 -- it is recorded rather than swallowed, so
+   * the contract claim can be checked instead of assumed.
+   */
+  lastProtection: SecretFileProtection = "not-enforced";
+
   private save(): StoreResult<void> {
     try {
-      writeJsonAtomic(this.file, { providers: this.data.providers, default_model: this.data.default_model }, { mode: PROVIDERS_MODE, fsync: true });
+      const written = writeJsonAtomic(
+        this.file,
+        { providers: this.data.providers, default_model: this.data.default_model },
+        { mode: PROVIDERS_MODE, fsync: true },
+      );
+      this.lastProtection = written.protection;
       return ok(undefined);
     } catch (e) {
       return fail(500, `providers serialize failed: ${errText(e)}`);
