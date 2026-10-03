@@ -21,6 +21,7 @@
     "@celestea/llm": "workspace:*",
     "@celestea/runtime": "workspace:*",
     "@celestea/session": "workspace:*",
+    "@celestea/swarm": "workspace:*",
     "@celestea/tools": "workspace:*",
     "@celestea/workers": "workspace:*",
     "@hono/node-server": "^2.1.1",
