@@ -154,6 +154,7 @@ export const settings = {
   'settings.providers.added': '已添加 {n} 个模型（共获取 {total} 个）· 请保存以生效',
   'settings.providers.noneSelected': '未选择模型（共获取 {n} 个）· 请保存以生效',
   'settings.providers.idRequired': '名称（id）不能为空',
+  'settings.providers.modelIdRequired': '模型「{name}」填了显示名，但模型 id 不能为空（该行会被服务端丢弃）',
   'settings.providers.saveFailed': '保存失败：{reason}',
   'settings.providers.empty': '暂无提供商 · 点击上方「添加提供商」创建',
   'settings.providers.defaultModel': '默认模型',

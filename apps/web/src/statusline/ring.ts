@@ -28,26 +28,34 @@ export function renderContextCell(
   ring: HTMLElement,
   usage: ContextUsage | undefined,
 ): void {
+  const click = t('statusline.ring.clickFull');
+  // F2-05：aria-label 与 title **分别**取值，不再用 replace 从 title 里削字符串。
+  //   三个分支都必须给出非空名 —— ring 是 role=button 的可聚焦控件，名字空了
+  //   读屏就只报「按钮」。aria 由**本分支**的字典键给出，与走哪条路无关。
   if (usage && usage.window > 0) {
     const ratio = clamp01(usage.ratio);
-    ctxEl.textContent = fmtCompact(usage.used) + '/' + fmtCompact(usage.window);
+    const used = fmtCompact(usage.used);
+    const limit = fmtCompact(usage.window);
+    const pct = Math.round(ratio * 1000) / 10;
+    ctxEl.textContent = used + '/' + limit;
     ring.style.strokeDashoffset = String(RING_C * (1 - ratio));
     ring.classList.toggle('warn', ratio >= WARN_RATIO);
-    ring.title = t('statusline.ring.title', { pct: Math.round(ratio * 1000) / 10, used: fmtCompact(usage.used), window: fmtCompact(usage.window), click: t('statusline.ring.clickFull') });
+    ring.title = t('statusline.ring.title', { pct, used, window: limit, click });
+    ring.setAttribute('aria-label', t('statusline.ring.titleAria', { pct, used, window: limit }));
   } else if (usage) {
     // W755：窗口未声明时不画假比率（对齐 DSH 缺容量即不显示环）。
     ctxEl.textContent = t('statusline.ring.unknown');
     ring.style.strokeDashoffset = String(RING_C);
     ring.classList.remove('warn');
     ring.title = t('statusline.ring.unknownTitle');
+    ring.setAttribute('aria-label', t('statusline.ring.unknownAria'));
   } else {
     ctxEl.textContent = '—/—';
     ring.style.strokeDashoffset = String(RING_C);
     ring.classList.remove('warn');
-    ring.title = t('statusline.ring.noneTitle', { click: t('statusline.ring.clickFull') });
+    ring.title = t('statusline.ring.noneTitle', { click });
+    ring.setAttribute('aria-label', t('statusline.ring.noneAria'));
   }
-  // W12：aria-label 带完整值（可见的 used/window 可能被省略号截断）。
-  ring.setAttribute('aria-label', (ring.title ?? '').replace(t('statusline.ring.clickFull'), ''));
 }
 
 /**

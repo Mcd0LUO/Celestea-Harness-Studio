@@ -154,6 +154,7 @@ export const settings = {
   'settings.providers.added': 'Added {n} models (of {total} fetched) · save to apply',
   'settings.providers.noneSelected': 'No models selected (of {n} fetched) · save to apply',
   'settings.providers.idRequired': 'The name (id) cannot be empty',
+  'settings.providers.modelIdRequired': 'Model \u201c{name}\u201d has a display name but no model id (the server drops this row)',
   'settings.providers.saveFailed': 'Save failed: {reason}',
   'settings.providers.empty': 'No providers yet · click "Add provider" above to create one',
   'settings.providers.defaultModel': 'Default model',

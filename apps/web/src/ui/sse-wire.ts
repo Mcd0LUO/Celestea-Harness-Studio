@@ -30,6 +30,67 @@ import type {
   ToolResultPayload,
 } from '../types';
 
+/**
+ * ★ W9298（F1-06 P2）：**丢帧检测器** —— 用信封自带的 `seq` 发现「漏了一整段」。
+ *
+ * 背景：契约的 `seq` 是**进程级单调计数器**（apps/studio/src/sse.ts 的 `emit`：
+ * `seq: seq++`，与订阅者无关），而重连时 `bus.subscribe()` 建的是**全新订阅**、**不重放**
+ * 历史帧（handlers/dialog.ts 的 `registerEvents` 直接进入 next 循环）。于是
+ * **一次重连 ⇒ 上一条收到的 seq 与下一条收到的 seq 之间必然出现断号**，断掉的那段就是
+ * 断线期间发生的、且**永远补不回来**的帧。改动前前端从不读 `p.seq`，于是这段丢失
+ * 完全不可见——用户看到的是「模型答到一半就跳到下一句」。
+ *
+ * 能做什么 / 不能做什么（边界写清楚，别让后人误以为它能恢复）：
+ *  · 能：**如实告诉用户丢了多少帧**（检测 + 提示），这是契约内、不需改后端的全部能力。
+ *  · 不能：**补齐**。没有补发端点，本帧之后也拿不到那些内容。要补齐必须改契约 +
+ *    后端（超出本文件与本 worker 的范围），已在报告里作为后续项写明。
+ *
+ * 三条纪律（每条都有测试）：
+ *  · **只认单调前进**：`seq <= last` 一律不报（重复投递 / 旧后端重排都不是丢帧）；
+ *  · **只报一次**：一次断连只提示一次，恢复后继续跟踪（不刷屏）；
+ *  · **旧后端无 seq**：`typeof seq !== 'number'` 直接放行，绝不把「没有序号」误报成「丢了」。
+ */
+export class SeqGapWatcher {
+  private last: number | null = null;
+  private reported = false;
+
+  /**
+   * 记一条帧的 seq；返回「这次丢了多少帧」（0 = 无丢失/不可判定）。
+   * @param seq 该帧信封的 seq（withEnvelope 已把它并进 payload）。
+   */
+  observe(seq: unknown): number {
+    if (typeof seq !== 'number' || !Number.isFinite(seq)) {
+      // 旧后端不带 seq：不可判定，既不记也不报。
+      return 0;
+    }
+    const prev = this.last;
+    if (prev === null) {
+      this.last = seq;              // 首帧只立基线
+      return 0;
+    }
+    // 不前进（重复投递 / 回退）**既不报、也不移动基线** —— 移动了就会在下一帧凭空
+    // 造出一次「丢帧」（回退到 3 之后再收到 5，会被算成丢了 1 帧，而那 1 帧我们收到过）。
+    if (seq <= prev) return 0;
+    this.last = seq;
+    const gap = seq - prev - 1;
+    if (gap <= 0) return 0;
+    // 本次断连只提示一次：已提示过就返回 0（缺口由 stats() 的累计值如实记录，不刷屏）。
+    if (this.reported) return 0;
+    this.reported = true;
+    return gap;
+  }
+
+  /** 连接重建：允许再提示一次（新的断连是新的事实）。 */
+  reset(): void {
+    this.reported = false;
+  }
+
+  /** 供测试/诊断只读。 */
+  stats(): { last: number | null; reported: boolean } {
+    return { last: this.last, reported: this.reported };
+  }
+}
+
 /** chat.ts 注入的轮次处理器与路由（本模块不 import chat.ts，见文件头依赖方向）。 */
 export interface WireHandlers {
   ctxFor(p: { session?: string | null }): SessionPane;
@@ -48,7 +109,18 @@ export function connectWiredSse(h: WireHandlers): SseClient {  const sse = new S
   // 回调 / 7.9–9.4 秒冻结）、K 的取法、「为什么保序」「为什么在这一层接线」全部写在
   // ./ui/messages/frame-budget.ts 的模块头，这里只留接线与错误隔离。
   const budget = createFrameBudget();
-  const paced = (label: string, run: () => void): void => {
+  // W9298（F1-06）：丢帧检测与预算**并行**——预算管「一帧做多少工作」，它管「有没有漏」。
+  const gaps = new SeqGapWatcher();
+  const paced = (label: string, run: () => void, frame?: unknown): void => {
+    // W9298（F1-06）：**在进队列之前**就记 seq —— 排队中的帧同样算「已送达本浏览器」，
+    // 而预算只延后不丢弃（frame-budget 模块头），所以「seq 连续」==「没漏帧」。
+    // 放在 run() 里则会把「预算还没排到的那几帧」误判成丢帧。
+    if (frame !== undefined) {
+      const missed = gaps.observe((frame as { seq?: unknown } | null)?.seq);
+      if (missed > 0) {
+        statusline.setNote(t('chat.status.seqGap', { n: missed }), 6000);
+      }
+    }
     budget.push(() => {
       try {
         run();
@@ -59,6 +131,8 @@ export function connectWiredSse(h: WireHandlers): SseClient {  const sse = new S
   };
   sse.onConn((state) => {
     S.conn = state;
+    // W9298（F1-06）：连接重建 ⇒ 允许下一次断号再提示一次（这是新的一次断连）。
+    gaps.reset();
     if (state === 'online') {
       setStatus(S.streaming ? t('chat.phase.running') : t('shell.status.online'), S.streaming ? 'busy' : 'ok');
     } else if (state === 'down') {
@@ -87,27 +161,27 @@ export function connectWiredSse(h: WireHandlers): SseClient {  const sse = new S
       // `inbox` event, which the server can never emit, so live injection showed
       // up only after a refresh replayed the transcript.
       h.onStatusInbox(ctx, p);
-    });
+    }, p);
   });
   // ★ 下面五条**轮次帧**（text/thinking/tool/tool_result/done）与 status 走同一条
   //   budget（它们都会写 DOM）；compact/question 不走，理由见上面 status 那段注释。
   sse.on('text', (p) => {
-    paced('SSE text', () => h.onText(h.ctxFor(p), p));
+    paced('SSE text', () => h.onText(h.ctxFor(p), p), p);
   });
   sse.on('thinking', (p) => {
-    paced('SSE thinking', () => h.onThinking(h.ctxFor(p), p));
+    paced('SSE thinking', () => h.onThinking(h.ctxFor(p), p), p);
   });
   sse.on('tool', (p) => {
-    paced('SSE tool', () => h.onTool(h.ctxFor(p), p));
+    paced('SSE tool', () => h.onTool(h.ctxFor(p), p), p);
   });
   sse.on('tool_result', (p) => {
-    paced('SSE tool_result', () => h.onToolResult(h.ctxFor(p), p));
+    paced('SSE tool_result', () => h.onToolResult(h.ctxFor(p), p), p);
   });
   sse.on('done', (p) => {
     paced('SSE done', () => {
       statusline.onSseDone();
       h.onDone(h.ctxFor(p), p);
-    });
+    }, p);
   });
   sse.on('compact', (p) => {
     try {

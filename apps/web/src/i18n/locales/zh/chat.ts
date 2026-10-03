@@ -298,6 +298,8 @@ export const chat = {
   'chat.status.turnError': '本轮出错：{reason}',
   'chat.status.unknownError': '未知错误',
   'chat.status.lagged': '部分输出因网络延迟被合并',
+  // W9298（F1-06）：重连后 seq 断号 = 有一段输出永远补不回来，如实告知丢了多少帧。
+  'chat.status.seqGap': '连接中断，丢失了 {n} 帧输出（无法补发，刷新可看完整记录）',
   'chat.status.cancelling': '取消中…',
   'chat.status.cancelFailed': '取消失败：{reason}',
   'chat.status.disconnected': '无法连接服务',

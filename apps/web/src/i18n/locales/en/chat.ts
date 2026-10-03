@@ -301,6 +301,8 @@ export const chat = {
   'chat.status.turnError': 'This turn failed: {reason}',
   'chat.status.unknownError': 'unknown error',
   'chat.status.lagged': 'Some output was merged due to network lag',
+  // W9298 (F1-06): a seq jump after reconnect = frames that can never be re-sent.
+  'chat.status.seqGap': 'Connection dropped; {n} output frames were lost (they cannot be re-sent — refresh to read the full record)',
   'chat.status.cancelling': 'Cancelling…',
   'chat.status.cancelFailed': 'Cancel failed: {reason}',
   'chat.status.disconnected': 'Cannot reach the service',

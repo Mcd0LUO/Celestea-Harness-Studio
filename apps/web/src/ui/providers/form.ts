@@ -3,7 +3,7 @@
 //   W748 从 ui/providers.ts 拆出；纯搬运，DOM 结构/类名/文案/事件一行未改。
 //   字段与操作行在本模块；单模型行见 ./modelrow，二级选择窗见 ./picker。
 // ============================================================================
-import { api, userErrorText } from '../../api';
+import { ApiError, api, userErrorText } from '../../api';
 import { el } from '../../utils/dom';
 import type { ProviderInfo, ProviderModelSpec } from '../../types';
 import { addModelRow } from './modelrow';
@@ -18,8 +18,12 @@ const FORMATS: readonly { value: string; label: string }[] = [
   { value: 'anthropic_messages', label: 'Anthropic Messages' },
 ];
 function buildPayload(e: EditorRefs): ProviderPayload {
-  // 未编辑的空行（点了「+ 添加模型」但没填 id/名称）直接跳过，
-  // 否则保存/获取模型会被后端 "each model needs a non-empty id" 拒绝。
+  // F4-04：**两列都空**（点了「+ 添加模型」但没填 id/名称）才跳过。
+  // 旧过滤是 `id || name`（**或**），于是「只填了显示名、id 空着」的半填行也会进
+  // payload，而 `name` 取到那个显示名 —— 但后端 parseModel 因 `id === ''` 让整行
+  // `return null`（apps/studio/src/store/providers.ts:287）⇒ 用户填的显示名连同整行
+  // **静默消失**，界面不给任何提示。半填不是空行：它带着用户已经输入的东西。
+  // 改判据成「与」：半填行留在 payload 里，由下面 modelIdRequired 显式拒绝并说清原因。
   const models: ProviderModelSpec[] = e.rows
     .filter((r) => r.id.value.trim() !== '' || r.name.value.trim() !== '')
     .map((r) => ({
@@ -68,6 +72,46 @@ function numOrNull(i: HTMLInputElement): number | null {
   const mult = m[2] === 'k' ? 1_000 : m[2] === 'm' ? 1_000_000 : 1;
   const n = Math.round(base * mult);
   return Number.isFinite(n) && n >= 0 ? n : null;
+}
+/**
+ * 半填模型行：填了**显示名**却没填 **id**（F4-04）。
+ *
+ * 为什么它必须被拦下来而不是丢掉：后端 `parseModel` 遇 `id === ''` 整行 `return null`
+ *（apps/studio/src/store/providers.ts:287），所以这一行在保存时会**静默消失** —— 用户
+ * 填好的显示名没有任何去处，界面也不会提示。空行（两列都空）才是「没在编辑」，允许跳过。
+ *
+ * 返回那行的显示名（用于错误文案），没有半填行则 null。
+ */
+function halfFilledRow(e: EditorRefs): string | null {
+  for (const r of e.rows) {
+    const id = r.id.value.trim();
+    const name = r.name.value.trim();
+    if (id === '' && name !== '') return name;
+  }
+  return null;
+}
+/**
+ * 一次 `POST /api/providers` 的成功判定（F4-03）。**两条路径共用一个口径**。
+ *
+ * 为什么需要它：`api.ts` 的 `requestJson` 对 4xx/5xx 抛 `ApiError`，但
+ * **HTTP 200 + `{ok:false,error}` 不会抛** —— 那是 `ClearResp`（types/batch.ts 的
+ * `OkResp`）契约允许的形状。保存按钮早就判了 `r.ok === false`，而「获取模型」的
+ * 预保存链 `.then(() => …)` 直接把 resolve 当成成功，于是保存被拒也会继续拉模型，
+ * 用户拿到基于**旧配置**的模型清单却以为保存好了。
+ *
+ * 通过时原样返回回执（不吞）；被拒时抛 `ApiError`，由各调用点的 `.catch` 渲染，
+ * 于是「获取模型」与「保存」对同一个失败给出同样诚实的结果。
+ */
+function checkSaved(r: { ok?: boolean; error?: string }): { ok?: boolean; error?: string } {
+  if (r.ok === false) {
+    // 自己拼文案，**不走 userErrorText**：那个函数对非 ApiError 的入参只回固定措辞
+    // （api.ts 的 userErrorText：字符串入参被 console.warn 记下后丢弃，返回 phrase），
+    // 200+ok:false 的 error 字段本来就只是字符串 ⇒ 原因会整个丢掉。
+    const detail = typeof r.error === 'string' ? r.error.trim() : '';
+    const reason = detail === '' ? t('settings.common.checkInput') : detail;
+    throw new ApiError(t('settings.providers.saveFailed', { reason }));
+  }
+  return r;
 }
 /**
  * 新建 provider 时「获取模型」要落的那一行的**最小载荷**（F4-01）。
@@ -250,11 +294,26 @@ export function buildProviderForm(p: ProviderInfo | null, hooks: FormHooks): Edi
     //   只有**新建**时 store 里还没有这一行，fetch 必然 404 unknown provider —— 那时
     //   才落一行，且只落探测必需的字段（见 buildProbeRow）；模型清单仍以表单为准。
     //   两条路径都**不调 onSaved**：真正的保存由用户点「保存」完成。
-    const existing = e.originalId !== undefined;
-    status.textContent = existing
+    // F4-04：预保存那一行用的是 buildProbeRow（models: []），半填模型行不会被它带走，
+    // 但用户此刻填的显示名若就此丢掉仍是无声失败 —— 同样先拦下来。
+    const half = halfFilledRow(e);
+    if (half !== null) {
+      status.className = 'prov-editor-status err';
+      status.textContent = t('settings.providers.modelIdRequired', { name: half });
+      return;
+    }
+    const known = e.originalId !== undefined;
+    status.className = 'prov-editor-status';
+    status.textContent = known
       ? t('settings.providers.fetching')
       : t('settings.providers.savingAndFetching');
-    const begin = existing ? Promise.resolve(null) : api.saveProvider(buildProbeRow(e));
+    // F4-03：预保存（仅新建）也要**判结果**，不能把 resolve 当成成功。
+    //   `requestJson` 对 4xx/5xx 抛 ApiError（api.ts:128），但 200 + {ok:false}
+    //   不会抛 —— 那是 ClearResp 契约的合法形状（types/batch.ts 的 OkResp）。
+    //   旧代码 `.then(() => fetchProviderModels(id))` 无视回执，于是保存被拒也照样
+    //   继续拉模型，用户拿到的是**基于旧配置**的清单，却以为保存成功了。
+    //   与保存按钮共用同一个判定（见 checkSaved），两条路径的口径从此一致。
+    const begin = known ? Promise.resolve(null) : api.saveProvider(buildProbeRow(e)).then(checkSaved);
     void begin.then(() => api.fetchProviderModels(id))
       .then((r) => {
         if (seq !== fetchSeq) return; // 旧响应：丢弃，不覆盖新状态
@@ -294,6 +353,13 @@ export function buildProviderForm(p: ProviderInfo | null, hooks: FormHooks): Edi
   });
 
   save.addEventListener('click', () => {
+    const half = halfFilledRow(e);
+    if (half !== null) {
+      // F4-04：半填行不静默消失 —— 点保存时说清是哪一行缺 id。
+      status.className = 'prov-editor-status err';
+      status.textContent = t('settings.providers.modelIdRequired', { name: half });
+      return;
+    }
     const payload = buildPayload(e);
     if (!payload.id) {
       status.className = 'prov-editor-status err';
@@ -305,13 +371,9 @@ export function buildProviderForm(p: ProviderInfo | null, hooks: FormHooks): Edi
     save.disabled = true;
     void api
       .saveProvider(payload)
+      .then(checkSaved)
       .then((r) => {
-        if (r.ok === false) {
-          status.className = 'prov-editor-status err';
-          status.textContent = t('settings.providers.saveFailed', { reason: userErrorText(r.error, t('settings.common.checkInput')) });
-          save.disabled = false;
-          return;
-        }
+        void r; // 判定已在 checkSaved 里做完（被拒则抛出，交给 .catch 渲染）
         save.disabled = false;
         status.className = 'prov-editor-status ok';
         status.textContent = t('settings.config.saved');

@@ -54,6 +54,14 @@ export const statusline = {
   'statusline.ring.unknownTitle': '上下文占用未知 · 点击查看完整上下文',
   'statusline.ring.noneTitle': '上下文占用{click}',
   'statusline.ring.clickFull': '（点击查看完整上下文）',
+  // F2-05：可访问名与 title **分键**，不再用 replace 从 title 里削字符串。
+  //   原写法 `(title).replace(clickFull, '')` 有两个问题：
+  //     ① 未知态的 unknownTitle 里写的是「点击查看完整上下文」**不带括号**，
+  //        replace 削不掉 ⇒ 「点击查看」漏进读屏播报的可访问名里；
+  //     ② 谁改一下文案排版（加个空格/换括号）就静默失效，不报错也不变红。
+  'statusline.ring.titleAria': '上下文占用 {pct}%，已用 {used}，上限 {window}',
+  'statusline.ring.unknownAria': '上下文占用未知',
+  'statusline.ring.noneAria': '上下文占用未知（尚无数据）',
   'statusline.cache.none': '缓存 —',
   'statusline.cache.noneTitle': '暂无缓存命中数据',
   'statusline.cache.label': '缓存 {pct}%',

@@ -254,14 +254,33 @@ button,
   .grant-ttl { font-size: 16px; }
 
   /* ---- 2.7 设置页（左导航 → 顶部横向导航条） ---- */
+  /* F2-04：窄档这一页已经是「铺满整屏」的形态（高度写死一屏、圆角归零），
+     此时 settings.css 那条给浮起卡片预留的顶内边距纯属重复 —— 叠加后 shell
+     顶部被顶下去一截、底部那一截落在视口外（390x844 实测过：shell 底边比视口
+     底边低了三十多像素）。全屏形态下没有「浮起」，内边距归零让面板真正铺满一屏。
+
+     ★ 注释里刻意不写「圆角」那一栏的字面量，也不写具体像素数：本仓样式门禁
+     （tests/w11-client-plugins.test.ts）用逐行正则扫圆角，且**注释也算内容**、
+     正则会贪婪吃到下一个分号 —— 注释里出现「圆角冒号 + 某个像素数」就会被判成
+     硬编码圆角。同类坑见 bundle-size-baseline 的 note37。 */
+  .settings-page { padding: 0; }
   .settings-shell { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; }
   .settings-layout { flex-direction: column; }
   .settings-nav {
     flex-direction: row; gap: 4px;
+    /* F2-03：align-items 必须复位。默认是 normal，在 row 方向下等价 stretch，
+       于是每一项都被拉到导航条的全高（390x844 实测：9 项一律 135px，选中项是
+       个瘦高药丸）。导航条是横向滚动的（scrollWidth 698 > clientWidth 342），
+       高度该由内容决定，交叉轴对齐回到 center。 */
+    align-items: center;
     overflow-x: auto; overscroll-behavior-x: contain;
-    padding: 6px 8px; border-right: none; border-bottom: 1px solid var(--c-border-subtle);
+    padding: 6px 8px; border-right: none; border-bottom: 1px solid var(--c-hairline-l2);
   }
-  .settings-nav-item { min-height: var(--tap-min); white-space: nowrap; }
+  /* F2-03：行内再钉一道高度，让「不因内容/字体变化而长高」不只依赖 align-items。 */
+  .settings-nav-item {
+    min-height: var(--tap-min); height: var(--tap-min); align-self: center;
+    white-space: nowrap; display: inline-flex; align-items: center;
+  }
   .settings-content { padding: 10px; }
   .settings-head { padding: 8px 10px; }
 }

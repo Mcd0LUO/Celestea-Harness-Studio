@@ -54,6 +54,11 @@ export const statusline = {
   'statusline.ring.unknownTitle': 'Context usage unknown · click to view full context',
   'statusline.ring.noneTitle': 'Context usage{click}',
   'statusline.ring.clickFull': ' (click to view full context)',
+  // F2-05: accessible name keyed separately from the title instead of being carved out
+  //   of it with replace() — see the zh note for the two failure modes.
+  'statusline.ring.titleAria': 'Context usage {pct}%, {used} used of {window}',
+  'statusline.ring.unknownAria': 'Context usage unknown',
+  'statusline.ring.noneAria': 'Context usage unknown (no data yet)',
   'statusline.cache.none': 'Cache —',
   'statusline.cache.noneTitle': 'No cache hit data yet',
   'statusline.cache.label': 'Cache {pct}%',

@@ -156,6 +156,22 @@ describe('F2-01 · 模态态的背景隔离（inert）', () => {
     expect(activeId()).toBe('closeBtn');
   });
 
+  it('空 modal（无可聚焦子节点）时焦点仍收得进来，退回容器本身', () => {
+    // 覆盖 firstFocusable 的兜底分支：modal 里一个可聚焦元素都没有时，靠 keep 上的
+    // tabindex="-1" 接住焦点。若此时返回 null，焦点就留在背景里（W9310 变异 M5 实测）。
+    setBody('<div id="app"><button id="bgBtn2">bg</button></div><div id="settingsPage"></div>');
+    const empty = el('settingsPage');
+    const bg = el('bgBtn2');
+    bg.focus();
+    const h = isolate.isolateBackground(empty, () => {
+      const first = isolate.firstFocusable(empty);
+      if (first) first.focus();
+    });
+    expect(activeId()).toBe('settingsPage');
+    expect(empty.getAttribute('tabindex')).toBe('-1');
+    h.restore();
+  });
+
   it('restore 摘掉 inert —— 漏摘会把整个应用变成一块砖', () => {
     const h = isolate.isolateBackground(page());
     expect(app().hasAttribute('inert')).toBe(true);
@@ -170,12 +186,15 @@ describe('F2-01 · 模态态的背景隔离（inert）', () => {
   });
 
   it('不覆盖别人已经设的 inert（那属于另一层浮层）', () => {
+    // 必须是 modal 的兄弟：isolateBackground 只遍历 keep.parentElement 的 children，
+    // 挂到 #app 里面去的那层永远轮不到，断言会空转成永远绿（W9310 变异 M2 实测）。
     const other = doc.createElement('div') as unknown as FocusEl;
     other.id = 'otherLayer';
-    app().appendChild(other);
     other.setAttribute('inert', '');
+    page().parentElement?.appendChild(other);
     const h = isolate.isolateBackground(page());
     h.restore();
+    // 关键：restore 只摘「由我们改的」，别把别的层已隔离好的摘掉
     expect(other.hasAttribute('inert')).toBe(true);
   });
 });
@@ -232,8 +251,13 @@ describe('F2-02 · #input 的稳定可访问名', () => {
     expect(e).not.toBe('chat.input.ariaLabel');
   });
 
-  it('aria-label 与 placeholder 不是同一句', async () => {
+  it('aria-label 与 placeholder 不是同一句（placeholder 是操作说明、一打字就消失）', async () => {
     const zh = (await loadZhChat()).chat;
+    // 钉住**字面值**而不是 key 之间的关系：只比两个 key 的话，把两个值改成同一句
+    // 仍会绿（W9310 变异 M9 实测）。placeholder 是会随状态变的操作说明
+    // （idle/touch/steer/queue/worker 共 5 句），可访问名必须是稳定的「这是什么」一句话。
+    expect(zh['chat.input.placeholderIdle']).toBe('输入消息，Enter 发送，Shift+Enter 换行');
+    expect(zh['chat.input.ariaLabel']).toBe('消息输入框');
     expect(zh['chat.input.ariaLabel']).not.toBe(zh['chat.input.placeholderIdle']);
   });
 
