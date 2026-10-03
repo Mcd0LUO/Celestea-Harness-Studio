@@ -20,6 +20,8 @@
  *      测试一律经夹具的 doc / ElLike 访问 DOM，或声明本文件自己的结构化窄类型。
  */
 import { readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { at, doc, type ElLike } from './lib/w795-dom.js';
 
@@ -68,7 +70,12 @@ interface LocaleChat {
   chat: Record<string, string>;
 }
 
-const ROOT = 'D:/tools/celestea-studio';
+/**
+ * 仓库根：从本文件位置反推，**不得写死本机绝对路径**。
+ * 写死只在作者本机成立 —— CI runner 上必然 ENOENT（main run 37133961564 即因此变红），
+ * 而本地因为那个路径真实存在反而全绿，属「把本机事实当普遍事实」（同 17cacfc 那一类）。
+ */
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 /** 取一个元素并收窄成 FocusEl。 */
 const el = (id: string): FocusEl => doc.getElementById(id) as unknown as FocusEl;

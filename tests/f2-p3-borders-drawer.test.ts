@@ -16,10 +16,17 @@
  *   2. 不得用 DOM 全局类型（根 tsconfig 的 lib 里没有 DOM），经夹具 doc / ElLike 访问。
  */
 import { readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { at, doc, type ElLike } from './lib/w795-dom.js';
 
-const ROOT = 'D:/tools/celestea-studio';
+/**
+ * 仓库根：从本文件位置反推，**不得写死本机绝对路径**。
+ * 写死只在作者本机成立 —— CI runner 上必然 ENOENT（main run 37133961564 即因此变红），
+ * 而本地因为那个路径真实存在反而全绿，属「把本机事实当普遍事实」（同 17cacfc 那一类）。
+ */
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const STYLES = ROOT + '/apps/web/src/styles/';
 
 interface FocusEl extends ElLike {
