@@ -242,3 +242,82 @@ describe("W9 preset writeRoots validation", () => {
     expect(root.status).toBe(422);
   });
 });
+
+describe("B1-01 (P1) · the limiter is per-endpoint, and a success resets it", () => {
+  /** One grants POST with no token: it reaches the limiter, then stops at the 403 gate. */
+  const grantPost = (h: StudioHarness): Promise<{ status: number; body: Record<string, unknown> }> =>
+    getJson(h.app, `/api/sessions/${S1}/grants`, jsonRequest("POST", { cap: "network", scope: {} }));
+  const putNoToken = (h: StudioHarness): Promise<{ status: number; body: Record<string, unknown> }> =>
+    getJson(h.app, `/api/sessions/${S1}/permission`, jsonRequest("PUT", { preset: "read-only" }));
+  /** A fully confirmed, legitimate preset change. */
+  const putConfirmed = async (h: StudioHarness): Promise<number> => {
+    const minted = await confirmPermission(h, "read-only");
+    return (await getJson(h.app, `/api/sessions/${S1}/permission`, confirmedPut(minted, { preset: "read-only" }))).status;
+  };
+  const isCooldown = (r: { status: number; body: Record<string, unknown> }): boolean =>
+    r.status === 409 && String(r.body["error"]).includes("just denied");
+
+  it("① a successful change CLEARS the 3-strikes cooldown (A/B against three straight denials)", async () => {
+    // THE regression. Three refusals arm the 5-minute cooldown, so the NEXT call
+    // answers 409 "just denied" — that is the control, and it is correct.
+    const control = open();
+    for (let i = 0; i < 3; i += 1) expect((await putNoToken(control)).status).toBe(403);
+    expect(isCooldown(await putNoToken(control))).toBe(true);
+
+    // Same session shape, but the 3rd call is a legitimate CONFIRMED change.
+    // Before the fix that success never called recordSuccess, so it was scored
+    // as if it were a failure and the 4th call answered 409 as well — locking
+    // the operator out of a capability change for 5 minutes by their own correct
+    // usage. Now the strike count is cleared, and the 4th call falls through to
+    // the ordinary 3-per-minute budget (429), which is NOT a lockout.
+    const h = open();
+    expect((await putNoToken(h)).status).toBe(403);
+    expect((await putNoToken(h)).status).toBe(403);
+    expect(await putConfirmed(h)).toBe(200);
+    const fourth = await putNoToken(h);
+    expect(isCooldown(fourth)).toBe(false);
+    expect(fourth.status).toBe(429);
+    expect(String(fourth.body["error"])).toContain("too many permission requests");
+    // ...and the change really did land, so the 200 was not a no-op.
+    expect(storedPreset(h)).toBe("read-only");
+  });
+
+  it("② a permission flood does not spend the GRANTS budget", async () => {
+    // Three fully successful permission changes used to leave the grants
+    // endpoint answering 429 "too many grant requests", because both endpoints
+    // keyed the same GrantRateLimiter instance on the bare session id.
+    const h = open();
+    for (let i = 0; i < 3; i += 1) expect(await putConfirmed(h)).toBe(200);
+    // Same session, same limiter instance, different endpoint: untouched.
+    const g = await grantPost(h);
+    expect(g.status).toBe(403);
+    expect(g.body["error"]).toBe("grant confirmation required");
+  });
+
+  it("③ permission denials do not put GRANTS into its 5-minute cooldown", async () => {
+    // The abuse direction that mattered: a session's own http_request tool could
+    // fire three unconfirmed permission PUTs and thereby lock the GRANTS
+    // endpoint — a different capability — out for 5 minutes.
+    const h = open();
+    for (let i = 0; i < 3; i += 1) expect((await putNoToken(h)).status).toBe(403);
+    const g = await grantPost(h);
+    expect(isCooldown(g)).toBe(false);
+    expect(g.status).toBe(403);
+  });
+
+  it("④ the permission endpoint still rate-limits ITSELF (isolation ≠ disabled)", async () => {
+    // The negative control for ②③: the separation must not have been bought by
+    // switching the limiter off. Three strikes on THIS endpoint still lock it.
+    const h = open();
+    for (let i = 0; i < 3; i += 1) expect((await putNoToken(h)).status).toBe(403);
+    expect(isCooldown(await putNoToken(h))).toBe(true);
+  });
+
+  it("⑤ the two endpoints keep SEPARATE strike counters for the same session", async () => {
+    // The key property of the namespaced key, stated directly: a grants lockout
+    // must not stop a permission change, which is the direction ②③ do not cover.
+    const h = open();
+    expect(isCooldown(await grantPost(h))).toBe(false);
+    expect(await putConfirmed(h)).toBe(200);
+  });
+});

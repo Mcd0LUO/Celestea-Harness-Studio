@@ -11,6 +11,10 @@
 // 帧内预算的判读（为什么接在接线层）：预算是 **UI 工作量**的控制，而 SseClient 的契约
 // 是「解析 + 分发」；接在接线层才能让同一条总线上的 status/text/thinking/tool/
 // tool_result/done 共用一个队列（跨事件名保序）。设计理由见 messages/frame-budget.ts。
+//
+// ★ 但**丢帧检测不在接线层**：它读的是信封的 seq，那是**进程级**计数器（每个事件名、
+//   每个订阅者都推进它），所以必须由 SseClient 在信封层逐条交出来（onEnvelope）。
+//   接线层只负责把「断号了」翻译成一条用户提示。见下面 onEnvelope 处与 sse.ts 的注释。
 // ============================================================================
 import { S } from '../state';
 import { SseClient } from '../sse';
@@ -49,6 +53,12 @@ import type {
  *  · **只认单调前进**：`seq <= last` 一律不报（重复投递 / 旧后端重排都不是丢帧）；
  *  · **只报一次**：一次断连只提示一次，恢复后继续跟踪（不刷屏）；
  *  · **旧后端无 seq**：`typeof seq !== 'number'` 直接放行，绝不把「没有序号」误报成「丢了」。
+ *
+ * ★ W9315（F1-01）：第四条纪律「**每条信封都要看**」原本是隐含的、且当时是**错的** ——
+ *   observe() 当时只被 paced() 调用，而 paced() 只包住六个事件名。seq 是进程级的，
+ *   compact/question/terminal 同样推进它却不推进基线 ⇒ 零丢失的流也会报「丢了 N 帧」。
+ *   现在由 SseClient.onEnvelope 逐条喂入（见 sse.ts 的 emitEnvelope），这条纪律由
+ *   **传输层**保证：新增事件名不需要在本文件补任何东西。
  */
 export class SeqGapWatcher {
   private last: number | null = null;
@@ -111,16 +121,28 @@ export function connectWiredSse(h: WireHandlers): SseClient {  const sse = new S
   const budget = createFrameBudget();
   // W9298（F1-06）：丢帧检测与预算**并行**——预算管「一帧做多少工作」，它管「有没有漏」。
   const gaps = new SeqGapWatcher();
-  const paced = (label: string, run: () => void, frame?: unknown): void => {
-    // W9298（F1-06）：**在进队列之前**就记 seq —— 排队中的帧同样算「已送达本浏览器」，
-    // 而预算只延后不丢弃（frame-budget 模块头），所以「seq 连续」==「没漏帧」。
-    // 放在 run() 里则会把「预算还没排到的那几帧」误判成丢帧。
-    if (frame !== undefined) {
-      const missed = gaps.observe((frame as { seq?: unknown } | null)?.seq);
-      if (missed > 0) {
-        statusline.setNote(t('chat.status.seqGap', { n: missed }), 6000);
-      }
+  // ★ W9315（F1-01 P1 修复）：记 seq 的位置从 paced() 挪到**传输层的信封钩子**。
+  //
+  // 改动前 observe() 只在 paced() 里被调用，而 paced() 只包住 status/text/thinking/tool/
+  // tool_result/done 六个名字。seq 却是**进程级**计数器 —— compact / question /
+  // terminal 同样推进它，却不推进本观察器的基线，于是**下一条真实帧必被算成「丢了 N 帧」**。
+  // 真机 CDP 复现（results/audit4/F1/evidence-seqgap-cdp.md）：零丢失的流里夹 1 个
+  // question 帧就报「丢失了 1 帧」，夹 3 个 terminal 帧就报「丢失了 3 帧」——数字随旁路
+  // 帧数线性放大。ask_user_question 是常驻工具、终端每批字节一帧 ⇒ 每轮都命中。
+  //
+  // 挂在 onEnvelope 上的两个理由（缺一不可）：
+  //  ① **在进预算队列之前**记 —— 排队中的帧同样算「已送达本浏览器」，而预算只延后不丢弃
+  //     （frame-budget 模块头），所以「seq 连续」==「没漏帧」。放进 run() 会把「预算还没
+  //     排到的那几帧」误判成丢帧。onEnvelope 在 EventSource 回调里同步触发，比 paced 还早。
+  //  ② **覆盖每一条信封** —— 包括没有任何处理器的事件名（terminal），且**新增事件名自动
+  //     生效**，不必像旧写法那样在每次新增事件时记得补一次 observe。
+  sse.onEnvelope((p) => {
+    const missed = gaps.observe((p as { seq?: unknown } | null)?.seq);
+    if (missed > 0) {
+      statusline.setNote(t('chat.status.seqGap', { n: missed }), 6000);
     }
+  });
+  const paced = (label: string, run: () => void): void => {
     budget.push(() => {
       try {
         run();
@@ -161,27 +183,27 @@ export function connectWiredSse(h: WireHandlers): SseClient {  const sse = new S
       // `inbox` event, which the server can never emit, so live injection showed
       // up only after a refresh replayed the transcript.
       h.onStatusInbox(ctx, p);
-    }, p);
+    });
   });
   // ★ 下面五条**轮次帧**（text/thinking/tool/tool_result/done）与 status 走同一条
   //   budget（它们都会写 DOM）；compact/question 不走，理由见上面 status 那段注释。
   sse.on('text', (p) => {
-    paced('SSE text', () => h.onText(h.ctxFor(p), p), p);
+    paced('SSE text', () => h.onText(h.ctxFor(p), p));
   });
   sse.on('thinking', (p) => {
-    paced('SSE thinking', () => h.onThinking(h.ctxFor(p), p), p);
+    paced('SSE thinking', () => h.onThinking(h.ctxFor(p), p));
   });
   sse.on('tool', (p) => {
-    paced('SSE tool', () => h.onTool(h.ctxFor(p), p), p);
+    paced('SSE tool', () => h.onTool(h.ctxFor(p), p));
   });
   sse.on('tool_result', (p) => {
-    paced('SSE tool_result', () => h.onToolResult(h.ctxFor(p), p), p);
+    paced('SSE tool_result', () => h.onToolResult(h.ctxFor(p), p));
   });
   sse.on('done', (p) => {
     paced('SSE done', () => {
       statusline.onSseDone();
       h.onDone(h.ctxFor(p), p);
-    }, p);
+    });
   });
   sse.on('compact', (p) => {
     try {

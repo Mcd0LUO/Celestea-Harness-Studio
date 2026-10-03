@@ -30,7 +30,7 @@ import {
 } from '../state';
 import { registerTierRepaint, registeredTierHost } from '../../../statusline/permission';
 import { resetTierStatus, tierSection } from '../../../statusline/permission/tier';
-import { activeFor, activeGrants, expiredFor } from './active';
+import { activeFor, activeGrants, baselineIsFullAccess, effectiveOf, expiredFor } from './active';
 import { attachPosition, detachPositionNow, positionPanel } from './position';
 import { previewText } from './phrase';
 import { renderPresets } from './quick';
@@ -125,8 +125,20 @@ export function renderPanel(host: GrantsHost): void {
   // §2 精细授权：快捷授权（W751 任务 1c）在最顶部，先给「一键组合」，再是逐项明细。
   off.appendChild(renderPresets(host));
 
+  // PX1-2：面板开头那句「默认只能读写工作区」此前是**写死的常量**，而默认档位在真机上
+  //   就是整机可读写+可联网 —— 与下方 30px 处的结果预览（同样反着说）自相矛盾。
+  //   现在三种口径由 effective 驱动；effective 没读到时明说「未知」，不猜。
+  const eff = effectiveOf();
   off.appendChild(
-    el('div', 'grant-intro', t('grants.body.introDefault')),
+    el(
+      'div',
+      'grant-intro',
+      baselineIsFullAccess()
+        ? t('grants.body.introFull')
+        : eff === null
+          ? t('grants.body.introUnknown')
+          : t('grants.body.introDefault'),
+    ),
   );
   off.appendChild(
     el(

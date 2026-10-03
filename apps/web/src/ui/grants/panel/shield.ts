@@ -13,7 +13,7 @@
 // ============================================================================
 import { nowSec } from '../caps';
 import { getShieldBadge, getShieldButton, getShieldTier } from '../state';
-import { EXPIRING_SEC, activeGrants } from './active';
+import { EXPIRING_SEC, activeGrants, baselineIsFullAccess, effectiveOf } from './active';
 import { t } from '../../../i18n';
 
 // ---- 盾牌按钮（§3.1 三态） -----------------------------------------------------
@@ -45,11 +45,20 @@ function tierOf(): string {
  * 两个都说，否则用户点了才发现里面还有档位）。
  */
 function shieldTitle(count: number, expiring: boolean, tier: string): string {
+  // PX1-2：count===0 只说明「本会话没有**额外**放宽项」，**不等于**「仅工作区、无网络」。
+  //   旧实现在这里回写死的「默认（仅工作区，无网络）」，而默认档位真机 effective 是
+  //   network:true + read_roots/write_roots 含 "/"。tooltip 是安全决策的依据，不能反着说。
   const base =
     count === 0
-      ? t('grants.shield.default')
+      ? baselineShieldPhrase()
       : expiring
         ? t('grants.shield.expiring')
         : t('grants.shield.granted', { n: count });
   return tier === '' ? base : t('grants.shield.withTier', { tier, text: base });
+}
+
+/** 没有额外放宽项时，盾牌标题怎么描述**基线**（由 effective 驱动，不写死）。 */
+function baselineShieldPhrase(): string {
+  if (baselineIsFullAccess()) return t('grants.shield.defaultFull');
+  return effectiveOf() === null ? t('grants.shield.defaultUnknown') : t('grants.shield.default');
 }

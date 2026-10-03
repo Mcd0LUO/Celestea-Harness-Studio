@@ -84,15 +84,28 @@ describe('F2-06 · 承担语义的边框用语义档位', () => {
     expect(bad).toEqual([]);
   });
 });
+/**
+ * 与 index.html **同构**的骨架（F2-07-01 修的就是这里）。
+ *
+ * 修复前的夹具把 #sidebar / #sidebarScrim / #main 直接挂在 #app 下面，而真实 DOM 是
+ *   #app > [ #topbar, #layout ]，#layout > [ #sidebar, #sidebarResizer, #sidebarScrim, #main ]
+ * （真机 390x844 CDP 实测，results/audit4/F2/probe-E.json 的 E0_ancestry）。
+ * 夹具一旦把 #sidebarScrim 摆成 #sidebar 的同级兄弟，它就恰好落在
+ * isolateBackground 的「兄弟子树 = 背景」射程内 —— 而这正是真机上发生的事，
+ * 夹具却让人误以为「scrim 是浮层自己的、不在射程内」。真实结构必须写出来。
+ */
 const APP_HTML =
   '<div id="app">' +
   '<header id="topbar"><button id="btnSidebar">x</button></header>' +
+  '<div id="layout">' +
   '<aside id="sidebar"><button id="sessA">A</button></aside>' +
   '<div id="sidebarResizer" class="sidebar-resizer"></div>' +
   '<div id="sidebarScrim" class="sidebar-scrim hidden"></div>' +
-  '<main id="main"><button id="bgBtn">bg</button>' +
-  '<textarea id="input"></textarea></main>' +
-  '<div id="statusline"></div>' +
+  '<main id="main">' +
+  '<div id="statusline" class="statusline"></div>' +
+  '<button id="bgBtn">bg</button><textarea id="input"></textarea>' +
+  '</main>' +
+  '</div>' +
   '</div>';
 
 /** jsdom 里 window.matchMedia 不存在；抽屉靠它判档 + 监听断点变化，这里打桩。 */
@@ -140,14 +153,17 @@ describe('F2-07 · 移动端抽屉的背景焦点隔离', () => {
     (doc as unknown as { body: ElLike }).body.innerHTML = '';
   });
 
-  it('抽屉打开时：主区/状态行 inert，抽屉自身不 inert', async () => {
+  it('抽屉打开时：主区 inert（状态行随之不可聚焦），抽屉自身不 inert', async () => {
     const mod = await loadSidebar();
     mod.initSidebar();
     click('btnSidebar');
     expect(el('app').classList.contains('drawer-open')).toBe(true);
     expect(el('main').hasAttribute('inert')).toBe(true);
-    expect(el('statusline').hasAttribute('inert')).toBe(true);
     expect(el('sidebar').hasAttribute('inert')).toBe(false);
+    // 状态行在真实 DOM 里是 #main 的**后代**（不是 #sidebar 的兄弟），所以它自己身上
+    // 没有 inert 属性、而是被祖先罩住。断言「被 inert 祖先罩住」而不是「自己带 inert」。
+    expect(el('statusline').hasAttribute('inert')).toBe(false);
+    expect(el('statusline').closest('[inert]')?.id).toBe('main');
   });
 
   it('点遮罩关闭后：inert 一定摘干净（漏摘等于整站变砖）', async () => {
@@ -173,6 +189,48 @@ describe('F2-07 · 移动端抽屉的背景焦点隔离', () => {
     expect(el('main').hasAttribute('inert')).toBe(false);
   });
 
+  // ---- F2-07-01：遮罩是抽屉自己的关闭控件，不是背景 -------------------------
+  //
+  // 回归本身：isolateBackground 的口径是「keep 的兄弟子树 = 背景」，而 #sidebarScrim
+  // 与 #sidebar 同为 #layout 的子节点，正好落在射程内。inert 的元素不参与命中测试，
+  // 于是 initDrawer 里那条 scrim 的 click 监听永远收不到事件 —— 真机 390x844 对照
+  // 实验（results/audit4/F2/probe-F.json）：带 inert 时点遮罩区 elementFromPoint 落到
+  // #layout、drawer 保持 true；仅摘掉遮罩的 inert 后点同一坐标即命中 #sidebarScrim。
+  //
+  // ★ 为什么下面第一条断言的是**属性**而不是「点一下没反应」：
+  //   jsdom 根本没实现 inert 的命中测试语义 —— dispatchEvent 照样会派发给带 inert 的
+  //   元素。所以「点遮罩关抽屉」这个用例在 jsdom 里**恒绿**，抓不到本 bug。
+  //   真正的因果是「遮罩身上有没有 inert」，那条才是承重断言。
+  it('遮罩不被置 inert —— 置了它就点不中（抽屉的主关闭手势失效）', async () => {
+    const mod = await loadSidebar();
+    mod.initSidebar();
+    click('btnSidebar');
+    // 背景照样被隔离：这条不能因为修了遮罩就一起放跑。
+    expect(el('main').hasAttribute('inert')).toBe(true);
+    expect(el('sidebarResizer').hasAttribute('inert')).toBe(true);
+    // 承重断言：遮罩必须留在命中测试里。
+    expect(el('sidebarScrim').hasAttribute('inert')).toBe(false);
+  });
+
+  it('点遮罩仍能关抽屉（监听没被摘掉）', async () => {
+    const mod = await loadSidebar();
+    mod.initSidebar();
+    click('btnSidebar');
+    click('sidebarScrim');
+    expect(el('app').classList.contains('drawer-open')).toBe(false);
+  });
+
+  it('exclude 的节点不进句柄 ⇒ restore 不会误摘别人设的 inert', async () => {
+    const mod = await loadSidebar();
+    // 别的层（例如设置页的 isolateBackground 把整个 #app 罩住时）给遮罩加过 inert，
+    // 抽屉关掉后**不能**替它摘 —— restore 只遍历本次由我们改的 nodes。
+    el('sidebarScrim').setAttribute('inert', '');
+    mod.initSidebar();
+    click('btnSidebar');
+    click('sidebarScrim');
+    expect(el('sidebarScrim').hasAttribute('inert')).toBe(true);
+    expect(el('main').hasAttribute('inert')).toBe(false);
+  });
   it('桌面档点汉堡不隔离 —— 抽屉不是桌面语义', async () => {
     vp.setMobile(false);
     const mod = await loadSidebar();

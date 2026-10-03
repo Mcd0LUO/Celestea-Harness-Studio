@@ -20,7 +20,7 @@ import {
 } from '../caps';
 import { drafts, inlineError, tempOpen, ttlPick, type GrantsHost } from '../state';
 import { maxTtlOf, tempDefaultTtl } from '../request';
-import { activeFor, expiredFor } from './active';
+import { activeFor, effectiveOf, expiredFor } from './active';
 import { netHostsIneffective } from './warnings';
 import { t } from '../../../i18n';
 
@@ -34,6 +34,15 @@ export function renderRow(def: CapDef, host: GrantsHost): HTMLElement {
   const head = el('div', 'grant-row-head');
   head.appendChild(el('span', 'grant-row-name', def.label));
   head.appendChild(badgeFor(def, active, expired));
+  // PX1-2：逐项徽标此前只看 grants[] （额外放宽项），于是默认档位下「访问网络」「额外可写
+  //   目录」一律显示「未授予」，而 effective 明说 network=true / write_roots 含整机根。
+  //   用户据此以为网络不可用。基线已经含有的能力如实标注出来。
+  for (const [text, title] of baselineMarks(def)) {
+    const mark = el('span', 'grant-badge on');
+    mark.textContent = text;
+    mark.title = title;
+    head.appendChild(mark);
+  }
   if (def.cap === 'net_hosts' && netHostsIneffective()) {
     const mark = el('span', 'grant-badge', t('grants.rows.ineffective'));
     mark.title = t('grants.rows.ineffectiveTitle');
@@ -112,6 +121,19 @@ export function renderRow(def: CapDef, host: GrantsHost): HTMLElement {
   const err = inlineError.get(def.cap);
   if (err) row.appendChild(el('div', 'grant-err', err));
   return row;
+}
+
+function baselineMarks(def: CapDef): Array<[string, string]> {
+  const e = effectiveOf();
+  if (e === null) return [];
+  const out: Array<[string, string]> = [];
+  const has = (roots: string[] | undefined): boolean =>
+    Array.isArray(roots) && roots.includes('/');
+  if (e.network === true) out.push([t('grants.rows.effectiveFullNet'), t('grants.rows.effectiveOn')]);
+  if ((def.cap === 'read_roots' || def.cap === 'write_roots') && (has(e.read_roots) || has(e.write_roots))) {
+    out.push([t('grants.rows.effectiveFullAll'), t('grants.rows.effectiveOn')]);
+  }
+  return out;
 }
 
 function badgeFor(def: CapDef, active: GrantEntry | null, expired: GrantEntry[]): HTMLElement {

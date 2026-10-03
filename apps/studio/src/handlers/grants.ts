@@ -45,6 +45,31 @@ const NET_HOSTS_INEFFECTIVE =
 const TOOL_EXTRA_INEFFECTIVE =
   "tool_extra_ineffective: tool_extra 预留给未来的 browser/net 工具，当前没有任何工具暴露面消费它 —— 该授权不生效（已停止新授，可撤销）";
 
+/**
+ * B1-01 (audit round 4): the limiter's key is namespaced by ENDPOINT.
+ *
+ * `GrantRateLimiter` keys everything on one string, and until this fix the
+ * permission endpoint passed its bare session id into the SAME instance the
+ * grants endpoint uses (`deps.grants.limits`). Two consequences, both measured:
+ *
+ *   1. Budget contention across endpoints — three SUCCESSFUL permission
+ *      changes answer `429 too many grant requests` on the grants endpoint.
+ *   2. The permission endpoint had no `recordSuccess` of its own, so its
+ *      3-strikes cooldown was a one-way counter: a legitimate
+ *      deny→ok→deny→ok sequence locked the operator out for 5 minutes WHILE
+ *      HOLDING A VALID BROWSER TOKEN. Measured sequence: 403,200,403,429,409.
+ *
+ * A grant and a permission change are different capabilities with different
+ * abuse shapes, so they get their own budgets: one endpoint's flood can no
+ * longer starve the other. The separator is NUL so a crafted session id can
+ * never forge another endpoint's key by containing the scope name.
+ */
+export const GRANTS_LIMIT_SCOPE = "grants";
+export const PERMISSION_LIMIT_SCOPE = "permission";
+export function limitKey(scope: string, sessionId: string): string {
+  return scope + "\u0000" + sessionId;
+}
+
 /** GET /api/sessions/{id}/grants (§6.1). */
 function registerList(app: Hono, deps: Deps, table: RouteTable): string {
   const route = table.get("get_session_grants");
@@ -85,7 +110,8 @@ function registerCreate(app: Hono, deps: Deps, table: RouteTable): string {
     if (!resolved.ok) return storeFail(c, resolved);
     const sessionId = resolved.value.id;
     const services = deps.grants;
-    const limit = services.limits.allow(sessionId);
+    // B1-01: the grants endpoint's own budget (see limitKey).
+    const limit = services.limits.allow(limitKey(GRANTS_LIMIT_SCOPE, sessionId));
     if (!limit.ok) return failJson(c, limit.status, limitMessage(limit), { retry_after: limit.retryAfterSec });
     const refusal: Refusal = { deps, sessionId, reason: "" };
     const read = await readJsonBody(c);
@@ -154,7 +180,7 @@ function persistGrant(c: Context, deps: Deps, dir: string, sessionId: string, re
     uses_left: record.uses_left,
     effective_after: effectiveJson(effective.grants),
   });
-  services.limits.recordSuccess(sessionId);
+  services.limits.recordSuccess(limitKey(GRANTS_LIMIT_SCOPE, sessionId));
   return c.json({ ok: true, grant: entryJson(record, seconds), effective: effectiveJson(effective.grants) });
 }
 
@@ -295,7 +321,8 @@ function hasSameOriginEvidence(c: Context): boolean {
  * fix was reverted and is handed back for whoever owns the test.
  */
 function denied(ctx: Refusal, response: Response): Response {
-  ctx.deps.grants.limits.recordDenial(ctx.sessionId);
+  // B1-01: the grants endpoint's own budget (see limitKey).
+  ctx.deps.grants.limits.recordDenial(limitKey(GRANTS_LIMIT_SCOPE, ctx.sessionId));
   ctx.deps.grants.audit.write({
     session: ctx.sessionId,
     event: "deny",

@@ -98,6 +98,39 @@ describe("B7-5 · method mismatch is 405 + Allow; an unknown path stays 404", ()
     }
   });
 
+  it("③b a path-parameter route with TRAILING JUNK stays 404, not 405 (B1-02)", async () => {
+    // B7-5 made 405 mean "this url exists, wrong verb". The matcher that
+    // implemented it aligned a `{param}` by SEARCHING for a position where the
+    // trailing literals lined up, and returned on the first hit without checking
+    // the url was fully consumed — so `/messages/extra` matched
+    // `/api/sessions/{id}/messages` and answered 405 + `Allow: GET, HEAD`. That
+    // is the exact confusion B7-5 exists to remove: a client would go looking
+    // for a typo in its HTTP METHOD while the real problem is a typo in its PATH.
+    const a = app();
+    for (const [method, path] of [
+      ["DELETE", "/api/sessions/ws%2Fs1/messages/extra"],
+      ["DELETE", "/api/sessions/ws%2Fs1/messages/a/b"],
+      ["DELETE", "/api/sessions/ws%2Fs1/permission/extra"],
+      ["PUT", "/api/sessions/ws%2Fs1/permission/sub"],
+      ["DELETE", "/api/terminal/t1/input/extra"],
+    ] as const) {
+      const r = await call(a, method, path);
+      expect(r.status, `${method} ${path} must be 404 (unknown path)`).toBe(404);
+      expect(r.allow, `${method} ${path} must carry no Allow`).toBeNull();
+    }
+  });
+
+  it("③c the trailing-junk fix did not break the real matches (B1-02 negative control)", () => {
+    // The same alignment arithmetic, both directions. A `{param}` still absorbs
+    // the %2F-encoded session id, and a wildcard tail still absorbs the rest.
+    const routes = studioRoutes();
+    expect(allowedMethodsFor(routes, "/api/sessions/ws%2Fs1/messages")).toEqual(["GET", "HEAD"]);
+    expect(allowedMethodsFor(routes, "/api/sessions/ws%2fs1/messages")).toEqual(["GET", "HEAD"]);
+    expect(allowedMethodsFor(routes, "/api/sessions/a/b/c/d")).toBeNull();
+    // An EMPTY parameter is still not a match (`/api/sessions//messages`).
+    expect(allowedMethodsFor(routes, "/api/sessions//messages")).toBeNull();
+  });
+
   it("④ 405 and 404 are now DISTINGUISHABLE — the whole point of the fix", async () => {
     const a = app();
     const wrongVerb = await call(a, "DELETE", "/api/health");

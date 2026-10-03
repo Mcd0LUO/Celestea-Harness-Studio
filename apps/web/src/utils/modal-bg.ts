@@ -42,11 +42,31 @@ const FOCUSABLE =
  * 只动 `keep.parentElement` 的**兄弟**：那些正是「模态之外的世界」。不碰 document.body
  * 本身（body 是所有浮层的共同祖先，把它 inert 掉会把 keep 一起带走）。
  *
- * `before`（可选）：置 inert **之前**先把焦点收进 keep —— 焦点此刻多半还停在触发按钮
- * （背景里），而那个节点即将变成不可聚焦。浏览器此时可能把焦点甩到 body，用户就
- * 「看不见焦点在哪」了。先进 keep 再置 inert，顺序不能反。
+ * `before`（可选）：把焦点收进 keep —— 焦点此刻多半还停在触发按钮（背景里），
+ * 而那个节点即将变成不可聚焦，浏览器会把焦点甩到 body，用户就「看不见焦点在哪」了。
+ *
+ * ★ 订正（F2-07-01 复核）：这段注释原先写的是「置 inert **之前**收焦点、顺序不能反」，
+ *   但**代码一直是反的** —— 上面那个 for 循环先把兄弟全置 inert，`before` 在循环之后才
+ *   跑。两种顺序的终态一样，原因是 keep 自己**不在**被置 inert 的名单里：循环只动兄弟，
+ *   所以 `before` 里对 keep 内部节点的 focus() 无论早晚都有效（真机 390x844 CDP 实测：
+ *   打开设置页后 activeElement=btnSettingsReload、focusInSettings=true，见
+ *   results/audit4/F2/probe-A.json 的 P1_open）。
+ *   据此**不改行为**、只订正注释：拿注释去「修」一个已被真机证明正确的顺序，等于用一个
+ *   未验证的行为改动换一个看起来自洽的注释。
+ *
+ * `exclude`（可选，F2-07-01）：**浮层自己的控件**不是背景，必须从隔离名单里排除。
+ * 「兄弟子树 = 背景」这条规则在抽屉上会咬人：#layout 的子节点是
+ * `[#sidebar, #sidebarResizer, #sidebarScrim, #main]`，而 `#sidebarScrim` 正是抽屉
+ * 的关闭遮罩（ui/sidebar.ts 给它挂了 click → setOpen(false)）。inert 的元素**不参与
+ * 命中测试**，把它一并隔离就等于让那条监听永远收不到事件 —— 真机 390x844 实测：
+ * 点遮罩区域 elementFromPoint 落到 #layout，抽屉纹丝不动（F2-07 修复前）。
+ * 摘除侧没有对称问题：restore 只遍历 `nodes`，被排除的节点从未入列，不会被误摘。
  */
-export function isolateBackground(keep: HTMLElement, before?: () => void): BackgroundHandle {
+export function isolateBackground(
+  keep: HTMLElement,
+  before?: () => void,
+  exclude?: ReadonlySet<Element>,
+): BackgroundHandle {
   const parent = keep.parentElement;
   if (!parent) return { nodes: [], restore: () => {} };
 
@@ -54,6 +74,9 @@ export function isolateBackground(keep: HTMLElement, before?: () => void): Backg
   const nodes: HTMLElement[] = [];
   for (const sib of Array.from(parent.children)) {
     if (sib === keep) continue;
+    // 浮层自己的关闭控件（抽屉的 #sidebarScrim）不是背景：inert 会把它移出命中测试，
+    // 点遮罩关抽屉就永远不触发。判在 instanceof 之前，省掉一次无谓的类型判断。
+    if (exclude?.has(sib)) continue;
     if (!(sib instanceof HTMLElement)) continue;
     if (sib.hasAttribute('inert')) continue; // 别的层已隔离过，别抢也别覆盖
     sib.setAttribute('inert', '');

@@ -107,14 +107,24 @@ function matchSegments(parts: string[], segments: string[]): boolean {
     if (isParam(part)) {
       // A parameter is ONE contract segment that may arrive as SEVERAL url
       // segments (`ws%2Fs1` is one `{id}` but splits into `ws` + `s1`), and it
-      // may not contain a bare `/` beyond that. It must end exactly where the
-      // remaining literal parts line up, so the only degree of freedom is how
-      // many segments it swallows — try them all, longest first.
+      // may not contain a bare `/` beyond that.
+      //
+      // B1-02 (audit round 4): the alignment is NOT a search. Everything after
+      // the parameter is LITERAL, so its tail is pinned to the end of the url
+      // by arithmetic alone — `take + rest.length` must equal `segments.length`,
+      // which leaves exactly ONE candidate. The old code looped over every
+      // position and `return true`d on the first alignment whose LITERALS lined
+      // up, without ever checking the url was fully consumed — so
+      // `/api/sessions/a/messages/extra` matched `/api/sessions/{id}/messages`
+      // (the trailing `extra` was never looked at) and answered 405 + `Allow`
+      // instead of 404: the one case the whole B7-5 fix exists to make
+      // distinguishable — a typo'd PATH — kept masquerading as a typo'd VERB.
       const rest = parts.slice(p + 1);
-      for (let take = segments.length - rest.length; take > i; take -= 1) {
-        if (rest.every((r, k) => r === segments[take + k])) return true;
-      }
-      return false;
+      const take = segments.length - rest.length;
+      // `take > i`: a parameter must swallow at least one segment, so an empty
+      // one (`/api/sessions//messages`) stays a non-match exactly as before.
+      if (take <= i) return false;
+      return rest.every((r, k) => r === segments[take + k]);
     }
     if (segments[i] !== part) return false;
     i += 1;

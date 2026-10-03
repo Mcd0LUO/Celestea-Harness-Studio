@@ -42,7 +42,15 @@ interface BgHandle {
 }
 
 interface ModalBgMod {
-  isolateBackground(keep: FocusEl, before?: () => void): BgHandle;
+  /**
+   * 第三个形参是 F2-07-01 新增的 exclude（排除「浮层自己的关闭控件」）。这里声明成
+   * 窄类型而不是 ReadonlySet<Element> —— 根 tsconfig 的 lib 里没有 DOM。
+   */
+  isolateBackground(
+    keep: FocusEl,
+    before?: () => void,
+    exclude?: ReadonlySet<ElLike>,
+  ): BgHandle;
   firstFocusable(keep: FocusEl): FocusEl | null;
 }
 
@@ -196,6 +204,67 @@ describe('F2-01 · 模态态的背景隔离（inert）', () => {
     h.restore();
     // 关键：restore 只摘「由我们改的」，别把别的层已隔离好的摘掉
     expect(other.hasAttribute('inert')).toBe(true);
+  });
+});
+
+describe('F2-07-01 · isolateBackground 的 exclude：浮层自己的控件不是背景', () => {
+  // 背景：#layer 下并排放 keep、一个真背景、一个「浮层自己的关闭控件」。
+  let isolate: ModalBgMod;
+
+  beforeEach(async () => {
+    setBody(
+      '<div id="layer">' +
+        '<div id="keep"></div>' +
+        '<div id="scrim"></div>' +
+        '<div id="bg"></div>' +
+        '</div>',
+    );
+    isolate = await loadModalBg();
+  });
+
+  afterEach(() => setBody(''));
+
+  it('不传 exclude 时行为不变：兄弟里除 keep 外全部置 inert', () => {
+    isolate.isolateBackground(el('keep'));
+    expect(el('scrim').hasAttribute('inert')).toBe(true);
+    expect(el('bg').hasAttribute('inert')).toBe(true);
+  });
+
+  it('exclude 里的兄弟不被置 inert —— 点它关浮层必须还能生效', () => {
+    isolate.isolateBackground(el('keep'), undefined, new Set([el('scrim')]));
+    expect(el('scrim').hasAttribute('inert')).toBe(false);
+    expect(el('bg').hasAttribute('inert')).toBe(true);
+  });
+
+  it('被 exclude 的节点不进句柄 ⇒ restore 只还原本次真改过的', () => {
+    const h = isolate.isolateBackground(el('keep'), undefined, new Set([el('scrim')]));
+    // 句柄里必须没有它：restore 是「按 nodes 逐个摘」，混进去就会误伤别人设的 inert。
+    expect(h.nodes.map((n) => n.id)).not.toContain('scrim');
+    h.restore();
+    expect(el('bg').hasAttribute('inert')).toBe(false);
+    expect(el('scrim').hasAttribute('inert')).toBe(false);
+  });
+
+  it('exclude 不妨碍 before 回调：它照样被调用一次', () => {
+    // 只钉「回调被调用」这一条，不钉它相对 inert 的先后。
+    //
+    // 原因：modal-bg.ts 的注释曾写「置 inert 之前收焦点、顺序不能反」，而代码一直是
+    // 循环先置 inert、回调后跑。两种顺序的终态相同（keep 自己不在被隔离的名单里，
+    // 两种情况下对 keep 内部 focus() 都有效），真机 390x844 也已验证焦点正确落进设置页
+    // （results/audit4/F2/probe-A.json 的 P1_open）。所以此处刻意不断言顺序 ——
+    // 把一条未兑现的注释约束成断言，只会在将来有人「顺手调顺序」时给出假信号。
+    let calls = 0;
+    isolate.isolateBackground(el('keep'), () => { calls += 1; }, new Set([el('scrim')]));
+    expect(calls).toBe(1);
+    expect(el('scrim').hasAttribute('inert')).toBe(false);
+    expect(el('bg').hasAttribute('inert')).toBe(true);
+  });
+
+  it('exclude 命中不了的节点（不在兄弟里）不影响任何事', () => {
+    // 传一个不在这层里的节点：不能误伤，也必须照常隔离真正的背景。
+    isolate.isolateBackground(el('keep'), undefined, new Set([el('scrim'), el('nowhere')]));
+    expect(el('bg').hasAttribute('inert')).toBe(true);
+    expect(el('keep').hasAttribute('inert')).toBe(false);
   });
 });
 

@@ -90,6 +90,24 @@ export class SseClient {
   private es: EventSource | null = null;
   private handlers = new Map<SseEventName, Set<(p: unknown) => void>>();
   private connCbs = new Set<(state: ConnState) => void>();
+  /**
+   * ★ W9315（F1-01 P1）：**信封观察者** —— 每条到达本连接的信封各调一次。
+   *
+   * 为什么必须是「信封级」而不是「事件处理器级」：契约的 seq 是**进程级单调计数器**
+   * （apps/studio/src/sse.ts 的 emit：seq++，与事件名、与订阅者都无关），所以
+   * **任何**事件名都会推进它。而 [emit] 对「没有注册处理器」的名字直接 early-return
+   * —— 在处理器层观察，terminal（本仓的接线层根本不为它注册处理器）的 seq 就永远
+   * 看不见，基线不前进，下一条真实帧必被算成「丢了 N 帧」。
+   *
+   * 真实危害（探针 + 真机 CDP 复现，results/audit4/F1/evidence-seqgap-cdp.md）：一条
+   * 完整无丢失的流，夹一个 question 帧就显示「连接中断，丢失了 1 帧输出」，夹三个
+   * terminal 帧就显示「丢失了 3 帧」——数字随旁路帧数线性放大。ask_user_question
+   * 是常驻工具、终端每批 pty 字节一帧，所以这是**每一轮**都会命中的可见面。
+   *
+   * 位置（withEnvelope 之后、事件分发之前）：既保证 seq 已并进载荷顶层（观测者与
+   * 处理器读同一份对象），又保证**没有任何处理器的事件名也会被看到**。
+   */
+  private envelopeCbs = new Set<(p: unknown, name: SseEventName) => void>();
 
   constructor(readonly url = '/api/events') {}
 
@@ -106,6 +124,18 @@ export class SseClient {
     this.connCbs.add(cb);
   }
 
+  /**
+   * ★ W9315（F1-01）：订阅「每条信封」。回调在 withEnvelope 之后、事件分发之前被调用，
+   * 因此载荷顶层已带 seq；且**没有注册处理器的事件名同样会触发**（这正是 terminal）。
+   *
+   * 唯一消费者是 ui/sse-wire.ts 的丢帧检测（SeqGapWatcher）。它必须挂在这里而不是
+   * 各事件的处理器里：seq 是进程级全局计数器，按事件名挑着看就会漏看，而漏看的那些
+   * 帧照样推进了计数器 ⇒ 下一条被看到的帧必被误判为「丢了 N 帧」。
+   */
+  onEnvelope(cb: (p: unknown, name: SseEventName) => void): void {
+    this.envelopeCbs.add(cb);
+  }
+
   connect(): void {
     this.close();
     const es = new EventSource(this.url);
@@ -116,8 +146,12 @@ export class SseClient {
       es.addEventListener(name, (e: MessageEvent<string>) => {
         try {
           const env = JSON.parse(e.data) as SseEnvelope;
-          const payload = env.payload !== undefined ? env.payload : env;
-          this.emit(name, withEnvelope(payload, env));
+          // ★ W9315（F1-01）：只 withEnvelope 一次，观测者与处理器读**同一个**载荷对象
+          // （读两份就可能读到不同的 seq，丢帧检测的基线就成了薛定谔的）。
+          const payload = withEnvelope(env.payload !== undefined ? env.payload : env, env);
+          // 观察者在分发之前：无处理器的事件名（terminal）也要被看到。
+          this.emitEnvelope(name, payload);
+          this.emit(name, payload);
         } catch (err) {
           console.warn('[sse] failed to parse', name, err);
         }
@@ -129,6 +163,22 @@ export class SseClient {
     if (this.es) {
       this.es.close();
       this.es = null;
+    }
+  }
+
+  /**
+   * ★ W9315（F1-01）：把每条信封交给观察者。**刻意排在 [emit] 之前** —— emit 对没有
+   * 处理器的名字会 early-return，而那些帧的 seq 同样推进了全局计数器，必须照样被看到。
+   *
+   * 观察者抛错不得影响事件分发：丢帧检测坏掉时，聊天流本身必须照常工作。
+   */
+  private emitEnvelope(name: SseEventName, payload: unknown): void {
+    for (const cb of this.envelopeCbs) {
+      try {
+        cb(payload, name);
+      } catch (err) {
+        console.warn('[sse] envelope hook failed for', name, err);
+      }
     }
   }
 

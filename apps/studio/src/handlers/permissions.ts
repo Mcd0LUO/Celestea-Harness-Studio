@@ -47,6 +47,10 @@ import {
 import { cookieValue } from "../auth/token.js";
 import { errText } from "../store/result.js";
 import { failJson, readJsonBody, strField, storeFail, type Deps } from "./common.js";
+// B1-01: the limiter key is shared with the grants endpoint's module, so the two
+// namespaces can never drift into one budget by accident. Importing a handler
+// from another handler is the shape `terminal.ts` already uses for exec.ts.
+import { limitKey, PERMISSION_LIMIT_SCOPE } from "./grants.js";
 
 /** The refusal when a permission change arrives without a browser confirmation. */
 export const PERMISSION_CONFIRM_REQUIRED = "permission confirmation required";
@@ -272,7 +276,8 @@ function registerPermissionConfirmToken(app: Hono, deps: Deps): void {
  * audited through the same channel the grants endpoint uses.
  */
 function confirmPermissionChange(c: Context, deps: Deps, sessionId: string, preset: string): Response | null {
-  const limit = deps.grants.limits.allow(sessionId);
+  // B1-01: the permission endpoint's OWN budget, not the grants one.
+  const limit = deps.grants.limits.allow(limitKey(PERMISSION_LIMIT_SCOPE, sessionId));
   if (!limit.ok) {
     return refuse(c, deps, sessionId, limit.status === 429
       ? `too many permission requests; retry in ${limit.retryAfterSec}s`
@@ -327,7 +332,7 @@ function findPreset(id: string, custom: readonly PermissionPreset[]): Permission
 
 /** A refusal: counted, audited (sanitized), and answered with the contract shape. */
 function refuse(c: Context, deps: Deps, sessionId: string, reason: string, status: number): Response {
-  deps.grants.limits.recordDenial(sessionId);
+  deps.grants.limits.recordDenial(limitKey(PERMISSION_LIMIT_SCOPE, sessionId));
   deps.grants.audit.write({ session: sessionId, event: "deny", cap: PERMISSION_CAP, reason });
   return failJson(c, status, reason);
 }
@@ -357,6 +362,14 @@ function registerPutSessionPermission(app: Hono, deps: Deps, table: RouteTable):
     }
     // W9: recompose the session at the next boundary (same hook grants use).
     deps.runtime.invalidateSession?.(resolved.value.id);
+    // B1-01: a SUCCESS resets the 3-strikes cooldown — the pair of
+    // `recordDenial` on every refusal. This endpoint used to call the denial
+    // side only, which made the cooldown a one-way counter: the operator's own
+    // deny→ok→deny→ok sequence answered 403,200,403,429,409, i.e. a legitimate
+    // second change was rate-limited WHILE HOLDING A VALID BROWSER TOKEN, and
+    // the fifth call locked the session for 5 minutes. grants.ts has always
+    // had this line; the asymmetry is the defect.
+    deps.grants.limits.recordSuccess(limitKey(PERMISSION_LIMIT_SCOPE, resolved.value.id));
     const baseline = effectivePermissionOf(resolved.value.dir, resolved.value.id, deps.grants.env);
     deps.grants.audit.write({
       session: resolved.value.id,

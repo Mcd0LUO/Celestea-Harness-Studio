@@ -9,19 +9,35 @@
 import type { GrantScope } from '../../../types';
 import { caps, listOf, scopeOf, type CapDef } from '../caps';
 import { t } from '../../../i18n';
-import { activeFor, activeGrants } from './active';
+import { activeFor, activeGrants, baselineIsFullAccess, effectiveOf } from './active';
+
+/*
+ * PX1-2：**「没有任何放宽项」不等于「只能读写工作区」**。
+ *   旧实现在这里直接回一句写死的「只能读写工作区目录，不能访问网络」，而默认档位
+ *   （full-access）在真机上的 effective 是 `network:true, read_roots:["/"],
+ *   write_roots:["/"]` —— 一句反着说的话，让用户据此放心让 agent 跑命令。
+ *   现在由 effective 驱动：整机可读写+可联网 / 未知 / 真正的工作区受限 三种口径。
+ */
+/**
+ * 基线口径的一句话（没有额外放宽项时说什么）。由生效快照决定，绝不写死。
+ * 额外放宽项存在时走下面的 canNow 句式，基线则作为前缀说明保留。
+ */
+function baselinePhrase(): string {
+  if (baselineIsFullAccess()) return t('grants.phrase.defaultFull');
+  return effectiveOf() === null ? t('grants.phrase.defaultUnknown') : t('grants.phrase.default');
+}
 
 /** 当前生效集 → 一句话预览（固定常量句式，范围值只作数据填入）。 */
 export function previewText(): string {
   const active = activeGrants();
-  if (!active.length) return t('grants.phrase.default');
+  if (!active.length) return baselinePhrase();
   const parts: string[] = [];
   for (const def of caps()) {
     const g = activeFor(def.cap);
     if (!g) continue;
     parts.push(phraseFor(def, scopeOf(g)));
   }
-  if (!parts.length) return t('grants.phrase.default');
+  if (!parts.length) return baselinePhrase();
   return t('grants.phrase.canNow') + parts.join(t('grants.copy.listSep')) + t('grants.phrase.suffix');
 }
 

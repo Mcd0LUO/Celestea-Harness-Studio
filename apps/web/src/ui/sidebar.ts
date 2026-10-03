@@ -154,7 +154,13 @@ function initDrawer(btn: HTMLButtonElement): void {
       const first = panel.querySelector<HTMLElement>(
         'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
       );
-      bg = isolateBackground(panel, () => first?.focus());
+      // F2-07-01：#sidebarScrim 是**本抽屉自己的关闭控件**，不是背景，必须排除。
+      //   它与 #sidebar 同为 #layout 的子节点，落在「兄弟子树 = 背景」这条规则的射程内；
+      //   而 inert 的元素不参与命中测试 => 一并隔离就等于让上面那条 scrim 的 click
+      //   监听永远收不到事件。真机 390x844 对照实验（results/audit4/F2/probe-F.json）：
+      //   带 inert 时点遮罩区 elementFromPoint 落到 #layout、drawer 保持 true；仅摘掉
+      //   遮罩的 inert 后点同一坐标 => 命中 #sidebarScrim、drawer 转 false。
+      bg = isolateBackground(panel, () => first?.focus(), scrim ? new Set([scrim]) : undefined);
     } else if (!open && bg) {
       // 成对摘除 —— 漏摘会让整个应用变成一块砖（比不做更糟）。
       bg.restore();
