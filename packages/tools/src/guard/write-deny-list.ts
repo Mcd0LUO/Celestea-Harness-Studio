@@ -43,6 +43,29 @@
  *   A project's `.claude/` settings are ordinary repo content, so the deny is
  *   deliberately narrower than "`.claude`".
  *
+ * ## B5-02 · the Windows + credential half
+ *
+ * The original list was POSIX-flavoured: it named the shell startup files whose
+ * only real-world instance is a dotfile in $HOME. That left two whole classes of
+ * execution/credential surface unwritten, and this repo's PRIMARY deployment
+ * platform is Windows:
+ *
+ *   1. **PowerShell profiles.** A profile is the exact analogue of `.bashrc`:
+ *      writing one plants code that runs at the NEXT session. On Windows it lives
+ *      at three documented paths (AllHosts / CurrentUser / CurrentHost), all
+ *      sharing the file NAME — so the win32 list matches the name and covers
+ *      every location and any depth at once. It is **win32-only** so a Linux
+ *      deployment is not handed a rule about a file it cannot have.
+ *
+ *   2. **Credential stores.** `.aws/`, `.gnupg/`, `.docker/config.json`,
+ *      `.kube/config`, `.npmrc`, `.pypirc`, `.netrc` are cross-platform and
+ *      are listed as such. These are not "configuration the user reads" — they
+ *      are secrets the user's own tools authenticate with, so an agent edit
+ *      silently repoints the next push/pull/docker/kubectl.
+ *
+ * Platform is STILL a parameter: only the profile names branch on it, and the
+ * case/separator rules below are unchanged.
+ *
  * ## Platform is a PARAMETER
  *
  * `platform` is injectable (AGENT.md §8 / W885 / W9110 precedent) so the win32
@@ -109,6 +132,69 @@ export const DANGEROUS_WRITE_DIR_PREFIXES: readonly (readonly string[])[] = Obje
   Object.freeze([".claude", "commands"]),
 ]);
 
+/**
+ * B5-02 · WINDOWS 启动文件名（单组件，匹配**最终组件**）。
+ *
+ * 为什么单列一份而不是并进 [DANGEROUS_WRITE_FILES]：那一份是**跨平台**的，
+ * POSIX 也认（`~/.bashrc` 在 Linux 上同样是一个执行面）。而 PowerShell
+ * profile 只在 Windows 上有意义，混进去会让 Linux 部署凭空多出一条拒写。
+ *
+ * 名单的立论与 shell 启动文件同源：写入一个 profile = 往**下一次会话**里塞
+ * 自己的代码，用户执行它时才生效 —— 那是执行面，不是数据文件。
+ *
+ * 三种 profile 路径都覆盖：`$PROFILE` 依次是
+ *   AllHosts    Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1
+ *   CurrentUser Documents\PowerShell\Microsoft.PowerShell_profile.ps1
+ *   CurrentHost 存在时与 CurrentUser 相同；
+ * 而 PS 5.1 的 AllHosts 固定在 AppData\Roaming\Microsoft\Windows\PowerShell\。
+ * 只按**文件名**匹配（三者同名），所以三种位置一次覆盖，且任意深度都命中。
+ *
+ * `profile.ps1` 也列入：它是 ISE 与部分部署的约定名。
+ */
+export const DANGEROUS_WRITE_FILES_WIN32: readonly string[] = Object.freeze([
+  "Microsoft.PowerShell_profile.ps1",
+  "profile.ps1",
+]);
+
+/**
+ * B5-02 · 凭据目录前缀（任意深度的**连续组件**序列）。
+ *
+ * 与 [DANGEROUS_WRITE_DIRS] 的区别是「跨平台」：`.aws`/`.gnupg` 在 Linux 上
+ * 同样是凭据面，所以这一份**不分平台**。
+ *
+ * 挡的是「读回来只当数据、用时却是凭据」的那类文件：`credentials` 里是明文
+ * 长期密钥；`config.json` 决定 registry 从哪拉镜像；`config`(kube) 是集群
+ * 凭据。agent 改这些 = 把用户下一次 push/pull/docker/kubectl 的身份换掉。
+ *
+ * 多组件序列（而不是单组件）是为了**不误伤**：仓库里若有 `docs/aws/` 这样的
+ * 普通目录不该被拒，所以列成 `[".aws"]` 只在**首层就是** `.aws` 时命中 ——
+ * 这正是「任意深度、连续组件」规则的语义：`a/.aws/x` 命中，`docs/aws/x` 不命中。
+ */
+export const DANGEROUS_WRITE_DIR_PREFIXES_CREDENTIAL: readonly (readonly string[])[] = Object.freeze([
+  Object.freeze([".aws"]),
+  Object.freeze([".gnupg"]),
+  Object.freeze([".docker", "config.json"]),
+  Object.freeze([".kube", "config"]),
+  Object.freeze([".azure"]),
+  Object.freeze([".gcloud"]),
+  Object.freeze([".config", "gcloud"]),
+]);
+
+/**
+ * B5-02 · 凭据**文件**名（最终组件，跨平台）。
+ *
+ * 同样是「写进去的是凭据」而不是「读出来是配置」：`.npmrc` 可以钉死 registry
+ * 与 `//registry.npmjs.org/:_authToken`，`.pypirc` 是 PyPI 上传凭据，
+ * `.netrc`/ `_netrc` 是 curl/wget 的通用凭据文件。
+ */
+export const DANGEROUS_WRITE_FILES_CREDENTIAL: readonly string[] = Object.freeze([
+  ".npmrc",
+  ".pypirc",
+  ".netrc",
+  "_netrc",
+  ".pypirc.ini",
+]);
+
 /** What a write target matched, and under which rule. */
 export interface DenyListMatch {
   /** The deny-list entry that matched, in its documented spelling. */
@@ -135,11 +221,22 @@ function splitSegments(normalized: string, platform: string): string[] {
     .filter((segment) => segment !== "");
 }
 
-/** The documented spellings, joined for the denial message. */
+/**
+ * The documented spellings, joined for the denial message.
+ *
+ * B5-02: the message now also names the credential + Windows entries, because a
+ * refusal a user cannot connect to the LIST they hit is a refusal they will read
+ * as a bug (and route around). The list is per-platform at MATCH time, but the
+ * message states every rule that COULD have fired here — being explicit is
+ * cheaper than a user asking "why is .aws/credentials special?".
+ */
 const LIST_TEXT = [
   DANGEROUS_WRITE_FILES.join(", "),
   DANGEROUS_WRITE_DIRS.join(", "),
   ...DANGEROUS_WRITE_DIR_PREFIXES.map((parts) => parts.join("/")),
+  DANGEROUS_WRITE_FILES_CREDENTIAL.join(", "),
+  ...DANGEROUS_WRITE_DIR_PREFIXES_CREDENTIAL.map((parts) => parts.join("/")),
+  DANGEROUS_WRITE_FILES_WIN32.join(", ") + " (windows)",
 ].join(", ");
 
 /**
@@ -164,8 +261,17 @@ export function denyListMatch(target: string, platform: string = process.platfor
   const folded = segments.map((segment) => foldForCompare(segment, platform));
 
   // ① the final component as an exact file name.
+  //
+  // B5-02: the list is the union of the cross-platform names, the credential
+  // names, and — **win32 only** — the PowerShell profile names. The platform
+  // check lives HERE rather than in the array so the exported constants stay
+  // declarative: one list, one matcher, and a Linux host can never deny a
+  // PowerShell path that does not exist on it.
   const lastFolded = folded[folded.length - 1] as string;
-  for (const file of DANGEROUS_WRITE_FILES) {
+  const fileLists: readonly (readonly string[])[] = isWindows(platform)
+    ? [DANGEROUS_WRITE_FILES, DANGEROUS_WRITE_FILES_CREDENTIAL, DANGEROUS_WRITE_FILES_WIN32]
+    : [DANGEROUS_WRITE_FILES, DANGEROUS_WRITE_FILES_CREDENTIAL];
+  for (const file of fileLists.flat()) {
     if (lastFolded === foldForCompare(file, platform)) return { entry: file, shape: "file" };
   }
 
@@ -177,7 +283,13 @@ export function denyListMatch(target: string, platform: string = process.platfor
   }
 
   // ③ a multi-component directory prefix appearing consecutively at any depth.
-  for (const parts of DANGEROUS_WRITE_DIR_PREFIXES) {
+  //
+  // B5-02: the credential prefixes ([".aws"], [".docker","config.json"], …) join
+  // here. They are cross-platform, so there is no platform branch — the
+  // consecutive-component rule is exactly the semantics ".aws is only special
+  // when it IS the .aws directory", which keeps docs/aws/ writable.
+  const prefixes = [...DANGEROUS_WRITE_DIR_PREFIXES, ...DANGEROUS_WRITE_DIR_PREFIXES_CREDENTIAL];
+  for (const parts of prefixes) {
     const partsFolded = parts.map((part) => foldForCompare(part, platform));
     for (let start = 0; start + partsFolded.length <= folded.length; start += 1) {
       let hit = true;

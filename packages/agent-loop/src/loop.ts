@@ -31,6 +31,7 @@
 import {
   AgentError,
   formatInjection,
+  LlmError,
   type AgentConfig,
   type AgentLoop,
   type Context,
@@ -136,6 +137,56 @@ export interface AgentLoopBindings {
 export const MAX_STEER_EXTENSIONS = 8;
 
 /**
+ * B2-02: the turn's terminal state for a value THROWN out of a seam.
+ *
+ * The problem this removes. A provider failure used to be reported one of two
+ * ways depending on which decorator happened to be armed:
+ *
+ *   - no decorator: `client.generate()` rejects, and `generate()` above built
+ *     `{ error: { kind: "generate" } }` from it;
+ *   - `@celestea/llm`'s fallback/retry decorators are async GENERATORS, so an
+ *     attempt that cannot be recovered re-THROWS out of the generator body. The
+ *     loop saw that as a mid-stream iterator rejection and hard-coded
+ *     `kind: "stream"` — for a failure that happened before any stream existed.
+ *
+ * The same upstream 401 therefore landed in `turn_end` as `generate` in one
+ * deployment and `stream` in another, purely because of a config switch.
+ * `TurnOutcome.error.kind` is a machine-readable field that callers branch on
+ * (the usage ledger books it as `error_kind`, and
+ * `contracts/session-event.schema.json` freezes its values), so that fork made
+ * every kind-based aggregate untrustworthy.
+ *
+ * The rule is now ONE sentence: a thrown `LlmError` is believed, because it is
+ * the provider seam's own structured classification. A value carrying no
+ * classification cannot be reasoned about, so the CALL SITE names the default —
+ * and it is the only party that knows: an opaque failure from `generate()` never
+ * produced a stream, while the same opaque failure from `iter.next()` is the one
+ * way a stream can break. `errorOutcomeFromThrown` is exported so that mapping is
+ * testable on its own rather than only through a whole turn.
+ *
+ * A `timeout` kind folds to `"generate"` — a guard trips BEFORE any stream
+ * exists — because `TurnOutcome.error.kind` is frozen to
+ * `"generate" | "stream"` (`core/src/types.ts:22`); the timeout
+ * distinction stays visible in the message (`llm timeout: …`) and in the
+ * provider seam's own event, exactly as the host adapter in
+ * `apps/studio/src/runtime/llm-assembly.ts` already does.
+ */
+export function errorOutcomeFromThrown(
+  error: unknown,
+  unclassified: "generate" | "stream" = "generate",
+): { error: { kind: "generate" | "stream"; message: string } } {
+  const kind = error instanceof LlmError ? error.kind : null;
+  if (kind === "stream") return { error: { kind: "stream", message: errorMessage(error) } };
+  // "generate" and "timeout" both mean "the call never produced a stream".
+  if (kind === "generate" || kind === "timeout") return { error: { kind: "generate", message: errorMessage(error) } };
+  // No classification to preserve: the answer comes from WHERE it was thrown.
+  // A bare Error from `generate()` is a pre-stream failure; the same bare Error
+  // from `iter.next()` is the only way a stream can break, and the caller knows
+  // which, so it says so.
+  return { error: { kind: unclassified, message: errorMessage(error) } };
+}
+
+/**
  * W1510: discarded-and-reissued attempts per step before the guard truncates.
  * Ported from the plugin's `maxDegenerationRetries: 2` — two chances to get a
  * clean attempt, then a cut, because a model that has collapsed three times on
@@ -239,7 +290,8 @@ export class DefaultAgentLoop implements AgentLoop {
       // broken seam is still visible to the caller.
       failed = true;
       failure = error;
-      outcome = { error: { kind: "generate", message: errorMessage(error) } };
+      // B2-02: same normalizer — a thrown LlmError keeps its own kind.
+      outcome = errorOutcomeFromThrown(error);
     }
 
     // P0-A: exactly one TurnEnd per turn, log and event stream written as a pair
@@ -365,8 +417,9 @@ export class DefaultAgentLoop implements AgentLoop {
     if (raced.outcome === "aborted") return { kind: "cancelled" };
     if (raced.outcome === "failed") {
       // Generation failure is a terminal error state with a TurnEnd (R1),
-      // never a silent return.
-      return { kind: "failed", outcome: { error: { kind: "generate", message: errorMessage(raced.error) } } };
+      // never a silent return. B2-02: the SAME normalizer as the mid-stream
+      // path, so one failure reports one kind whichever seam threw it.
+      return { kind: "failed", outcome: errorOutcomeFromThrown(raced.error) };
     }
     return { kind: "ok", stream: raced.value };
   }
@@ -438,7 +491,9 @@ export class DefaultAgentLoop implements AgentLoop {
         break;
       }
       if (next.outcome === "failed") {
-        out.terminal = { error: { kind: "stream", message: errorMessage(next.error) } };
+        // B2-02: believed the LlmError's own kind instead of hard-coding "stream".
+        // An unclassified throw from the iterator is by definition a broken stream.
+        out.terminal = errorOutcomeFromThrown(next.error, "stream");
         break;
       }
       if (next.value.done === true) break;

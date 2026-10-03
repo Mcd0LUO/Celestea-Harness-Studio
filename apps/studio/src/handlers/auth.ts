@@ -21,7 +21,7 @@
 
 import type { Context, Hono } from "hono";
 import type { RouteTable } from "../routes.js";
-import { failJson, type Deps } from "./common.js";
+import { DEFAULT_JSON_BODY_BYTES, failJson, type Deps } from "./common.js";
 import {
   AUTH_COOKIE,
   AUTH_MAX_FAILURES,
@@ -95,6 +95,19 @@ function attemptKeys(c: Context, user: string): string[] {
 async function loginResponse(c: Context, gate: Gate): Promise<Response> {
   const wantsJson = prefersJson(c);
   const creds = await credentialsOf(c);
+  // B7-1: an over-length body is refused BEFORE any credential work, and it is
+  // NOT counted as a failed attempt — a 64 MiB body is a malformed request, not
+  // a guess, and charging it to the failure limiter would let one oversized
+  // request lock a legitimate user out of their own login form.
+  if (creds !== null && "oversize" in creds) {
+    return denied(
+      c,
+      wantsJson,
+      413,
+      `request body is over the ${LOGIN_BODY_BYTES}-byte limit`,
+      "请求体过大",
+    );
+  }
   if (creds === null) return denied(c, wantsJson, 401, "invalid username or password", "用户名或密码不正确");
   const keys = attemptKeys(c, creds.user);
   if (keys.some((key) => gate.limiter.blocked(key))) {
@@ -122,14 +135,59 @@ function denied(c: Context, wantsJson: boolean, status: number, error: string, p
   return wantsJson ? failJson(c, status, error) : pageResponse(loginPage(pageError), status);
 }
 
-/** `{username, password}` out of a form post OR a JSON body; null when absent. */
-async function credentialsOf(c: Context): Promise<{ user: string; pass: string } | null> {
+/**
+ * B7-1 (audit round 3): the login body's ceiling.
+ *
+ * Why this route had none. W9230 added `DEFAULT_JSON_BODY_BYTES` to
+ * `readJsonBody`, and its own module comment (handlers/common.ts:110-120)
+ * names this route as one of the two it was written FOR — "an unauthenticated
+ * `/auth/login` (not under the token gate) ... could be handed an arbitrarily
+ * large body and OOM the process". But login never came through
+ * `readJsonBody`: it has to accept a urlencoded FORM post as well as JSON, so
+ * it read the body itself and the ceiling never reached it. Measured on a live
+ * listener before the fix: a 64 MiB form body was buffered in full (heap +30.6
+ * MiB, no 413) while the same bytes on `POST /api/config` were refused 413.
+ *
+ * 1 MiB is the same ceiling every other JSON route uses and is astronomically
+ * above a username/password pair; a login that needs more than 1 MiB is not a
+ * login. An unauthenticated, uncounted 64 MiB read is a free OOM for anyone who
+ * can reach the port.
+ */
+const LOGIN_BODY_BYTES = DEFAULT_JSON_BODY_BYTES;
+
+/**
+ * Read the login body under a ceiling, or null when it is absent/oversize.
+ *
+ * Same two-half shape as `readJsonBody` (common.ts:142-155), for the same two
+ * reasons: `content-length` is refused BEFORE a single byte is buffered (the
+ * declared length is attacker-chosen but the refusal it triggers costs nothing),
+ * and the bytes actually read are re-checked because a chunked request declares
+ * no length at all. UTF-16 code units are a LOWER bound on the byte count, so
+ * this errs in the safe direction.
+ */
+async function readLoginBody(
+  c: Context,
+  maxBytes = LOGIN_BODY_BYTES,
+): Promise<{ ok: true; raw: string } | { ok: false; oversize: true } | { ok: false; oversize: false }> {
+  const declared = Number.parseInt(c.req.header("content-length") ?? "", 10);
+  if (Number.isFinite(declared) && declared > maxBytes) return { ok: false, oversize: true };
   let raw: string;
   try {
     raw = await c.req.text();
   } catch {
-    return null;
+    return { ok: false, oversize: false };
   }
+  if (raw.length > maxBytes) return { ok: false, oversize: true };
+  return { ok: true, raw };
+}
+
+/** `{username, password}` out of a form post OR a JSON body; null when absent. */
+async function credentialsOf(
+  c: Context,
+): Promise<{ user: string; pass: string } | { oversize: true } | null> {
+  const read = await readLoginBody(c);
+  if (!read.ok) return read.oversize ? { oversize: true } : null;
+  const raw = read.raw;
   if (raw.trim() === "") return null;
   const type = (c.req.header("content-type") ?? "").toLowerCase();
   if (type.includes("json")) {

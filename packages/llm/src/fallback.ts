@@ -326,7 +326,50 @@ async function* attemptLoop(rt: FallbackRuntime, req: ModelRequestDraft): LlmStr
     }
     from = target.name;
   }
-  throw lastError ?? new LlmError("llm fallback: every target failed", "generate", { retryable: false });
+  // B2-03: the chain is exhausted. This used to be a bare `throw lastError`,
+  // which skipped the stream-event contract entirely: no terminal frame, no
+  // usage frame, and (because a thrown error is re-boxed by the caller) the
+  // `httpStatus` / `retryable` the decorators already computed were dropped on
+  // the floor. "A and B were both 503" then arrived at the caller as "the
+  // stream broke" — precisely the information an operator needs.
+  //
+  // Emitting the terminal EVENT keeps this failure on the same error surface as
+  // every other one: the host and the loop already know what to do with a
+  // `failed` frame, and the classification reaches them intact.
+  yield terminalEventFor(lastError);
+}
+
+/**
+ * B2-03: the terminal frame a chain-exhaustion maps to.
+ *
+ * `lastError` is whatever the LAST attempt threw (an `LlmError` carrying
+ * `httpStatus` / `retryable`, in the common case). Its `kind` is honoured, and
+ * an unclassified throw keeps the historical "stream" mapping, because the
+ * only thing an opaque value can be is something that broke the stream.
+ *
+ * The synthesized "every target failed" case (no attempt ever set `lastError`,
+ * e.g. an empty plan) is a `generate` failure: no stream was ever produced.
+ */
+function terminalEventFor(lastError: unknown): StreamEvent {
+  if (lastError instanceof LlmError) {
+    return {
+      kind: "failed",
+      kindOf: lastError.kind === "stream" ? "stream" : "generate",
+      message: lastError.message,
+    };
+  }
+  return {
+    kind: "failed",
+    kindOf: "stream",
+    message: errorMessageOf(lastError) ?? "llm fallback: every target failed",
+  };
+}
+
+/** The message of a thrown value, or null when it carries none. */
+function errorMessageOf(error: unknown): string | null {
+  if (error instanceof Error && error.message !== "") return error.message;
+  if (typeof error === "string" && error !== "") return error;
+  return null;
 }
 
 /** The verdict of one consumed attempt. */

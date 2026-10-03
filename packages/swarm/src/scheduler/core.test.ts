@@ -411,7 +411,9 @@ describe("超时", () => {
 
   it("timeoutMs 为 0 或未设时不超时", async () => {
     const h = harness();
-    const p = runSwarm(specsOf(2), h.deps, { timeoutMs: 0 });
+    // maxTotalMs: 0 —— 本用例断言的是「单任务不超时」，而它把时钟推进了 10^7 ms；
+    // 整批预算（B1-03）默认 30 分钟会在那之前取消整批，两者断言的是不同的闸门。
+    const p = runSwarm(specsOf(2), h.deps, { timeoutMs: 0, maxTotalMs: 0 });
     await flush(0);
     await flush(10_000_000);
     h.complete(1);

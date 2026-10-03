@@ -307,7 +307,10 @@ describe("容量收缩与恢复", () => {
     // 本用例全程不 settle 任何成员（advanceClock 不结算，drain 只在最后收尾），
     // 因此它断言的就是"定时器本身还在"以及"那个定时器真的会触发状态变化"。
     const h = harness();
-    const scheduler = new SwarmScheduler(specsOf(8), h.deps, SLOW);
+    // maxTotalMs: 0 —— 本用例断言的是「唤醒定时器始终在」，而它把虚拟时钟推进到 4.5e6 ms
+    // （约 25 个恢复窗口）。整批预算（B1-03）默认 30 分钟会在那之前取消整批；
+    // 两者断言的是不同闸门，所以这里显式关掉批次预算，而不是把它调大到失去意义。
+    const scheduler = new SwarmScheduler(specsOf(8), h.deps, { ...SLOW, maxTotalMs: 0 });
     const p = scheduler.run();
     await flush(0);
     h.rateLimit(1);

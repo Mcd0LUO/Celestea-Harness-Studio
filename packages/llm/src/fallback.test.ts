@@ -345,7 +345,14 @@ function scripted(events: StreamEvent[]): { generate: () => Promise<AsyncIterabl
 }
 
 describe("chain exhaustion", () => {
-  it("throws the last error when every target failed before producing anything", async () => {
+  /**
+   * B2-03: exhaustion is a TERMINAL EVENT, not a throw.
+   *
+   * It used to `throw lastError` out of the async generator, which bypassed the
+   * stream-event contract (no terminal frame, no usage frame) and dropped the
+   * `httpStatus` / `retryable` the decorators had already computed.
+   */
+  it("ends with a failed terminal event carrying the last error's classification", async () => {
     const failing = new LlmError("stream request failed: 503", "generate", { httpStatus: 503, retryable: true });
     const llm = createFallbackLlm({
       targets: [
@@ -356,7 +363,41 @@ describe("chain exhaustion", () => {
         generate: () => Promise.reject(failing),
       }),
     });
-    await expect(collectStream(await llm.generate(REQ))).rejects.toBe(failing);
+    const events = await collectStream(await llm.generate(REQ));
+    const last = events[events.length - 1];
+    // A pre-stream failure is "generate", NOT "stream" (B2-02 and B2-03 together).
+    expect(last).toEqual({ kind: "failed", kindOf: "generate", message: "stream request failed: 503" });
+  });
+
+  it("does not reject generate() when the chain is exhausted", async () => {
+    const failing = new LlmError("stream request failed: 503", "generate", { httpStatus: 503, retryable: true });
+    const llm = createFallbackLlm({
+      targets: [{ name: "a", provider: "a", model: "m-a" }],
+      clientFor: () => ({ generate: () => Promise.reject(failing) }),
+    });
+    await expect(collectStream(await llm.generate(REQ))).resolves.toBeDefined();
+  });
+
+  it("keeps a genuinely mid-stream failure as kindOf stream", async () => {
+    // The mirror image: an LlmError that IS a stream failure must not be
+    // laundered into "generate" by the exhaustion path.
+    const tearing = new LlmError("sse decode error: upstream hung up", "stream", { retryable: true });
+    const llm = createFallbackLlm({
+      targets: [
+        { name: "a", provider: "a", model: "m-a" },
+        { name: "b", provider: "b", model: "m-b" },
+      ],
+      clientFor: () => ({
+        generate: async () => ({
+          async *[Symbol.asyncIterator]() {
+            throw tearing;
+          },
+        }),
+      }),
+    });
+    const events = await collectStream(await llm.generate(REQ));
+    const last = events[events.length - 1];
+    expect(last).toEqual({ kind: "failed", kindOf: "stream", message: "sse decode error: upstream hung up" });
   });
 
   it("requires at least one target", () => {
@@ -367,7 +408,9 @@ describe("chain exhaustion", () => {
 // W835 (R3 batch C / W811 P1-2): the last target must not sleep Retry-After.
 // Source: W826-R3修复计划 §批次 C P1-2 probe (真实 fallback 入口 + sleep spy).
 describe("W835 P1-2 — no Retry-After sleep once the chain is exhausted", () => {
-  it("does not sleep and rethrows the original error for a single failed target", async () => {
+  // B2-03: the shape of the terminal changed (a `failed` event, not a throw); the
+  // property this case guards — NO sleep once nothing is left to try — is unchanged.
+  it("does not sleep and reports a terminal failure for a single failed target", async () => {
     const only = await startMockUpstream("http-error", {
       status: 429,
       headers: { "retry-after": "2" },
@@ -387,7 +430,8 @@ describe("W835 P1-2 — no Retry-After sleep once the chain is exhausted", () =>
       sleep: async (ms) => void waits.push(ms),
     });
 
-    await expect(collectStream(await llm.generate(REQ))).rejects.toBeInstanceOf(LlmError);
+    const events = await collectStream(await llm.generate(REQ));
+    expect(events[events.length - 1]).toMatchObject({ kind: "failed" });
     expect(waits).toEqual([]);
     await only.close();
   });

@@ -13,6 +13,7 @@ import type {
   SwarmAttemptContext,
   SwarmAttemptResult,
   SwarmExecutor,
+  SwarmSchedulerConfig,
   SwarmState,
   SwarmTaskResult,
   SwarmTaskSpec,
@@ -88,7 +89,7 @@ export function abortedResult(state: ResultTaskState, agentId: string | undefine
 /** 单次尝试的产出：要么落定成一个结果，要么是一次限流（交回调用方重排队）。 */
 export type AttemptOutcome =
   | { type: "settled"; result: SwarmTaskResult }
-  | { type: "rate_limited"; agentId?: string; error: unknown };
+  | { type: "rate_limited"; agentId?: string; error: unknown; usedTool: boolean };
 
 /** 闸门与中继共同依赖的最小调度器视图（core.ts 的 #deps 满足它）。 */
 export interface AttemptGateDeps {
@@ -172,7 +173,14 @@ export async function runAttemptOnce(ctx: AttemptRunContext): Promise<AttemptOut
     outcome = await ctx.executor.run(state.spec, attemptContext);
   } catch (error) {
     if (ctx.isRateLimitError(error)) {
-      return { type: "rate_limited", ...(agentId === undefined ? {} : { agentId }), error };
+      // usedTool 让调度器能拒绝重放一个已经动过外部世界的 attempt（W9290 B1-04）：
+      // 限流发生在 provider 响应阶段，而工具副作用通常在那之前就已经发生。
+      return {
+        type: "rate_limited",
+        ...(agentId === undefined ? {} : { agentId }),
+        error,
+        usedTool: isUsedToolError(error),
+      };
     }
     const message = error instanceof Error ? error.message : String(error);
     return {
@@ -250,6 +258,136 @@ export function attemptGate(
         attempt.controller.abort(new Error(TIMED_OUT));
         onExpired();
       }, timeoutMs);
+    },
+  };
+}
+
+/**
+ * 一个被校验的数值字段：`>= min`（可选再要求整数），且**必须有限**。
+ */
+export interface NumericField {
+  key: keyof SwarmSchedulerConfig & string;
+  value: number;
+  /** 下界（闭区间）。 */
+  min: number;
+  /** true = 还必须是整数。 */
+  integer: boolean;
+}
+
+/**
+ * **`SwarmSchedulerConfig` 的全部数值字段与其合法下界**（W9290 B1-05）。
+ *
+ * 为什么必须是**一张穷尽的表**而不是若干条 if：这个契约的失败模式是「静默失效」——
+ * `NaN` 与任何数比较都 false，于是 `NaN <= 0` 为 false 会真的装一支定时器，而 Node 把它
+ * 当 1ms；`initialLaunchIntervalMs: NaN` 则退化成 0ms 忙等；`Infinity` 让超时永不触发。
+ * 每一个漏校验的字段都会**静默**变成一个「看起来生效、其实不是」的行为，而它只在慢路径上
+ * 现形。列全这张表并让「新增字段忘记校验」成为一次编译期可见的遗漏（下面按字段逐个列出，
+ * 不用 `Object.keys` 反射——反射会让漏加字段在类型上完全无声）。
+ *
+ * `min: 0` 表示「0 是有意义的值」；真正要区分「0 = 禁用」的字段在下表里显式标出。
+ */
+export const SWARM_NUMERIC_FIELDS: readonly NumericField[] = [
+  // 首波放几个：至少 1，否则首波一个都放不出去。
+  { key: "initialLaunchLimit", value: 0, min: 1, integer: false },
+  // 放量间隔：0 = 不额外等待（忙跑，合法但昂贵）。
+  { key: "initialLaunchIntervalMs", value: 0, min: 0, integer: false },
+  // 退避基数：0 = 不退避（合法，测试用）。
+  { key: "retryBaseMs", value: 0, min: 0, integer: false },
+  // 退避因子：>= 1，否则第 n 次退避比第 1 次还短。
+  { key: "retryFactor", value: 0, min: 1, integer: false },
+  // 收缩防抖：0 = 每次限流都立刻收缩。
+  { key: "capacityShrinkDebounceMs", value: 0, min: 0, integer: false },
+  // 恢复间隔：**必须 >= 1**，否则 nextWakeupAt 的兜底分支会退化成自旋。
+  { key: "capacityRecoveryIntervalMs", value: 0, min: 1, integer: false },
+  { key: "maxConcurrency", value: 0, min: 1, integer: true },
+  // 单成员超时：**0 = 禁用**（显式定义，消解上游 D8 的 undefined/0 歧义），故下界 0。
+  { key: "timeoutMs", value: 0, min: 0, integer: false },
+  { key: "maxRateLimitRetries", value: 0, min: 1, integer: true },
+  // 整批墙钟预算：0 = 禁用（与 timeoutMs 同义），故下界 0。
+  { key: "maxTotalMs", value: 0, min: 0, integer: false },
+  // 整批退避上限：0 = 不允许任何重排队（合法：立刻判死，别把墙钟耗在退避上）。
+  { key: "maxBatchRateLimitRetries", value: 0, min: 0, integer: true },
+];
+
+/** 按 resolved 配置把上面那张表填上真实值。 */
+export function numericFieldsOf(config: SwarmSchedulerConfig): NumericField[] {
+  return SWARM_NUMERIC_FIELDS.map((field) => ({ ...field, value: config[field.key] }));
+}
+
+/**
+ * 单个数值字段的合法性判定。**有限性优先于一切**：
+ * `NaN`/`Infinity` 不是「一个很大的数」，而是「这个数没有定义」，任何比较都不成立。
+ */
+export function assertSaneNumber(key: string, value: number, min: number, integer: boolean): void {
+  if (!Number.isFinite(value)) {
+    throw new Error(`${key} must be a finite number, got ${String(value)}.`);
+  }
+  if (integer && !Number.isInteger(value)) {
+    throw new Error(`${key} must be an integer >= ${String(min)}, got ${String(value)}.`);
+  }
+  if (!(value >= min)) {
+    throw new Error(`${key} must be >= ${String(min)}, got ${String(value)}.`);
+  }
+}
+
+/**
+ * 读出「这个 attempt 是否已经执行过工具调用」（W9290 B1-04）。
+ *
+ * 判据走结构而非 `instanceof`：`SwarmMemberFailedError` 是 executor 的类，而本模块刻意
+ * 不 import 它（results.ts 不该知道执行器的实现）。字段 duck-typing 在这里是安全的：
+ * 只有 executor 会写 `usedTool`，缺字段即 false（= 没有副作用），与构造器缺省一致。
+ */
+function isUsedToolError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  return (error as { usedTool?: unknown }).usedTool === true;
+}
+
+/**
+ * 整批墙钟预算的武装结果：只有 `disarm`，没有别的（W9290 B1-03）。
+ *
+ * 做成「返回一个撤除句柄」而不是「在调度器里存一个 timer 字段」，是为了让预算与
+ * attempt 闸门共享同一种形状——两者都是「武装在别处、撤除在收尾处」，而收尾只有一处。
+ */
+export interface BatchBudget {
+  /** 撤除预算定时器（幂等）。 */
+  disarm(): void;
+}
+
+/** 什么也不撤除的预算：对应「未武装」。 */
+export const NO_BUDGET: BatchBudget = { disarm: () => undefined };
+
+/**
+ * 武装**整批**墙钟预算（`maxTotalMs`，0 = 禁用）—— W9290 B1-03。
+ *
+ * **为什么它不能由 per-attempt 的 timeoutMs 拼出来**：一批的代价是「波数 × 每波上限」，
+ * 而波数（成员数 ÷ maxConcurrency）在配置期根本不知道实际会跑几波；即使知道，
+ * 128 成员 ÷ 16 并发 × 2h 也已经是 16 小时。宿主等的是**整批**的结果，所以必须有一条
+ * 与 attempt 无关的整批闸门。
+ *
+ * 到点的动作 = **与用户中断完全同一条路径**（调用方传进来的 `onExpire`）：未落定的成员
+ * 记 aborted、队列清空、在跑的成员收到 abort。这不是新语义——「批次被取消」这套形状早已
+ * 存在，预算只是给它加了一个**宿主自己也能调的**触发源，并把「一定落定」变成可依赖的。
+ */
+export function armBatchBudget(
+  deps: { setTimeout(handler: () => void, ms: number): unknown; clearTimeout(handle: unknown): void },
+  maxTotalMs: number,
+  onExpire: () => void,
+): BatchBudget {
+  if (!(maxTotalMs > 0)) return NO_BUDGET;
+  let handle: unknown;
+  let closed = false;
+  handle = deps.setTimeout(() => {
+    closed = true;
+    handle = undefined;
+    onExpire();
+  }, maxTotalMs);
+  return {
+    disarm: () => {
+      if (closed || handle === undefined) return;
+      closed = true;
+      const h = handle;
+      handle = undefined;
+      deps.clearTimeout(h);
     },
   };
 }

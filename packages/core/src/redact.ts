@@ -44,12 +44,43 @@ export const DEFAULT_RULES: RedactionRule[] = [
   { id: "env-assignment", re: /([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*\s*=\s*)("?)([^\s"'\\]{8,})\2/g, replace: "$1$2" + PLACEHOLDER + "$2" },
   { id: "aws-key", re: /AKIA[0-9A-Z]{16}/g, replace: PLACEHOLDER },
   // Cookie / Set-Cookie header values (a live session cookie is a credential).
-  { id: "cookie-header", re: /((?:set-)?cookie\s*:\s*)([^\r\n"'\\]{8,})/gi, replace: "$1" + PLACEHOLDER },
+  //
+  // B6-02: the separator is [ \t]*, NOT \s*. The value class already excludes
+  // \r\n, but a \s* PREFIX happily eats the newline, so a cookie header was
+  // followed by the NEXT line being claimed as its value. That in turn made the
+  // leak check itself wrong: leaksAfter() replaces <REDACTED> with a SPACE, which
+  // re-joins "cookie:  <next line>" into a fresh match, so assertClean threw on
+  // output that was already perfectly redacted -- and writeText() throws on every
+  // file, so one ordinary multi-line session log aborted the whole export.
+  { id: "cookie-header", re: /((?:set-)?cookie[ \t]*:[ \t]*)([^\r\n"'\\]{8,})/gi, replace: "$1" + PLACEHOLDER },
   // Service-issued bearer tokens such as `dsh-auth-<token>`.
   { id: "service-auth-token", re: /-auth-[A-Za-z0-9_-]{12,}/g, replace: "-auth-" + PLACEHOLDER },
   // Any `...token=<value>` / `...key=<value>` / `...secret=<value>` assignment
   // with a token-shaped (12+ char) value. Prose like `?token=...` stays intact.
-  { id: "credential-assignment", re: /(\b[A-Za-z0-9_]*(?:token|secret|passwd|password|apikey|api_key|auth)[A-Za-z0-9_]*\s*[=:]\s*)([A-Za-z0-9_\-.]{12,})/gi, replace: "$1" + PLACEHOLDER },
+  //
+  // B6-03: the NAME class was [A-Za-z0-9_]* -- no hyphen -- while the VALUE class
+  // already allowed one. A name may not contain the same character its own value
+  // may, so every hyphenated credential name fell into the gap: a bare header line
+  // `x-api-key: <key>` (the actual Anthropic auth header this repo speaks, and the
+  // form HTTP dumps use -- no quotes) passed through untouched while the QUOTED
+  // form was caught by authorization-header, so neither rule backed up the other.
+  // The api_key spelling also becomes api[_-]?key for the same reason.
+  {
+    id: "credential-assignment",
+    re: /(\b[A-Za-z0-9_-]*(?:token|secret|passwd|password|apikey|api[_-]?key|auth)[A-Za-z0-9_-]*\s*[=:]\s*)([A-Za-z0-9_\-.]{12,})/gi,
+    replace: "$1" + PLACEHOLDER,
+  },
+  // B6-04: URL userinfo -- `postgres://user:pass@host/db`, `https://u:p@host/`.
+  // A connection string is one of the most common things a tool argument, a .env
+  // dump or an upstream error carries, and the password had no rule at all: no
+  // prefix, no assignment, nothing for the shape rules to match. The userinfo
+  // section is bounded by the LAST @ before the host, so an @ inside the host or
+  // the path is not mistaken for one, and a URL without a password is untouched.
+  {
+    id: "url-userinfo",
+    re: /(\b[a-z][a-z0-9+.-]*:\/\/)([^\s\/@:]{1,64}:)([^\s\/@]{3,})@/gi,
+    replace: "$1$2" + PLACEHOLDER + "@",
+  },
   // NOTE: no generic `_authToken=<value>` rule on purpose. Session logs contain
   // sed regex prose such as `s/(_authToken=)[A-Za-z0-9._-]+/.../`; the real
   // npm token is caught by the npm-token rule and by the registered-secret pass
@@ -73,7 +104,10 @@ export interface Redactor {
  * credential-shaped.
  */
 const CREDENTIAL_CONTEXTS: readonly RegExp[] = [
-  /(?:set-)?cookie\s*:\s*([^\r\n"'\\]{8,})/gi,
+  // B6-02: [ \t]* for the same reason as the cookie-header rule above -- a
+  // \s* prefix crosses the newline and harvests the following line as a
+  // credential, which both over-registers and re-breaks the leak check.
+  /(?:set-)?cookie[ \t]*:[ \t]*([^\r\n"'\\]{8,})/gi,
   /authorization\s*:\s*([^\r\n"'\\]{8,})/gi,
   /bearer\s+([A-Za-z0-9._~+/=-]{8,})/gi,
   /\b[A-Za-z0-9_]*(?:token|secret|password|passwd|apikey|api_key|auth)[A-Za-z0-9_]*\s*[=:]\s*("?)([A-Za-z0-9_\-.+/=]{8,})\1/gi,

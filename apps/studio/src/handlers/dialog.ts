@@ -21,14 +21,100 @@ import { join } from "node:path";
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { TurnBusyError } from "@celestea/runtime";
-import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_DIRNAME, createAttachmentStore } from "@celestea/tools";
+import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_DIRNAME, createAttachmentStore, idle, TIMED_OUT } from "@celestea/tools";
 import type { ImageRef } from "@celestea/core";
 import { CapacityError, type TurnDeliveryMode } from "../runtime-adapter.js";
 import type { RouteTable } from "../routes.js";
 import type { StoreResult } from "../store/result.js";
 import { activeSession, capacityJson, DEFAULT_JSON_BODY_BYTES, errorOnly, failJson, readJsonBody, storeFail, strField, type Deps } from "./common.js";
 
-function registerEvents(app: Hono, deps: Deps, table: RouteTable): string {
+/**
+ * B7-2 (audit round 3): the idle-stream heartbeat interval.
+ *
+ * `contracts/sse-events.json` declares `transport.keepAlive: true` and
+ * `contracts/endpoints.json`'s `get_events` notes repeat "KeepAlive
+ * enabled" — but nothing implemented it. The read loop below used to await
+ * `sub.next()`, and a bus with no traffic leaves that promise unsettled
+ * forever, so an idle connection wrote ZERO bytes: measured 0 bytes over a
+ * 10s idle window. Every proxy and load balancer in front of a public
+ * deployment then reaps the connection on its own idle timeout, and the
+ * client sees the event stream die silently — no error, no reconnect, the UI
+ * simply stops updating. That is the exact failure `keepAlive` exists to
+ * prevent, and the contract had been claiming otherwise the whole time.
+ *
+ * 25s sits under the 30-60s idle window that nginx (the documented front, see
+ * handlers/auth.ts) and cloud load balancers actually use, so the connection
+ * is always the thing that speaks first.
+ */
+export const SSE_KEEPALIVE_MS = 25_000;
+
+/**
+ * The bytes of one heartbeat.
+ *
+ * A **comment frame** (a line starting with `:`), by deliberate choice over
+ * the two alternatives:
+ *
+ *   · it is a no-op for the client. Per the SSE spec a comment line is
+ *     ignored entirely, and `apps/web/src/sse.ts` dispatches with
+ *     `es.addEventListener(name, ...)` for the ten frozen event names — an
+ *     event-less frame therefore reaches **no** handler, so a heartbeat can
+ *     never be mistaken for a turn, a status or a lagged marker;
+ *   · it does not touch the contract. `tools/check-sse-events.mjs` compares
+ *     the event-name SET across contracts/sse-events.json, core's
+ *     `SSE_EVENT_NAMES` and the frontend's `EVENT_NAMES`; a frame with no
+ *     `event:` field adds no name to any of the three, so `contracts/**`
+ *     stays byte-identical;
+ *   · it does not consume a `seq`. The P5 replay harness compares the frame
+ *     stream byte-for-byte, so spending a sequence number on a synthetic
+ *     frame would make replay non-deterministic.
+ *
+ * Hono's `SSEMessage` requires a `data` field and so cannot express a
+ * comment; `SSEStreamingApi` extends `StreamingApi`, whose `write()` is the
+ * same primitive `writeSSE` itself calls, so one raw line is written here.
+ */
+const SSE_KEEPALIVE_FRAME = ": keepalive\n\n";
+
+/**
+ * The next real frame, [TIMED_OUT] when the stream went quiet for a full
+ * interval, or null when the subscription is closed.
+ *
+ * W2014: this is the sanctioned [idle] primitive from `@celestea/tools`, not a
+ * hand-rolled race. That primitive is the repo's single deadline
+ * implementation (`packages/tools/src/sandbox/async.ts`), and its module
+ * header names this exact shape as one of the call sites that motivated it:
+ * captureSseWire hands every reader.read() the SAME 300 ms and gives up only
+ * when the stream itself goes quiet. Each `sub.next()` here is one demand
+ * against the IDLE clock, so [idle] is the honest name for it.
+ *
+ * Two properties come from the primitive and were worth the hand-rolled version
+ * I first wrote: the timer is cleared in a `finally` (a busy stream produces
+ * thousands of frames, and one leaked 25s timer per frame would be thousands of
+ * live handles), and a rejection that lands AFTER the idle deadline already won
+ * is swallowed instead of surfacing as an unhandled rejection.
+ *
+ * The [TIMED_OUT] sentinel is also what keeps this call site honest: a busy
+ * stream must be able to tell a quiet stream (heartbeat) from a CLOSED
+ * subscription (break) — two different loop exits that a single `null`
+ * conflates, and conflating them hangs the loop forever.
+ */
+export async function nextFrameOrKeepalive<T>(
+  sub: { next(): Promise<T | null> },
+  keepAliveMs: number = SSE_KEEPALIVE_MS,
+): Promise<T | null | typeof TIMED_OUT> {
+  return idle(sub.next(), keepAliveMs);
+}
+/**
+ * B7-2: the keepalive interval is a parameter, not a constant baked into the
+ * loop, so the end-to-end test can drive a real handler on a millisecond
+ * interval instead of waiting 25s (or fighting vitest's fake clock against a
+ * TransformStream — the two do not mix: the timer fires but the reader never
+ * settles, which is exactly the deadlock the first draft of the test hit).
+ */
+export interface DialogOptions {
+  keepAliveMs?: number;
+}
+
+function registerEvents(app: Hono, deps: Deps, table: RouteTable, keepAliveMs: number): string {
   const events = table.get("get_events");
   app.on(events.method, events.honoPath, (c) => {
     const asked = c.req.queries("session") ?? [];
@@ -37,7 +123,27 @@ function registerEvents(app: Hono, deps: Deps, table: RouteTable): string {
       stream.onAbort(() => sub.close());
       try {
         for (;;) {
-          const frame = await sub.next();
+          // A heartbeat makes a dead stream reachable in a way the old
+          // never-settling await did not: without this guard the loop keeps
+          // waking and calling write() on a stream the client has already
+          // cancelled, which hangs the write forever and leaks the loop (the
+          // test suite would not exit). `aborted` is Hono's own signal that
+          // the readable side is gone.
+          if (stream.aborted) break;
+          // B7-2: give the next frame ONE idle budget. A real frame wins and
+          // resets the clock, so a busy stream heartbeats only when it has
+          // genuinely been quiet for a full interval (no extra bytes on a live
+          // connection); an expired budget only writes the comment frame.
+          const frame = await nextFrameOrKeepalive(sub, keepAliveMs);
+          // Two exits, now distinguishable only because the deadline resolves
+          // the TIMED_OUT sentinel instead of a null that the bus also uses.
+          if (frame === TIMED_OUT) {
+            await stream.write(SSE_KEEPALIVE_FRAME);
+            continue;
+          }
+          // null = the subscription closed (the pre-keepalive `break`). Losing
+          // this arm is what conflating the two would cost: the loop would
+          // heartbeat forever on a dead subscription.
           if (frame === null) break;
           await stream.writeSSE({ event: frame.event, data: JSON.stringify(frame.envelope) });
         }
@@ -295,6 +401,17 @@ function registerClear(app: Hono, deps: Deps, table: RouteTable): string {
   return clear.id;
 }
 
-export function registerDialog(app: Hono, deps: Deps, table: RouteTable): string[] {
-  return [registerEvents(app, deps, table), registerTurn(app, deps, table), registerCancel(app, deps, table), registerClear(app, deps, table)];
+export function registerDialog(
+  app: Hono,
+  deps: Deps,
+  table: RouteTable,
+  opts: DialogOptions = {},
+): string[] {
+  const keepAliveMs = opts.keepAliveMs ?? SSE_KEEPALIVE_MS;
+  return [
+    registerEvents(app, deps, table, keepAliveMs),
+    registerTurn(app, deps, table),
+    registerCancel(app, deps, table),
+    registerClear(app, deps, table),
+  ];
 }

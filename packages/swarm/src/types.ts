@@ -158,6 +158,29 @@ export interface SwarmSchedulerConfig {
    * 给定值必须是 >= 1 的整数。
    */
   maxRateLimitRetries: number;
+  /**
+   * **整批**的墙钟预算（毫秒，W9290 B1-03）。**0 = 禁用**（与 timeoutMs 同义）。
+   *
+   * 为什么必须有它（`timeoutMs` 为什么不够）：`timeoutMs` 是 **per-attempt** 的，而一拍的
+   * 代价是「成员数 ÷ maxConcurrency」波 × 每波 timeoutMs。128 成员 ÷ 16 并发 = 8 波，
+   * 默认 timeoutMs 2h ⇒ 静态上限就是 16 小时；限流重试（per-task 3 次，退避 3s×2ⁿ）叠上去
+   * 还会更长。**没有任何一个 per-task 的阈值能给出整批的上界**——而宿主等的就是整批。
+   *
+   * 到点即**取消整批**（与用户中断同一条通道，未落定的成员记 aborted），所以这个预算
+   * 对模型是可读、可预期、且一定落定的：它不改变「谁成功」，只保证「多久必须有个结果」。
+   */
+  maxTotalMs: number;
+  /**
+   * **整批**允许累计多少次限流重排队（>= 0 的整数；0 = 不允许，W9290 B1-03）。
+   *
+   * 为什么与 per-task 的 `maxRateLimitRetries` 不是一回事：后者按**成员**计数，所以
+   `128` 个成员各重试 `maxRateLimitRetries` 次 = 128×N 次退避，批次的总墙钟
+   * 依然没有上界。这一个按**批次**计数，于是「整批还能退避多久」变成一个可回答的数。
+   *
+   * **缺省保守**（给一个真实的小上限，而不是 undefined = 无限）：一次瞬时限流值得退避，
+   * 连续几十次只说明 provider 侧已经不可用，继续退避只是把墙钟耗光。
+   */
+  maxBatchRateLimitRetries: number;
 }
 
 export const DEFAULT_SWARM_SCHEDULER_CONFIG: SwarmSchedulerConfig = {
@@ -170,6 +193,14 @@ export const DEFAULT_SWARM_SCHEDULER_CONFIG: SwarmSchedulerConfig = {
   maxConcurrency: 16,
   timeoutMs: 7_200_000,
   maxRateLimitRetries: 3,
+  // 整批预算：默认取「一个保守但够用的上限」而不是无限。
+  // 2 小时的单成员超时 × 8 波 = 16h 显然不是宿主能接受的等待；
+  // 30 分钟覆盖 128 成员在正常速率下跑完（真实 128 成员压测未做，见 feature §10 R1），
+  // 超时则整批取消并如实报 aborted —— 宁可少做，不可悬挂。
+  maxTotalMs: 1_800_000,
+  // 整批退避上限：per-task 是 3，这里给 12 —— 相当于「平均每个成员还能退避一次」，
+  // 足够吸收 provider 的瞬时抖动，又不会让一个已经不可用的 provider 把墙钟耗光。
+  maxBatchRateLimitRetries: 12,
 };
 
 /**

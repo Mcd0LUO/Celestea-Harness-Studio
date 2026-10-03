@@ -42,7 +42,7 @@ import {
 import { SwarmMemberExecutor, SwarmMemberFailedError, SwarmModelError, type SwarmExecutorDeps } from "./executor.js";
 import type { SwarmRegistry } from "./roster.js";
 import { renderSwarmResultSafely } from "./result-xml.js";
-import { runSwarm } from "./scheduler/index.js";
+import { runSwarm, validateSchedulerConfig } from "./scheduler/index.js";
 import {
   DEFAULT_SWARM_SCHEDULER_CONFIG,
   type SwarmSchedulerConfig,
@@ -165,6 +165,16 @@ async function runBatch(deps: SwarmToolDeps, args: unknown): Promise<unknown> {
   }
 }
 async function dispatchBatch(deps: SwarmToolDeps, args: unknown): Promise<unknown> {
+  // 调度参数**先**校验，且走结果信封（W9290 B1-05）：
+  // 非法 config 是宿主装配的问题（不是模型能改的），但它绝不能把异常抛出工具外——
+  // tool.ts 自己的契约是「失败是结果不是异常」，一个 batch 仅仅因为配置非法就杀掉整轮，
+  // 代价与收益完全不对称。校验放在这里（任何成员启动之前）是为了 fail-fast：非法配置
+  // 不该先跑起来再报错。
+  try {
+    validateSchedulerConfig(deps.schedulerConfig);
+  } catch (error) {
+    return contractError("config", error instanceof Error ? error.message : String(error));
+  }
   const validation = validateSwarmInput(readRequest(args));
   if (!validation.ok) {
     return contractError("validate", validation.error.message);

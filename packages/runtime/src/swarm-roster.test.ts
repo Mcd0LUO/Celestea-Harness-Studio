@@ -117,10 +117,13 @@ describe("roster 接线 ①：跑完批次后 roster 与 XML 终态一致", () =
 describe("roster 接线 ②：抛错/被取消时 roster 仍然 endBatch（不留 running 悬案）", () => {
   it("批次抛异常：工具 reject，但批次已被收尾", async () => {
     const registry = new SwarmRegistry();
+    // 触发点换成**批次开始之后**才抛的路径：非法 schedulerConfig 现在在
+    // 「任何成员启动之前」就被结构化拒绝（W9290 B1-05），roster 根本还没开批次，
+    // 所以断言不到「抛错后仍要收尾」。这里用 deps 的 onProgress 抛错——它同样发生在
+    // runWithRoster 的 try 之内，finally 仍必须把批次收掉。
     const tool = harness(registry, {
       sessionId: 's-4',
-      // 非法的 scheduler config 在构造期同步抛出（scheduler/index.ts 的契约）。
-      schedulerConfig: { maxConcurrency: 0 },
+      onProgress: () => { throw new Error('rejected promise'); },
     });
     await expect(tool.execute(GOOD)).rejects.toBeTruthy();
     const batch = registry.getLatestBatch('s-4');
@@ -132,7 +135,7 @@ describe("roster 接线 ②：抛错/被取消时 roster 仍然 endBatch（不�
 
   it("批次异常路径后 visibleBatches 不会永远留着一个 running 批次", async () => {
     const registry = new SwarmRegistry();
-    const tool = harness(registry, { sessionId: 's-5', schedulerConfig: { maxConcurrency: 0 } });
+    const tool = harness(registry, { sessionId: 's-5', onProgress: () => { throw new Error('rejected promise'); } });
     await expect(tool.execute(GOOD)).rejects.toBeTruthy();
     for (const b of registry.visibleBatches('s-5')) {
       expect(b.endedAt).not.toBeUndefined();

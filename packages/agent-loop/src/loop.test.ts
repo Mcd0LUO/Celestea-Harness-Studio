@@ -9,6 +9,7 @@ import {
   assistantText,
   AgentError,
   Context,
+  LlmError,
   userMessage,
   type Llm,
   type Message,
@@ -31,6 +32,7 @@ import {
   toolCallMessage,
   type Harness,
 } from "./fakes.test-util.js";
+import { errorOutcomeFromThrown } from "./loop.js";
 import { estimateTokens, trimContext } from "./context-trim.js";
 import { createUsageTracker } from "./usage.js";
 
@@ -379,5 +381,73 @@ describe("contextSnapshot (W725)", () => {
     const expected = trimContext(h.session.deriveMessages(), estimateTokens(h.loop.agentConfig.system_prompt), 100, 1, 1);
     expect(expected.outcome.trimmed).toBe(true);
     expect(snapshot.messages).toEqual(expected.messages);
+  });
+});
+
+/**
+ * B2-02 / B2-03 — one failure, ONE terminal kind, whichever decorator is armed.
+ *
+ * Before: a provider 401 was `kind:"generate"` with no fallback decorator and
+ * `kind:"stream"` with one, because the decorator re-threw out of its async
+ * generator and the loop hard-coded `"stream"` for any iterator rejection. The
+ * turn therefore reported a different terminal state for the same upstream
+ * failure depending on a config switch, which makes every kind-based aggregate
+ * (the usage ledger's `error_kind` column, the statusline) untrustworthy.
+ */
+describe("B2-02 — a thrown LlmError is believed, not relabelled", () => {
+  it("maps a pre-stream LlmError to generate", () => {
+    expect(errorOutcomeFromThrown(new LlmError("stream request failed: 401", "generate", { httpStatus: 401 }))).toEqual({
+      error: { kind: "generate", message: "stream request failed: 401" },
+    });
+  });
+
+  it("maps a mid-stream LlmError to stream", () => {
+    expect(errorOutcomeFromThrown(new LlmError("sse decode error: hung up", "stream"))).toEqual({
+      error: { kind: "stream", message: "sse decode error: hung up" },
+    });
+  });
+
+  it("folds a timeout to the frozen outcome vocabulary, keeping the message", () => {
+    // TurnOutcome.error.kind is frozen to generate|stream (core/src/types.ts:22);
+    // the timeout fact stays visible in the message, as the host adapter does.
+    const outcome = errorOutcomeFromThrown(new LlmError("llm timeout: response headers not received within 60000ms", "timeout"));
+    expect(outcome.error.kind).toBe("generate");
+    expect(outcome.error.message).toContain("llm timeout:");
+  });
+
+  it("lets the CALL SITE decide an unclassified throw, because only it knows where it came from", () => {
+    const bare = new Error("socket hang up");
+    // From generate() → pre-stream. From iter.next() → the stream broke.
+    expect(errorOutcomeFromThrown(bare)).toEqual({ error: { kind: "generate", message: "socket hang up" } });
+    expect(errorOutcomeFromThrown(bare, "stream")).toEqual({ error: { kind: "stream", message: "socket hang up" } });
+    // A bare string behaves identically — it carries no classification either.
+    expect(errorOutcomeFromThrown("a bare string")).toEqual({ error: { kind: "generate", message: "a bare string" } });
+    expect(errorOutcomeFromThrown("a bare string", "stream")).toEqual({ error: { kind: "stream", message: "a bare string" } });
+  });
+
+  it("reports the SAME kind whether the failure came from generate() or from mid-iteration", async () => {
+    const upstream = new LlmError("stream request failed: 401 Unauthorized", "generate", { httpStatus: 401, retryable: false });
+
+    // (a) the bare client: generate() itself rejects — the pre-stream path.
+    const preStream = harness({ llm: { generate: () => Promise.reject(upstream) } as unknown as Llm });
+    const a = await preStream.run("hi");
+
+    // (b) the decorator shape: generate() RESOLVES to an async generator whose
+    //     body throws on the first pull — the path that used to be hard-coded to
+    //     "stream" no matter what the error actually said.
+    const midStream = harness({
+      llm: {
+        generate: () =>
+          Promise.resolve({
+            async *[Symbol.asyncIterator]() {
+              throw upstream;
+            },
+          }),
+      } as unknown as Llm,
+    });
+    const b = await midStream.run("hi");
+
+    expect(a).toEqual({ error: { kind: "generate", message: "stream request failed: 401 Unauthorized" } });
+    expect(b).toEqual(a);
   });
 });

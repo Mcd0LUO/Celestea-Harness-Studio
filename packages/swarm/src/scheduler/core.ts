@@ -34,12 +34,17 @@ import { RateLimitGate, retryDelayMs } from "./rate-limit.js";
 import {
   ABORTED_BEFORE_START,
   abortedResult,
+  armBatchBudget,
+  assertSaneNumber,
   failedResult,
+  numericFieldsOf,
   runAttemptOnce,
   startedOf,
   attemptGate,
   withHostFailures,
   type AttemptGate,
+  type BatchBudget,
+  NO_BUDGET,
 } from "./results.js";
 
 /**
@@ -61,6 +66,13 @@ const ABANDONED_BY_RATE_LIMIT =
  * 它，腾不出别人来"；后者是"它自己重试次数到顶了"（哪怕旁边还有别的成员在跑）。
  * 共用一句会让"为什么被放弃"在成员多于一个时彻底说不清。
  */
+const ABANDONED_BY_SIDE_EFFECTS =
+  "This member was rate limited after it had already run its tools, so the swarm did not retry it: " +
+  "replaying the turn would repeat those side effects.";
+
+const ABANDONED_BY_BATCH_RETRY_LIMIT = (limit: number): string =>
+  `The swarm hit its batch-wide rate limit budget of ${String(limit)} retries and gave up on this member.`;
+
 const ABANDONED_BY_RETRY_LIMIT = (limit: number): string =>
   `Subagent stayed rate limited after ${String(limit)} retries; the swarm gave up on it.`;
 
@@ -72,30 +84,15 @@ function resolveConfig(config?: Partial<SwarmSchedulerConfig>): SwarmSchedulerCo
 /**
  * 调度器配置的**唯一**合法性判定（构造期调用；宿主也可在加载期提前调用以 fail-fast）。
  *
- * 本仓与源仓的差别（有意）：源仓的 maxConcurrency / maxRateLimitRetries 是可选参数
- * （undefined = 无上限），但**本仓没有宿主派发池兜底**，并发闸门是唯一防线，
- * 因此这两个字段改为**必填且带默认值**（16 / 3），给定值仍必须是 >= 1 的整数：
- *   0  → `active.size >= 0` 恒真（maxConcurrency：静默不放量）/ 第一次限流就判死；
- *   NaN → 与任何数比较都 false → 闸门形同虚设；
- *   负数/小数 → 同上或语义不明。
- * 它们都会把"非法 config 必然抛错"的契约变成静默失效，所以一并挡掉。
+ * 源仓的 maxConcurrency / maxRateLimitRetries 是可选的（undefined = 无上限），但**本仓没有
+ * 宿主派发池兜底**，并发闸门是唯一防线，故改为必填且带默认值，且**全部数值字段一律校验**
+ * （W9290 B1-05）：字段表与判据在 results.ts 的 SWARM_NUMERIC_FIELDS / assertSaneNumber。
+ * 漏一个字段的后果不是报错而是**静默失效**——`NaN` 与任何数比较都 false，于是 `NaN <= 0`
+ * 会真的装一支定时器（Node 当 1ms），而 `Infinity` 让超时永不触发。
  */
 export function validateSchedulerConfig(config?: Partial<SwarmSchedulerConfig>): void {
-  const resolved = resolveConfig(config);
-  if (!(resolved.initialLaunchLimit >= 1)) {
-    throw new Error(`initialLaunchLimit must be >= 1, got ${String(resolved.initialLaunchLimit)}.`);
-  }
-  if (!(resolved.retryBaseMs >= 0)) {
-    throw new Error(`retryBaseMs must be >= 0, got ${String(resolved.retryBaseMs)}.`);
-  }
-  if (!(resolved.retryFactor >= 1)) {
-    throw new Error(`retryFactor must be >= 1, got ${String(resolved.retryFactor)}.`);
-  }
-  for (const field of ["maxConcurrency", "maxRateLimitRetries"] as const) {
-    const value = resolved[field];
-    if (!Number.isInteger(value) || value < 1) {
-      throw new Error(`${field} must be an integer >= 1, got ${String(value)}.`);
-    }
+  for (const field of numericFieldsOf(resolveConfig(config))) {
+    assertSaneNumber(field.key, field.value, field.min, field.integer);
   }
 }
 
@@ -128,7 +125,7 @@ interface Attempt {
 
 type AttemptOutcome =
   | { type: "settled"; result: SwarmTaskResult }
-  | { type: "rate_limited"; agentId?: string; error: unknown };
+  | { type: "rate_limited"; agentId?: string; error: unknown; usedTool: boolean };
 
 /**
  * 按 spec 顺序把任务跑完，返回**与输入等长、按 index 落位**的结果数组。
@@ -152,6 +149,10 @@ export class SwarmScheduler {
   #normalLaunchCount = 0;
   #normalLaunchTimer: SwarmTimerHandle | undefined;
   #random: () => number;
+  /** 整批墙钟预算的撤除句柄（W9290 B1-03）；undefined = 未武装或已撤除。 */
+  #budget: BatchBudget = NO_BUDGET;
+  /** 本批**累计**的限流重排队次数（per-task 阈值的批次级孪生，B1-03/B1-04）。 */
+  #batchRateLimitRetries = 0;
 
   #onBatchAbort = (): void => {
     if (this.#finished) return;
@@ -204,6 +205,7 @@ export class SwarmScheduler {
         return;
       }
       signal?.addEventListener("abort", this.#onBatchAbort, { once: true });
+      this.#budget = armBatchBudget(this.#deps, this.#config.maxTotalMs, this.#onBatchAbort);
       this.#schedule();
     });
     this.#runPromise = promise;
@@ -447,7 +449,7 @@ export class SwarmScheduler {
     if (!this.#releaseAttempt(attempt)) return;
     if (this.#finished) return;
 
-    const deathError = outcome.type === "settled" ? undefined : this.#rateLimitDeathCause(attempt.state);
+    const deathError = outcome.type === "settled" ? undefined : this.#rateLimitDeathCause(attempt.state, outcome.usedTool);
     if (outcome.type === "settled") {
       this.#results[attempt.state.index] = outcome.result;
     } else if (deathError !== undefined) {
@@ -510,8 +512,19 @@ export class SwarmScheduler {
    *   它按成员各自计数——一个成员限流到顶，不会连坐拖死同批仍在健康跑完的其它成员。
    *
    * 校准：每次 requeue 递增 1，故"已重排队 N 次后仍在第 N+1 次尝试里限流"时 retryCount === N。
+   *
+   * ③ **批次级**上限（W9290 B1-03/B1-04）：`maxBatchRateLimitRetries`。①②都是 per-task，
+   * 所以 128 个成员各退避 N 次 = 128×N 次，整批墙钟仍然没有上界。第三条按**批次**计数，
+   * 于是「整批还能退避多久」变成一个可回答的数。它在两条之前判定：批次级预算是更粗的
+   * 闸门，先到先答，避免把「整批已经超预算」说成「某个成员自己到顶了」。
    */
-  #rateLimitDeathCause(state: TaskState): string | undefined {
+  #rateLimitDeathCause(state: TaskState, usedTool: boolean): string | undefined {
+    // 副作用优先：它比任何阈值都更硬——重放会让已经发生的事再发生一次。
+    if (usedTool) return ABANDONED_BY_SIDE_EFFECTS;
+    const batchLimit = this.#config.maxBatchRateLimitRetries;
+    if (this.#batchRateLimitRetries >= batchLimit) {
+      return ABANDONED_BY_BATCH_RETRY_LIMIT(batchLimit);
+    }
     if (this.#isOnlyUnfinishedTask(state) && state.retryCount >= 1) {
       return ABANDONED_BY_RATE_LIMIT;
     }
@@ -531,6 +544,7 @@ export class SwarmScheduler {
     const now = this.#deps.now();
     this.#gate.noteRateLimit(now);
     state.retryCount += 1;
+    this.#batchRateLimitRetries += 1;
 
     // 带抖动（本仓新增，上游无）：base * factor^(n-1) * (0.5 + random * 0.5)
     const retryDelay = retryDelayMs(this.#config, state.retryCount, this.#random());
@@ -635,6 +649,10 @@ export class SwarmScheduler {
     for (const attempt of this.#active) {
       attempt.controller.abort(this.#deps.signal?.reason);
     }
+    // 收尾必须**同时**撤掉在跑成员的闸门：#releaseAttempt 只在 attempt 自己 settle 时才跑，
+    // 而整批被取消时这些 attempt 还在跑，于是它们的 timeout 闸门会留在事件循环上
+    // （回归用例「预算到点后不留定时器」正是这一条）。
+    for (const attempt of this.#active) attempt.gate.disarm();
     const results = this.#states.map((state) => {
       const existing = this.#results[state.index];
       if (existing !== undefined) return existing;
@@ -653,6 +671,7 @@ export class SwarmScheduler {
   #cleanup(): void {
     this.#deps.signal?.removeEventListener("abort", this.#onBatchAbort);
     this.#clearNormalTimer();
+    this.#budget.disarm();
     this.#gate.clearWakeup();
     for (const attempt of this.#active) this.#unlinkAttempt(attempt);
     this.#active.clear();

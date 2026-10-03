@@ -111,6 +111,22 @@ export class SwarmModelError extends Error {
   }
 }
 
+/**
+ * 一个成员 attempt 已经**执行过工具调用**的事实（W9290 B1-04）。
+ *
+ * 为什么调度器要问这件事：限流（429/408/425）发生在 provider 响应阶段，此时成员的
+ * **本地工具副作用通常已经发生**。整轮重放 = 副作用再跑一次（写文件两次、跑命令两次）。
+ * 而调度器**看不到**成员的 log——所以由 executor 在它唯一有 log 的地方把答案带出来。
+ *
+ * 判据取 `tool_call` 而不是「成员有没有产出文本」：只有工具调用会动外部世界。
+ */
+function usedTool(log: SessionLog): boolean {
+  for (const event of log.events()) {
+    if (event.type === "tool_call") return true;
+  }
+  return false;
+}
+
 /** A member abandoned because the batch signal fired (rule 2 / rule 3). */
 
 /**
@@ -127,13 +143,28 @@ export class SwarmMemberFailedError extends Error {
   readonly kind: "generate" | "stream";
   /** True when the failure is a provider rate limit (HTTP 429). */
   readonly retryable: boolean;
+  /**
+   * True when this attempt already issued at least one tool call (W9290 B1-04).
+   *
+   * **调度器据此拒绝重放**：工具调用意味着外部世界的副作用已经发生，整轮重放会让它
+   * 再发生一次。缺省 false = 「没有可重放的副作用」，于是**不碰工具的老成员**仍然能
+   * 享受限流退避——把退避整个取消掉会损失真正的瞬时限流恢复能力，那不是本条要修的东西。
+   */
+  readonly usedTool: boolean;
 
-  constructor(spec: SwarmTaskSpec, kind: "generate" | "stream", message: string, retryable: boolean) {
+  constructor(
+    spec: SwarmTaskSpec,
+    kind: "generate" | "stream",
+    message: string,
+    retryable: boolean,
+    usedTool = false,
+  ) {
     super(`Swarm member ${String(spec.index)} failed: ${message}`);
     this.name = "SwarmMemberFailedError";
     this.index = spec.index;
     this.kind = kind;
     this.retryable = retryable;
+    this.usedTool = usedTool;
   }
 }
 
@@ -261,7 +292,13 @@ export class SwarmMemberExecutor implements SwarmExecutor {
     if (terminal === null) {
       throw new Error(`Swarm member ${String(spec.index)} produced no assistant message.`);
     }
-    throw new SwarmMemberFailedError(spec, terminal.kind, terminal.message, RATE_LIMIT_LABEL.test(terminal.message));
+    throw new SwarmMemberFailedError(
+      spec,
+      terminal.kind,
+      terminal.message,
+      RATE_LIMIT_LABEL.test(terminal.message),
+      usedTool(log),
+    );
   }
 
   /**
