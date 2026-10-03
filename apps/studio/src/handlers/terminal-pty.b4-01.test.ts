@@ -53,7 +53,33 @@ function track(child: ChildProcess): ChildProcess {
   return child;
 }
 
+/** Every table this file builds, so teardown can stop its REAPER. */
+const tables: TerminalTable[] = [];
+
+/**
+ * Build a table and register it for teardown.
+ *
+ * B4-01 flake, root cause: a table built with the DEFAULT idleMs arms a real
+ * 60 s interval, and three cases here never stopped it. That timer outlived
+ * the file, stayed armed, and swept ptys belonging to OTHER tests in OTHER
+ * files -- which is why the failure looked random and moved between assertions.
+ * Measured before this fix: 2 live Timeout handles survived this file (probe
+ * via process.getActiveResourcesInfo()), and stopAllTerminalReapers() did NOT
+ * clear them, because those reapers belonged to tables teardown never touched.
+ *
+ * This is test hygiene, not a production change: the leak was never in
+ * createTerminalTable -- it was in a test that forgot to stop what it started.
+ */
+function newTable(options: Parameters<typeof createTerminalTable>[0] = {}): TerminalTable {
+  const table = createTerminalTable(options);
+  tables.push(table);
+  return table;
+}
+
 afterEach(() => {
+  // Reapers FIRST: a timer that outlives its test would terminate a pty another
+  // test is still using. Then the children, through their handles.
+  for (const table of tables.splice(0)) table.reaper.stop();
   for (const c of spawned.splice(0)) {
     // Kill THROUGH the child handle, not by raw pid. A raw pid kill can land on a
     // RECYCLED pid: once a child is reaped the OS is free to hand that number to
@@ -167,7 +193,7 @@ async function expectDead(pid: number | undefined, what: string): Promise<void> 
 
 describe(`B4-01 P0 · shutdown drains the pty table and kills the process groups`, () => {
   it(`shutdown() empties the table AND the OS forgets every pty pid`, async () => {
-    const table = createTerminalTable({ idleMs: 0 }); // no reaper: this is the shutdown half
+    const table = newTable({ idleMs: 0 }); // no reaper: this is the shutdown half
     const pids = [addLive(table), addLive(table)];
     expect(table.registry.size()).toBe(2);
     for (const pid of pids) await expectAlive(pid, "a freshly spawned pty is running");
@@ -182,7 +208,7 @@ describe(`B4-01 P0 · shutdown drains the pty table and kills the process groups
   });
 
   it(`shutdown() is idempotent (the W2029 repeat-SIGTERM path is a no-op)`, async () => {
-    const table = createTerminalTable({ idleMs: 0 });
+    const table = newTable({ idleMs: 0 });
     addLive(table);
     expect(await table.shutdown()).toBe(1);
     expect(await table.shutdown()).toBe(0);
@@ -191,7 +217,7 @@ describe(`B4-01 P0 · shutdown drains the pty table and kills the process groups
 
   it(`the published table is reachable by owner key; release drains exactly it`, async () => {
     const owner = `b4-01-app`;
-    const table = createTerminalTable({ idleMs: 0 });
+    const table = newTable({ idleMs: 0 });
     const pid = addLive(table);
     registerTerminalTable(owner, table);
 
@@ -204,7 +230,7 @@ describe(`B4-01 P0 · shutdown drains the pty table and kills the process groups
   });
 
   it(`a wedged child cannot hold the teardown open: the table still empties`, async () => {
-    const table = createTerminalTable({ idleMs: 0 });
+    const table = newTable({ idleMs: 0 });
     const pid = addLive(table);
     // A child that never settles would hang a naive await on wait().
     const entry = table.registry.all()[0]!;
@@ -218,7 +244,7 @@ describe(`B4-01 P0 · shutdown drains the pty table and kills the process groups
 
 describe(`B4-01 P0 · the idle reaper finally has a caller`, () => {
   it(`a pty past the ceiling is reaped; a fresh one is left running`, async () => {
-    const table = createTerminalTable({ idleMs: 0 });
+    const table = newTable({ idleMs: 0 });
     const reapedPid = addLive(table);
     const keptPid = addLive(table);
     const entries = table.registry.all();
@@ -236,7 +262,7 @@ describe(`B4-01 P0 · the idle reaper finally has a caller`, () => {
   });
 
   it(`a second sweep reaps nothing (the drop happens before the slow signal)`, () => {
-    const table = createTerminalTable({ idleMs: 0 });
+    const table = newTable({ idleMs: 0 });
     addLive(table);
     table.registry.all()[0]!.touchedAt = Date.now() - TERMINAL_IDLE_MS - 60_000;
     expect(table.reaper.sweep().reaped).toBe(1);
@@ -249,7 +275,7 @@ describe(`B4-01 P0 · the idle reaper finally has a caller`, () => {
   // pty is pure waste -- and waste that outlives the app is exactly what a
   // fake-timer gate fails on. The first pty arms it; the last one leaving stops it.
   it(`arms on the FIRST pty and disarms when the last one leaves`, async () => {
-    const table = createTerminalTable();
+    const table = newTable();
     // Nothing opened yet: no timer, so a table that never hosted a pty arms nothing.
     expect(table.reaper.armed()).toBe(false);
 
@@ -269,8 +295,8 @@ describe(`B4-01 P0 · the idle reaper finally has a caller`, () => {
   });
 
   it(`stopAllTerminalReapers disarms every armed reaper (a teardown that cannot see the table)`, () => {
-    const a = createTerminalTable();
-    const b = createTerminalTable();
+    const a = newTable();
+    const b = newTable();
     addLive(a);
     addLive(b);
     expect(a.reaper.armed()).toBe(true);
@@ -281,7 +307,7 @@ describe(`B4-01 P0 · the idle reaper finally has a caller`, () => {
   });
 
   it(`idleMs <= 0 arms no timer, yet shutdown still drains (the two halves are independent)`, async () => {
-    const table = createTerminalTable({ idleMs: 0 });
+    const table = newTable({ idleMs: 0 });
     expect(table.reaper.armed()).toBe(false);
     const pid = addLive(table);
     // The teardown path must never depend on the reaper being armed.
@@ -298,7 +324,7 @@ describe(`B4-01 P0 · the idle reaper finally has a caller`, () => {
   });
 
   it(`a standalone reaper honours an injected clock (no real waiting)`, () => {
-    const table = createTerminalTable({ idleMs: 0 });
+    const table = newTable({ idleMs: 0 });
     // addLive stamps touchedAt from the REAL clock, so the injected clock has to
     // start there — starting at an arbitrary small number would put the entry in
     // the future and it could never look idle.
@@ -310,5 +336,26 @@ describe(`B4-01 P0 · the idle reaper finally has a caller`, () => {
     expect(reaper.sweep().reaped).toBe(1); // past the ceiling
     reaper.stop();
     expect(reaper.armed()).toBe(false);
+  });
+});
+
+
+describe(`B4-01 P0 flake guard · this file leaks no reaper`, () => {
+  it(`a default-idle table IS armed, and teardown can always stop it`, () => {
+    // The precondition that made the flake possible at all.
+    const table = newTable(); // default idleMs => a real 60 s interval
+    addLive(table);
+    expect(table.reaper.armed()).toBe(true);
+
+    // afterEach routes every table through `tables`, so this is exactly what
+    // teardown does for it. The bug was a test that never called this.
+    table.reaper.stop();
+    expect(table.reaper.armed()).toBe(false);
+  });
+
+  it(`an idleMs-0 table never arms, so it cannot leak either`, () => {
+    const table = newTable({ idleMs: 0 });
+    addLive(table);
+    expect(table.reaper.armed()).toBe(false);
   });
 });

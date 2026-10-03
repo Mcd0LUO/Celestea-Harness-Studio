@@ -26,25 +26,47 @@ export function themes(): readonly ThemeDef[] {
 
 const STORAGE_KEY = 'celestea-studio.theme';
 
+/*
+ * F4-05：无 DOM 环境（node / worker / SSR）下本模块曾直接抛 `ReferenceError:
+ * document is not defined`。实测（tests/w9301-theme-nodom.test.ts，未开 jsdom 的
+ * 默认 node 环境）：`currentTheme()` 与 `applyTheme()` 都会炸。
+ *
+ * 为什么这不只是洁癖：vitest 的默认 environment 是 **node**（vitest.config.ts 没有
+ * 全局 `environment: 'jsdom'`，要 DOM 靠每个文件的 `@vitest-environment jsdom` 头），
+ * 所以任何未加该头、又 import 了本模块的测试都会在 import 期的**渲染期**崩掉。
+ * 仓内先例同源：i18n/index.ts 的 `typeof navigator`、plugins/store.ts 的
+ * `typeof localStorage`、permissions/store.ts 的 `typeof window`。
+ *
+ * 读侧回落成 'mono'（与 README 记录的默认一致），写侧在无 DOM 时**不假装成功**：
+ * 写不进 DOM 就等于没写，但 localStorage 仍尽力写（node/worker 下可能可用），
+ * 于是「记住偏好」这条能力不被牵连。
+ */
+function themeEl(): HTMLElement | null {
+  return typeof document === 'undefined' ? null : document.documentElement;
+}
+
 export function currentTheme(): string {
-  return document.documentElement.dataset.theme || 'mono';
+  return themeEl()?.dataset.theme || 'mono';
 }
 
 export function applyTheme(id: string): void {
-  document.documentElement.dataset.theme = id;
+  const root = themeEl();
+  if (root !== null) root.dataset.theme = id;
   try {
-    localStorage.setItem(STORAGE_KEY, id);
+    if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEY, id);
   } catch {
     /* storage unavailable — ignore */
   }
 }
 
 /** Apply the persisted (or default) theme; returns the applied id.
- *  旧版 localStorage 里存过已删除主题 id 时（THEMES.some 不命中）自动回落到 mono。 */
+ *  旧版 localStorage 里存过已删除主题 id 时（THEMES.some 不命中）自动回落到 mono。
+ *  F4-05：getItem 的 `try` 过去顺带挡住了无 DOM 环境的 ReferenceError，但那靠的是
+ *  「ReferenceError 恰好是 Error」这条巧合；这里显式判 typeof，与 applyTheme 同一口径。 */
 export function initTheme(defaultId = 'mono'): string {
   let id = defaultId;
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = typeof localStorage === 'undefined' ? null : localStorage.getItem(STORAGE_KEY);
     if (saved && themes().some((x) => x.id === saved)) id = saved;
   } catch {
     /* ignore */

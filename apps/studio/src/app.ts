@@ -33,6 +33,7 @@ import { apiTokenMiddleware, registerTokenBootstrap } from "./auth/api-token.js"
 import { composeStudio, type EngineFactory, type StudioServices } from "./plugins.js";
 import { registerHandlers } from "./handlers/index.js";
 import { crossSiteRefusal } from "./handlers/common.js";
+import { apiNotFound } from "./api-not-found.js";
 import { securityHeaders } from "./security-headers.js";
 import { assembleSystemPromptFor } from "./handlers/config-shape.js";
 import { registerStatic } from "./static.js";
@@ -422,8 +423,11 @@ export function createStudioApp(opts: StudioAppOptions = {}): StudioApp {
   const endpointIds = registerHandlers(app, services, table);
   assertCoverage(table.routes, endpointIds);
 
-  // Unknown API paths are 404 JSON, never the SPA (frozen static contract).
-  app.all("/api/*", (c) => c.json({ error: "not found" }, 404));
+  // B7-5: unknown API paths are JSON, never the SPA (frozen static contract) —
+  // and a method mismatch on a KNOWN contract path is 405 with an `Allow`
+  // header, because contracts/endpoints.json §errorCodes already declares
+  // 405 for exactly that case. The body shape is unchanged.
+  app.all("/api/*", apiNotFound(table.routes));
   registerStatic(app, config.paths.staticRoot);
 
   return { app, routes: table.routes, services, endpointIds };

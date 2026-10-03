@@ -264,9 +264,11 @@ body.resizing-col { cursor: col-resize; user-select: none; }
 .msg.user.queued .who::after { content: var(--i18n-lane-queued, ''); color: var(--c-text-3); font-weight: 400; }
 
 /* inbox 条目（worker 回执 / 系统注入）：与用户消息、系统 info 块都不同——
-   顶部双线 + 等宽小字 + 左侧粗标记，明确「不是用户说的话」。 */
+   顶部双线 + 等宽小字 + 左侧粗标记，明确「不是用户说的话」。
+   F2-06：这道描边是**语义**（区分消息来源），必须看得见 ⇒ 走 --c-border-semantic
+   （对 --c-surface 18.88:1 / 14.56:1），不用只够装饰用的 --c-border-strong。 */
 .msg.inbox .bubble.inbox-bubble {
-  border: 1px solid var(--c-border-strong);
+  border: 1px solid var(--c-border-semantic);
   border-top-width: 3px;
   background: var(--c-surface);
   border-radius: var(--r-md);

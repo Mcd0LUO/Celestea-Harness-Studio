@@ -12,6 +12,7 @@ import { t } from '../i18n';
 // ui/viewport.ts —— 输入提示也要按设备能力换文案，判定不许有第二份，见该文件头注）。
 import { isMobileViewport, MOBILE_QUERY } from './viewport';
 import { isImeKey } from './ime'; // W2036：组合中的 Esc 是「取消组合」，不是「关抽屉」
+import { isolateBackground, type BackgroundHandle } from '../utils/modal-bg'; // F2-07：抽屉开着时把背景置 inert
 
 const STORAGE_COLLAPSED = 'celestea-studio.sidebar-collapsed';
 const STORAGE_WIDTH = 'celestea-studio.sidebar-width';
@@ -133,12 +134,32 @@ export function initSidebar(): void {
 function initDrawer(btn: HTMLButtonElement): void {
   const app = need<HTMLElement>('#app');
   const scrim = document.getElementById('sidebarScrim');
+  const panel = need<HTMLElement>('#sidebar');
   let open = false;
+  // F2-07：抽屉开着时背景（#main / #inputbar 等 #app 内的兄弟子树）必须是**不可聚焦**的。
+  //   实测 390x844：Tab×10 有 9 次落进被遮罩盖住的主区控件上。原生 inert 一次解决
+  //   Tab 进不去 / 读屏不读 / 鼠标点不动（手写环绕只解决第一件，见 utils/modal-bg.ts）。
+  //   与 openSettings 用**同一个**内核，不做第二份实现。
+  let bg: BackgroundHandle | null = null;
 
   const apply = (): void => {
     app.classList.toggle('drawer-open', open);
     if (scrim) scrim.classList.toggle('hidden', !open);
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open && !bg) {
+      // 顺序：先把焦点收进抽屉，**再**置 inert。此刻焦点多半还停在顶栏汉堡键上，
+      // 而它（连同整个顶栏）即将变成不可聚焦 —— 不先收焦点，浏览器会把焦点甩到 body，
+      // 用户就「看不见焦点在哪、Tab 又从页首重来」。
+      // 抽屉里没有可聚焦节点时（空会话树）不动焦点，交给浏览器自己处置。
+      const first = panel.querySelector<HTMLElement>(
+        'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      bg = isolateBackground(panel, () => first?.focus());
+    } else if (!open && bg) {
+      // 成对摘除 —— 漏摘会让整个应用变成一块砖（比不做更糟）。
+      bg.restore();
+      bg = null;
+    }
   };
   const setOpen = (next: boolean): void => {
     if (open === next) return;

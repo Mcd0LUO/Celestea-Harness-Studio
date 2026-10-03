@@ -3,9 +3,43 @@
  * (`crates/tools/src/sandbox.rs`, v1 userspace path).
  *
  * Everything an operator can tune is an env knob, read once per sandbox
- * construction; the child environment is an **allowlist** (never the whole host
- * environment, and deliberately never `HOME`: `~/.ssh`, `~/.aws`, `~/.gnupg`
- * must not ride along).
+ * construction; the child environment is an **allowlist**, never the whole host
+ * environment.
+ *
+ * ## B5-06 · what "never HOME" does and does not promise
+ *
+ * The old header here made a TWO-part claim about `HOME` and the credential
+ * directories under it: that the variable is deliberately never forwarded, and
+ * that this in turn keeps the credential directories out of the child. The first
+ * part held; the second did not. This section keeps the part that is true and
+ * states the part that is not — with the measurement that settles both:
+ *
+ *   · **`HOME` is not in the allowlist — TRUE, and it stays that way.**
+ *     `ENV_ALLOWLIST` (POSIX) and `ENV_ALLOWLIST_WIN32` both omit it, and
+ *     `sanitizedEnv` never adds it. Measured: the exact map handed to a Windows
+ *     child is `{PATH, PATHEXT…, SystemRoot, ComSpec, TEMP, TMP, USERPROFILE,
+ *     HOMEDRIVE, HOMEPATH, APPDATA, …}` — no `HOME`.
+ *
+ *   · **"the credential directories are thereby kept out of the child" — FALSE as
+ *     written, and the fix is THIS COMMENT, not the allowlist.** Two independent
+ *     reasons:
+ *       1. A SHELL may synthesise the variable. Measured on this host (Windows,
+ *          gitbash is the resolved shell): with `HOME` absent from the child env,
+ *          `$HOME` still prints `/c/Users/lenovo`. So "we did not pass it" is not
+ *          observable from inside the shell, and a comment claiming otherwise
+ *          sends the next reader looking for a leak that is not in this list.
+ *       2. More fundamentally, the userspace path has **no mount boundary** —
+ *          `ls -d ~` resolves to the real home and the directory is readable
+ *          whether or not the variable is set. Env shaping was never a
+ *          confidentiality boundary here; the OS-isolated provider's
+ *          `--ro-bind` / masks are (see bwrap-argv.ts).
+ *
+ * So: **credential DIRECTORIES are out of scope for the env allowlist on the
+ * userspace path, by design and by documentation.** If that is to change, the
+ * lever is the sandbox provider (a mask or a namespace), not this list. Dropping
+ * `HOME` from the allowlist would also break ordinary tooling on POSIX, where
+ * npm/git/curl resolve `~` from it — the leak it looks like it closes is closed
+ * by nothing.
  */
 
 import { realpathSync, statSync } from "node:fs";
@@ -121,6 +155,11 @@ export const ENV_ALLOWLIST: readonly string[] = [
  * excludes `HOME` on purpose. `USERPROFILE`/`APPDATA` are the Windows spellings of
  * `HOME` and are included because Windows tooling expects them; a POSIX shell
  * simply does not read them, which is the only reason they were not listed.
+ *
+ * B5-06: the `HOME` half is about the VARIABLE, not about the DIRECTORY — see
+ * the module header. Neither list is a confidentiality boundary on the userspace
+ * path, and `USERPROFILE`/`APPDATA` being present does not make this list weaker
+ * than the POSIX one; it makes the child able to start at all on Windows.
  */
 export const ENV_ALLOWLIST_WIN32: readonly string[] = [
   "PATH",

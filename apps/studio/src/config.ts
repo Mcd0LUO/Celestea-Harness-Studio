@@ -42,14 +42,32 @@ export const BUS_CAPACITY = 512;
  * user profile — and the same list supplies the default path when a client sends
  * none. `platform`/`env` are injectable so the win32 answer is unit-tested on
  * Linux (the W885 seam). POSIX output is byte-identical to the old constant.
+ *
+ * B7-6: the ORDER of the win32 list is the user-visible half, because
+ * `handlers/fs.ts` opens the browser at `roots[0]` when the client sends no
+ * `?path=` — and `apps/web/src/ui/fsbrowser.ts:257` does exactly that
+ * (`loadDirs('')`) every time the directory picker opens. The list therefore
+ * used to START every Windows user in `C:\`, i.e. the first screen of the
+ * picker was `Windows/`, `Program Files/`, `$Recycle.Bin/` and a dozen other
+ * system directories, none of which is anywhere a user means to create a
+ * workspace. The USERPROFILE first is the same answer POSIX already gives
+ * (`/home` is first on the POSIX list for exactly the same reason), so this
+ * also removes a platform asymmetry rather than adding a special case.
+ *
+ * The drive root is KEPT, just not first: it is still a legitimate one-click
+ * shortcut, and the breadcrumb UI has its own root button (`fsbrowser.ts:112`)
+ * for reaching it in one click. Only the OPENING directory changes.
  */
 export function fsRoots(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): string[] {
   if (platform !== "win32") return ["/src", "/tmp", "/srv", "/home"];
   const drive = (env["SystemDrive"] ?? "C:").replace(/[\\/]+$/, "");
-  const out = [drive + "\\"];
-  const profile = (env["USERPROFILE"] ?? "").trim();
-  if (profile !== "") out.push(profile.replace(/[\\/]+$/, ""));
-  return out;
+  const profile = (env["USERPROFILE"] ?? "").trim().replace(/[\\/]+$/, "");
+  // The user profile first (the useful place to start), the drive root second
+  // (still reachable, just not the landing spot). An absent or blank
+  // USERPROFILE falls back to the drive root rather than yielding an empty
+  // list, which would leave `roots[0]` undefined and break the fs default.
+  if (profile === "") return [drive + "\\"];
+  return [profile, drive + "\\"];
 }
 /** `src/workspaces.rs:115` fs browse entry cap. */
 export const MAX_DIR_ENTRIES = 200;

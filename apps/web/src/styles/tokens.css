@@ -245,6 +245,14 @@
   --c-surface-raised: var(--bg-surface-raised);
   --c-border-subtle: var(--border-l1);
   --c-border-strong: var(--border-l3);
+  /* F2-06：**承担语义**的边框（区分消息来源、引用块的竖线）专用档位。
+     与 --c-border-strong 的分工：strong 对 --c-surface 只有 1.98:1（浅）/ 2.47:1（深），
+     够画装饰分隔线，但**不满足** WCAG 1.4.11 非文本对比度 3:1 —— 而语义边框要能
+     被看见才成立（WCAG 1.4.1 非文本内容同样要求可辨）。故单列一档：
+     对 --c-surface 为 18.88:1（浅）/ 14.56:1（深），两套主题都远高于 3:1。
+     ★ 只给真正承担语义的少数几处用，**不要**拿它当全局描边色 —— 那会毁掉
+       「轻边框=装饰、强边框=有含义」的层次。 */
+  --c-border-semantic: var(--border-l4);
   --c-text-1: var(--label-primary);
   --c-text-2: var(--label-secondary);
   --c-text-3: var(--label-tertiary);

@@ -287,7 +287,8 @@
 
 .rendered blockquote {
   margin: .6em 0; padding: 2px 12px;
-  border-left: 2px solid var(--c-border-strong); color: var(--c-text-2);
+  /* F2-06：引用块的左竖线是「这是引用」的唯一视觉标记 ⇒ 语义边框档位。 */
+  border-left: 2px solid var(--c-border-semantic); color: var(--c-text-2);
 }
 .rendered hr { border: none; border-top: 1px solid var(--c-border-subtle); margin: .9em 0; }
 .rendered table { border-collapse: collapse; margin: .6em 0; font-size: 13px; }

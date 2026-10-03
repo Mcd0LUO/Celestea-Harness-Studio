@@ -23,6 +23,16 @@ export interface RedactionReport {
 
 const PLACEHOLDER = "<REDACTED>";
 
+/**
+ * The shortest value this module will treat as a secret.
+ *
+ * B6-10: this used to be written down in three places at two different numbers
+ * (12 in the rule table, 8 in the registered-secret pass), so the two halves of
+ * "is this a credential" disagreed and a window opened between them. One named
+ * constant means a future change moves both or neither.
+ */
+export const MIN_SECRET_LEN = 8;
+
 /** Token shapes that are secrets regardless of where they came from. */
 export const DEFAULT_RULES: RedactionRule[] = [
   // NOTE: no leading \b on the token rules. Session logs embed JSON escapes as
@@ -32,6 +42,41 @@ export const DEFAULT_RULES: RedactionRule[] = [
   { id: "openai-sk", re: /sk-[A-Za-z0-9_-]{16,}(?![A-Za-z0-9_-])/g, replace: PLACEHOLDER },
   { id: "npm-token", re: /npm_[A-Za-z0-9]{30,}/g, replace: PLACEHOLDER },
   { id: "github-token", re: /(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g, replace: PLACEHOLDER },
+  //
+  // B6-09: the other vendor prefixes, at the shapes their issuers document.
+  // Every one of these is a REAL key format, each was measured leaking through
+  // untouched with assertClean reporting CLEAN, and each is a PURELY ADDITIVE rule:
+  // the prefix is distinctive enough that the false-positive risk is negligible,
+  // which is why `ghp_` could always be covered and these could not be. Stripe is
+  // the one that reads as a surprise -- it starts with "sk-", but `openai-sk`
+  // requires 16+ characters AFTER the hyphen and a secret key segment, so
+  // `sk_live_` fell between the two (the underscore is what defeats the hyphen rule).
+  { id: "google-api-key", re: /AIza[0-9A-Za-z_-]{35}/g, replace: PLACEHOLDER },
+  { id: "slack-token", re: /xox[abposr]-[A-Za-z0-9-]{10,}/g, replace: PLACEHOLDER },
+  { id: "gitlab-pat", re: /glpat-[A-Za-z0-9_-]{16,}/g, replace: PLACEHOLDER },
+  { id: "huggingface-token", re: /hf_[A-Za-z0-9]{30,}/g, replace: PLACEHOLDER },
+  { id: "stripe-key", re: /sk_(?:live|test)_[A-Za-z0-9]{16,}/g, replace: PLACEHOLDER },
+  //
+  // A JWT: three base64url segments, both of the first two opening with "eyJ"
+  // (the base64 of a JSON object's opening brace). Requiring the STRUCTURE and
+  // not just "a long opaque blob" is what keeps this safe -- measured against
+  // prose, a lone header segment, and a string that merely contains one payload
+  // segment: all three stay unmasked. A signed JWT is itself a bearer credential,
+  // so a session log that printed one has leaked something replayable.
+  {
+    id: "jwt",
+    re: /\beyJ[A-Za-z0-9_-]{6,}\.eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/g,
+    replace: PLACEHOLDER,
+  },
+  // A PEM private key, not a token: no prefix, and the body is base64 across many
+  // lines. This is the highest-consequence one on the list -- a leaked private key
+  // is a long-lived credential, and a tool that printed an .env or a key file into
+  // a session would otherwise have it stored verbatim in the fixture.
+  {
+    id: "pem-private-key",
+    re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY(?: BLOCK)?-----/g,
+    replace: PLACEHOLDER,
+  },
   { id: "bearer", re: /(Bearer)\s+[A-Za-z0-9._~+/=-]{16,}/g, replace: "$1 " + PLACEHOLDER },
   { id: "authorization-header", re: /("(?:authorization|x-api-key|api[_-]?key)"\s*:\s*")([^"\\]{8,})(")/gi, replace: "$1" + PLACEHOLDER + "$3" },
   // W824 F01: JSON-quoted credential values. The key CLOSING quote sits between
@@ -40,6 +85,22 @@ export const DEFAULT_RULES: RedactionRule[] = [
   // the name set is the credential suffixes only (the authorization-header rule above
   // owns authorization/api[_-]key, and dropping the broad "auth" fragment here keeps a
   // JSON field such as "author":"..." intact).
+  //
+  // B6-10 (NOT changed, deliberately): the floor here is 12 while the
+  // registered-secret pass uses MIN_SECRET_LEN (8), so a 10- or 11-character
+  // {"token":"..."} / {"password":"..."} passes through. Measured and left as is.
+  //
+  // Why not lower it to MIN_SECRET_LEN: redact-w824.test.ts:36 pins
+  // {"token":"short12345"} (exactly 10 characters) as VERBATIM. That test is the
+  // P0 that introduced this rule (W824 F01, from R2 W821 E1), and its title states
+  // the intent -- "keeps short (NON-CREDENTIAL) ... values intact". The two
+  // readings cannot both hold, and this is a deliberate policy call, not an
+  // oversight: below 12 characters a value is far more likely to be a placeholder,
+  // an enum, a test fixture or a truncation marker than a live credential, and
+  // masking those would corrupt golden fixtures. Note the same length under
+  // api_key/authorization IS already masked (authorization-header, above), so the
+  // exposure is limited to the shorter key NAMES, and B6-09 closes the shapes
+  // that actually carry live credentials.
   { id: "json-credential", re: /("(?:[A-Za-z0-9_]*(?:token|secret|passwd|password|apikey|api_key)[A-Za-z0-9_]*)"\s*:\s*")((?:[^"\\]|\\.){12,})(")/gi, replace: "$1" + PLACEHOLDER + "$3" },
   { id: "env-assignment", re: /([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*\s*=\s*)("?)([^\s"'\\]{8,})\2/g, replace: "$1$2" + PLACEHOLDER + "$2" },
   { id: "aws-key", re: /AKIA[0-9A-Z]{16}/g, replace: PLACEHOLDER },
@@ -157,7 +218,7 @@ export function createRedactor(knownSecrets: readonly string[], extraRules: read
   let replacements = 0;
 
   // Exact registered secrets first (longest first so overlapping values are safe).
-  const secrets = [...new Set(knownSecrets.filter((s) => typeof s === "string" && s.length >= 8))].sort(
+  const secrets = [...new Set(knownSecrets.filter((s) => typeof s === "string" && s.length >= MIN_SECRET_LEN))].sort(
     (a, b) => b.length - a.length,
   );
 
