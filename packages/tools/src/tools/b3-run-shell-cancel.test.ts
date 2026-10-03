@@ -151,6 +151,9 @@ describe("B3-01: cancelling a foreground run_shell kills the process", () => {
     // case by wiring the signal into the spawn path too.
     // (The signal above is a throwaway already-unaborted controller; the point
     // asserted is the LIFETIME, i.e. that nothing killed it when the turn ended.)
+    // 要证的是「取消 turn 没有杀掉后台子进程」，即「什么都没发生」，没有可轮询的条件
+    // （轮询只能证明「某一刻还活着」，证不了「在这段窗口里一直活着」）。
+    // W9225：故此处必须**有界地等一段真实时间**，不是赌时长。
     await new Promise((r) => setTimeout(r, 500));
     expect(alive(pid), "a background child must survive the turn that started it").toBe(true);
 
