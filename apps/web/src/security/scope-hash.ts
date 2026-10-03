@@ -85,6 +85,34 @@ export async function scopeHashOf(cap: string, scope: ScopeLists): Promise<strin
   return sha256Hex(bytes);
 }
 
+/**
+ * B5-01：切换档位（PUT /api/sessions/{id}/permission）的一次性令牌绑定摘要。
+ *
+ * 与 [scopeHashOf] 的区别只有一处**形状**：那一个的 `scope` 永远是
+ * `{roots|hosts|tools}`（由 [scopeKeyOf] 选出），而档位切换的绑定对象是
+ * `{preset:"<档位 id>"}`。所以这里不走 scopeKeyOf——传 "permission" 会得到
+ * `null` 从而序列化成 `{}`，那正是 692f19c 那次事故的同一类形状漂移。
+ *
+ * 服务端 source of truth：`apps/studio/src/handlers/permissions.ts` 的
+ * `permissionScopeHash` / `canonicalPermissionJson`，形如：
+ *   {"cap":"permission","scope":{"preset":"full-access"}}
+ * 两侧必须同步改，否则每次切换档位都会 403。
+ */
+export async function permissionScopeHash(preset: string): Promise<string> {
+  const text = JSON.stringify({ cap: 'permission', scope: { preset } });
+  const bytes = new TextEncoder().encode(text);
+  const subtle = globalThis.crypto?.subtle;
+  if (subtle) {
+    try {
+      const buf = await subtle.digest('SHA-256', bytes);
+      return toHex(new Uint8Array(buf));
+    } catch {
+      /* 落到下方自带的实现（例如非安全上下文） */
+    }
+  }
+  return sha256Hex(bytes);
+}
+
 function toHex(b: Uint8Array): string {
   let s = '';
   for (const x of b) s += x.toString(16).padStart(2, '0');

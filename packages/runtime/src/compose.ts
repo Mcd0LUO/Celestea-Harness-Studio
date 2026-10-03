@@ -188,13 +188,20 @@ export function compose(config: ComposeConfig): Runtime {
   attachDrivers(workerHost, { llm: resolveDriverLlm(ctx, llm), tools, agentLoop });
 
   const agentConfig = agentConfigFromProfile(config.profile, config.agentConfig ?? {});
+  // W9290 B1-01: the in-flight turn's cancel signal, late-bound. The swarm tool is
+  // mounted BEFORE `runner` exists (below) and the cancel signal is created PER TURN, so
+  // there is no concrete AbortSignal to hand over yet — only a holder to fill in once
+  // `runner` is built. Same shape as the studio's questionHolder / runCodeHolder.
+  // Without it a batch has NO cancel path: a member that ignores abort runs until its
+  // own timeoutMs (2h by default) and the user's stop button cannot reach the batch.
+  const swarmSignal: { current: AbortSignal | null } = { current: null };
   // 4c. swarm wiring: mounted AFTER the tools plugin (the plugin registers the tool
   // into the tool registry) and AFTER `agentConfig` is derived, because a member
   // inherits the host's model / system prompt / step budget from it.
   const swarmHost =
     config.swarm === false || config.swarm === undefined
       ? null
-      : ensureSwarmWiring(ctx, { ...config.swarm, agentConfig, ...(config.loopFactory === undefined ? {} : { loopFactory: config.loopFactory }) });
+      : ensureSwarmWiring(ctx, { ...config.swarm, agentConfig, ...(config.loopFactory === undefined ? {} : { loopFactory: config.loopFactory }), signal: config.swarm.signal ?? (() => swarmSignal.current) });
   const inbox = config.inbox ?? createSessionInbox();
   // E §1.3 P1 ①: the lanes + the accepted-id ledger live in this session's
   // checkpoint sidecar when the log is a checkpointed persistent one; an
@@ -243,6 +250,11 @@ export function compose(config: ComposeConfig): Runtime {
       pending: () => inbox.pending("next-step") + (workerHost?.pending() ?? 0),
     },
   });
+
+  // W9290 B1-01: the runner exists now, so the in-flight turn's signal is readable.
+  // `currentSignal` is null between turns, which batchSignalOf() treats as "no batch
+  // cancellation" — byte-identical to the pre-fix behaviour when no turn is running.
+  swarmSignal.current = runner.currentSignal;
 
   const parts: RuntimeParts = {
     ctx,

@@ -8,8 +8,13 @@
  * flags.
  *
  * Teardown order is the W742 contract (do not reorder):
- *   signal -> stop accepting traffic (bounded grace) -> flush grants audit ->
- *   engine down (workers settled, logs closed) -> let the loop drain.
+ *   signal -> stop accepting traffic (bounded grace) -> kill pty process groups
+ *   -> flush grants audit -> engine down (workers settled, logs closed) -> let
+ *   the loop drain.
+ *
+ * B4-01 P0 added the pty step. It is here and not inside engine teardown
+ * because a pty is NOT the engine's resource: it is a detached process group
+ * that survives the engine and the parent process unless something signals it.
  */
 
 import { serve } from "@hono/node-server";
@@ -20,6 +25,12 @@ import { engineLlmView } from "./runtime/llm-assembly.js";
 import type { RealRuntimeAdapter } from "./runtime/real-runtime-adapter.js";
 import { autowakeEnabled, ENV_AUTOWAKE } from "@celestea/runtime";
 import { bounded, TIMED_OUT } from "@celestea/tools";
+// B4-01 P0: the pty table is built by the terminal routes, which live behind
+// handlers/index.ts. The shutdown path has to reach it from out here, so the
+// table publishes itself under a per-app key this file can name from the very
+// app object it is tearing down (see terminal-pty.ts).
+import { terminalOwnerKey } from "./handlers/terminal.js";
+import { releaseTerminalTable, stopAllTerminalReapers } from "./handlers/terminal-pty.js";
 
 /** Env knob: drain window before leftover sockets are cut. */
 export const ENV_DRAIN_MS = "CELESTEA_SHUTDOWN_DRAIN_MS";
@@ -220,6 +231,45 @@ export function startStudioServer(options: StudioServerOptions): StudioServerHan
     log(`${signal} received — draining (grace ${drainMs}ms)`);
     await stopTraffic();
     log("traffic stopped (listener closed, leftover sockets cut)");
+    // B4-01 P0: kill every pty BEFORE the engine goes down, so a terminal still
+    // streaming cannot outlive the process. A pty leads its own detached process
+    // group, so nothing else would take it: without this step a browser that
+    // vanished left `python3` / `npm run dev` running until the machine rebooted.
+    // It is its own teardown step (not folded into engine teardown) because it
+    // is a different resource with a different bound, and because a timeout here
+    // must be reported rather than silently skip the kill.
+    // Stop the idle sweeps FIRST and unconditionally: a setInterval that outlives
+    // the app it was sweeping is a timer nobody can reach again (and the
+    // watchdog-mount gate fails on exactly that). It costs nothing when no pty
+    // was ever opened, so it is not conditional on the kill count below.
+    stopAllTerminalReapers();
+    // B4-01 P0: kill every pty BEFORE the engine goes down, so a terminal still
+    // streaming cannot outlive the process. A pty leads its own detached process
+    // group, so nothing else would take it.
+    //
+    // W2029 honesty: the line is printed ONLY when something was actually
+    // signalled. A server that never hosted a pty has nothing to report, and a
+    // "ptys terminated: 0" line would be noise pretending to be a fact -- the
+    // shutdown log is a byte-exact baseline that other gates assert against.
+    let ptyKilled = 0;
+    const ptyStep = await within(
+      releaseTerminalTable(terminalOwnerKey(app)).then((n) => { ptyKilled = n; }),
+      teardownMs,
+    );
+    if (ptyKilled > 0) {
+      log(
+        stepLine(
+          "pty teardown",
+          ptyStep,
+          teardownMs,
+          `ptys terminated: ${String(ptyKilled)} process group(s) signalled`,
+        ),
+      );
+    } else if (ptyStep !== "settled") {
+      // A non-settled step with nothing killed is still worth reporting: the
+      // deadline passed, which is exactly what §2④ forbids staying silent about.
+      log(stepLine("pty teardown", ptyStep, teardownMs, "no pty was signalled"));
+    }
     const audit = await within(services.grants.audit.flush(), drainMs);
     log(stepLine("audit flush", audit, drainMs, "audit flushed"));
     const engineStep = await within(engine.shutdown?.(), teardownMs);

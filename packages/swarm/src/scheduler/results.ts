@@ -90,6 +90,36 @@ export type AttemptOutcome =
   | { type: "settled"; result: SwarmTaskResult }
   | { type: "rate_limited"; agentId?: string; error: unknown };
 
+/** 闸门与中继共同依赖的最小调度器视图（core.ts 的 #deps 满足它）。 */
+export interface AttemptGateDeps {
+  /** 批次级取消信号（宿主 turn 的信号；缺省 = 该批无取消通道）。 */
+  signal?: AbortSignal;
+  /** 调度器时钟/定时器（与执行函数无关，是「宿主等不下去」的唯一权威）。 */
+  setTimeout(handler: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+
+/** 一次尝试的取消面：批次信号的中继 + 超时兜底闸门。 */
+export interface AttemptGate {
+  /** 撤掉中继监听（批次收尾时调用）。 */
+  unlink(): void;
+  /** 撤除超时闸门（幂等；释放与中止共用同一处，见下方说明）。 */
+  disarm(): void;
+  /**
+   * 武装超时闸门；`onExpired` 是到期回调，**调用方**（core.ts）用它落定该成员。
+   *
+   * **为什么到期不是「reject 一个 Promise」而是一个回调**：本仓的 W2014 棘轮规定全仓
+   * 只有一处裸 race（统一原语内部那一行），而统一原语住在 `packages/tools`，
+   * `packages/swarm` 是**同一层（L1）**，`tier1-no-peer-deps-swarm` 禁止横向依赖它。
+   * 与其为了拿一个 race 去放宽棘轮或破坏分层，不如走**本来就存在**的那条释放路径——
+   * 取消（批次 signal）正是靠「不经过 executor 就把成员落定」救了整批；超时现在走同一条。
+   *
+   * 到期回调先跑「置 timedOut → abort 成员信号」，再调 `onExpired`，顺序由本函数固定。
+   * `timeoutMs <= 0` = 不武装（与 SwarmSchedulerConfig.timeoutMs 同义）。
+   */
+  arm(onExpired: () => void): void;
+}
+
 /** runAttemptOnce 需要的最小上下文（不含 attempt 对象本身，避免本模块依赖调度器的私有状态）。 */
 export interface AttemptRunContext {
   state: ResultTaskState;
@@ -105,6 +135,7 @@ export interface AttemptRunContext {
   markReady(): void;
   /** 超时文案（超时优先于原始错误）。 */
   timedOut: boolean;
+
 }
 
 /**
@@ -159,4 +190,66 @@ export async function runAttemptOnce(ctx: AttemptRunContext): Promise<AttemptOut
     ...(outcome.stopReason === undefined ? {} : { stopReason: outcome.stopReason }),
   };
   return { type: "settled", result: withHostFailures(state, result) };
+}
+
+/**
+ * 一次尝试的取消面：批次信号的中继 + 超时兜底闸门。
+ *
+ * **为什么超时与中继必须同源同刻（W9290 B1-02）**：它们回答的是同一个问题——「这个成员
+ * 还要等多久」。分开武装两支定时器，即使 ms 相同也会先后触发，于是「abort 先到、对决后到」
+ * 时会先按成员自己的错误落定——超时优先于原始错误这条契约又变回巧合。这里只装**一支**，
+ * 它的回调按「置 `timedOut` → abort 成员信号 → 让对决落定」的固定次序跑完，顺序由结构保证。
+ *
+ * **为什么闸门是必需的（而不是只有中继）**：中继只是**通知**。一个无视 abort 的执行函数
+ *（子进程 wedged、SDK 永不返回、await 死锁）会让 `executor.run` 的 Promise 永不 settle，
+ * 调用方等不到 `.then`，整个批次的 `run()` 也就永远不 resolve。闸门是那条与 executor 无关的
+ * 释放路径：它由调度器自己的时钟武装，正是取消（批次 signal）已经在用、而超时当时缺的那条。
+ *
+ * `disarm` 幂等且由**释放与中止共用**：闸门在 `runAttemptOnce` 内部武装（对决之前），而释放
+ * 发生在 `#releaseAttempt`——两者不在同一个栈上。若只由对决的 finally 撤除，批次被取消、
+ * 对决还没跑到 finally 时闸门就会留在事件循环上（既有回归用例 `vi.getTimerCount() === 0`
+ * 正是这一条）。
+ */
+export function attemptGate(
+  deps: AttemptGateDeps,
+  timeoutMs: number,
+  attempt: {
+    controller: AbortController;
+    /** 由本函数在到期时置位；调用方在落定文案里读它。 */
+    timedOut: boolean;
+  },
+): AttemptGate {
+  let armed: unknown;
+  /** 已撤除（批次收尾）= 后续的 `arm` 必须直接返回，不再武装。 */
+  let closed = false;
+  const batchSignal = deps.signal;
+  const abortFromBatch = (): void => {
+    attempt.controller.abort(batchSignal?.reason);
+  };
+  if (batchSignal?.aborted === true) abortFromBatch();
+  else batchSignal?.addEventListener("abort", abortFromBatch, { once: true });
+
+  return {
+    unlink: () => {
+      batchSignal?.removeEventListener("abort", abortFromBatch);
+    },
+    disarm: () => {
+      closed = true;
+      if (armed === undefined) return;
+      const handle = armed;
+      armed = undefined;
+      deps.clearTimeout(handle);
+    },
+    arm: (onExpired) => {
+      // 批次已经收尾（`disarm` 先行一步）：再装一支定时器就没人会撤它，
+      // 它会留在事件循环上直到自己触发——既有回归用例的 getTimerCount()===0 正是这一条。
+      if (closed || !(timeoutMs > 0)) return;
+      armed = deps.setTimeout(() => {
+        armed = undefined;
+        attempt.timedOut = true;
+        attempt.controller.abort(new Error(TIMED_OUT));
+        onExpired();
+      }, timeoutMs);
+    },
+  };
 }

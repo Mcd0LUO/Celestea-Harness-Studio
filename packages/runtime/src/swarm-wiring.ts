@@ -72,6 +72,20 @@ export interface SwarmWiring {
   sessionId?: string;
   /** Pre-built roster (the host owns it); otherwise one is created here. */
   registry?: SwarmRegistry;
+  /**
+   * The BATCH cancellation source, as a **late-bound provider** (W9290 B1-01).
+   *
+   * 为什么是 provider 而不是 `AbortSignal`：**一个 turn 一个信号**。取消信号由每个 turn
+   * 各自新建（`TurnRunner.runTurn` 每轮 `new AbortController()`），而本函数在 `compose`
+   * 里**早于** `TurnRunner` 的构造被调用——此刻还不存在「这一轮的信号」。传一个具体的
+   * `AbortSignal` 只能传进**某一个** turn 的信号，下一轮起就是死的，于是「用户按停止」在
+   * 第二批之后就再也传不进 swarm，成员会一直烧到各自的 `timeoutMs`。
+   *
+   * provider 形态与仓里既有的 `questionHolder` / `runCodeHolder` 同形：先建空壳，等
+   * `runner` 真的存在了再回填 `() => runner.currentSignal`。`null` = 当前没有在跑的 turn
+   *（轮次之间），那一批按「无取消通道」处理，与修复前逐字节等价。
+   */
+  signal?: () => AbortSignal | null;
 }
 
 export interface SwarmHost {
@@ -176,6 +190,8 @@ export function ensureSwarmWiring(
       : { llmRegistry: ctx.get<LlmRegistry>(LLM_REGISTRY_SERVICE) }),
     registry,
     ...(wiring.sessionId === undefined ? {} : { sessionId: wiring.sessionId }),
+    // Provider 形态原样传给工具：一批解析一次，绝不在装配期就把它钉死成某一个 turn 的信号。
+    ...(wiring.signal === undefined ? {} : { signalProvider: wiring.signal }),
     ...(wiring.deps ?? {}),
   };
   mountPlugins(ctx, [swarmPlugin({ deps, name: wiring.name ?? DEFAULT_SWARM_PLUGIN })]);

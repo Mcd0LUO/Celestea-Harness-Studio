@@ -33,8 +33,6 @@ import {
 } from './ui/messages';
 import { applyToolResult, pushToolCard, resetTurnStep } from './ui/toolcards';
 // W784：模型向用户提问（提问卡片 + 断线重连的未决列表重建）接线
-import { registerQuestionSse } from './ui/question';
-import { onCompact } from './ui/compact';
 import { msgOf, sid } from './ui/session-util';
 import {
   initInputBar,
@@ -69,9 +67,9 @@ import {
   type SessionPane,
 } from './ui/viewctx';
 import { railActivate, railRebind } from './ui/rail';
+import { connectWiredSse } from './ui/sse-wire';
 import { updateSessionBar } from './ui/sessionbar';
 import { updateWorkerStrip } from './ui/worker-strip'; // W866：本会话 worker 快捷条
-import { createFrameBudget } from './ui/messages/frame-budget'; // W9113（P0-1）：帧内预算
 import { t } from './i18n';
 
 /**
@@ -170,6 +168,39 @@ function finalizeTurn(ctx: SessionPane, phase: string): void {
   updateSessionBar();
 }
 
+/**
+ * ★ W9298（F1-01 P0）：lagged 之后**向服务端复核**该轮是否真的还在跑。
+ *
+ * 为什么必须有这一步：lagged 帧只在「某 session bucket 溢出、该 session 的帧被丢」
+ * 时发出，被丢的帧里**通常就含该轮的终态帧**（status completed/cancelled/error）。
+ * 前端把 lagged 提示显示出来只是让用户知道「这里丢了东西」—— 若该轮其实已经结束，
+ * 那一轮就永远停在「运行中」（ctx.streaming 仍为 true、气泡仍带流式光标、输入栏仍
+ * 是插话态），用户只能刷新页面。GET /api/status?session= 的 `busy` 字段是**服务端
+ * 真值**，据此补一次收尾即可脱困。
+ *
+ * 三条纪律：
+ *  · 只在**聚焦容器**上做（后台会话不抢 chrome，也不该由一次 lagged 决定其生命周期）；
+ *  · 请求失败/无 busy 字段（旧后端）⇒ **保持原状**，绝不臆断成「不在跑」——宁可继续
+ *    显示运行中，也不要误杀一个还在正常输出的轮次；
+ *  · `busy === true` ⇒ 轮次确实还在跑（迟到的终态帧会自己把它收尾），什么都不做。
+ */
+function recheckLagged(ctx: SessionPane): void {
+  if (!isActivePane(ctx) || !ctx.streaming) return;
+  const id = ctx.id;
+  void api
+    .status(id === LOCAL_ID ? undefined : id)
+    .then((snap) => {
+      // 复核期间可能已切走 / 该轮已自行收尾 —— 两种情况都别动手。
+      if (!isActivePane(ctx) || !ctx.streaming) return;
+      if (snap.busy === true) return;
+      if (snap.busy === undefined) return; // 旧后端不返回该字段：保持原状
+      finalizeTurn(ctx, 'interrupted');
+    })
+    .catch(() => {
+      /* 复核失败：保持现状，绝不把「查不到」当成「已结束」 */
+    });
+}
+
 export function onStatus(ctx: SessionPane, p: StatusPayload): void { // export：A1 用例的测试缝
   // W805（设计 §7.6）：上游「图像不支持」降级帧的 phase 也是 'error'，但它不是
   // 轮次结束（envelope.turn=0，是进程级提示）—— 先拦下，只做可见提示。
@@ -200,25 +231,26 @@ export function onStatus(ctx: SessionPane, p: StatusPayload): void { // export�
     updateSessionBar();
     return;
   }
+  // ★ W9298（F1-01 P0）：进程级提示**不受 turn 守卫约束**，必须排在守卫之前。lagged
+  //   帧的 turn 由后端硬编码为 0（studio/sse.ts 的 laggedFrame），不属于任何轮次 ⇒ 放在
+  //   守卫之后会被 turn 不匹配整帧吞掉。而 lagged 只在「bucket 溢出丢帧」时发出，被丢的
+  //   帧通常含该轮终态帧 ⇒ 终态与告警双双收不到 ⇒ 永久卡「运行中」。
+  if (p.phase === 'lagged' || p.hint) {
+    if (p.phase === 'lagged') renderInfoBlock(ctx, t('chat.status.lagged'), 'warn');
+    if (p.hint) renderInfoBlock(ctx, String(p.hint), 'warn');
+    if (p.phase === 'lagged') recheckLagged(ctx);
+    return;
+  }
   if (p.turn !== undefined && p.turn !== null && ctx.turn !== null && p.turn !== ctx.turn) {
     return;
   }
-  // ★ W9201：终态**以契约为准**（5 个，见 TERMINAL_PHASES）。旧代码只认三个，于是
-  //   step_limit（步数耗尽）与 interrupted（流被撕断）到达时不调 finalizeTurn ⇒
-  //   ctx.streaming 永远 true、气泡永远 streaming、输入栏永远「插话」——只能刷新脱困。
-  //   后端来源：TurnOutcome → real-runtime-adapter.ts:527 outcomePhaseOf 原样透传。
-  //   文案：只有 cancelled/error 有词条，其余回落空串=空闲态（与 completed 同口径，A1）。
+  // ★ W9201：终态**以契约为准**（5 个，见 TERMINAL_PHASES）；只有 cancelled/error 有词条，
+  //   其余回落空串=空闲态（与 completed 同口径，A1）。
   if (isTerminalPhase(p.phase)) {
     finalizeTurn(ctx, p.phase || '');
     if (p.phase === 'error') {
       renderInfoBlock(ctx, t('chat.status.turnError', { reason: p.error || t('chat.status.unknownError') }), 'err');
     }
-  }
-  if (p.phase === 'lagged') {
-    renderInfoBlock(ctx, t('chat.status.lagged'), 'warn');
-  }
-  if (p.hint) {
-    renderInfoBlock(ctx, String(p.hint), 'warn');
   }
 }
 
@@ -292,83 +324,20 @@ function onDone(ctx: SessionPane, p: DonePayload): void {
 // ---- SSE wiring ---------------------------------------------------------------
 
 export function connectSse(): SseClient {
-  const sse = new SseClient();
-  // W9113（P0-1）：轮次帧的 UI 工作统一过一个**帧内预算**队列 —— 症状（一帧 584 个
-  // 回调 / 7.9–9.4 秒冻结）、K 的取法、「为什么保序」「为什么在这一层接线」全部写在
-  // ./ui/messages/frame-budget.ts 的模块头，这里只留接线与错误隔离。
-  const budget = createFrameBudget();
-  const paced = (label: string, run: () => void): void => {
-    budget.push(() => {
-      try {
-        run();
-      } catch (err) {
-        console.warn(label, err);
-      }
-    });
-  };
-  sse.onConn((state) => {
-    S.conn = state;
-    if (state === 'online') {
-      setStatus(S.streaming ? t('chat.phase.running') : t('shell.status.online'), S.streaming ? 'busy' : 'ok');
-    } else if (state === 'down') {
-      setStatus(t('shell.status.reconnecting'), 'err');
-    }
+  // W9298（F1-01）：接线段整段搬进 ./ui/sse-wire.ts（纯搬家，语句逐字未改）——
+  // chat.ts 顶在 450 行硬上限，本修复与新增的 recheckLagged 需要腾出行数。
+  // 依赖方向：轮次处理器**由本文件注入**，sse-wire 不反向 import chat.ts。
+  return connectWiredSse({
+    ctxFor,
+    mergePaneStatus,
+    onStatus,
+    onStatusInbox,
+    onText,
+    onThinking,
+    onTool,
+    onToolResult,
+    onDone,
   });
-  // ★ W9201：status **也走 budget**。旧注释「前两者不碰消息容器」是错的：status 是唯一
-  //   同时写「消息容器 + 状态栏 + 会话条」的事件（onStatus → finalizeTurn/renderInfoBlock；
-  //   onStatusInbox → renderInboxMessage 追加一整条 .mcol）。后端 status 速率不低
-  //   （adapter:388 / fallback-host:150），一次宏任务里同步 emit 一批就是 W9111 的形状。
-  //   更关键是**全局保序**（frame-budget.ts:34-36）：status 直连时 `status:completed` 能插到
-  //   已排队的 `tool_result` 之前落地（finalizeTurn 先跑、applyToolResult 后跑）。
-  //   compact/question 仍不走：前者重载消息区（自带 await），后者是用户交互卡片。
-  sse.on('status', (p) => {
-    paced('SSE status', () => {
-      const ctx = ctxFor(p);
-      if (isActivePane(ctx)) {
-        statusline.fromSse(p);
-        if (p.session && ctx.status) ctx.status = { ...ctx.status, ...pickStatusFields(p) };
-      } else {
-        mergePaneStatus(ctx, p);
-      }
-      onStatus(ctx, p);
-      // W1479: the injected-message lane rides ON the status frame (the backend
-      // has always sent `placement` + `inbox` here). It used to have its own
-      // `inbox` event, which the server can never emit, so live injection showed
-      // up only after a refresh replayed the transcript.
-      onStatusInbox(ctx, p);
-    });
-  });
-  // ★ 下面五条**轮次帧**（text/thinking/tool/tool_result/done）与 status 走同一条
-  //   budget（它们都会写 DOM）；compact/question 不走，理由见上面 status 那段注释。
-  sse.on('text', (p) => {
-    paced('SSE text', () => onText(ctxFor(p), p));
-  });
-  sse.on('thinking', (p) => {
-    paced('SSE thinking', () => onThinking(ctxFor(p), p));
-  });
-  sse.on('tool', (p) => {
-    paced('SSE tool', () => onTool(ctxFor(p), p));
-  });
-  sse.on('tool_result', (p) => {
-    paced('SSE tool_result', () => onToolResult(ctxFor(p), p));
-  });
-  sse.on('done', (p) => {
-    paced('SSE done', () => {
-      statusline.onSseDone();
-      onDone(ctxFor(p), p);
-    });
-  });
-  sse.on('compact', (p) => {
-    try {
-      onCompact(p);
-    } catch (err) {
-      console.warn('SSE compact', err);
-    }
-  });
-  // W784：提问帧 → 卡片；重连 → 用未决列表补齐（都在模块内，chat.ts 只留这一行）
-  registerQuestionSse(sse, ctxFor);
-  sse.connect();
-  return sse;
 }
 
 // ---- cancel -------------------------------------------------------------------

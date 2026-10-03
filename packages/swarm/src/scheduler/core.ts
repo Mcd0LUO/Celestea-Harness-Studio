@@ -37,7 +37,9 @@ import {
   failedResult,
   runAttemptOnce,
   startedOf,
+  attemptGate,
   withHostFailures,
+  type AttemptGate,
 } from "./results.js";
 
 /**
@@ -120,7 +122,8 @@ interface Attempt {
   controller: AbortController;
   ready: boolean;
   timedOut: boolean;
-  cleanup(): void;
+  /** 取消面：批次信号中继 + 超时兜底闸门（构造期建立，见 results.ts 的 attemptGate）。 */
+  gate: AttemptGate;
 }
 
 type AttemptOutcome =
@@ -364,15 +367,21 @@ export class SwarmScheduler {
   #startAttempt(state: TaskState): void {
     if (this.#finished || this.#deps.signal?.aborted === true) return;
     const controller = new AbortController();
+    // 闸门先建：它需要 attempt 的 controller 与 timedOut（到期时要置位并 abort）。
+    const seal = { controller, timedOut: false };
     const attempt: Attempt = {
       state,
       controller,
       ready: false,
       timedOut: false,
-      cleanup: () => undefined,
+      gate: attemptGate(this.#deps, this.#config.timeoutMs, seal),
     };
-    attempt.cleanup = this.#linkAttemptSignals(attempt);
     this.#active.add(attempt);
+    // 超时兜底闸门：到期**由调度器直接把该成员落定**，不经过 executor 的 Promise——
+    // ���是一条与 executor 无关的释放路径，正是取消（批次 signal）已经在用的那一条。
+    attempt.gate.arm(() => {
+      this.#settleTimedOut(attempt);
+    });
     void runAttemptOnce({
       state,
       signal: attempt.controller.signal,
@@ -394,28 +403,33 @@ export class SwarmScheduler {
   }
 
 
-  #linkAttemptSignals(attempt: Attempt): () => void {
-    const batchSignal = this.#deps.signal;
-    const abortFromBatch = (): void => {
-      attempt.controller.abort(batchSignal?.reason);
-    };
-    // **0 = 禁用**（本仓显式定义，消解上游 D8 的 undefined/0 语义分叉）。
-    const timeoutMs = this.#config.timeoutMs;
-    const timeout =
-      timeoutMs <= 0
-        ? undefined
-        : this.#deps.setTimeout(() => {
-            attempt.timedOut = true;
-            attempt.controller.abort(new Error(TIMED_OUT));
-          }, timeoutMs);
+  /** 撤除定时器/监听；闸门也走这里，保证「释放」与「中止」共用同一处（results.ts attemptGate）。 */
+  #unlinkAttempt(attempt: Attempt): void {
+    attempt.gate.unlink();
+    attempt.gate.disarm();
+  }
 
-    if (batchSignal?.aborted === true) abortFromBatch();
-    else batchSignal?.addEventListener("abort", abortFromBatch, { once: true });
-
-    return () => {
-      if (timeout !== undefined) this.#deps.clearTimeout(timeout);
-      batchSignal?.removeEventListener("abort", abortFromBatch);
-    };
+  /**
+   * 超时到点：把该成员**就地**落成 failed(TIMED_OUT)，不等待 executor（W9290 B1-02）。
+   *
+   * **为什么释放不经过 executor**：闸门到期时，一个无视 abort 的执行函数（子进程 wedged、
+   * SDK 永不返回、await 死锁）的 Promise **永远不会 settle**。若把落定挂在它的 `.then` 上，
+   * 整个批次的 `run()` 就永远不 resolve——这正是修复前的形态（探针 C1：done 5/6、settled
+   * false、active 1）。取消之所以能救，是因为它走的是**不依赖 executor**的这条释放路径；
+   * 超时现在走同一条。
+   *
+   * **幂等**：`#releaseAttempt` 以 `active.delete` 判重，先落定的一方赢。若 executor 稍后
+   * 才 settle，它的 `.then` 会在 `#releaseAttempt` 处直接返回，结果已被本次落定占据——
+   * 这是一次**有意的**「晚到结果被丢弃」，它换来的是批次一定收尾。
+   *
+   * 文案用 `TIMED_OUT` 而非成员的原始错误：`attempt.timedOut` 已由闸门先置位（见
+   "results.ts 的 attemptGate"），于是即便成员在被 abort 后抢先 reject，
+   "落定文案仍是超时——「超时优先于原始错误」由结构保证，不靠两支定时器的巧合。" */
+  #settleTimedOut(attempt: Attempt): void {
+    if (!this.#releaseAttempt(attempt)) return;
+    if (this.#finished) return;
+    this.#results[attempt.state.index] = failedResult(attempt.state, TIMED_OUT);
+    this.#schedule();
   }
 
   #markAttemptReady(attempt: Attempt): void {
@@ -472,7 +486,7 @@ export class SwarmScheduler {
 
   #releaseAttempt(attempt: Attempt): boolean {
     if (!this.#active.delete(attempt)) return false;
-    attempt.cleanup();
+    this.#unlinkAttempt(attempt);
     return true;
   }
 
@@ -640,7 +654,7 @@ export class SwarmScheduler {
     this.#deps.signal?.removeEventListener("abort", this.#onBatchAbort);
     this.#clearNormalTimer();
     this.#gate.clearWakeup();
-    for (const attempt of this.#active) attempt.cleanup();
+    for (const attempt of this.#active) this.#unlinkAttempt(attempt);
     this.#active.clear();
   }
 

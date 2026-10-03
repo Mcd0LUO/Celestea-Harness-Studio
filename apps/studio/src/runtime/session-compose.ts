@@ -804,6 +804,15 @@ export class SessionComposer {
    * agent_swarm` — the swarm-live test caught exactly that.
    */
   private swarmWiring(): Record<string, never> {
+    // **取消信号由 compose 注入，不必在这里传**（W9290 B1-01）：compose 在本函数之后才
+    // 构造 `TurnRunner`，而取消信号是**每个 turn 各自新建**的——此刻这里根本拿不到
+    // 「这一轮的信号」，能拿到的只有空壳。所以 compose 用与 questionHolder / runCodeHolder
+    // 同一形状的 holder，等 runner 建好后回填 `() => runner.currentSignal`，再以
+    // `signalProvider` 的形态交给工具。
+    //
+    // 修复前这里返回 `{}` 且 compose 也不注入 ⇒ 整条链路**没有任何取消通道**：一个
+    // 不配合 abort 的成员会让 `tool.execute` 永久挂住，用户按停止也救不回来
+    // （audit3-r2/B1/probe-cancel.ts K1，退出码 7）。
     return {};
   }
 

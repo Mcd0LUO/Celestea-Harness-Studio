@@ -25,6 +25,7 @@
  * about the row in both directions.
  */
 
+import { createRedactor } from "@celestea/core";
 import { HttpTargetPolicy, requestOnce } from "@celestea/tools";
 
 import { normalizeBaseUrl } from "./providers.js";
@@ -145,8 +146,32 @@ function pinnedProbeFetch(pinnedIps: readonly string[], timeoutMs: number): Prob
   };
 }
 
-function head(text: string, n: number): string {
-  return text.length <= n ? text : text.slice(0, n);
+/**
+ * A bounded, REDACTED excerpt of an upstream body — the ONLY way this file may
+ * quote bytes an upstream sent us.
+ *
+ * B2-01 (P0): both failure strings used to be `head(text, …)`, so an upstream
+ * that echoes the `Authorization` header it received (many gateways quote the
+ * bad key back in a 401/500) put the row's stored `api_key` straight into the
+ * `{ok:false,error}` body that `/api/providers/test` and `/models/fetch` return.
+ * That broke the frozen `endpoints.json` convention
+ * `"no response ever contains api_key"`.
+ *
+ * Why the probe's OWN key is passed as a registered secret: a provider key is an
+ * arbitrary vendor string (`9f8e7d6c…`), so no token-shape rule can be relied on.
+ * `createRedactor`'s registered-secret pass replaces the literal value wherever it
+ * appears, and its DEFAULT_RULES additionally cover the common `sk-…` /
+ * `Bearer …` shapes for a key this process never held. The engine path
+ * (`packages/llm/src/transport.ts:redact`) does the same for the same reason —
+ * this is the probe half of that guard, not a second vocabulary.
+ *
+ * Order matters and is deliberate: REDACT FIRST, then truncate. Truncating first
+ * could slice a secret in half and leave an unmatchable fragment behind.
+ */
+function safeHead(text: string, n: number, secrets: readonly (string | null)[] = []): string {
+  const known = secrets.filter((s): s is string => typeof s === "string" && s !== "");
+  const redacted = createRedactor(known).redact(text);
+  return redacted.length <= n ? redacted : redacted.slice(0, n);
 }
 
 /** Which key a probe would use, and whether it was borrowed. NEVER logged. */
@@ -234,11 +259,11 @@ export async function probeModels(candidate: ProbeCandidate, opts: ProbeOptions)
     return { ok: false, error: `summary response read failed: ${errText(e)}` };
   }
   if (res.status < 200 || res.status >= 300) {
-    return { ok: false, error: `HTTP ${res.status}: ${head(text, 300)}` };
+    return { ok: false, error: `HTTP ${res.status}: ${safeHead(text, 300, [key])}` };
   }
   const models = parseModels(text);
   if (models === null) {
-    return { ok: false, error: `response is not JSON (invalid body); body head: ${head(text, 200)}` };
+    return { ok: false, error: `response is not JSON (invalid body); body head: ${safeHead(text, 200, [key])}` };
   }
   return { ok: true, models };
 }

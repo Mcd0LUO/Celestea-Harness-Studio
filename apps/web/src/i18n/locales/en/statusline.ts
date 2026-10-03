@@ -32,6 +32,7 @@ export const statusline = {
   'statusline.perm.notAccepted': 'Switch failed: the service did not accept this tier',
   'statusline.perm.unsupported': 'This version does not support switching the session permission tier',
   'statusline.perm.unknownTier': 'unknown tier',
+  'statusline.perm.confirmFailed': 'switching tiers needs a confirmation; the token was not issued or has expired (please retry)',
   'statusline.picker.currentSuffix': ' (current)',
   'statusline.picker.modelName': 'Model name',
   'statusline.picker.apply': 'Apply',

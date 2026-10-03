@@ -51,15 +51,18 @@ import type { GoalResp } from './types/goal'; // A3：持久目标
 import type { PluginsResp } from './types/plugin';
 // W858：权限族类型整族在 ./types/permission（types.ts 有模块体积棘轮，本轮不追加行数；
 // 先例：ui/attachments.ts 直接 import ./types/attachment）。
-import type {
-  PermissionPreset,
-  PermissionPresetDeletedResp,
-  PermissionPresetResp,
-  PermissionPresetsResp,
-  SessionPermissionResp,
-} from './types/permission';
 // W9103：用量账本 + 登录态（设置页「使用统计」与左下角设置入口的用户名）。
 import type { AuthCheckResp, UsageLedgerResp } from './types/usage';
+// B5-01：权限族端点整族搬到这里（api.ts 因换档确认门涨过 450 行；拆分而非登记例外）。
+import {
+  createPermissionPreset,
+  deletePermissionPreset,
+  permissionPresets,
+  permissionToken,
+  sessionPermission,
+  setSessionPermission,
+  updatePermissionPreset,
+} from './api/permission';
 import { t } from './i18n'; // i18n P0：用户可见文案走字典
 
 export class ApiError extends Error {
@@ -106,7 +109,8 @@ export function userErrorText(detail: unknown, phrase?: string): string {
   return phrase ?? t('api.error.generic');
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+/** B5-01：权限族端点已拆到 ./api/permission，那一层复用这三个原语。 */
+export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, init);
@@ -133,7 +137,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (data ?? {}) as T;
 }
 
-function postJson<T>(
+export function postJson<T>(
   path: string,
   body: unknown,
   headers?: Record<string, string>,
@@ -146,10 +150,10 @@ function postJson<T>(
 }
 
 /** PUT + JSON body（与 postJson 同款：唯一 fetch 出处仍在本文件）。 */
-function putJson<T>(path: string, body: unknown): Promise<T> {
+export function putJson<T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> {
   return requestJson<T>(path, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
     body: JSON.stringify(body ?? {}),
   });
 }
@@ -359,32 +363,14 @@ export const api = {
       '/api/prompts/' + encodeURIComponent(id) + '/default',
       workspace ? { workspace } : {},
     ),
-  // ---- W9：权限预设 / 会话权限档位（设置页「权限预设」pane + statusline 档位徽标） ----
-  /**
-   * GET /api/permissions/presets —— 内置三档 + 自定义档 + 运行时封顶 max。
-   * max 是**真源**（可能低于所选档）：界面如实展示，不替用户「修正」。
-   */
-  permissionPresets: () => requestJson<PermissionPresetsResp>('/api/permissions/presets'),
-  /** POST /api/permissions/presets {preset}：409 = id 已存在（含内置 id）/ 422 = 字段非法。 */
-  createPermissionPreset: (preset: PermissionPreset) =>
-    postJson<PermissionPresetResp>('/api/permissions/presets', { preset }),
-  /** PUT /api/permissions/presets/{id} {preset}：内置档 409、不存在 404、非法 422。 */
-  updatePermissionPreset: (id: string, preset: PermissionPreset) =>
-    putJson<PermissionPresetResp>('/api/permissions/presets/' + encodeURIComponent(id), { preset }),
-  /** DELETE /api/permissions/presets/{id}：200 {deleted} / 内置 409 / 不存在 404。 */
-  deletePermissionPreset: (id: string) =>
-    requestJson<PermissionPresetDeletedResp>(
-      '/api/permissions/presets/' + encodeURIComponent(id),
-      { method: 'DELETE' },
-    ),
-  /** GET /api/sessions/{id}/permission：该会话选中的档位 + 已过封顶的生效快照。 */
-  sessionPermission: (id: string) =>
-    requestJson<SessionPermissionResp>('/api/sessions/' + encodeURIComponent(id) + '/permission'),
-  /** PUT /api/sessions/{id}/permission {preset}：422 = 未知档位（调用方回滚徽标并说明）。 */
-  setSessionPermission: (id: string, preset: string) =>
-    putJson<SessionPermissionResp>('/api/sessions/' + encodeURIComponent(id) + '/permission', {
-      preset,
-    }),
+  // ---- W9：权限预设 / 会话权限档位 ⇒ 见 ./api/permission（B5-01 拆分，体积棘轮） ----
+  permissionPresets,
+  createPermissionPreset,
+  updatePermissionPreset,
+  deletePermissionPreset,
+  sessionPermission,
+  permissionToken,
+  setSessionPermission,
   // ---- 会话权限 / 提权通道（W701；能力位未就绪时调用方不显示入口） ----
   /**
    * GET /api/sessions/{id}/grants：

@@ -210,6 +210,17 @@ export const permStub = {
   putStatus: 200,
   putError: "unknown preset 'read-only'",
   tools: ['read_file', 'write_file', 'bash'] as string[],
+  /**
+   * B5-01：换档的一次性确认令牌。铸造端点 GET /api/sessions/{id}/permission/
+   * confirm-token，答复 {token} 并在 Set-Cookie 里下 HttpOnly nonce（浏览器同源
+   * 自动带，前端不手工搬运）。token 为空串 = 服务端没给令牌 ⇒ 换档必然 403。
+   */
+  tokenStatus: 200,
+  token: 'perm-tok-1',
+  /** 已铸造的令牌（用于断言 PUT 带的就是它）。 */
+  lastToken: '' as string,
+  /** 铸造端点被调用的次数（重试语义靠它观察）。 */
+  tokenCalls: 0,
 };
 
 export const reply = (status: number, payload: unknown): unknown => ({
@@ -252,6 +263,10 @@ export function resetHarness(): void {
   permStub.putStatus = 200;
   permStub.putError = "unknown preset 'read-only'";
   permStub.tools = ['read_file', 'write_file', 'bash'];
+  permStub.tokenStatus = 200;
+  permStub.token = 'perm-tok-1';
+  permStub.lastToken = '';
+  permStub.tokenCalls = 0;
   doc.body.innerHTML = HTML;
   vi.resetModules(); // 模块级单例（statusline / grants 状态）每个用例重建
   vi.stubGlobal("TextEncoder", TextEncoder); // scopeHashOf 需要（jsdom 环境不保证有）
@@ -274,7 +289,7 @@ export function resetHarness(): void {
     if (u.startsWith("/api/tools")) {
       return reply(200, { ok: true, tools: permStub.tools.map((name) => ({ name })) });
     }
-    if (u.startsWith("/api/permissions/presets") || /\/permission$/.test(u)) {
+    if (u.startsWith("/api/permissions/presets") || u.includes("/permission/confirm-token") || /\/permission$/.test(u)) {
       return permissionRoute(u, method, body);
     }
     if (u.startsWith("/api/sessions")) return reply(200, { ok: true, sessions: [] });
@@ -341,6 +356,16 @@ function permissionRoute(url: string, method: string, body: string): unknown {
       return reply(200, { ok: true, deleted: id });
     }
     return reply(200, { ok: true, builtin: PERM_BUILTIN, custom: permStub.custom, max: permStub.max });
+  }
+  // B5-01：换档确认令牌。必须排在下面的 /permission$ 之前 —— 后者只认结尾的
+  // /permission，这个 URL 结尾是 /confirm-token，但这里统一走显式分支更清楚。
+  if (url.includes('/permission/confirm-token')) {
+    permStub.tokenCalls += 1;
+    if (permStub.tokenStatus !== 200) {
+      return reply(permStub.tokenStatus, { ok: false, error: 'not available' });
+    }
+    permStub.lastToken = permStub.token;
+    return reply(200, { ok: true, token: permStub.token, expires_at: 1700000060 });
   }
   const m = /^\/api\/sessions\/(.+)\/permission$/.exec(url);
   if (m) {

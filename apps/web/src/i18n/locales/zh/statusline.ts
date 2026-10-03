@@ -32,6 +32,7 @@ export const statusline = {
   'statusline.perm.notAccepted': '切换失败：服务未接受该档位',
   'statusline.perm.unsupported': '当前版本不支持切换会话权限档位',
   'statusline.perm.unknownTier': '未知档位',
+  'statusline.perm.confirmFailed': '换档需要一次人工确认，令牌未取到或已失效（请重试）',
   'statusline.perm.switched': '已切换会话权限档位 · 下一轮生效',
   'statusline.picker.currentSuffix': '（当前）',
   'statusline.picker.modelName': '模型名称',

@@ -20,6 +20,7 @@
  * The guard side is also asserted in packages/tools/guard/all-paths.test.ts and
  * sandbox/w9-rw-roots.test.ts.
  */
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -290,7 +291,24 @@ describe("W864 allPaths — the HTTP face", () => {
     expect(def.body["preset"]).toBe("full-access");
     expect((def.body["effective"] as { allPaths: boolean }).allPaths).toBe(true);
 
-    const set = await getJson(h.app, "/api/sessions/" + S1 + "/permission", jsonRequest("PUT", { preset: "read-only" }));
+    // B5-01: a preset change is a capability change, so the PUT now carries the
+    // one-shot browser confirmation (same handshake the grants POST needs). The
+    // W864 assertion below is unchanged: the preset still drives effective.allPaths.
+    const minted = await h.app.request(
+      "/api/sessions/" + S1 + "/permission/confirm-token?preset=read-only&scope_hash=" +
+        createHash("sha256").update(JSON.stringify({ cap: "permission", scope: { preset: "read-only" } })).digest("hex"),
+      { headers: { "sec-fetch-site": "same-origin" } },
+    );
+    const mintBody = JSON.parse(await minted.text()) as { token: string };
+    const set = await getJson(h.app, "/api/sessions/" + S1 + "/permission", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        "x-celestea-grant-confirm": mintBody.token,
+        cookie: (minted.headers.get("set-cookie") ?? "").split(";")[0] ?? "",
+      },
+      body: JSON.stringify({ preset: "read-only" }),
+    });
     expect(set.status).toBe(200);
     expect((set.body["effective"] as { allPaths: boolean }).allPaths).toBe(false);
     const ro = await getJson(h.app, "/api/sessions/" + S1 + "/permission");

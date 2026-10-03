@@ -50,8 +50,11 @@ import {
   TERMINAL_LIMIT_CODE,
   TERMINAL_GONE_CODE,
   TERMINAL_UNAVAILABLE_CODE,
+  createTerminalTable,
+  registerTerminalTable,
   TerminalRegistry,
   terminateTree,
+  type TerminalTable,
 } from "./terminal-pty.js";
 // The permission gate, the target resolution and the execution boundary are
 // REUSED, never re-derived: importing them is what makes "the terminal cannot be
@@ -75,6 +78,16 @@ export type TerminalSink = (id: string, session: string | null, data: string) =>
 export interface TerminalDeps {
   /** Relay pty output to the client. Absent = the studio SSE bus. */
   sink?: TerminalSink;
+  /**
+   * B4-01 P0: where this app publishes its pty table so a host can shut it
+   * down. Absent = nobody listens, and the table is built privately (the
+   * pre-fix shape, kept for tests that never spawn a real pty).
+   */
+  exposeTable?: (table: TerminalTable) => void;
+  /** Idle ceiling override; absent = the env knob / default. */
+  idleMs?: number;
+  /** Sweep period override; absent = `TERMINAL_REAPER_MS`. */
+  periodMs?: number;
 }
 
 /** Read the optional `session`/`cols`/`rows` fields of an open request. */
@@ -254,6 +267,27 @@ async function closeTerminal(c: Context, terminals: TerminalRegistry): Promise<R
   return c.json({ ok: true, id, closed: true, pid });
 }
 
+/**
+ * The per-app key the pty table is published under.
+ *
+ * A WeakMap-backed id: the app OBJECT is the identity, so a table dies with
+ * its app (no id ever repeats, and a garbage-collected app takes its key with
+ * it) while a caller in `server.ts` can derive the same key from the very
+ * app it is tearing down. A counter alone would also work, but a weak key makes
+ * the per-app guarantee structural instead of conventional.
+ */
+const ownerIds = new WeakMap<object, string>();
+let nextOwnerId = 0;
+
+export function terminalOwnerKey(app: object): string {
+  const existing = ownerIds.get(app);
+  if (existing !== undefined) return existing;
+  nextOwnerId += 1;
+  const key = `studio-app-` + nextOwnerId;
+  ownerIds.set(app, key);
+  return key;
+}
+
 export function registerTerminal(app: Hono, deps: Deps, table: RouteTable, options: TerminalDeps = {}): string[] {
   const open = table.get("post_terminal");
   const input = table.get("post_terminal_input");
@@ -267,7 +301,21 @@ export function registerTerminal(app: Hono, deps: Deps, table: RouteTable, optio
   );
   // One table per app: the routes below close over it, so no other app in this
   // process can see or close these terminals (see the note above).
-  const terminals = new TerminalRegistry();
+  //
+  // B4-01 P0: built through the factory, so the idle reaper is ARMED here
+  // rather than existing as a comment, and the table is published through the
+  // seam so the shutdown path can reach it (a bare closure local was exactly
+  // why a detached pty outlived the process before).
+  const table_: TerminalTable = createTerminalTable({
+    ...(options.idleMs === undefined ? {} : { idleMs: options.idleMs }),
+    ...(options.periodMs === undefined ? {} : { periodMs: options.periodMs }),
+  });
+  // Publish under the app object itself: a stable per-app key that the server
+  // (which owns that same object) can name at teardown, and that two apps in
+  // one test process can never collide on.
+  registerTerminalTable(terminalOwnerKey(app), table_);
+  options.exposeTable?.(table_);
+  const terminals: TerminalRegistry = table_.registry;
   app.on(open.method, open.honoPath, (c) => openTerminal(c, deps, pump, terminals));
   app.on(input.method, input.honoPath, (c) => inputTerminal(c, terminals));
   app.on(close.method, close.honoPath, (c) => closeTerminal(c, terminals));

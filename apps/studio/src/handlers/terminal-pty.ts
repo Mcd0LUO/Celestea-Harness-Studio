@@ -8,8 +8,7 @@
  * repo does not take lightly) or an EXISTING setuid-free binary that already
  * allocates a pty. `util-linux`'s `script(1)` is the second: it opens
  * `/dev/ptmx`, forks the command onto the slave side, and relays the master to
- * its own stdio. Measured on this host: a prompt appears, `python3` starts a
- * REPL, `top` renders, and `cat` echoes a typed line.
+ * its own stdio.
  *
  * ## The sandbox is NOT bypassed
  *
@@ -30,6 +29,10 @@
  *   is a re-open — the UI does exactly that, and says so.
  * - **No silent platform fallback.** A host without `script(1)` (Windows) gets a
  *   structured refusal, never a bare shell pretending to be a terminal.
+ * - **B4-01: an idle pty is not a keeper.** `idleSince` existed with zero
+ *   callers, so a browser that vanished left its detached process group running
+ *   until the machine rebooted. `startTerminalReaper` is that missing caller and
+ *   `terminateAll` is the shutdown half; see both below.
  */
 
 import { randomUUID } from "node:crypto";
@@ -120,8 +123,15 @@ export interface TerminalEntry {
  */
 export class TerminalRegistry {
   private readonly entries = new Map<string, TerminalEntry>();
+  /** Fired whenever the table crosses 0 <-> non-zero (the reaper's arm trigger). */
+  private occupancy: Array<(live: boolean) => void> = [];
 
   constructor(private readonly limit: number = MAX_TERMINALS) {}
+
+  /** Observe "the table became non-empty / became empty" (B4-01: arm-on-demand). */
+  onOccupancy(fn: (live: boolean) => void): void {
+    this.occupancy.push(fn);
+  }
 
   /** Register a freshly spawned child; `null` when the ceiling is reached. */
   add(child: SandboxChild, session: string | null, cols: number, rows: number): TerminalEntry | null {
@@ -137,6 +147,7 @@ export class TerminalRegistry {
       closed: false,
     };
     this.entries.set(entry.id, entry);
+    if (this.entries.size === 1) this.occupancy.forEach((fn) => fn(true));
     return entry;
   }
 
@@ -150,6 +161,7 @@ export class TerminalRegistry {
     if (entry === undefined) return;
     entry.closed = true;
     this.entries.delete(id);
+    if (this.entries.size === 0) this.occupancy.forEach((fn) => fn(false));
   }
 
   /** Every live entry (the reaper and the shutdown path iterate this). */
@@ -165,10 +177,208 @@ export class TerminalRegistry {
   idleSince(idleMs: number, now: number = Date.now()): TerminalEntry[] {
     return this.all().filter((e) => now - e.touchedAt > idleMs);
   }
+
+  /**
+   * B4-01 P0: signal EVERY live entry's process group and forget it.
+   *
+   * The shutdown half of the anti-leak contract. A pty is spawned detached (it
+   * LEADS its own group), so nothing in the parent's exit takes it down -- which
+   * is what made the missing wiring an ORPHAN rather than a cosmetic leak. Each
+   * tree gets graceMs to answer SIGTERM before the SIGKILL escalation, and
+   * entries are dropped WHETHER or not the child answered, so a wedged shell
+   * cannot hold the teardown budget open. Never rejects.
+   */
+  async terminateAll(graceMs: number = TERMINATE_GRACE_MS): Promise<number> {
+    const entries = this.all();
+    await Promise.all(
+      entries.map((entry) =>
+        terminateTree(entry, graceMs).catch(() => {
+          /* one wedged tree must not strand the others */
+        }),
+      ),
+    );
+    for (const entry of entries) this.drop(entry.id);
+    return entries.length;
+  }
 }
 
 /** Default idle ceiling: a pty with no traffic for this long is reaped. */
 export const TERMINAL_IDLE_MS = 30 * 60 * 1000;
+
+/** How often the idle reaper sweeps (the ceiling itself is TERMINAL_IDLE_MS). */
+export const TERMINAL_REAPER_MS = 60 * 1000;
+
+/** How one idle sweep ended; the seam the tests and the host log both read. */
+export interface ReaperReport {
+  swept: number; // entries left in the table after the pass
+  reaped: number; // entries the ceiling killed this pass
+}
+
+/** The reaper handle: a manual sweep, the armed flag, and a disarm. */
+export interface TerminalReaper {
+  /** One pass; exposed so a test can drive it without waiting on a timer. */
+  sweep: () => ReaperReport;
+  armed: () => boolean; // is the sweep timer armed?
+  stop: () => void; // disarm (idempotent; safe twice)
+}
+
+/** Knobs the reaper takes; every one is pinned by the B4-01 test. */
+export interface TerminalReaperOptions {
+  idleMs?: number; // idle ceiling (default TERMINAL_IDLE_MS)
+  periodMs?: number; // sweep period (default TERMINAL_REAPER_MS)
+  now?: () => number; // clock; must match the one add() stamped with
+  onReaped?: (report: ReaperReport) => void; // host log, only when something died
+}
+
+/**
+ * B4-01 P0: the idle reaper that finally CALLS idleSince.
+ *
+ * An unref'd interval that reaps whatever outlived the ceiling, ARMED ON DEMAND
+ * (first pty in, last pty out): a sweep over an EMPTY table can never reap
+ * anything, so a timer running then is pure waste -- and waste outlives the app.
+ */
+export function startTerminalReaper(registry: TerminalRegistry, options: TerminalReaperOptions = {}): TerminalReaper {
+  const idleMs = options.idleMs ?? TERMINAL_IDLE_MS;
+  const now = options.now ?? Date.now;
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const sweep = (): ReaperReport => {
+    const stale = registry.idleSince(idleMs, now());
+    for (const entry of stale) {
+      registry.drop(entry.id);
+      void terminateTree(entry).catch(() => undefined);
+    }
+    const report: ReaperReport = { swept: registry.size(), reaped: stale.length };
+    if (stale.length > 0) options.onReaped?.(report);
+    return report;
+  };
+
+  const arm = (): void => {
+    if (timer !== null || idleMs <= 0) return;
+    timer = setInterval(sweep, options.periodMs ?? TERMINAL_REAPER_MS);
+    timer.unref?.();
+    armedReapers.add(reaper);
+  };
+  const reaper: TerminalReaper = {
+    sweep,
+    armed: () => timer !== null,
+    stop: () => {
+      if (timer === null) return;
+      clearInterval(timer);
+      timer = null;
+      armedReapers.delete(reaper); // the set must drain, or it is its own leak
+    },
+  };
+
+  // B4-01: arm ON DEMAND, not at composition. A sweep over an EMPTY table can
+  // never reap anything, so a timer running before the first pty is pure waste
+  // -- and a waste that outlives the app (the teardown that stops it may never
+  // run). The first pty arms it; the last one leaving disarms it. Same coverage,
+  // zero idle wakeups, and a table that was never used arms nothing at all.
+  registry.onOccupancy((live) => {
+    if (live) arm();
+    else reaper.stop();
+  });
+  if (registry.size() > 0) arm();
+  return reaper;
+}
+
+/**
+ * Every reaper this module armed, so a host teardown can stop all of them. A Set,
+ * not a WeakSet: stopping requires ITERATION. Entries leave as their reaper stops.
+ */
+const armedReapers = new Set<TerminalReaper>();
+
+/**
+ * Disarm EVERY armed reaper (idempotent; never throws). Stopping an already-
+ * stopped reaper is a no-op, so a double teardown is safe.
+ */
+export function stopAllTerminalReapers(): void {
+  for (const reaper of [...armedReapers]) {
+    try {
+      reaper.stop();
+    } catch {
+      /* one uncooperative reaper must not strand the rest */
+    }
+  }
+}
+
+/** Env knob: the idle ceiling, so a host can tighten (or disable) the backstop. */
+export const ENV_TERMINAL_IDLE_MS = "CELESTEA_TERMINAL_IDLE_MS";
+
+/**
+ * The effective idle ceiling: the env knob overrides the default, and 0 (or a
+ * negative) DISABLES the sweep. Unparsable input falls back to the default
+ * rather than disabling.
+ */
+export function terminalIdleMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = (env[ENV_TERMINAL_IDLE_MS] ?? "").trim();
+  if (raw === "") return TERMINAL_IDLE_MS;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : TERMINAL_IDLE_MS;
+}
+
+/** One app's pty table plus the reaper that guards it. */
+export interface TerminalTable {
+  registry: TerminalRegistry;
+  reaper: TerminalReaper;
+  /** Terminate every live pty and disarm the sweep (idempotent). */
+  shutdown: () => Promise<number>;
+}
+
+/**
+ * B4-01 P0: build ONE app's pty table with its idle reaper already armed.
+ *
+ * registerTerminal used to build the table as a bare closure local, which is
+ * precisely why nothing outside the three routes could reach it.
+ */
+export function createTerminalTable(
+  options: TerminalReaperOptions & { limit?: number; env?: NodeJS.ProcessEnv } = {},
+): TerminalTable {
+  const registry = new TerminalRegistry(options.limit);
+  const idleMs = options.idleMs ?? terminalIdleMs(options.env);
+  const reaper = startTerminalReaper(registry, { ...options, idleMs });
+  return {
+    registry,
+    reaper,
+    shutdown: async (): Promise<number> => {
+      reaper.stop();
+      return registry.terminateAll();
+    },
+  };
+}
+
+/**
+ * B4-01 P0: the per-app table book, so a host can reach a table it never built.
+ *
+ * The routes are registered by handlers/index.ts, which this fix does not touch,
+ * so the table cannot be threaded through that call chain. NOT the module-
+ * singleton the class doc forbids: each app registers ITS OWN table under ITS
+ * OWN key, and releaseTerminalTable removes it, so harnesses stay isolated.
+ */
+const tables = new Map<string, TerminalTable>();
+
+/** Publish this app's table under `owner` (a later call replaces the earlier one). */
+export function registerTerminalTable(owner: string, table: TerminalTable): void {
+  tables.set(owner, table);
+}
+
+/** The table an app registered, if it is still live. */
+export function terminalTableOf(owner: string): TerminalTable | undefined {
+  return tables.get(owner);
+}
+
+/**
+ * Drain and forget an app's table. Idempotent, and safe for an owner that
+ * never registered: the second call is a no-op, which matters because a
+ * shutdown path may run twice (W2029: the repeat SIGTERM only reports).
+ */
+export async function releaseTerminalTable(owner: string): Promise<number> {
+  const table = tables.get(owner);
+  if (table === undefined) return 0;
+  tables.delete(owner);
+  return table.shutdown();
+}
 
 /**
  * Grace allowed for a SIGTERM'd pty tree to be reaped before SIGKILL is sent.
@@ -192,11 +402,11 @@ export const TERMINATE_GRACE_MS = 5_000;
  * (observed as a 30s test timeout under load). Escalation is what makes the
  * function's contract true; `launch.ts:108-109` is the same two-step pattern.
  *
- * W9220（测试提速，行为不变）：`graceMs` 是**可选**参数，默认仍是 TERMINATE_GRACE_MS。
- * 生产调用点（`terminal.ts:252`）不传，所以线上超时预算逐字节不变。
- * 唯一用途是让 W1528b 的假 child（SIGTERM 忽略、SIGKILL 才 settle）不必真等 5 s：
- * 它证的是「有界 + 会升级 SIGKILL」，不是「必须等满 5 s」。
+ * W9220: graceMs is an OPTIONAL parameter (default unchanged) purely so the
+ * W1528b fake child -- SIGTERM ignored, settles only on SIGKILL -- need not really
+ * wait 5 s. It proves "bounded + escalates", not "must wait the full 5 s".
  */
+
 export function terminateTree(entry: TerminalEntry, graceMs: number = TERMINATE_GRACE_MS): Promise<void> {
   entry.closed = true;
   entry.child.terminate();

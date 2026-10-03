@@ -86,8 +86,25 @@ export interface SwarmToolDeps extends SwarmExecutorDeps {
   schedulerConfig?: Partial<SwarmSchedulerConfig>;
   /** Rate-limit classifier; omitted = the LlmError field test below. */
   isRateLimitError?: (error: unknown) => boolean;
-  /** Batch cancellation (the host turn's signal). */
+  /**
+   * Batch cancellation (the host turn's signal).
+   *
+   * **一个批次一个信号**：它在 `runBatch` 入口解析一次，整批（连同每个成员的中继信号）都用
+   * 它，所以「终态只认批次信号」这条契约在语义上仍然是「同一批共用一个权威」。
+   */
   signal?: AbortSignal;
+  /**
+   * 批次取消的**延迟求值来源**（W9290 B1-01）。
+   *
+   * 为什么与 `signal` 并存：取消信号是**每个 turn 各自新建**的（见 `TurnRunner.runTurn`），
+   * 而工具是**整个 session 一份**。只挂一个具体 `AbortSignal` 的话，它会一直是第一批那个
+   * turn 的信号——第一批结束���，之后每批的「用户按停止」都传不进来，成员只能各自烧到
+   * `timeoutMs`（默认 2 小时）。`signalProvider` 让每批在**开跑那一刻**问一次「现在这一轮
+   * 的信号是哪个」，`null`（轮次之间）按无取消通道处理。
+   *
+   * 优先级：`signalProvider` 解析出的值 > `signal`。两者都缺省 = 无取消通道（与修复前等价）。
+   */
+  signalProvider?: () => AbortSignal | null;
   /** Progress observer for the statusline panel (optional). */
   onProgress?: (results: readonly SwarmTaskResult[]) => void;
   /**
@@ -311,8 +328,24 @@ function readRequest(args: unknown): Record<string, unknown> {
   return request;
 }
 
+/**
+ * 本批的取消信号：每批解析**一次**，整批共用。
+ *
+ * 为什么在 `schedulerDeps` 里解析而不是每次用到时现问：调度器在 `SwarmSchedulerDeps` 上
+ * 读 `signal`（加监听、查 `aborted`），一个批次必须自始至终是**同一个** AbortSignal 实例——
+ * 每问一次换一个实例，等于给同一批装了两条互不相识的取消链，成员会各听各的。
+ *
+ * 解析顺序：`signalProvider()`（每轮现问，优先）> `signal`（宿主给的固定信号）。
+ */
+function batchSignalOf(deps: SwarmToolDeps): AbortSignal | undefined {
+  const live = deps.signalProvider?.() ?? null;
+  if (live !== null) return live;
+  return deps.signal;
+}
+
 /** Wire the scheduler to the batch's executor and the host's seams. */
 function schedulerDeps(deps: SwarmToolDeps, executor: SwarmMemberExecutor): SwarmSchedulerDeps {
+  const batchSignal = batchSignalOf(deps);
   return {
     now: () => Date.now(),
     setTimeout: (handler, ms) => setTimeout(handler, ms),
@@ -321,7 +354,7 @@ function schedulerDeps(deps: SwarmToolDeps, executor: SwarmMemberExecutor): Swar
     isRateLimitError: deps.isRateLimitError ?? isRateLimitErrorFromLlmError,
     // randomFn is the scheduler's jitter source (types.ts); Math.random is the
     // documented default, so it is left unset rather than passed explicitly.
-    ...(deps.signal === undefined ? {} : { signal: deps.signal }),
+    ...(batchSignal === undefined ? {} : { signal: batchSignal }),
   };
 }
 

@@ -1,0 +1,256 @@
+/**
+ * B4-01 P0 — the pty table is now reachable and actually emptied.
+ *
+ * The defect this pins: `idleSince` + `TERMINAL_IDLE_MS` shipped as the
+ * anti-leak backstop with ZERO callers, and the studio's `stop()` could not
+ * reach the table at all (it was a bare closure local inside
+ * `registerTerminal`). A pty is spawned `detached`, so it leads its own process
+ * group and NOTHING in the parent's exit takes it down: a browser that
+ * vanished left `python3` running until the machine rebooted.
+ *
+ * Both halves are pinned against REAL detached child processes, not mocks: the
+ * shutdown step has to make the OS actually forget the pid, because a fake
+ * child would pass even with the wiring absent.
+ */
+
+import { spawn, type ChildProcess } from "node:child_process";
+import { afterEach, describe, expect, it } from "vitest";
+import type { SandboxChild, SandboxExit } from "@celestea/core";
+import {
+  createTerminalTable,
+  registerTerminalTable,
+  releaseTerminalTable,
+  startTerminalReaper,
+  stopAllTerminalReapers,
+  TERMINAL_IDLE_MS,
+  terminalIdleMs,
+  terminalTableOf,
+  type TerminalTable,
+} from "./terminal-pty.js";
+
+/** A REAL long-lived child, spawned the way the pty is: detached (own group). */
+function detachedChild(): ChildProcess {
+  return spawn(process.execPath, ["-e", "setTimeout(()=>{}, 600000)"], {
+    detached: true,
+    stdio: ["ignore", "ignore", "ignore"],
+  });
+}
+
+/** Is the OS still running this pid? The only honest orphan test. */
+function pidAlive(pid: number | undefined): boolean {
+  if (pid === undefined) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+const spawned: ChildProcess[] = [];
+function track(child: ChildProcess): ChildProcess {
+  spawned.push(child);
+  return child;
+}
+
+afterEach(() => {
+  for (const c of spawned.splice(0)) {
+    try {
+      if (c.pid !== undefined) process.kill(c.pid, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+});
+
+/**
+ * The real child behind the seam the sandbox provides. `terminateTree` signals the
+ * whole group through this handle, so the pid itself is what is under test.
+ */
+function wrap(child: ChildProcess): SandboxChild {
+  let settled: SandboxExit | null = null;
+  let resolveWait: ((e: SandboxExit) => void) | null = null;
+  const wait = new Promise<SandboxExit>((resolve) => {
+    resolveWait = resolve;
+  });
+  child.once("close", (code, signal) => {
+    if (settled !== null) return;
+    settled = { code, signal };
+    resolveWait?.({ code, signal });
+  });
+  return {
+    pid: child.pid ?? null,
+    stdin: null,
+    stdout: null,
+    stderr: null,
+    wait: () => wait,
+    terminate: () => { child.kill("SIGTERM"); },
+    kill: () => { child.kill("SIGKILL"); },
+  } as SandboxChild;
+}
+
+/** Register one real detached child in a table; returns its pid. */
+function addLive(table: TerminalTable): number | undefined {
+  const child = track(detachedChild());
+  const entry = table.registry.add(wrap(child), null, 80, 24);
+  if (entry === null) throw new Error("table refused the entry (ceiling?)");
+  return child.pid;
+}
+
+/** Let the OS settle: a signal is not the same instant as the exit. */
+const settle = async (ms = 400): Promise<void> => {
+  await new Promise((r) => setTimeout(r, ms));
+};
+describe(`B4-01 P0 · shutdown drains the pty table and kills the process groups`, () => {
+  it(`shutdown() empties the table AND the OS forgets every pty pid`, async () => {
+    const table = createTerminalTable({ idleMs: 0 }); // no reaper: this is the shutdown half
+    const pids = [addLive(table), addLive(table)];
+    expect(table.registry.size()).toBe(2);
+    for (const pid of pids) expect(pidAlive(pid)).toBe(true);
+
+    const killed = await table.shutdown();
+
+    // The table is drained ...
+    expect(killed).toBe(2);
+    expect(table.registry.size()).toBe(0);
+    // ...and this is the half the fix exists for: the processes are REALLY gone.
+    await settle();
+    for (const pid of pids) expect(pidAlive(pid)).toBe(false);
+  });
+
+  it(`shutdown() is idempotent (the W2029 repeat-SIGTERM path is a no-op)`, async () => {
+    const table = createTerminalTable({ idleMs: 0 });
+    addLive(table);
+    expect(await table.shutdown()).toBe(1);
+    expect(await table.shutdown()).toBe(0);
+    expect(table.registry.size()).toBe(0);
+  });
+
+  it(`the published table is reachable by owner key; release drains exactly it`, async () => {
+    const owner = `b4-01-app`;
+    const table = createTerminalTable({ idleMs: 0 });
+    const pid = addLive(table);
+    registerTerminalTable(owner, table);
+
+    expect(terminalTableOf(owner)).toBe(table);
+    expect(await releaseTerminalTable(owner)).toBe(1);
+    expect(terminalTableOf(owner)).toBeUndefined();
+    await settle();
+    expect(pidAlive(pid)).toBe(false);
+    // A second release is safe: the teardown path may run twice.
+    expect(await releaseTerminalTable(owner)).toBe(0);
+  });
+
+  it(`a wedged child cannot hold the teardown open: the table still empties`, async () => {
+    const table = createTerminalTable({ idleMs: 0 });
+    const pid = addLive(table);
+    // A child that never settles would hang a naive await on wait().
+    const entry = table.registry.all()[0]!;
+    entry.child.wait = () => new Promise<SandboxExit>(() => {});
+
+    await table.shutdown();
+    expect(table.registry.size()).toBe(0);
+    await settle();
+    expect(pidAlive(pid)).toBe(false);
+  }, 20_000);
+});
+
+describe(`B4-01 P0 · the idle reaper finally has a caller`, () => {
+  it(`a pty past the ceiling is reaped; a fresh one is left running`, async () => {
+    const table = createTerminalTable({ idleMs: 0 });
+    const reapedPid = addLive(table);
+    const keptPid = addLive(table);
+    const entries = table.registry.all();
+    // entries are in insertion order: mark the FIRST long-idle, leave the second fresh.
+    entries[0]!.touchedAt = Date.now() - TERMINAL_IDLE_MS - 60_000;
+    entries[1]!.touchedAt = Date.now();
+
+    const report = table.reaper.sweep();
+
+    expect(report.reaped).toBe(1);
+    expect(report.swept).toBe(1);
+    expect(table.registry.size()).toBe(1);
+    await settle();
+    expect(pidAlive(reapedPid)).toBe(false); // the ceiling actually killed it
+    expect(pidAlive(keptPid)).toBe(true); // ...and left the live one alone
+  });
+
+  it(`a second sweep reaps nothing (the drop happens before the slow signal)`, () => {
+    const table = createTerminalTable({ idleMs: 0 });
+    addLive(table);
+    table.registry.all()[0]!.touchedAt = Date.now() - TERMINAL_IDLE_MS - 60_000;
+    expect(table.reaper.sweep().reaped).toBe(1);
+    expect(table.reaper.sweep().reaped).toBe(0);
+    expect(table.registry.size()).toBe(0);
+  });
+
+  // B4-01 follow-up: the reaper arms ON DEMAND, not at construction. A sweep over
+  // an EMPTY table can never reap anything, so a timer running before the first
+  // pty is pure waste -- and waste that outlives the app is exactly what a
+  // fake-timer gate fails on. The first pty arms it; the last one leaving stops it.
+  it(`arms on the FIRST pty and disarms when the last one leaves`, async () => {
+    const table = createTerminalTable();
+    // Nothing opened yet: no timer, so a table that never hosted a pty arms nothing.
+    expect(table.reaper.armed()).toBe(false);
+
+    const first = addLive(table);
+    expect(table.reaper.armed()).toBe(true);
+    addLive(table);
+    expect(table.reaper.armed()).toBe(true);
+
+    // A close drains one row; a sweep past the ceiling drains the last one.
+    table.registry.all()[0]!.touchedAt = Date.now() - TERMINAL_IDLE_MS - 60_000;
+    expect(table.reaper.sweep().reaped).toBe(1);
+    expect(table.reaper.armed()).toBe(true); // one pty still live
+    table.registry.drop(table.registry.all()[0]!.id);
+    expect(table.reaper.armed()).toBe(false); // the last one left: the timer is gone
+
+    await settle();
+    expect(pidAlive(first)).toBe(false);
+  });
+
+  it(`stopAllTerminalReapers disarms every armed reaper (a teardown that cannot see the table)`, () => {
+    const a = createTerminalTable();
+    const b = createTerminalTable();
+    addLive(a);
+    addLive(b);
+    expect(a.reaper.armed()).toBe(true);
+    expect(b.reaper.armed()).toBe(true);
+    stopAllTerminalReapers();
+    expect(a.reaper.armed()).toBe(false);
+    expect(b.reaper.armed()).toBe(false);
+  });
+
+  it(`idleMs <= 0 arms no timer, yet shutdown still drains (the two halves are independent)`, async () => {
+    const table = createTerminalTable({ idleMs: 0 });
+    expect(table.reaper.armed()).toBe(false);
+    const pid = addLive(table);
+    // The teardown path must never depend on the reaper being armed.
+    expect(await table.shutdown()).toBe(1);
+    await settle();
+    expect(pidAlive(pid)).toBe(false);
+  });
+
+  it(`the ceiling defaults to the documented value; the env knob retunes and can disable`, () => {
+    expect(terminalIdleMs({})).toBe(TERMINAL_IDLE_MS);
+    expect(terminalIdleMs({ CELESTEA_TERMINAL_IDLE_MS: "60000" })).toBe(60_000);
+    expect(terminalIdleMs({ CELESTEA_TERMINAL_IDLE_MS: "0" })).toBe(0);
+    // Unparsable input must NOT silently disable the backstop.
+    expect(terminalIdleMs({ CELESTEA_TERMINAL_IDLE_MS: "nonsense" })).toBe(TERMINAL_IDLE_MS);
+  });
+
+  it(`a standalone reaper honours an injected clock (no real waiting)`, () => {
+    const table = createTerminalTable({ idleMs: 0 });
+    // addLive stamps touchedAt from the REAL clock, so the injected clock has to
+    // start there — starting at an arbitrary small number would put the entry in
+    // the future and it could never look idle.
+    const now = { t: Date.now() };
+    const reaper = startTerminalReaper(table.registry, { idleMs: 5_000, now: () => now.t });
+    addLive(table);
+    expect(reaper.sweep().reaped).toBe(0); // fresh
+    now.t += 6_000;
+    expect(reaper.sweep().reaped).toBe(1); // past the ceiling
+    reaper.stop();
+    expect(reaper.armed()).toBe(false);
+  });
+});
