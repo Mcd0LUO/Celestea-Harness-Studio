@@ -88,9 +88,9 @@ describe("W9104 — the trigger table is reused, not re-invented", () => {
       [2, "http_503", 503, "primary", "model-a"],
     ]);
     // Two retries happened because this harness asked for two — the value really
-    // drives the loop (the DEFAULT is one extra attempt; see DEFAULT_RETRY_POLICY).
+    // drives the loop (the DEFAULT is three extra attempts; see DEFAULT_RETRY_POLICY).
     expect(h.llm.policy().maxRetries).toBe(2);
-    expect(DEFAULT_RETRY_POLICY.maxRetries).toBe(1);
+    expect(DEFAULT_RETRY_POLICY.maxRetries).toBe(3);
   });
 
   it("never retries a non-retryable status (400) — exactly one call, error rethrown", async () => {

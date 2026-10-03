@@ -101,7 +101,7 @@ export interface RetryPolicy {
 }
 
 export const DEFAULT_RETRY_POLICY: RetryPolicy = {
-  maxRetries: 1,
+  maxRetries: 3,
   backoffMs: 500,
   maxDelayMs: 60_000,
   respectRetryAfter: true,

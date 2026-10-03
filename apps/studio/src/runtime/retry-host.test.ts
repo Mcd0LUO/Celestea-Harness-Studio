@@ -389,7 +389,7 @@ describe("W9104 — POST /api/config tunes max_retries (real adapter)", () => {
     harnesses.push(h);
 
     const before = await getJson(h.app, "/api/config");
-    expect(before.body["max_retries"]).toBe(1);
+    expect(before.body["max_retries"]).toBe(3);
 
     const applied = await getJson(h.app, "/api/config", jsonRequest("POST", { max_retries: 3 }));
     expect(applied.status).toBe(200);

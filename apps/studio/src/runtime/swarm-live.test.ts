@@ -105,6 +105,8 @@ function writeJson(path: string, value: unknown): void {
 interface LiveHostOptions {
   baseUrl: string;
   model: string;
+  /** Extra env for THIS host (e.g. pin the engine retry budget). */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** Build the PRODUCTION app (nothing injected) over a throwaway data root. */
@@ -137,6 +139,7 @@ function makeLiveHost(opts: LiveHostOptions): LiveHost {
     CELESTEA_API_KEY: "test-key",
     CELESTEA_TOOL_ROOTS: workspace,
     CELESTEA_SANDBOX_NET: "0",
+    ...(opts.env ?? {}),
   });
   const config = loadStudioConfig({ cwd: root, env, paths: { staticRoot } });
   const studio = createStudioApp({ config, env });
@@ -265,7 +268,10 @@ describe("agent_swarm · 真实引擎端到端（§10.3 自动化）", () => {
       ...Array.from({ length: 2 }, (_, i) => [textDelta("member-" + (i + 1)), DONE_FRAME]),
       [textDelta("结束"), DONE_FRAME],
     ]);
-    const host = makeLiveHost({ baseUrl: rateLimited.v1BaseUrl, model: "mock-model" });
+    // Pin the ENGINE retry budget to 1: this test measures the SWARM scheduler's
+    // own backoff, and the engine's instant (retry-after: 0) retries would otherwise
+    // interleave hits and hide the scheduler's >=2s gap. W93xx: the default is now 3.
+    const host = makeLiveHost({ baseUrl: rateLimited.v1BaseUrl, model: "mock-model", env: { CELESTEA_LLM_MAX_RETRIES: "1" } });
 
     // 第 1 步：正常流，回答里带一个 2 成员的 agent_swarm 调用。
     await runSwarmTurn(host, "跑一个会被限流的批次", 60_000);

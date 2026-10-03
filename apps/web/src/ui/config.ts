@@ -120,7 +120,7 @@ function renderForm(cfg: ConfigInfo, statusWindow: number | null, container: HTM
   // W9104：自动重试次数。**只有后端发布了这个字段才渲染** —— 旧服务不认它，
   // 渲染一个控件再被 400 拒绝是骗人的；不渲染比渲染一个假的默认值诚实。
   const hasRetries = typeof cfg.max_retries === 'number';
-  const maxRetriesCtl = ctl.num(hasRetries ? cfg.max_retries : null, '1');
+  const maxRetriesCtl = ctl.num(hasRetries ? cfg.max_retries : null, '3');
   maxRetriesCtl.min = '0';
   maxRetriesCtl.max = '3';
   if (hasRetries) {

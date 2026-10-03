@@ -121,7 +121,7 @@ export interface EngineProfile {
   /**
    * W9104: EXTRA same-target LLM attempts after a retryable failure, before the
    * model-fallback chain hands over to the next target. Integer 0..3 (hard cap),
-   * default 1 — so `max_retries: 3` means up to 4 attempts on one endpoint.
+   * default 3 — so `max_retries: 3` means up to 4 attempts on one endpoint.
    *
    * OPTIONAL on purpose: the frozen runtime `Profile` is a 12-key contract and
    * this knob is host policy (like `system_prompt`'s override), so a caller that
