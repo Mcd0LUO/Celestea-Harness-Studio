@@ -84,6 +84,16 @@ export interface BrokerContext {
    * `run_code` calls can overlap in one process.
    */
   programSource?: string;
+  /**
+   * B3-01: the turn's cancellation signal. Absent = the host cannot cancel.
+   *
+   * The file header has claimed "the child is killed on timeout, on cancel and on
+   * protocol failure" since the broker was written, but nothing carried a cancel
+   * down to here: the loop stopped *awaiting* the batch and the program went on
+   * running. With this signal the child is killed on abort, which makes the
+   * header's claim true.
+   */
+  signal?: AbortSignal;
 }
 
 /** One parsed sub-call request from the child. */
@@ -126,7 +136,11 @@ export async function brokerRun(ctx: BrokerContext, args: unknown): Promise<Tool
   const state = newRunState();
   state.cpuSec = cpuSec;
   try {
-    await executeProgram(ctx, { scriptPath: script.path, language: source.language, budget: { timeoutMs, cpuSec } }, state);
+    await executeProgram(
+      ctx,
+      { scriptPath: script.path, language: source.language, budget: { timeoutMs, cpuSec } },
+      state,
+    );
   } catch (e) {
     throw withLogs(e, ctx, state);
   } finally {
@@ -191,6 +205,35 @@ async function placeProgram(programDir: string, source: ProgramSource): Promise<
 }
 
 // ---- child lifecycle ---------------------------------------------------------
+
+/**
+ * B3-01: kill `child` as soon as the turn is cancelled, and return the
+ * unsubscribe that removes the listener again.
+ *
+ * Why a listener and not a flag: the pump below parks on a pending `reader.next()`,
+ * so nothing in this file is in a position to *check* a cancellation flag at the
+ * right moment. The signal is the only thing that can fire at the right moment,
+ * which is exactly why the loop owns it.
+ *
+ * Contract details that matter:
+ *   * a signal ALREADY aborted never fires `abort` again, so it is checked once
+ *     here (same reason as `question-registry.ts:105`);
+ *   * the kill is the same tree-kill the timeout path uses, so a cancelled
+ *     program leaves no grandchildren behind;
+ *   * returning the unsubscribe (instead of trusting `{once:true}`) keeps the
+ *     listener count flat across the many runs one long-lived signal carries.
+ */
+function killChildOnAbort(signal: AbortSignal | undefined, child: SandboxChild): () => void {
+  if (signal === undefined) return () => undefined;
+  const onAbort = (): void => {
+    child.kill();
+  };
+  if (signal.aborted) onAbort();
+  else signal.addEventListener("abort", onAbort, { once: true });
+  return () => {
+    signal.removeEventListener("abort", onAbort);
+  };
+}
 
 /**
  * The interpreter of one `run_code` program (W885).
@@ -281,6 +324,10 @@ async function executeProgram(ctx: BrokerContext, run: ProgramRun, state: RunSta
   const { scriptPath, language, budget } = run;
   const { timeoutMs, cpuSec } = budget;
   const child = await spawnProgram(ctx.sandbox, scriptPath, language, cpuSec);
+  // B3-01: cancellation kills the child, exactly like the wall clock below does.
+  // The returned unsubscribe runs in the existing `finally`, so a normal
+  // completion never leaves a listener behind on a long-lived signal.
+  const unlinkAbort = killChildOnAbort(ctx.signal, child);
   const stderr = readCapped(child.stderr, ctx.config.maxLogBytes);
   // W833 (R3 B1 / W812 P1-1): the wall clock is enforced HERE, not only while
   // waiting for the next stdout line. A slow sub-call (run_shell itself allows
@@ -309,6 +356,7 @@ async function executeProgram(ctx: BrokerContext, run: ProgramRun, state: RunSta
       },
     });
   } finally {
+    unlinkAbort();
     endStdin(child.stdin);
   }
   if (pumpError !== null && !timedOut) {

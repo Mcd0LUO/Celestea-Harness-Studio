@@ -57,6 +57,7 @@ import {
 import {
   activePane,
   adoptLocalIfUnbound,
+  busyIds,
   ensurePane,
   isActivePane,
   LOCAL_ID,
@@ -258,8 +259,8 @@ function onText(ctx: SessionPane, p: TextPayload): void {
   if (ctx.turn === null) ctx.turn = p.turn ?? null;
   if (p.turn !== undefined && p.turn !== ctx.turn) return;
   if (ctx.streaming === false) setPaneStreaming(ctx, true);
-  // 衔接去重：SSE 重放的增量若与已恢复尾部同内容则吞掉
-  const delta = feedAssistantDelta(ctx, p.delta || '');
+  // 衔接去重：SSE 重放的增量若与已恢复尾部同内容则吞掉（W9298 F1-02：带轮次身份）
+  const delta = feedAssistantDelta(ctx, p.delta || '', ctx.turn);
   if (delta === null) return;
   const a = ensureAssistant(ctx);
   appendText(ctx, a, delta);
@@ -321,6 +322,31 @@ function onDone(ctx: SessionPane, p: DonePayload): void {
   autoscroll(ctx);
 }
 
+/**
+ * ★ W9298（F1-03 P1）：`onSseDone()` 的聚焦守卫 —— **只有「全局真的空闲」才推进挂起的切换**。
+ *
+ * 缺陷：`sse.on('done')` 过去无条件调 `statusline.onSseDone()`，而它会消费全局单例上的
+ * `pendingPatch`/`pendingPick`（409 挂起的档位/模型切换）。**任何**会话的 done 都能消费它 ——
+ * 后台会话 A 的一轮结束时，就会在聚焦会话 B 还在跑的那一帧里，把 B 的挂起补丁提前取出、
+ * 当帧乐观画成「已切到新档位」，随后 B 的 saveConfig 又被服务端的 409 顶回来 ⇒ 状态栏
+ * 闪一下又弹回，补丁被白白消耗掉一次。
+ *
+ * 为什么不能只判 isActivePane：服务端 409 的判据是**全局**的
+ * （config.ts:95 → `runtime.isBusy()` 无参 = `inFlightCount() > 0`）。若只在聚焦会话结束
+ * 时推进，而**别的**会话仍在跑，saveConfig 照样 409 ⇒ onSseDone 已把补丁清空，本次切换
+ * 直接丢失（用户永远等不到它生效）。所以判据必须是「**一个都没在跑**」。
+ *
+ * 与 P0 的 `recheckLagged` 同一纪律：查不到 ⇒ 什么都不做（保守），绝不臆断成「空闲」。
+ */
+export function onDoneGuarded(ctx: SessionPane, p: DonePayload): void { // export：F1-03 的测试缝
+  onDone(ctx, p);
+  // 判据：除**本帧所属会话**外没有别的会话在跑。排除自己，是因为后端顺序为
+  // `done` 先于 status:completed（real-runtime-adapter.ts:547-554），done 到达时它仍 busy；
+  // 不能只看 isActivePane —— 那会在「别的会话仍在跑」时放行。
+  if (busyIds().some((id) => id !== ctx.id)) return;
+  statusline.onSseDone();
+}
+
 // ---- SSE wiring ---------------------------------------------------------------
 
 export function connectSse(): SseClient {
@@ -336,7 +362,7 @@ export function connectSse(): SseClient {
     onThinking,
     onTool,
     onToolResult,
-    onDone,
+    onDone: onDoneGuarded,
   });
 }
 

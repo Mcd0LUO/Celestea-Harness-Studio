@@ -24,6 +24,8 @@ interface Dedup {
   guardActive: boolean;
   guardBuf: string;
   guardAll: boolean;
+  /** W9298（F1-02）：去重守卫的轮次身份（恢复尾部属于哪一轮）。 */
+  guardTurn: number | null;
 }
 interface Pane { dedup: Dedup }
 interface DedupMod {
@@ -34,7 +36,9 @@ interface DedupMod {
 }
 
 const pane = (tail: { role: string; content: string } | null = null): Pane => ({
-  dedup: { tail, guardActive: false, guardBuf: '', guardAll: false },
+  // W9298（F1-02）：本文件钉的是「缓冲的界」与「复位语义」，与守卫身份无关 ⇒ 这里给
+  // guardTurn 锚一个轮次号，让去重守卫在这些用例里**照旧生效**（与改动前同口径）。
+  dedup: { tail, guardActive: false, guardBuf: '', guardAll: false, guardTurn: 1 },
 });
 
 interface RestoreBackstop {
@@ -111,7 +115,7 @@ describe('W9229 · F-19 去重锚点在「整条被吞」后必须保留', () =>
     const ctx = pane({ role: 'assistant', content: 'ABC' });
     D.feedAssistantDelta(ctx, 'AB');
     D.resetRestore(ctx);
-    expect(ctx.dedup).toEqual({ tail: null, guardActive: false, guardBuf: '', guardAll: false });
+    expect(ctx.dedup).toEqual({ tail: null, guardActive: false, guardBuf: '', guardAll: false, guardTurn: null });
   });
 });
 

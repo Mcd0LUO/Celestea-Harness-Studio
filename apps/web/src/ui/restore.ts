@@ -60,8 +60,8 @@ const MAX_RESTORE = 200;
 const RESTORE_TAIL = MAX_RESTORE + 1;
 
 // W9229：衔接去重状态搬到 ./restore-dedup.ts（模块体积门禁），此处再导出保持 import 路径兼容。
-import { resetRestore } from './restore-dedup';
-export { feedAssistantDelta, finalAssistantDedup, guardBufLimit, resetRestore } from './restore-dedup';
+import { noteRestoreTurn, resetRestore } from './restore-dedup';
+export { feedAssistantDelta, finalAssistantDedup, guardBufLimit, noteRestoreTurn, resetRestore } from './restore-dedup';
 
 /**
  * W1485：历史恢复的**分帧**片大小（条/片）。
@@ -277,6 +277,9 @@ export async function restoreSessionHistory(
   // 注释声称的复位能力与实际路径不符）。语义与原先的四行赋值逐字相同。
   resetRestore(ctx);
   ctx.dedup.tail = recent.length ? (recent[recent.length - 1] ?? null) : null;
+  // W9298（F1-02）：记下「尾部属于哪一轮」——只有该轮的 live 增量才可能是重放。
+  // 恢复时该会话正在跑（ctx.streaming）才锚定它；否则此后任何增量都不是重放。
+  noteRestoreTurn(ctx, ctx.streaming ? ctx.turn : null);
   // W9113（P1-2）+ W9222（F-11）：**搬家之后**按 DOM 实况把账本重定基 —— 账本必须
   // 记在真正持有这些节点的容器上，且容器整体重建后旧账本不得残留（见 rebaseThinkRetained）。
   rebaseThinkRetained(ctx.el);

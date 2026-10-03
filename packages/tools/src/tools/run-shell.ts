@@ -11,11 +11,10 @@
  * - the effective isolation mode is reported back inside `sandbox`.
  */
 
-import type { Sandbox, Tool, ToolSpec } from "@celestea/core";
+import type { Sandbox, Tool, ToolExecOutcome, ToolInput, ToolSpec } from "@celestea/core";
 
 import { boolArg, optionalIntArg, optionalStringArg, stringArg } from "../args.js";
 import { descParam } from "../desc.js";
-import { fnTool } from "../fn-tool.js";
 import type { ProcessRegistry } from "../process/registry.js";
 
 export interface RunShellToolOptions {
@@ -69,20 +68,61 @@ export function runShellSpec(): ToolSpec {
   };
 }
 
+/**
+ * B3-01: this tool used to be a plain `fnTool`, which can only see `args` — and
+ * a FOREGROUND run needs the caller's cancellation signal, or the command
+ * outlives the cancelled turn that started it.
+ *
+ * `executeWith` is the seam's way to receive the whole `ToolInput`. `execute`
+ * stays as the no-signal face so a direct caller (and every test that calls
+ * `execute`) keeps working with unchanged behaviour: no signal, no cancellation,
+ * only the wall clock.
+ */
 export function runShellTool(options: RunShellToolOptions): Tool {
-  return fnTool(runShellSpec(), async (args) => {
+  const spec = runShellSpec();
+  const run = runShellImpl(options);
+  return {
+    spec: () => spec,
+    execute: (args: unknown): Promise<unknown> => run(args, undefined),
+    // `render: null` is the seam's "use the default" value: the registry applies
+    // `humanRender` itself (`registry.ts:90`), which is exactly what the old
+    // `fnTool` face got for free. Passing it here would import humanRender and
+    // risk a cycle for no behavioural gain.
+    executeWith: (input: ToolInput): Promise<ToolExecOutcome> =>
+      run(input.args, input.signal).then((value) => ({ value, render: null })),
+  };
+}
+
+/**
+ * The one implementation both seam faces delegate to. `signal` is undefined on
+ * the `execute` face and the turn's own signal on the `executeWith` face.
+ */
+function runShellImpl(
+  options: RunShellToolOptions,
+): (args: unknown, signal: AbortSignal | undefined) => Promise<Record<string, unknown>> {
+  return async (args, signal) => {
     const command = stringArg(args, "command");
     const workdir = optionalStringArg(args, "workdir");
     const cpuSec = optionalIntArg(args, "cpu_sec");
     const cpu = cpuSec === undefined ? {} : { cpuSec };
     if (boolArg(args, "background", false)) {
+      // B3-01: a BACKGROUND child deliberately does NOT take the signal. It is
+      // registered so a later turn can poll/kill it, and its whole purpose is to
+      // outlive this turn; cancelling this turn must not reach it.
       const spawned = await options.sandbox.spawn({ command, workdir, ...cpu });
       const handle = options.processes.insert(spawned.child, boolArg(args, "notify", true), {
         cpuSec: spawned.sandbox.cpu_sec ?? cpuSec ?? null,
       });
       return { background: true, handle: handle.handle, pid: handle.pid, sandbox: spawned.sandbox };
     }
-    const run = await options.sandbox.run({ command, workdir, timeoutMs: optionalIntArg(args, "timeout_ms"), ...cpu });
+    const run = await options.sandbox.run({
+      command,
+      workdir,
+      timeoutMs: optionalIntArg(args, "timeout_ms"),
+      ...cpu,
+      // Absent when the caller wired no signal, which is the pre-B3-01 shape.
+      ...(signal === undefined ? {} : { signal }),
+    });
     // W6/W9223: an RLIMIT_CPU kill must not read as a bare death - mark it when
     // the kernel reports the ONE signal only RLIMIT_CPU can send.
     //
@@ -113,5 +153,5 @@ export function runShellTool(options: RunShellToolOptions): Tool {
       stderr_truncated: run.stderr_truncated,
       sandbox: run.sandbox,
     };
-  });
+  };
 }

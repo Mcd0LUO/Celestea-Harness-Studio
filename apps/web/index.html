@@ -149,7 +149,11 @@
                  （触摸端 Enter = 换行 ⇒ enter；桌面 = 发送 ⇒ send）。这里的静态值只是 JS
                  起来之前那一帧的兜底，装配时由 ui/inputbar 按设备能力重写
                  （ui/inputbar/newline.ts 的 enterKeyHint()），能力位翻转时再写一次。 -->
-            <textarea id="input" rows="2" data-i18n-placeholder="chat.input.placeholderIdle" enterkeyhint="send" spellcheck="false"></textarea>
+            <!-- F2-02：补**稳定**可访问名。placeholder 在 HTML-AAM 里只是 fallback、
+                 不是可访问名，而且它就是操作说明（Enter 发送 / Shift+Enter 换行）——
+                 一旦用户开始打字它就消失，读屏再也听不到这行指引。语义名走 locales
+                 （护栏 D：index.html 不得出现中文字面量）。 -->
+            <textarea id="input" rows="2" data-i18n-placeholder="chat.input.placeholderIdle" data-i18n-aria-label="chat.input.ariaLabel" enterkeyhint="send" spellcheck="false"></textarea>
           </div>
           <!-- W1512：发送与终止是**同一个控件的两种状态**（照 DSH）：空闲 = 发送（↑），
                运行中 = 终止（■）。为什么合并：原先终止键挂在 statusline 右端，窄屏下被

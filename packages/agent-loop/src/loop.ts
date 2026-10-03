@@ -644,9 +644,16 @@ export class DefaultAgentLoop implements AgentLoop {
     return cancelled;
   }
 
-  /** Dispatch one batch concurrently; results keep the model's call order. */
+  /**
+   * Dispatch one batch concurrently; results keep the model's call order.
+   *
+   * B3-01: the turn's signal rides each [ToolInput] so a tool that spawned a
+   * process can kill it when the turn is cancelled. The loop still stops
+   * *awaiting* the batch (see [raceAbort] above) — this is what makes the
+   * in-flight work actually stop rather than merely stop being watched.
+   */
   private dispatchBatch(registry: ToolRegistry, batch: readonly ToolCall[]): Promise<ToolOutput[]> {
-    return Promise.all(batch.map((call) => dispatchCall(registry, toToolInput(call))));
+    return Promise.all(batch.map((call) => dispatchCall(registry, toToolInput(call, this.signal))));
   }
 
   private async recordToolResult(

@@ -107,6 +107,26 @@ export function failureOf(error: unknown): LedgerFailure {
 }
 
 /**
+ * 契约形状的 `cost`：**对象** `{in,out,cache,total}` 或 null（`contracts/endpoints.json`
+ * 的 `rows[].cost:{in,out,cache,total}|null` 与 `totals.cost` 同形）。
+ *
+ * F4-02：这里**必须**取 `.total` 再交给 numOrNull。原来直接 `numOrNull(cost)`，
+ * 而 numOrNull 只认 `typeof === 'number'` ⇒ 对象一律判成 null ⇒ 「费用估算」
+ * 在**每一行都定价了**的情况下也恒显示「未定价」。真机复现：results/audit3-r2/F4/
+ * probeL.mjs（端点回 `"cost":{"in":0.018,"out":0.036,"cache":0,"total":0.054}`）。
+ *
+ * 兼容两个形状，纯属历史包袱：`totals.cost` 在 `LedgerTotals` 里与 `rows[].cost` 同形，
+ * 但测试夹具（tests/w9103-usage-stats.test.ts）一直写裸数字，于是 numOrNull 那条
+ * 「老服务可能给数字」的假设被夹具喂成了**唯一**形状。两种都收，数字的旧路不删，
+ * 真机上对象是唯一会出现的形状。
+ */
+function costTotal(v: unknown): number | null {
+  if (typeof v === 'number') return numOrNull(v); // 旧/测试形状
+  if (typeof v === 'object' && v !== null) return numOrNull((v as { total?: unknown }).total);
+  return null; // null / undefined / 其它 = 未知，不是 0
+}
+
+/**
  * 费用：优先读 `totals.cost`（整个区间），回落成逐行相加。
  *   两条路径都**保持 null 语义** —— 一行都没定价时结果是 null（未知），不是 0。
  */
@@ -114,11 +134,11 @@ function costOf(resp: LedgerResp): CostView {
   const currency = typeof resp.currency === 'string' ? resp.currency : '';
   const models = resp.unpriced_models ?? resp.totals?.unpriced_models ?? [];
   const unpricedModels = Array.isArray(models) ? models.filter((m) => typeof m === 'string') : [];
-  const fromTotals = resp.totals === undefined ? null : numOrNull(resp.totals.cost);
+  const fromTotals = resp.totals === undefined ? null : costTotal(resp.totals.cost);
   if (fromTotals !== null) return { total: fromTotals, currency, unpricedModels };
   let sum: number | null = null;
   for (const row of resp.rows ?? []) {
-    const c = numOrNull(row.cost);
+    const c = costTotal(row.cost);
     if (c !== null) sum = (sum ?? 0) + c;
   }
   return { total: sum, currency, unpricedModels };

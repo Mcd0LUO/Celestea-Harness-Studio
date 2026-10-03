@@ -41,8 +41,23 @@ export function resolveSeams(ctx: Context): Seams {
   return { llm, session, registry };
 }
 
-export function toToolInput(call: ToolCall): ToolInput {
-  return { call_id: call.id, name: call.name, args: call.args };
+/**
+ * The seam's [ToolInput] for one model call.
+ *
+ * B3-01: `signal` is the turn's cancellation signal, attached HERE — the loop is
+ * the only thing that owns it, and [ToolInput.signal] is what lets a tool that
+ * spawned a process kill it instead of leaving an orphan behind a "cancelled"
+ * turn. Absent when the loop was built without a signal (a turn that genuinely
+ * cannot be cancelled), and the key is then omitted rather than set to
+ * `undefined`, so the object stays byte-identical to the pre-B3-01 shape.
+ */
+export function toToolInput(call: ToolCall, signal?: AbortSignal): ToolInput {
+  return {
+    call_id: call.id,
+    name: call.name,
+    args: call.args,
+    ...(signal === undefined ? {} : { signal }),
+  };
 }
 
 /**

@@ -86,7 +86,7 @@ W9206 的结论表只列到 34 条（`3/18/10/1 = 32` + 2 条判「无缺陷」�
 旧注释声称「status/compact/question 不走帧预算——前两者不碰消息容器」。
 事实：`onStatus` 调 `finalizeTurn`/`renderInfoBlock`，`onStatusInbox` 追加整条 `.mcol`——
 **status 是唯一同时写「消息容器 + 状态栏 + 会话条」的事件**。
-处置（提交 `65b6398`）：status 也走帧预算，注释改写为事实 + 证据，见 `apps/web/src/chat.ts:317`。
+处置（提交 `65b6398`）：status 也走帧预算，注释改写为事实 + 证据，见 `apps/web/src/ui/sse-wire.ts:68`（该注释段 68-74；W9298 F1-01 修复时接线段由 `chat.ts` 整段搬入该模块，语句逐字未改）。
 
 **③ 各修复报告自己登记的同类项（本轮至少还有这些）**
 
@@ -245,7 +245,7 @@ W9113 自己的报告 §9 把 rail 的 P1-1 明确列为**仍未修**，并写�
 | 门禁 | 钉住什么 | 位置 |
 | --- | --- | --- |
 | 契约里的数字必须**从真源派生** | 散文里的计数不得手写 | `tests/contracts.test.ts:460` |
-| 终态集合必须是**可断言面** | 契约里的 phase 集合改动时测试必红 | `apps/web/src/chat.ts:83` |
+| 终态集合必须是**可断言面** | 契约里的 phase 集合改动时测试必红 | `apps/web/src/chat.ts:82`（`TERMINAL_PHASES`） |
 | 文档不变量 | 登记 / 状态闭集 / 链接与锚点（含**区间端点与逗号列表**）/ ≤700 行 / 无本机事实 / 归档横幅 / 分册可达 / 仓内路径必须存在 / 散文里的计数必须派生 | `tests/doc-conventions.test.ts` |
 | `docs/README.md` 的端点数字 | 第四处契约数字（根 README 早有门禁） | `tests/readme-claims.test.ts:38` |
 | 哨兵不得从数据推断能力 | 能力是布尔字段，不是字符串匹配 | `packages/tools/src/guard/path-guard.ts:255` |

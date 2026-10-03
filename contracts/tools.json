@@ -4,7 +4,7 @@
   "generatedAt": "2026-09-10T01:20:00Z",
   "source": {
     "liveEndpoint": "http://127.0.0.1:3777/api/tools (descriptions taken verbatim from the running engine)",
-    "schemas": "/srv/celestea/engine-ref/crates/tools/src/*.rs + crates/workers/src/tools.rs (hand-written ToolSpec.parameters, transcribed 1:1)",
+    "schemas": "packages/tools/src/tools/*.ts (hand-written ToolSpec.parameters) + packages/workers/src/tools.ts + packages/swarm/src/tool.ts; per-tool provenance lives in each entry's sourceRef. The former reference (/srv/celestea/engine-ref/crates/tools/src/*.rs + crates/workers/src/tools.rs) was the retired Rust engine, deleted 2026-09-11; those line numbers survive only inside the sourceRef provenance notes.",
     "liveProbe": {
       "checked": true,
       "toolCount": 10,
@@ -186,7 +186,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "W783: packages/tools/src/tools/ask-user.ts (schema copied from @deepseek-ai/dsh-tool-ask-user)"
+      "sourceRef": "packages/tools/src/tools/ask-user.ts (W783; schema copied from @deepseek-ai/dsh-tool-ask-user)"
     },
     {
       "name": "browser_act",
@@ -347,7 +347,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "crates/tools/src/http.rs:238-254"
+      "sourceRef": "packages/tools/src/tools/http-request.ts (live TS spec; was crates/tools/src/http.rs:238-254)"
     },
     {
       "name": "list_dir",
@@ -369,7 +369,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "crates/tools/src/builtin.rs:217-230"
+      "sourceRef": "packages/tools/src/tools/list-dir.ts (live TS spec; was crates/tools/src/builtin.rs:217-230)"
     },
     {
       "name": "load_skill",
@@ -427,7 +427,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "crates/tools/src/process.rs:462-479"
+      "sourceRef": "packages/tools/src/tools/process-control.ts (live TS spec; was crates/tools/src/process.rs:462-479)"
     },
     {
       "name": "read_file",
@@ -459,7 +459,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "crates/tools/src/builtin.rs:186-199"
+      "sourceRef": "packages/tools/src/tools/read-file.ts (live TS spec; was crates/tools/src/builtin.rs:186-199)"
     },
     {
       "name": "read_image",
@@ -548,7 +548,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "crates/tools/src/run_code.rs:984-1022"
+      "sourceRef": "packages/tools/src/tools/run-code.ts (live TS spec; TypeScript since W774; was crates/tools/src/run_code.rs:984-1022)"
     },
     {
       "name": "run_shell",
@@ -592,7 +592,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "crates/tools/src/builtin.rs:232-258"
+      "sourceRef": "packages/tools/src/tools/run-shell.ts (live TS spec, orchestration only; was crates/tools/src/builtin.rs:232-258)"
     },
     {
       "name": "send_message",
@@ -619,7 +619,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "crates/workers/src/tools.rs:75-90"
+      "sourceRef": "packages/workers/src/tools.ts (this contract IS the spec source per its header; was crates/workers/src/tools.rs:75-90)"
     },
     {
       "name": "spawn_worker",
@@ -682,7 +682,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "crates/workers/src/tools.rs:53-74"
+      "sourceRef": "packages/workers/src/tools.ts (this contract IS the spec source per its header; was crates/workers/src/tools.rs:53-74)"
     },
     {
       "name": "stop_worker",
@@ -728,7 +728,7 @@
         "required": [],
         "additionalProperties": false
       },
-      "sourceRef": "crates/workers/src/tools.rs:91-104"
+      "sourceRef": "packages/workers/src/tools.ts (this contract IS the spec source per its header; was crates/workers/src/tools.rs:91-104)"
     },
     {
       "name": "write_file",
@@ -755,7 +755,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "crates/tools/src/builtin.rs:201-215"
+      "sourceRef": "packages/tools/src/tools/write-file.ts (live TS spec; was crates/tools/src/builtin.rs:201-215)"
     },
     {
       "name": "update_tasks",

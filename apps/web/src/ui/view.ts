@@ -97,4 +97,10 @@ export interface DedupState {
   guardActive: boolean;
   guardBuf: string;
   guardAll: boolean;
+  /**
+   * ★ W9298（F1-02）：**恢复尾部属于哪一轮** —— 去重守卫的身份约束。
+   * null = 恢复时该会话没有在跑的轮次（此后任何 live 增量都不是重放，守卫全程关闭）。
+   * 见 ui/restore-dedup.ts 的 noteRestoreTurn。
+   */
+  guardTurn: number | null;
 }

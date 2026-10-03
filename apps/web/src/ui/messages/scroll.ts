@@ -86,6 +86,44 @@ export function autoscroll(ctx: SessionPane, force = false): void {
   writtenTop.set(ctx, ctx.el.scrollTop); // 读回浏览器钳制后的真实值
 }
 
+/** 已排「本帧贴底」的容器（每帧至多写一次；随容器一起被 GC）。 */
+const pendingFrame = new WeakSet<SessionPane>();
+
+/**
+ * W9300/F3-1：**帧内合并**的贴底（流式每节拍调用）。
+ *
+ * 为什么需要它（真机 Chrome 154 + CDP 实测，见 results/audit3-r2/F3/）：
+ *   `autoscroll()` 每节拍写一次 `scrollTop = scrollHeight`。**任何**形式的滚动写
+ *   都要求浏览器先算好几何（读 scrollHeight 6.8ms / 只写 scrollTop 6.9ms /
+ *   读后写 7.2ms，600 列时同一量级）—— 所以 "不读 scrollHeight" **并不能**省下布局，
+ *   真正的杠杆是**少写几次**。实测一次 200 帧突发：600 列下 `scrollHeight` 被读 136 次、
+ *   `scrollTop` 被写 81 次 ⇒ 217 次强制布局，其中绝大多数发生在**同一帧内**。
+ *
+ * 合并成「一帧一次」把每帧的布局次数从 O(本帧节拍数) 降到 1，长会话下这是数量级差异
+ * （第 2 节的 frames 数与 600 列布局耗时同阶增长）。
+ *
+ * 语义与 [autoscroll] 完全一致，只是**推迟到本帧末**：闩锁判定仍同步（stickBottom
+ * 由 autoscroll 的前两步决定），只有最后那次布局写入是异步的。因此：
+ *   · 不 force 时：闩锁为假 → 什么都不排（与改动前一致）；
+ *   · 本帧已排过 → 重复调用是幂等的（不再排第二次）；
+ *   · 用户在本帧内往上滚 → 回调里闩锁已为假，直接跳过（不会把读者拽回，W12）。
+ *
+ * 用 rAF 而不是 setTimeout：合并窗口就是**一帧**（与 W1524 的渲染节拍同相），且
+ * rAF 回调在浏览器完成布局之后才跑 —— 那一次布局正是我们本来要付的，只是
+ * 从「本帧第 1..N 次」压缩成「第 1 次」。
+ */
+export function autoscrollSoon(ctx: SessionPane): void {
+  if (ctx.el.hidden) return; // 隐藏容器不写布局（与 autoscroll 的隐藏分支一致）
+  if (!ctx.stickBottom) return; // 闩锁为假：本节拍没有跟随意图
+  if (pendingFrame.has(ctx)) return; // 本帧已排过一次
+  pendingFrame.add(ctx);
+  requestAnimationFrame(() => {
+    pendingFrame.delete(ctx);
+    // 闩锁可能在本帧内被用户滚动清掉（onPaneScroll ③）—— 此时不得贴底。
+    autoscroll(ctx);
+  });
+}
+
 export function hideEmptyHint(ctx: SessionPane): void {
   ctx.hint.classList.add('hidden');
 }

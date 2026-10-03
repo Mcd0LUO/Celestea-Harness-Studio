@@ -8,6 +8,7 @@ import { api, ApiError } from '../api';
 import { loadConfigCached, revalidateConfig } from '../statusline/cfg-cache'; // W778：首屏走配置缓存
 import { el, need } from '../utils/dom';
 import { closeOverlaysAbove, popOverlay, pushOverlay, type OverlayHandle } from '../utils/overlays';
+import { firstFocusable, isolateBackground, type BackgroundHandle } from '../utils/modal-bg'; // F2-01：aria-modal 的背景隔离
 import type { ConfigInfo, ConfigPatch } from '../types';
 import { loadToolsSection } from './tools';
 import { loadArchiveSection } from './archive/panel';
@@ -335,8 +336,18 @@ function reloadCurrentPane(): void {
 /** 设置页在层级栈中的句柄（打开时 push 底层 closeSettings）。 */
 let settingsOverlay: OverlayHandle | null = null;
 
+/**
+ * F2-01：背景隔离的句柄（打开时把 #app 等兄弟子树置 inert）。
+ *   与 settingsOverlay **成对**，漏摘会把整个应用变成一块砖 —— 比不做更糟。
+ */
+let settingsBg: BackgroundHandle | null = null;
+
 export function openSettings(): void {
   page.classList.remove('hidden');
+  // F2-01：本页声明了 aria-modal="true"，背景必须真的被隔离（Tab 进不去、读屏不读、
+  //   鼠标点不动）。isolateBackground 内部会**先**把焦点收进设置页再置 inert ——
+  //   此刻焦点多半还在左侧栏那个触发按钮上，而它马上就要变成不可聚焦。
+  if (!settingsBg) settingsBg = isolateBackground(page, () => firstFocusable(page)?.focus());
   // 任务 3：设置页作为最底层压栈——其上的二级弹窗/内联面板先于它被 Esc 关闭
   if (!settingsOverlay) settingsOverlay = pushOverlay(closeSettings);
   // 打开时配置页强制刷新（热调可能被 statusline 快速切换等改变）
@@ -351,6 +362,13 @@ export function closeSettings(): void {
     settingsOverlay = null;
     closeOverlaysAbove(h);
     popOverlay(h);
+  }
+  // F2-01：先摘 inert 再隐藏 —— 顺序反了的话，摘除那一刻用户仍可能聚焦到
+  //   「已经看不见但还没被隐藏」的背景（隐藏与摘除在同一帧，实践上不可观测，
+  //   但这里按「隐藏优先让位给可聚焦性」的口径固定下来）。
+  if (settingsBg) {
+    settingsBg.restore();
+    settingsBg = null;
   }
   page.classList.add('hidden');
 }

@@ -115,7 +115,9 @@ export class UserspaceSandbox implements Sandbox {
     // `cpu_sec` still wins and is still clamped (see [resolveCallCpuSec]).
     const limits = this.limitsFor(resolveCallCpuSec({ requested: request.cpuSec, maxCpuSec: this.config.maxCpuSec, wallClockMs: timeoutMs }));
     const { child, meta } = await this.launch(request.command, request.workdir, false, limits, request.noAddressSpaceLimit === true);
-    return captureRun(this.config, child, timeoutMs, meta);
+    // B3-01: the caller's cancellation reaches the kill, so a cancelled turn
+    // stops this run's process group instead of leaving it behind the turn.
+    return captureRun(this.config, child, timeoutMs, meta, request.signal);
   }
 
   async spawn(request: SandboxSpawnRequest): Promise<SandboxSpawned> {

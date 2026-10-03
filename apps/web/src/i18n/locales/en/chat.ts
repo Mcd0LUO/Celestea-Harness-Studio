@@ -235,6 +235,10 @@ export const chat = {
   'chat.wb.term.notStarted': 'The terminal did not open',
   'chat.wb.term.retry': 'Retry',
   'chat.input.placeholderIdle': 'Type a message; Enter to send, Shift+Enter for a new line',
+  // F2-02: the **stable** accessible name for #input. Deliberately not the same text as
+  // the placeholder — the placeholder is a mode-dependent hint (Idle/Steer/Queue), and a
+  // name that changes with mode is a 4.1.2 anti-pattern.
+  'chat.input.ariaLabel': 'Message input box',
   // W2023: touch lane (no physical Shift key). Selection: ui/viewport.ts isTouchInput.
   'chat.input.placeholderIdleTouch': 'Type a message; Enter for a new line, tap Send to send',
   // W2028: on touch Enter inserts a newline, so the send button is the only send path —

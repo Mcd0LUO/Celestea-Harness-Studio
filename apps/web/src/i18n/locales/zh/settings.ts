@@ -147,6 +147,7 @@ export const settings = {
   'settings.providers.testOk': '✓ 延迟 {ms}ms · 模型数 {n}',
   'settings.providers.needId': '请先填写提供商名称（作为 id）',
   'settings.providers.savingAndFetching': '保存并获取模型中…',
+  'settings.providers.fetching': '获取模型中…',
   'settings.providers.fetchFailed': '获取模型失败：{reason}',
   'settings.providers.noModelsFetched': '未获取到任何模型',
   'settings.providers.fetched': '已获取 {n} 个模型 · 请勾选要添加的模型',

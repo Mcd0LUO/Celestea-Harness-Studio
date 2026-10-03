@@ -1,0 +1,251 @@
+// @vitest-environment jsdom
+/**
+ * F2-01 / F2-02：模态背景隔离 + 主输入框可访问名。
+ *
+ * F2-01：#settingsPage 声明了 role=dialog aria-modal=true，修复前背景既不 inert 也不
+ *        可聚焦隔离（真机 CDP 实测 Tab×20 有 9 次落进背景、背景输入框真能写入）。
+ *        这里钉住「打开时背景 inert 且焦点进得来、关闭时必须摘干净」。
+ * F2-02：#input 只有 placeholder（HTML-AAM 里 placeholder 只是 fallback，不是可访问名），
+ *        且 placeholder 就是操作说明、一打字就消失。钉住 aria-label 由 i18n 填上。
+ *
+ * 两条加载纪律（收口时定的，别改回去）：
+ *   1. 一律走 tests/lib/w795-dom.ts 的 at(rel) 动态加载器 + 本文件自定义的窄接口，
+ *      不得写 typeof import('../apps/web/src/...')。那是类型级静态导入 —— 根 tsconfig
+ *      的 include 含整个 tests 目录（NodeNext + 无 DOM lib），于是整棵 apps/web 被拖进
+ *      根 tsc 工程，爆出满屏 TS2835/TS2304；depcruise 同理把 apps/web 拉进 cruise 并
+ *      触发 4 个 no-circular。动态 import + 窄接口只留下字符串，tsc 与 depcruise 都看不见它。
+ *      范式抄 tests/w9-permission-ui.test.ts 第 92 行那一处。
+ *   2. 不得直接用 DOM 全局类型（HTMLElement / Document / document / ParentNode）：根
+ *      tsconfig 的 lib 里没有 DOM（那是 apps/web 自己的 tsconfig 才开的），本仓 web
+ *      测试一律经夹具的 doc / ElLike 访问 DOM，或声明本文件自己的结构化窄类型。
+ */
+import { readFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { at, doc, type ElLike } from './lib/w795-dom.js';
+
+/**
+ * 元素窄类型：在夹具的 ElLike 之上补上本测试真正用到的那几个成员
+ * （hasAttribute / removeAttribute / focus / children）。刻意不扩到 HTMLElement ——
+ * 扩满等于把 DOM lib 又请回来，根 tsc 会重新报满屏 TS2304。
+ */
+interface FocusEl extends ElLike {
+  hasAttribute(k: string): boolean;
+  removeAttribute(k: string): void;
+  focus(): void;
+  children: ArrayLike<ElLike>;
+}
+
+/** 背景隔离的句柄（modal-bg.ts 的 BackgroundHandle）。 */
+interface BgHandle {
+  nodes: readonly ElLike[];
+  restore: () => void;
+}
+
+interface ModalBgMod {
+  isolateBackground(keep: FocusEl, before?: () => void): BgHandle;
+  firstFocusable(keep: FocusEl): FocusEl | null;
+}
+
+interface ConfigMod {
+  openSettings(): void;
+  closeSettings(): void;
+}
+
+interface I18nDomMod {
+  /** 形参是 ParentNode（DOM 侧类型）；根工程无 DOM lib，故这里收 unknown。 */
+  applyI18n(root: unknown): void;
+}
+
+interface LocaleChat {
+  chat: Record<string, string>;
+}
+
+const ROOT = 'D:/tools/celestea-studio';
+
+/** 取一个元素并收窄成 FocusEl。 */
+const el = (id: string): FocusEl => doc.getElementById(id) as unknown as FocusEl;
+
+const setBody = (html: string): void => {
+  doc.body.innerHTML = html;
+};
+
+const activeId = (): string => {
+  const d = doc as unknown as { activeElement: FocusEl | null };
+  return d.activeElement ? d.activeElement.id : '';
+};
+
+const loadModalBg = async (): Promise<ModalBgMod> =>
+  (await import(/* @vite-ignore */ at('utils/modal-bg.ts'))) as unknown as ModalBgMod;
+const loadConfig = async (): Promise<ConfigMod> =>
+  (await import(/* @vite-ignore */ at('ui/config.ts'))) as unknown as ConfigMod;
+const loadI18nDom = async (): Promise<I18nDomMod> =>
+  (await import(/* @vite-ignore */ at('i18n/dom.ts'))) as unknown as I18nDomMod;
+const loadZhChat = async (): Promise<LocaleChat> =>
+  (await import(/* @vite-ignore */ at('i18n/locales/zh/chat.ts'))) as unknown as LocaleChat;
+const loadEnChat = async (): Promise<LocaleChat> =>
+  (await import(/* @vite-ignore */ at('i18n/locales/en/chat.ts'))) as unknown as LocaleChat;
+
+const MODAL_HTML =
+  '<div id="settingsPage" class="settings-page hidden" role="dialog" aria-modal="true">' +
+  '<div class="settings-shell"><header><button id="closeBtn">x</button></header></div></div>';
+
+const NAV = [
+  'general', 'config', 'tools', 'archive', 'providers',
+  'prompts', 'permissions', 'plugins', 'usage',
+].map((p) => '<button class="settings-nav-item" data-page="' + p + '">' + p + '</button>').join('');
+
+const PANES = [
+  '<section class="settings-pane" data-pane="general"><div id="settingsGeneral"></div></section>',
+  '<section class="settings-pane active" data-pane="config"><div id="settingsConfig"></div><div id="settingsHint"></div></section>',
+  '<section class="settings-pane" data-pane="tools"><span id="toolsCount"></span><div id="settingsTools"></div></section>',
+  '<section class="settings-pane" data-pane="archive"><div id="settingsArchive"></div><div id="settingsArchiveHint"></div></section>',
+  '<section class="settings-pane" data-pane="providers"><div id="settingsProviders"></div></section>',
+  '<section class="settings-pane" data-pane="prompts"><div id="settingsPrompts"></div><div id="promptsWrap"></div></section>',
+  '<section class="settings-pane" data-pane="permissions"><div id="settingsPermissions"></div></section>',
+  '<section class="settings-pane" data-pane="plugins"><div id="settingsPlugins"></div></section>',
+  '<section class="settings-pane" data-pane="usage"><div id="settingsUsage"></div></section>',
+].join('');
+
+const FULL_SETTINGS_HTML =
+  '<div id="app"><button id="btnSettingsEntry">设置</button></div>' +
+  '<div id="settingsPage" class="settings-page hidden" role="dialog" aria-modal="true">' +
+  '<div class="settings-shell"><header>' +
+  '<button id="btnSettingsReload">r</button><button id="btnSettingsClose">x</button>' +
+  '</header><div class="settings-layout">' +
+  '<nav class="settings-nav">' + NAV + '</nav>' + PANES +
+  '</div></div></div>';
+
+describe('F2-01 · 模态态的背景隔离（inert）', () => {
+  let isolate: ModalBgMod;
+
+  beforeEach(async () => {
+    setBody(
+      '<div id="app"><button id="bgBtn">bg</button>' +
+        '<textarea id="bgInput"></textarea></div>' +
+        MODAL_HTML,
+    );
+    isolate = await loadModalBg();
+  });
+
+  afterEach(() => {
+    setBody('');
+    vi.restoreAllMocks();
+  });
+
+  const page = (): FocusEl => el('settingsPage');
+  const app = (): FocusEl => el('app');
+
+  it('打开时把背景兄弟子树置 inert（Tab 进不去、读屏不读）', () => {
+    isolate.isolateBackground(page());
+    expect(app().hasAttribute('inert')).toBe(true);
+  });
+
+  it('不把 modal 自身置 inert', () => {
+    isolate.isolateBackground(page());
+    expect(page().hasAttribute('inert')).toBe(false);
+  });
+
+  it('置 inert 之前先把焦点收进 modal（否则焦点被甩到 body）', () => {
+    const bgBtn = el('bgBtn');
+    bgBtn.focus();
+    expect(activeId()).toBe('bgBtn');
+    isolate.isolateBackground(page(), () => {
+      const first = isolate.firstFocusable(page());
+      if (first) first.focus();
+    });
+    expect(activeId()).toBe('closeBtn');
+  });
+
+  it('restore 摘掉 inert —— 漏摘会把整个应用变成一块砖', () => {
+    const h = isolate.isolateBackground(page());
+    expect(app().hasAttribute('inert')).toBe(true);
+    h.restore();
+    expect(app().hasAttribute('inert')).toBe(false);
+  });
+
+  it('restore 幂等：重复调用不抛错', () => {
+    const h = isolate.isolateBackground(page());
+    h.restore();
+    expect(() => h.restore()).not.to.throw();
+  });
+
+  it('不覆盖别人已经设的 inert（那属于另一层浮层）', () => {
+    const other = doc.createElement('div') as unknown as FocusEl;
+    other.id = 'otherLayer';
+    app().appendChild(other);
+    other.setAttribute('inert', '');
+    const h = isolate.isolateBackground(page());
+    h.restore();
+    expect(other.hasAttribute('inert')).toBe(true);
+  });
+});
+
+describe('F2-01 · openSettings/closeSettings 成对摘除', () => {
+  beforeEach(() => {
+    setBody(FULL_SETTINGS_HTML);
+  });
+
+  afterEach(() => {
+    setBody('');
+    vi.restoreAllMocks();
+  });
+
+  it('打开后背景 inert，关闭后一定摘干净', async () => {
+    const jsonResponse = new Response(JSON.stringify({}), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse));
+    const mod = await loadConfig();
+    const app = el('app');
+    const page = el('settingsPage');
+
+    mod.openSettings();
+    expect(page.classList.contains('hidden')).toBe(false);
+    expect(app.hasAttribute('inert')).toBe(true);
+
+    mod.closeSettings();
+    expect(page.classList.contains('hidden')).toBe(true);
+    expect(app.hasAttribute('inert')).toBe(false);
+  });
+});
+
+describe('F2-02 · #input 的稳定可访问名', () => {
+  afterEach(() => {
+    setBody('');
+  });
+
+  it('index.html 上带 data-i18n-aria-label，且不含中文字面量', () => {
+    const html = readFileSync(ROOT + '/apps/web/index.html', 'utf8');
+    const line = html.split('\n').find((l) => l.includes('id="input"')) ?? '';
+    expect(line).toContain('data-i18n-aria-label="chat.input.ariaLabel"');
+  });
+
+  it('zh/en 字典都有 chat.input.ariaLabel，且不是 key 回落', async () => {
+    const zh = (await loadZhChat()).chat;
+    const en = (await loadEnChat()).chat;
+    const z = zh['chat.input.ariaLabel'] ?? '';
+    const e = en['chat.input.ariaLabel'] ?? '';
+    expect(z.length).toBeGreaterThan(0);
+    expect(e.length).toBeGreaterThan(0);
+    expect(z).not.toBe('chat.input.ariaLabel');
+    expect(e).not.toBe('chat.input.ariaLabel');
+  });
+
+  it('aria-label 与 placeholder 不是同一句', async () => {
+    const zh = (await loadZhChat()).chat;
+    expect(zh['chat.input.ariaLabel']).not.toBe(zh['chat.input.placeholderIdle']);
+  });
+
+  it('applyI18n 真的把 aria-label 写到 DOM 上', async () => {
+    setBody(
+      '<textarea id="input" data-i18n-placeholder="chat.input.placeholderIdle" ' +
+        'data-i18n-aria-label="chat.input.ariaLabel"></textarea>',
+    );
+    const dom = await loadI18nDom();
+    dom.applyI18n(doc);
+    const ta = el('input');
+    expect(ta.getAttribute('aria-label')).toBeTruthy();
+    expect(ta.getAttribute('aria-label')).not.toBe('chat.input.ariaLabel');
+  });
+});

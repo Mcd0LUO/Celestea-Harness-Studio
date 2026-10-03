@@ -28,14 +28,56 @@ export function resetRestore(ctx: SessionPane): void {
   ctx.dedup.guardActive = false;
   ctx.dedup.guardBuf = '';
   ctx.dedup.guardAll = false;
+  ctx.dedup.guardTurn = null;
+}
+
+/**
+ * ★ W9298（F1-02 P1）：**记下「恢复尾部属于哪一轮」** —— 去重守卫的身份约束。
+ *
+ * 缺陷：守卫此前只按**内容前缀**判别（`tail.startsWith(guardBuf)`），不看轮次身份，于是
+ * 「新一轮的首段文本恰好与已恢复尾部开头相同」也被当成重放整段吞掉。实测：恢复尾部是
+ * `"OK"`、新一轮全文也是 `"OK"` 时，新一轮的输出在界面上**完全不可见**（探针 H；
+ * 对照组把新文本改成 `"OK then more"` 即正常显示）。
+ *
+ * 守卫要挡的只有**同一轮的重连重放**：服务端重连后从该助手消息开头重放，而那条消息
+ * 属于**恢复时已经在跑的那一轮**。新一轮（turn 变了）永远不是重放。
+ *
+ * 取值：`null` = 恢复时该会话没有在跑的轮次（此后任何 live 增量都不是重放，守卫全程
+ * 关闭）；数字 = 恢复尾部所属的轮次号，只有该轮的增量才进守卫。
+ */
+export function noteRestoreTurn(ctx: SessionPane, turn: number | null): void {
+  ctx.dedup.guardTurn = turn;
 }
 
 /**
  * 处理一条 live 助手文本增量：若与已恢复尾部前缀匹配则吞掉（返回 null），
  * 发散后一次性吐出累积缓冲并解除守卫。
  */
-export function feedAssistantDelta(ctx: SessionPane, delta: string): string | null {
+export function feedAssistantDelta(ctx: SessionPane, delta: string, turn?: number | null): string | null {
   const d = ctx.dedup;
+  // ★ W9298（F1-02）：身份闸门 —— 不是「恢复时在跑的那一轮」就不是重放，直接放行。
+  //
+  //   三种 guardTurn 语义，缺一不可：
+  //   · **数字**：恢复时该会话在跑，锚定的是那一轮的轮次号 ⇒ 只有**同一轮**的增量才进守卫。
+  //   · **null**：恢复时**没有**在跑的轮次（noteRestoreTurn 显式写入）⇒ 守卫全程关闭，
+  //     任何 live 增量都不是重放。
+  //   · **undefined**：从未被锚定（调用方没走过 noteRestoreTurn，例如直接构造容器的测试）
+  //     ⇒ 身份**不可判定**，退回旧的内容前缀判别。把它与 null 混为一谈会让「显式关闭守卫」
+  //     和「没锚过」变得不可区分，也让旧调用方的去重语义无声失效。
+  const anchored = typeof d.guardTurn === 'number';
+  if (anchored && typeof turn === 'number' && turn !== d.guardTurn) {
+    // 轮次已变 ⇒ 铁定不是重放。
+    d.tail = null;
+    d.guardActive = false;
+    d.guardAll = false;
+    d.guardBuf = '';
+    return delta === '' ? null : delta;
+  }
+  if (d.guardTurn === null) {
+    // 显式「恢复时无在途轮次」⇒ 守卫关闭。
+    d.tail = null;
+    return delta === '' ? null : delta;
+  }
   if (d.tail?.role !== 'assistant') {
     d.tail = null;
     return delta === '' ? null : delta;

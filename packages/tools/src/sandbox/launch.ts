@@ -16,10 +16,10 @@ import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import type { Readable } from "node:stream";
 
-import type { SandboxChild, SandboxConfig, SandboxMeta, SandboxRunResult } from "@celestea/core";
+import type { SandboxChild, SandboxConfig, SandboxExit, SandboxMeta, SandboxRunResult } from "@celestea/core";
 import { SandboxError } from "@celestea/core";
 
-import { TIMED_OUT, withTimeout } from "./async.js";
+import { TIMED_OUT, withTimeout, type TimeoutResult } from "./async.js";
 import { signalTree, wrapChild } from "./child.js";
 
 /** Grace allowed for a SIGKILLed child to be reaped before we stop waiting. */
@@ -75,17 +75,42 @@ export function spawnPlan(plan: SpawnPlan): Promise<ChildProcess> {
   });
 }
 
-/** Enforce the deadline, cap both streams, and report the effective meta. */
+/**
+ * Enforce the deadline, cap both streams, and report the effective meta.
+ *
+ * B3-01: `signal` is the CALLER's cancellation, distinct from `timeoutMs` (the
+ * budget the call chose). It kills the child's whole process group — the same
+ * tree-kill `timeoutFailure` uses — so a foreground `run_shell` stops when the
+ * turn is cancelled rather than outliving it. The run then settles through the
+ * NORMAL exit path below: a cancelled command reports its (empty) output and a
+ * null exit code, which is the honest description of a process that was killed.
+ */
 export async function captureRun(
   config: SandboxConfig,
   child: ChildProcess,
   timeoutMs: number,
   meta: SandboxMeta,
+  signal?: AbortSignal,
 ): Promise<SandboxRunResult> {
   const sandboxed = wrapChild(child, { detached: true });
   const outPromise = readCapped(child.stdout, config.maxOutputBytes);
   const errPromise = readCapped(child.stderr, config.maxOutputBytes);
-  const exit = await withTimeout(sandboxed.wait(), timeoutMs);
+  const onAbort = (): void => {
+    sandboxed.kill();
+  };
+  if (signal !== undefined) {
+    // A signal ALREADY aborted never fires "abort" again, so it is honoured here.
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  }
+  let exit: TimeoutResult<SandboxExit>;
+  try {
+    exit = await withTimeout(sandboxed.wait(), timeoutMs);
+  } finally {
+    // The turn's signal outlives this run (one controller serves many turns), so
+    // the listener is removed here rather than trusted to "{ once: true }".
+    if (signal !== undefined) signal.removeEventListener("abort", onAbort);
+  }
   if (exit === TIMED_OUT) throw await timeoutFailure(sandboxed, outPromise, errPromise, timeoutMs);
   const [stdout, stderr] = await Promise.all([outPromise, errPromise]);
   return {

@@ -190,8 +190,18 @@ describe("W9213 route snapshot counts are derived from the contract", () => {
 const ROOT = process.cwd();
 const CONTRACTS = join(ROOT, 'contracts');
 
-/** 契约里承载「文档在哪」的字段名（与 contracts 现有用法一致）。 */
-const POINTER_FIELDS = ['docRef', 'sourceRef', 'doc', 'design', 'ref'] as const;
+/**
+ * 契约里承载「东西在哪」的字段名（与 contracts 现有用法一致）。
+ *
+ * B8-01 追加 `schemas`：`contracts/tools.json` 的 `source.schemas` 是**同一类**
+ * 指针（一度写着 2026-09-11 已删除的 `/srv/celestea/engine-ref/crates/**`），
+ * 只是它是「一句话里列多个路径」而不是「一个路径 + 散文」。放进同一个扫描器
+ * 才能让两条指针共用一套判据；另起一个扫描器只会和这条慢慢长歪。
+ *
+ * 只收 `schemas`（复数）；`data-files/index.json` 的 `schema`（单数）是它自己的
+ * JSON Schema 文档或文件名，不在这个语义里，刻意不收。
+ */
+const POINTER_FIELDS = ['docRef', 'sourceRef', 'doc', 'design', 'ref', 'schemas'] as const;
 
 function jsonFiles(dir: string): string[] {
   const out: string[] = [];
@@ -268,6 +278,87 @@ describe('契约文档指针可达性', () => {
       }
     }
     expect(broken, '锚点写错 = 指针等于没有').toEqual([]);
+  });
+
+  /**
+   * B8-01 —— `sourceRef` 必须解析到**现役**仓内文件。
+   *
+   * 为什么单列一条：上面两条指针门禁都带 `p.value.startsWith('docs/')` 过滤，
+   * 所以 `sourceRef`（以及任何 `packages/`、`apps/` 指针）从来没被查过。实测
+   * 后果是 `contracts/tools.json` 里 10 条 `sourceRef` 全部指向 **2026-09-11 已删除**
+   * 的 `crates/*.rs`，而四条门禁全绿——读契约的人按指针去查只会得到一个不存在的路径。
+   *
+   * 判据刻意分成两档（与本文件既有的「docs 指针」门禁分工）：
+   *   ① **仓内指针**（首 token 以 `docs/`、`packages/`、`apps/`、`contracts/` 开头）：
+   *      必须解析到真实文件。这是本条的主判据。
+   *   ② `crates/**` = 已退役的参照实现，**不是**仓内指针：不能判它「坏」，
+   *      但它也不该再被当成可解析入口——若哪天有人把它写回来，这里要求带
+   *      `retired-engine/` 前缀（仓内已有该写法先例：packages/llm/README.md:3），
+   *      让「这是历史引用」成为**显式**事实，而不是靠读者自己推断。
+   *
+   * 只取**首 token**作为路径：现有 `sourceRef` 的形态是
+   * `path (provenance 散文)`，散文部分不可机械解析（同上：形态 ② 的取舍）。
+   * 首 token 本身必须是纯路径——这正是 B8-01 顺带修掉的第 11 处
+   * （`"W783: packages/tools/src/tools/ask-user.ts"` 把工号前缀写进了首 token，
+   * 于是任何「首 token 当路径」的扫描都读不出它指向哪）。
+   */
+  it('sourceRef 的首 token 是仓内可解析路径（退役的 crates 引用必须带 retired-engine/ 前缀）', () => {
+    const IN_REPO = /^(docs|packages|apps|contracts|scripts|tests)\//;
+    const RETIRED = /^(crates|src|retired-engine)\//;
+    /** A glob tail (`*.ts`) is checked against the directory that carries it. */
+    const isPathLike = (tok: string): boolean => IN_REPO.test(tok) || RETIRED.test(tok);
+    const broken: string[] = [];
+    const retiredUnmarked: string[] = [];
+    let checked = 0;
+
+    /**
+     * `sourceRef` is one path + prose ("path (W123; note)"); `schemas` is a
+     * *sentence* listing several of them ("a/*.ts (...) + b.ts + c.ts; ...").
+     * Both are reduced to their path-like tokens, so one judgement serves both
+     * rather than growing a second scanner that would drift from this one.
+     *
+     * A token is path-like if it starts with a known repo root OR carries a
+     * source-file suffix (`*.ts`/`*.rs`/`*.mjs`…); the suffix test is what
+     * picks `crates/tools/src/builtin.rs:217-230` out of a retired note while
+     * ignoring ordinary prose. Parentheticals are dropped first so the
+     * "was crates/…" history note is not judged as a live pointer.
+     */
+    function pathTokens(value: string): string[] {
+      const prose = value.replace(/\([^)]*\)/g, ' ');
+      return prose
+        .split(/\s+/)
+        // Strip punctuation from BOTH ends: prose here is a SENTENCE ("a.ts; b.ts."),
+        // so the separator lands on the tail ("tool.ts;"), not just the head. Only
+        // leading was stripped before, which judged "tool.ts;" a missing file and
+        // made a correct contract look broken.
+        .map((t) => t.replace(/^[;,\s]+|[;,\s]+$/g, '').replace(/[.,;:]+$/, '').split('#')[0]!)
+        .filter((t) => t !== '' && isPathLike(t) && /[./*]/.test(t));
+    }
+
+    /** A glob (`dir/*.ts`) resolves if the DIRECTORY carrying it exists. */
+    function resolves(pathPart: string): boolean {
+      const base = pathPart.replace(/[\\/]\*\.[A-Za-z0-9]+$/, '');
+      return existsSync(join(ROOT, base === '' ? '.' : base));
+    }
+
+    for (const p of allPointers()) {
+      if (p.field !== 'sourceRef' && p.field !== 'schemas') continue;
+      for (const pathPart of pathTokens(p.value)) {
+        if (IN_REPO.test(pathPart)) {
+          checked++;
+          if (!resolves(pathPart)) {
+            broken.push(p.file + ' ' + p.field + ' -> ' + p.value + '  [不是真实文件]');
+          }
+        } else if (RETIRED.test(pathPart) && !pathPart.startsWith('retired-engine/')) {
+          retiredUnmarked.push(p.file + ' ' + p.field + ' -> ' + p.value + '  [退役引用未标 retired-engine/]');
+        }
+      }
+    }
+
+    expect(broken, '指针指向不存在的仓内文件（读契约的人会查不到）').toEqual([]);
+    expect(retiredUnmarked, 'crates/ 是 2026-09-11 已删除的参照实现；引用它就得标 retired-engine/').toEqual([]);
+    // 空清单 = 扫描器坏了（门禁空转），与本文件既有断言同一手法
+    expect(checked, '扫描器必须找到仓内指针（否则本条是空转的）').toBeGreaterThan(0);
   });
 
   it('没有指向 git 历史里从未存在过的文件（这正是本次查出的 bug 形态）', () => {

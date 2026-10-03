@@ -236,6 +236,9 @@ export const chat = {
   'chat.wb.term.notStarted': '终端没有打开',
   'chat.wb.term.retry': '重试',
   'chat.input.placeholderIdle': '输入消息，Enter 发送，Shift+Enter 换行',
+  // F2-02：#input 的**稳定**可访问名。刻意不与 placeholder 同文 —— placeholder 是
+  // 会随状态切换的操作说明（Idle/Steer/Queue 各一档），拿它当名字会随状态变。
+  'chat.input.ariaLabel': '消息输入框',
   // W2023：触摸档（无物理 Shift 键）。选取见 ui/viewport.ts 的 isTouchInput。
   'chat.input.placeholderIdleTouch': '输入消息，Enter 换行，点发送键发出',
   'chat.input.placeholderSteer': 'Enter 插话（下一步送达）· Ctrl/Cmd+Enter 排队（下一回合送达）',

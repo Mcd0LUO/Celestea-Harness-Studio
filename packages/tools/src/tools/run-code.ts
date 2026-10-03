@@ -94,6 +94,10 @@ export function runCodeTool(options: RunCodeToolOptions): Tool {
         registry,
         config,
         parentId: input.call_id,
+        // B3-01: the loop's cancellation signal, straight off the ToolInput it
+        // built. The broker kills the program on abort, so a cancelled turn does
+        // not leave the program running behind it.
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
         ...(options.events === undefined ? {} : { events: options.events }),
       };
       return brokerRun(ctx, input.args);

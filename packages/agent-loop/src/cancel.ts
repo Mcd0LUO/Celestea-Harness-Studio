@@ -102,14 +102,51 @@ export function raceAbort<T>(
 }
 
 /**
- * Best-effort close of an async iterator abandoned on cancellation: releases
- * the provider stream (and its socket) instead of leaving it suspended. A
- * close failure is irrelevant to the turn, which is already terminal.
+ * The out-of-band teardown a stream MAY carry, without this module depending on
+ * the LLM package. Structural on purpose: agent-loop is above llm in the
+ * dependency graph, so naming llm's own type here would invert the arrow.
+ */
+interface Releasable {
+  release?(): void;
+}
+
+/**
+ * Force-release an abandoned stream's resources, THEN ask the iterator to close.
+ *
+ * B3-04: the two steps are not redundant. `release()` is the part that actually
+ * frees a socket — it does not depend on the generator making progress, so it
+ * works while the generator is parked on a `await` that never settles. `return()`
+ * alone queues behind that await and its `finally` may never run. `return()` is
+ * still issued, because for a well-behaved generator it is what runs the
+ * generator's own cleanup, and for a stream with no `release()` it is all we have.
  */
 export function closeIterator<T>(iter: AsyncIterator<T>): void {
+  releaseIterator(iter);
   const close = iter.return;
   if (close === undefined) return;
   void Promise.resolve(close.call(iter)).catch(ignore);
+}
+
+/**
+ * B3-04: the out-of-band half of [closeIterator], split out because it must be
+ * callable BEFORE the generator has been started, and WITHOUT issuing a
+ * `return()`.
+ *
+ * Issuing `return()` early is actively harmful in the pre-stream window: it
+ * queues behind the `next()` already in flight, so a stream that resolves late
+ * would have its teardown stranded behind its own pending read. (Measured: doing
+ * both in one step turned the repo's own `cancel.test.ts` case "closes a stream
+ * that resolves AFTER the abort fired" red.) Releasing first costs nothing and
+ * cannot be queued, so the two steps are ordered: release now, close after.
+ */
+function releaseIterator<T>(iter: AsyncIterator<T>): void {
+  const releasable = iter as AsyncIterator<T> & Releasable;
+  if (typeof releasable.release !== "function") return;
+  try {
+    releasable.release();
+  } catch {
+    /* teardown is best-effort: the turn is already terminal */
+  }
 }
 
 /**
@@ -119,12 +156,25 @@ export function closeIterator<T>(iter: AsyncIterator<T>): void {
  * `LlmStream` is an async GENERATOR, and `return()` on a generator that was
  * never started does not run its body's `finally` at all (measured on node
  * v26: `ranFinally === false`). The provider's `finally { response.destroy() }`
- * (`stream.ts:239-241`) is therefore unreachable, and the response + socket stay
- * open. Starting the iterator first is what makes the close real; the first
- * event is discarded because the turn is already cancelled.
+ * is therefore unreachable, and the response + socket stay open. Starting the
+ * iterator first is what makes the close real; the first event is discarded
+ * because the turn is already cancelled.
+ *
+ * B3-04: starting the iterator is NECESSARY BUT NOT SUFFICIENT. A generator that
+ * has started and is then parked on an `await` never settles (a provider that
+ * stalls with its idle guard disabled) still never runs that `finally`. That is
+ * why [closeIterator] now forces a `release()` when the stream carries one.
  */
 export function closeStream<T>(stream: AsyncIterable<T>): void {
   const iter = stream[Symbol.asyncIterator]();
+  // B3-04: force the release FIRST, unconditionally and without issuing a
+  // `return()`. This is the only step that frees a socket held by a provider
+  // that never settles, and it cannot be queued behind the pending read below.
+  releaseIterator(iter);
+  // The W9225 behaviour, kept exactly: start the iterator, THEN close it, in
+  // that order and in a later tick. `return()` on a never-started generator does
+  // not run its `finally`, and `return()` issued while a `next()` is in flight
+  // queues behind it. The first event is discarded: the turn is already cancelled.
   void Promise.resolve(iter.next()).then(
     () => closeIterator(iter),
     () => closeIterator(iter),

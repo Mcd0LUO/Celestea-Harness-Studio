@@ -17,6 +17,28 @@ export interface ToolInput {
   call_id: string;
   name: string;
   args: unknown;
+  /**
+   * B3-01: the caller's cancellation signal, OPTIONAL and additive.
+   *
+   * Before this, a turn could be cancelled but a tool that had already been
+   * dispatched kept running: the loop stopped *awaiting* it and the child
+   * process it spawned went on to finish its side effects. The loop logged the
+   * honest "execution may have completed" (see `CANCELLED_EXECUTION_UNCERTAIN`),
+   * which is a true statement about an unacceptable situation.
+   *
+   * Why it is safe to add here even though core is L0 and contracts are frozen:
+   *   * `AbortSignal` is a GLOBAL type (lib.dom / node globals) — this adds no
+   *     import, so no dependency edge appears in either direction;
+   *   * it is OPTIONAL, so every existing producer of a `ToolInput` literal
+   *     (tests, tools, the run_code sub-call bridge) still type-checks unchanged;
+   *   * the field is never serialized — it is a runtime handle, not a contract
+   *     key, and `ToolInput` is not part of the frozen wire contracts
+   *     (`contracts/` describes the session/HTTP schemas, not this seam type).
+   *
+   * A tool that ignores it keeps its exact previous behaviour; a tool that
+   * spawns a process SHOULD abort it. The loop is the only producer that sets it.
+   */
+  signal?: AbortSignal;
 }
 
 /** `Tool::execute_with` result: canonical value + optional authored rendering. */

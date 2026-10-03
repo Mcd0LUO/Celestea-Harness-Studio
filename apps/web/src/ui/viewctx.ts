@@ -137,7 +137,7 @@ function buildPane(id: string, kind: string, title: string): SessionPane {
     stickBottom: true,
     restored: false,
     restoreSeq: 0,
-    dedup: { tail: null, guardActive: false, guardBuf: '', guardAll: false },
+    dedup: { tail: null, guardActive: false, guardBuf: '', guardAll: false, guardTurn: null },
     histToolStep: 0,
     restoreOps: new Map(),
     status: null,

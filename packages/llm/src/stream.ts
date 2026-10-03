@@ -230,11 +230,63 @@ function waitForData(
 }
 
 /**
+ * A stream plus the ONE handle a caller needs to release the socket when it
+ * abandons the stream.
+ *
+ * B3-04: `iter.return()` cannot do this job. An async generator suspended at a
+ * pending `await` queues `return()` BEHIND that await, so the generator's
+ * `finally` — the only place `response.destroy()` lives — does not run until
+ * the await settles. A provider that never settles therefore keeps the socket
+ * open for as long as it likes. `release()` is out-of-band: it destroys the
+ * response directly, with no dependency on the generator making progress.
+ *
+ * Idempotent, and safe to call before iteration starts.
+ */
+export interface ReleasableStream {
+  /** Destroy the underlying response NOW. Safe at any time, any number of times. */
+  release(): void;
+}
+
+/**
+ * Decorate a stream generator with an out-of-band [ReleasableStream].
+ *
+ * The `release()` it installs destroys `response` directly and is idempotent:
+ * the generator's own `finally { response.destroy() }` may still run later, and
+ * `IncomingMessage.destroy()` is already safe to call twice, but the guard makes
+ * the contract explicit and keeps the wrapper allocation-free of side effects.
+ */
+function withRelease(
+  gen: AsyncGenerator<StreamEvent>,
+  response: http.IncomingMessage,
+): AsyncGenerator<StreamEvent> & ReleasableStream {
+  let released = false;
+  return Object.assign(gen, {
+    release(): void {
+      if (released) return;
+      released = true;
+      response.destroy();
+    },
+  });
+}
+
+/**
  * Decode a 2xx SSE response into seam events. The generator always ends with
  * exactly one terminal event (done | failed | interrupted) or an empty stream
  * only when the caller stops iterating early.
+ *
+ * B3-04: the [ReleasableStream] `release()` is the ONLY way to destroy the
+ * socket without this generator unwinding, so [streamEvents] returns the
+ * generator decorated with it. See [ReleasableStream] for why `return()` alone
+ * is not enough.
  */
-export async function* streamEvents(
+export function streamEvents(
+  response: http.IncomingMessage,
+  idleMs: number | null,
+): AsyncGenerator<StreamEvent> & ReleasableStream {
+  return withRelease(decodeStreamEvents(response, idleMs), response);
+}
+
+async function* decodeStreamEvents(
   response: http.IncomingMessage,
   idleMs: number | null,
 ): AsyncGenerator<StreamEvent> {

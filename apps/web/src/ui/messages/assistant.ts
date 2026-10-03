@@ -14,7 +14,7 @@ import { htmlToNodes } from './markdown';
 import { buildOmittedNote, clampForRender, MESSAGE_RENDER_LIMIT, setOmittedCount } from './oversize';
 import { prunePaneDom } from './dom-cap'; // W1485：消息容器的 DOM 上限
 import { waitFor } from './cadence'; // W1524：合并窗口 = 上次渲染实测耗时（自适应）
-import { autoscroll, hideEmptyHint, renderEmptyHint } from './scroll';
+import { autoscroll, autoscrollSoon, hideEmptyHint, renderEmptyHint } from './scroll';
 // W9222（F-11）：resetMessages 是「清空会话」的规范复位入口，账本也必须归零 ——
 // 见下方注释（容器对象不变 ⇒ 账本不会随 replaceChildren 自动作废）。
 import { addThinkRetained, thinkRetained } from './think-budget';
@@ -245,10 +245,20 @@ function scheduleTextView(ctx: SessionPane, view: AssistantView): void {
  * off），逐条写 scrollTop 是纯浪费（200 条 ≈ 200 次强制布局 + 无效写）；恢复末尾
  * restoreSessionHistory 自己会 autoscroll(ctx, true) 贴底一次，观感不变。
  * 用 `=== false` 判定（而不是 `!isConnected`）：DOM 垫片没有该属性时行为与改动前一致。
+ *
+ * ★ W9300/F3-1（性能）：**不 force 的节拍调用改为帧内合并**（autoscrollSoon）。
+ *   实测（Chrome 154 + CDP）：流式期间每节拍一次 `scrollTop = scrollHeight` 写，
+ *   600 列下一次 200 帧突发要付 217 次强制同步布局，且**读与写代价同阶**
+ *   （读 6.8ms / 只写 6.9ms @600 列）—— 所以省下 `scrollHeight` 的读**无效**，
+ *   真正的杠杆是「一帧只写一次」。force=true 的路径（轮次结束 / done / 新消息）
+ *   仍然**同步**贴底：那些调用点之后调用方立刻依赖最终滚动位（W1524 的论证）。
  */
 function autoscrollView(ctx: SessionPane, view: AssistantView, force = false): void {
   if (view.root.isConnected === false) return;
-  autoscroll(ctx, force);
+  // force 必须同步贴底（turn 结束 / done 之后调用方立即依赖最终滚动位）；
+  // 普通节拍走帧内合并，一帧至多写一次。
+  if (force) autoscroll(ctx, true);
+  else autoscrollSoon(ctx);
 }
 
 /** 立即冲刷（turn 结束 / done 事件 / 最终文本到来时调用）。 */

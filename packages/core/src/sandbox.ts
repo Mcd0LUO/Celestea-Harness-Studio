@@ -193,6 +193,27 @@ export interface SandboxRunRequest extends SandboxAddressSpaceOptions {
   timeoutMs?: number;
   /** W6: optional per-call `RLIMIT_CPU` in seconds, clamped to `config.maxCpuSec`. */
   cpuSec?: number;
+  /**
+   * B3-01: the caller's cancellation signal for a FOREGROUND run.
+   *
+   * `timeoutMs` is a budget the CALL chose; this is the host changing its mind.
+   * With it, a cancelled turn kills the run's whole process group instead of
+   * leaving it running behind a turn that already reported itself `cancelled`.
+   *
+   * Why an optional field on an L0 seam is safe here (same three reasons as
+   * `ToolInput.signal`, and the same reasoning is recorded there):
+   *   * `AbortSignal` is a GLOBAL type — this adds no import, so core gains no
+   *     dependency edge;
+   *   * optional, so every existing `SandboxRunRequest` literal still type-checks
+   *     and behaves identically when it is absent (the wall clock is then the only
+   *     thing that can end the run);
+   *   * a runtime handle, never serialized; it is not part of `contracts/`.
+   *
+   * `SandboxSpawnRequest` deliberately has NO such field: a background child is
+   * registered in the process registry and is DESIGNED to outlive the turn that
+   * started it, so cancelling that turn must not kill it.
+   */
+  signal?: AbortSignal;
 }
 
 export interface SandboxSpawnRequest extends SandboxAddressSpaceOptions {

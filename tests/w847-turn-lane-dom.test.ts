@@ -218,7 +218,11 @@ describe("W847 · done 权威全文（真实 SSE 接线）", () => {
     const { V, restore } = await bootChat();
     const pane = V.ensurePane(LIVE, "session", "live");
     pane.dedup.tail = { role: "assistant", content: "重放正文" };
-    expect(restore.feedAssistantDelta(pane, "重放正文")).toBeNull();
+    // W9298（F1-02）：去重守卫现在带**轮次身份** —— 它要挡的只有「同一轮的重连重放」。
+    // 本用例模拟的正是这个形状（恢复时那一轮正在跑、服务端重连重放它），故锚上同一轮号；
+    // 不锚定会被判为「恢复时无在途轮次」而直接放行（那正是 F1-02 要修的误吞）。
+    pane.dedup.guardTurn = 1;
+    expect(restore.feedAssistantDelta(pane, "重放正文", 1)).toBeNull();
     fire("status", { phase: "start", statusline: {} });
     fire("done", { text: "重放正文" });
     expect(kindsOf(pane.el)).toEqual([]);

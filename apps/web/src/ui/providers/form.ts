@@ -69,6 +69,29 @@ function numOrNull(i: HTMLInputElement): number | null {
   const n = Math.round(base * mult);
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
+/**
+ * 新建 provider 时「获取模型」要落的那一行的**最小载荷**（F4-01）。
+ *
+ * 后端 `POST /api/providers/{id}/models/fetch` 用路径参数 `store.find(id)` 读既有行，
+ * 所以新建流程必须先有这一行才能探测。但它只需要「能连上并说话」的那几个字段：
+ * 身份、地址、请求格式、Key。**刻意不带 models** —— 探测返回的清单经二级选择窗
+ * 由用户勾选后进表单，那一刻还没点保存；把未勾选的模型也写下去会让用户以为
+ * 「获取模型」= 保存。`models: []` 是契约里合法的空列表（store 的 validate 接受）。
+ *
+ * `api_key` 沿用 buildPayload 的规则：空 = 不带这个键（后端 keep-on-default）。
+ */
+function buildProbeRow(e: EditorRefs): ProviderPayload {
+  const key = e.key.value.trim();
+  return {
+    id: e.name.value.trim(),
+    name: e.name.value.trim(),
+    note: e.note.value.trim(),
+    base_url: e.url.value.trim(),
+    request_format: e.format.value,
+    ...(key !== '' ? { api_key: key } : {}),
+    models: [],
+  };
+}
 export function buildProviderForm(p: ProviderInfo | null, hooks: FormHooks): EditorRefs {
   const root = el('div', 'prov-form');
 
@@ -217,10 +240,22 @@ export function buildProviderForm(p: ProviderInfo | null, hooks: FormHooks): Edi
       return;
     }
     status.className = 'prov-editor-status';
-    status.textContent = t('settings.providers.savingAndFetching');
-    void api
-      .saveProvider(buildPayload(e))
-      .then(() => api.fetchProviderModels(id))
+    // F4-01：「获取模型」是**发现型**动作，不是保存型动作。
+    //   旧实现无条件 `saveProvider(buildPayload(e))` 把整张表单写盘，于是「用户没点
+    //   保存、甚至 fetch 随后失败」，半成品配置（name/备注/地址/Key/模型）也**已经生效**，
+    //   而列表行仍显示旧值（fetch 路径从不调 hooks.onSaved）——落盘与显示不一致，用户
+    //   无从察觉。真机复现见 results/audit3-r2/F4/probeG.mjs。
+    //   后端 `POST /api/providers/{id}/models/fetch`（handlers/providers.ts:112）只
+    //   `store.find(id)` 读既有行，**不需要**先保存 ⇒ 编辑既有 provider 时直接 fetch。
+    //   只有**新建**时 store 里还没有这一行，fetch 必然 404 unknown provider —— 那时
+    //   才落一行，且只落探测必需的字段（见 buildProbeRow）；模型清单仍以表单为准。
+    //   两条路径都**不调 onSaved**：真正的保存由用户点「保存」完成。
+    const existing = e.originalId !== undefined;
+    status.textContent = existing
+      ? t('settings.providers.fetching')
+      : t('settings.providers.savingAndFetching');
+    const begin = existing ? Promise.resolve(null) : api.saveProvider(buildProbeRow(e));
+    void begin.then(() => api.fetchProviderModels(id))
       .then((r) => {
         if (seq !== fetchSeq) return; // 旧响应：丢弃，不覆盖新状态
         if (r.ok === false || (r.ok === undefined && r.error)) {

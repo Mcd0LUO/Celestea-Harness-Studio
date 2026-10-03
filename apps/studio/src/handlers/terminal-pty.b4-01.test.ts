@@ -55,8 +55,14 @@ function track(child: ChildProcess): ChildProcess {
 
 afterEach(() => {
   for (const c of spawned.splice(0)) {
+    // Kill THROUGH the child handle, not by raw pid. A raw pid kill can land on a
+    // RECYCLED pid: once a child is reaped the OS is free to hand that number to
+    // a later spawn, and a stray SIGKILL would take out an unrelated process (in
+    // this suite, possibly a sibling test's child -- the cross-test flake this
+    // hook must never cause). ChildProcess.kill() targets the handle we spawned,
+    // and is a no-op once that child is gone.
     try {
-      if (c.pid !== undefined) process.kill(c.pid, "SIGKILL");
+      c.kill("SIGKILL");
     } catch {
       /* already gone */
     }
@@ -97,16 +103,74 @@ function addLive(table: TerminalTable): number | undefined {
   return child.pid;
 }
 
-/** Let the OS settle: a signal is not the same instant as the exit. */
-const settle = async (ms = 400): Promise<void> => {
-  await new Promise((r) => setTimeout(r, ms));
-};
+/**
+ * Wait for the OS to actually forget a pid, with a BOUND.
+ *
+ * Why polling and not a sleep: a kill is delivered immediately, but the OS
+ * reaping the process is ASYNCHRONOUS. A fixed sleep is a guess about
+ * someone else's scheduler -- under a loaded machine (this file runs alongside
+ * the rest of the suite) the reaping can outlast it, and the test then fails
+ * for having been impatient rather than for having caught a real orphan. That
+ * is the difference between a gate and a coin flip, so this polls a MONOTONIC
+ * clock until the process is gone, and only then returns.
+ *
+ * The bound is deliberately generous (5 s against a normal reclaim well under
+ * 50 ms): a slow machine should make this wait, not fail. The elapsed time is
+ * returned so a FAILURE can say how long it actually waited, which is what
+ * separates "we never killed it" from "we killed it and the OS was busy".
+ */
+const REAP_BOUND_MS = 5_000;
+const REAP_POLL_MS = 20;
+
+async function waitForExit(pid: number | undefined, boundMs: number = REAP_BOUND_MS): Promise<number> {
+  const started = performance.now();
+  while (pidAlive(pid)) {
+    if (performance.now() - started > boundMs) return performance.now() - started;
+    await new Promise((r) => setTimeout(r, REAP_POLL_MS));
+  }
+  return performance.now() - started;
+}
+
+/**
+ * Assert the OS forgot this pid, having waited for it (bounded).
+ *
+ * The assertion still checks the REAL pid -- that is the entire value of this
+ * file. Only the WAIT became bounded; a weaker check (not throwing, or
+ * dropping the pid) would pass with the fix removed.
+ */
+/**
+ * Assert the OS is STILL running this pid (the "we must not kill it" side).
+ *
+ * Bounded the same way as [expectDead]: a child that is still being SET UP can
+ * briefly look absent, and that is a slow spawn, not a kill. Waiting makes the
+ * negative case as trustworthy as the positive one.
+ */
+async function expectAlive(pid: number | undefined, what: string): Promise<void> {
+  const started = performance.now();
+  while (!pidAlive(pid)) {
+    if (performance.now() - started > REAP_BOUND_MS) {
+      expect(pidAlive(pid), `${what}: pid ${String(pid)} never came up within ${REAP_BOUND_MS}ms`).toBe(true);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, REAP_POLL_MS));
+  }
+  expect(pidAlive(pid), `${what}: pid ${String(pid)} should still be running`).toBe(true);
+}
+
+async function expectDead(pid: number | undefined, what: string): Promise<void> {
+  const waited = await waitForExit(pid);
+  expect(
+    pidAlive(pid),
+    `${what}: pid ${String(pid)} was still alive after waiting ${waited.toFixed(0)}ms (bound ${REAP_BOUND_MS}ms)`,
+  ).toBe(false);
+}
+
 describe(`B4-01 P0 · shutdown drains the pty table and kills the process groups`, () => {
   it(`shutdown() empties the table AND the OS forgets every pty pid`, async () => {
     const table = createTerminalTable({ idleMs: 0 }); // no reaper: this is the shutdown half
     const pids = [addLive(table), addLive(table)];
     expect(table.registry.size()).toBe(2);
-    for (const pid of pids) expect(pidAlive(pid)).toBe(true);
+    for (const pid of pids) await expectAlive(pid, "a freshly spawned pty is running");
 
     const killed = await table.shutdown();
 
@@ -114,8 +178,7 @@ describe(`B4-01 P0 · shutdown drains the pty table and kills the process groups
     expect(killed).toBe(2);
     expect(table.registry.size()).toBe(0);
     // ...and this is the half the fix exists for: the processes are REALLY gone.
-    await settle();
-    for (const pid of pids) expect(pidAlive(pid)).toBe(false);
+    for (const pid of pids) await expectDead(pid, "shutdown()");
   });
 
   it(`shutdown() is idempotent (the W2029 repeat-SIGTERM path is a no-op)`, async () => {
@@ -135,8 +198,7 @@ describe(`B4-01 P0 · shutdown drains the pty table and kills the process groups
     expect(terminalTableOf(owner)).toBe(table);
     expect(await releaseTerminalTable(owner)).toBe(1);
     expect(terminalTableOf(owner)).toBeUndefined();
-    await settle();
-    expect(pidAlive(pid)).toBe(false);
+    await expectDead(pid, "releaseTerminalTable()");
     // A second release is safe: the teardown path may run twice.
     expect(await releaseTerminalTable(owner)).toBe(0);
   });
@@ -150,8 +212,7 @@ describe(`B4-01 P0 · shutdown drains the pty table and kills the process groups
 
     await table.shutdown();
     expect(table.registry.size()).toBe(0);
-    await settle();
-    expect(pidAlive(pid)).toBe(false);
+    await expectDead(pid, "a wedged child is still killed");
   }, 20_000);
 });
 
@@ -170,9 +231,8 @@ describe(`B4-01 P0 · the idle reaper finally has a caller`, () => {
     expect(report.reaped).toBe(1);
     expect(report.swept).toBe(1);
     expect(table.registry.size()).toBe(1);
-    await settle();
-    expect(pidAlive(reapedPid)).toBe(false); // the ceiling actually killed it
-    expect(pidAlive(keptPid)).toBe(true); // ...and left the live one alone
+    await expectDead(reapedPid, "the idle ceiling killed it"); // bounded poll, not a sleep
+    await expectAlive(keptPid, "the reaper left the fresh pty alone");
   });
 
   it(`a second sweep reaps nothing (the drop happens before the slow signal)`, () => {
@@ -205,8 +265,7 @@ describe(`B4-01 P0 · the idle reaper finally has a caller`, () => {
     table.registry.drop(table.registry.all()[0]!.id);
     expect(table.reaper.armed()).toBe(false); // the last one left: the timer is gone
 
-    await settle();
-    expect(pidAlive(first)).toBe(false);
+    await expectDead(first, "the reaper killed the stale pty");
   });
 
   it(`stopAllTerminalReapers disarms every armed reaper (a teardown that cannot see the table)`, () => {
@@ -227,8 +286,7 @@ describe(`B4-01 P0 · the idle reaper finally has a caller`, () => {
     const pid = addLive(table);
     // The teardown path must never depend on the reaper being armed.
     expect(await table.shutdown()).toBe(1);
-    await settle();
-    expect(pidAlive(pid)).toBe(false);
+    await expectDead(pid, "shutdown() drains even with the reaper disarmed");
   });
 
   it(`the ceiling defaults to the documented value; the env knob retunes and can disable`, () => {

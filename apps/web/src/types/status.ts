@@ -60,13 +60,42 @@ export interface UsageSnapshot extends UsageCounters {
   total?: UsageCounters;
 }
 
+/**
+ * W9298（F1-04）：status 帧的 phase 联合，**逐字取自契约**的九值枚举
+ * （contracts/sse-events.json → events[name=status].payload.phase）。
+ *
+ * 为什么把它提成具名导出：`TERMINAL_PHASES`（chat.ts）与本联合必须对同一份契约说话，
+ * 提成具名类型后「哪些是终态」这件事有一处可对拍的声明面，而不是两处各自抄字面量。
+ * 终态子集见 chat.ts 的 TERMINAL_PHASES（5 个），其余四个 start/progress/lagged/fallback
+ * 是非终态。
+ */
+export type StatusPhase =
+  | 'start'
+  | 'progress'
+  | 'completed'
+  | 'cancelled'
+  | 'error'
+  | 'step_limit'
+  | 'interrupted'
+  | 'lagged'
+  | 'fallback';
+
 /** status SSE payload: turn lifecycle + optional statusline fields. */
 export interface StatusPayload extends StatusSnapshot {
   /** W514: envelope version (2 = carries `session`). */
   v?: number;
   /** W514: `session` is inherited from StatusSnapshot (may be null on legacy). */
   seq?: number;
-  phase?: 'start' | 'completed' | 'cancelled' | 'error' | 'lagged';
+  /**
+   * W9298（F1-04）：**以契约为准**（contracts/sse-events.json events[status].payload.phase）。
+   * 改动前这里只列了 5 个值，缺 progress / step_limit / interrupted / fallback —— 契约新增
+   * phase 时类型层不会红，而 chat.ts 的 onStatus 恰恰要逐个认这些值（step_limit /
+   * interrupted 是**终态**，漏认就是「永久卡运行中」）。故在此显式声明九值全枚举。
+   *
+   * 对拍由 tests/w9298-lagged-frame.test.ts 与 tests/w9201-terminal-phases.test.ts 做：
+   * 契约 JSON 不进前端产物，测试逐字比对「本联合 ⊆ 契约枚举」。
+   */
+  phase?: StatusPhase;
   turn?: number;
   error?: string;
   hint?: string;

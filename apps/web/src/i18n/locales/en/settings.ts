@@ -147,6 +147,7 @@ export const settings = {
   'settings.providers.testOk': '✓ Latency {ms}ms · Models: {n}',
   'settings.providers.needId': 'Please fill in the provider name (used as the id) first',
   'settings.providers.savingAndFetching': 'Saving and fetching models…',
+  'settings.providers.fetching': 'Fetching models…',
   'settings.providers.fetchFailed': 'Failed to fetch models: {reason}',
   'settings.providers.noModelsFetched': 'No models were fetched',
   'settings.providers.fetched': 'Fetched {n} models · check the ones to add',

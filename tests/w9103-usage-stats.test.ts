@@ -323,23 +323,46 @@ describe('W9103 · 账本响应体解析', () => {
     expect(read.cost?.total, '未知价格必须保持 null，绝不 `?? 0`').toBeNull();
     expect(read.cost?.currency).toBe('CNY');
     expect(read.cost?.unpricedModels).toEqual(['deepseek-flash']);
-    // 有价时正常读出。
+    // 有价时正常读出 —— **契约形状**：`cost` 是对象 `{in,out,cache,total}|null`
+    // （contracts/endpoints.json 的 `rows[].cost` / `totals.cost` 都注明了这点）。
+    // F4-02：夹具曾写裸数字 `cost: 1.25`，于是 `numOrNull` 那条「数字」假设被喂成
+    // 唯一形状，而真机永远发对象 ⇒ 费用恒显示「未定价」。这里改回契约形状。
     const priced = model.parseLedgerDays({
       ok: true,
       currency: 'CNY',
-      totals: { cost: 1.25 },
-      rows: [{ key: '2026-09-19', tokens: { total_tokens: 10 }, cost: 1.25 }],
+      totals: { cost: { in: 0.5, out: 0.75, cache: 0, total: 1.25 } },
+      rows: [{ key: '2026-09-19', tokens: { total_tokens: 10 }, cost: { in: 0.5, out: 0.75, cache: 0, total: 1.25 } }],
     });
-    expect(priced.cost?.total).toBe(1.25);
-    // 缺 totals 时回落成逐行相加（仍保持 null 语义）。
+    expect(priced.cost?.total, '对象形状必须读出 .total').toBe(1.25);
+    // 缺 totals 时回落成逐行相加（仍保持 null 语义）—— 同样用契约形状。
     const summed = model.parseLedgerDays({
       ok: true,
       rows: [
-        { key: '2026-09-19', cost: 1 },
-        { key: '2026-09-20', cost: 2 },
+        { key: '2026-09-19', cost: { in: 0.4, out: 0.6, cache: 0, total: 1 } },
+        { key: '2026-09-20', cost: { in: 0.8, out: 1.2, cache: 0, total: 2 } },
       ],
     });
-    expect(summed.cost?.total).toBe(3);
+    expect(summed.cost?.total, '逐行求和走 .total').toBe(3);
+    // 部分定价：totals 带价、一行 cost:null ⇒ 读 totals 的已知值，不因个别未定价归零。
+    const partial = model.parseLedgerDays({
+      ok: true,
+      currency: 'CNY',
+      totals: { cost: { in: 0.018, out: 0.036, cache: 0, total: 0.054 } },
+      rows: [
+        { key: '2026-09-19', cost: { in: 0.018, out: 0.036, cache: 0, total: 0.054 } },
+        { key: '2026-09-20', cost: null },
+      ],
+      unpriced_models: ['weird-local-model'],
+    });
+    expect(partial.cost?.total, '部分定价也要显示已知金额').toBe(0.054);
+    expect(partial.cost?.unpricedModels).toEqual(['weird-local-model']);
+    // 旧/测试形状（裸数字）仍收：老服务或历史夹具可能给数字，数字不是 0 也不是未知。
+    const legacyNumber = model.parseLedgerDays({
+      ok: true,
+      currency: 'CNY',
+      totals: { cost: 1.25 },
+    });
+    expect(legacyNumber.cost?.total, '裸数字形状向后兼容').toBe(1.25);
     const nonePriced = model.parseLedgerDays({
       ok: true,
       rows: [{ key: '2026-09-19', cost: null }],
