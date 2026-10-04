@@ -5,7 +5,7 @@
  * Run it for a baseline; run it again after a change and compare with
  * `pnpm bench -- --compare benchmarks/baseline-<previous>.json`. A plain run writes
  * `benchmarks/baseline-v<current>.json` (machine-readable, derived from the repo
- * version) and `docs/performance-baseline.md` (the human twin) from the same run.
+ * version) and `results/bench/performance-baseline.md` (the human twin) from the same run.
  *
  * Covered (each row: name / scale / iterations / median ms / ops per s):
  *   a. `contextSnapshot()` and `statusline()` over real 1k/10k/50k-event

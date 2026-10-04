@@ -1,7 +1,7 @@
 /**
  * W761 artifact writers: the machine-readable baseline and its human twin.
  *
- * `docs/performance-baseline.md` is GENERATED from the same run as the JSON, so
+ * `results/bench/performance-baseline.md` is GENERATED from the same run as the JSON, so
  * re-running `pnpm bench` refreshes both. Nothing here decides anything about
  * the engine: it only formats measurements and the honest caveats around them.
  */
@@ -12,7 +12,7 @@ import { BASELINE_SCHEMA, baselineVersion, renderMarkdownTable, type Baseline } 
 import type { BenchCase } from "./timing.js";
 
 /** Default artifact paths (relative to the repo root, the cwd of `pnpm bench`). */
-export const DOC_PATH = "docs/performance-baseline.md";
+export const DOC_PATH = "results/bench/performance-baseline.md";
 /**
  * Where a plain `pnpm bench` writes. Derived from the current version, so the
  * default cannot silently overwrite an older release's baseline (it was the

@@ -2,7 +2,7 @@
  * W761 reporting: machine facts, the printed table, and the baseline document.
  *
  * The baseline is one JSON document (`benchmarks/baseline-v<version>.json`) plus
- * the human-readable twin (`docs/performance-baseline.md`); both are written from
+ * the human-readable twin (`results/bench/performance-baseline.md`); both are written from
  * the SAME run, so the doc can never drift from the numbers it describes.
  */
 
