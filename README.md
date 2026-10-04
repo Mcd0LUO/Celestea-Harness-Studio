@@ -90,6 +90,27 @@ pnpm --filter @celestea/studio start   # 默认 127.0.0.1:3778
 
 开发流程、门禁与提交规范见 [AGENT.md](docs/AGENT.md)。
 
+### 4. 桌面应用（可选）
+
+同一个 Studio 也能装成一个标准桌面应用：内嵌窗口 + 系统托盘常驻 + 基于 bsdiff 补丁的自动更新。关窗只是隐藏，会话与进行中的 turn 继续跑，退出在托盘菜单里。
+
+```bash
+pnpm run desktop:build        # 当前平台 → release/<os-arch>/
+pnpm run desktop:build:all    # 五个目标平台（Linux x64/arm64、macOS x64/arm64、Windows x64）
+./release/linux-x64/CelesteaStudio.AppImage --self-test    # 打包产物逐项自检（CI 门禁可用）
+```
+
+`release/` 整目录就是「一次上传」的内容：每个 `<os-arch>/` 放该平台的安装包 + 更新清单
+（`latest.json`）+ 补丁，顶层是 `SHA256SUMS.txt` / `index.json` / `README.md`。
+应用按 `<baseUrl>/<os-arch>/latest.json` 取更新——**补丁是运行时库的二进制差分，每个平台一份，不存在通用补丁**。
+
+macOS 的 `.app` 必须在 macOS 上打（ad-hoc 签名用 `codesign(1)`，Deno 的交错编译在别的平台会失败），
+所以仓库里带了一条 `.github/workflows/desktop-release.yml`：三个 runner 各建自己的平台，最后合并成一棵
+`release/` 树。
+
+构建流水线（仓库产物 → 单文件 bundle → 资源 staging → `deno desktop` 打包）、托盘/更新行为、
+发布补丁与签名、自建更新源、本地验证更新链路的完整说明见 **[desktop/README.md](desktop/README.md)**。
+
 ---
 
 ## 文档
