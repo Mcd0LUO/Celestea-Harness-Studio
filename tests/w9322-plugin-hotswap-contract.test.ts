@@ -33,7 +33,8 @@ describe("W9322 PUT /api/plugins (contract delta)", () => {
     expect(String(put?.request.fields[0]?.note)).toContain("OPTIONAL");
     expect(String(put?.request.fields[1]?.note)).toContain("complement");
     expect(put?.response.fields.map((f) => f.name)).toEqual(["ok", "plugins", "disabled"]);
-    expect(put?.docRef).toBe("docs/feature-plugin-hotswap.md");
+    // W9337 归档：文档搬进 docs/archive/decisions/，契约的 docRef 跟着搬 —— 断言守的是"指到真文档"，不是"路径长这样"。
+    expect(put?.docRef).toBe("docs/archive/decisions/feature-plugin-hotswap.md");
 
     // ① the frozen anchor, ② the file's declared count and its array length,
     // ③ the derived constant the boot assertion reads.

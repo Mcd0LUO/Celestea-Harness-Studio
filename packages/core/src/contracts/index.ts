@@ -184,7 +184,7 @@ export const FROZEN_COUNTS = {
   // model switch, the Win-style file-manager listing/read, immediate shell
   // execution without the model, the server-side display-component switches, the
   // workbench terminal's real-PTY face (open/input/close), the persistent session
-  // goal, and the plugin hot-swap enabled table (docs/feature-plugin-hotswap.md;
+  // goal, and the plugin hot-swap enabled table (docs/archive/decisions/feature-plugin-hotswap.md;
   // its GET side already existed before that switch was added).
   endpoints: 71,
   // `sseEvents` covers the frame vocabulary: `question` is the first event that is

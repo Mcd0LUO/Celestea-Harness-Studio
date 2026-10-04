@@ -397,7 +397,6 @@ export const chat = {
   'chat.turnEdits.fold': 'Collapse or expand the file list',
   'chat.turnEdits.moreActions': 'More actions',
   'chat.turnEdits.otherCalls': '{n} other calls may have changed files',
-} as const;
   // W9336: the "back to bottom" jump button. `label` is the button's name (title, and the
   // accessible name while no new message has arrived); `new` adds the count so screen
   // reader users are told about the new messages, not just about the button.

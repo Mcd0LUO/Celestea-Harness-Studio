@@ -1177,7 +1177,7 @@
       "path": "/api/sessions/{id}/mode",
       "group": "sessions",
       "rustHandler": "(none - TypeScript-only, W791)",
-      "docRef": "docs/modes-standard-vs-execution.md#31-api端点与字段",
+      "docRef": "docs/archive/decisions/modes-standard-vs-execution.md#31-api端点与字段",
       "request": {
         "kind": "json",
         "fields": [
@@ -1322,7 +1322,7 @@
       "path": "/api/sessions/{id}/model",
       "group": "sessions",
       "rustHandler": "(none - TypeScript-only, W870)",
-      "docRef": "docs/modes-standard-vs-execution.md#31-api端点与字段",
+      "docRef": "docs/archive/decisions/modes-standard-vs-execution.md#31-api端点与字段",
       "request": {
         "kind": "json",
         "fields": [
@@ -4410,7 +4410,7 @@
       "path": "/api/plugins",
       "group": "plugins",
       "rustHandler": "(none - TypeScript-only, W860)",
-      "docRef": "docs/feature-plugin-hotswap.md",
+      "docRef": "docs/archive/decisions/feature-plugin-hotswap.md",
       "request": {
         "kind": "none",
         "fields": []
@@ -4462,7 +4462,7 @@
       "path": "/api/plugins",
       "group": "plugins",
       "rustHandler": "(none - TypeScript-only, W9322)",
-      "docRef": "docs/feature-plugin-hotswap.md",
+      "docRef": "docs/archive/decisions/feature-plugin-hotswap.md",
       "request": {
         "kind": "json",
         "fields": [
