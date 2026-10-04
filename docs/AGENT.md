@@ -19,6 +19,7 @@
 | 7 | 同一时间**只允许一个 builder**（构建 / 测试 / benchmark） | 并发会让时序敏感用例 flaky、让 benchmark 数字失真。**只读门禁不是 builder**：`check:fast`（两个 typecheck + lint + lint:arch，约 34s、零产物、确定性）任何时刻都可以跑，**worker 交付前必须跑** |
 | 8 | 不跑 `--no-verify`，不绕过任何门禁 | 门禁存在的唯一理由就是它不给人情 |
 | 9 | **npm 发布必须有人类显式授权**：没有授权绝不推 npm | 发布不可逆（版本不能再发、tarball 永久公开），不能是「走完发布清单」的副作用。机械实现：`pnpm run publish` 在 `CELESTEA_PUBLISH_AUTHORIZED=1` 缺失时 fail-closed |
+| 10 | 同一工作区**同一时间只允许一个 writer**（改文件算 writer，只读门禁不算）；且 worker **不许**对全仓门禁的红下「既有问题」的结论 | ① worker 的简报一旦投递**不可修改**（主会话 → worker 无通道，2026-10-04 实测三条路全断：非子代理 / `session_send_message` 未注册 / `send_message` 报 belongs to another parent）⇒ 重叠**只能在派工时避免**，事后只能重跑。② 并发编辑的丢失**不会让任何门禁变红**，只表现为「某 worker 说自己改了、但文件里没有」。③ worker 只能证明「不是我」（stash 自己的文件），**无法**排除另一个 worker 的在途编辑 —— 2026-10-04 实测：同一次全量测试里，一条 `terminal-pty.b4-01` flake 是**真既有**（基线 `f8c2c15` 1/6 复现），两条 `doc-conventions` 是**另一个 worker 的在途折行**，而 worker 对两者下了同一个「既有问题」的结论。**归因只能由派工者在安静工作区上做。** |
 
 ---
 
@@ -169,6 +170,7 @@ tag 一推就有自己的 CI 结论；**等它绿了再 `publish`** 才是完整
 | **CI 的 Windows runner 只有 4 核**，而 vitest 会为每个测试文件 spawn 一个 worker（日志自己会写 `Isolate N workers spawned`） | 轮询型用例（如 `tests/w795-optimistic-grants.test.ts`）在**本机 28 核怎么跑都绿**、在 CI 偶发 `Error: timed out waiting for ...`；且常出现在**纯文档提交**上（证明与改动无关） | 先按「负载 flake」判：本机重跑 + `taskset -c 0-3` 限核重跑，都绿即可判非回归；**不要**为了绿去加大轮询预算（那是掩盖）。根治方向是降并行度：W9220 已把主池换成 **`vmThreads`**（VM 上下文隔离，见 `docs/ARCHITECTURE.md` §6.4.7）—— 本机实测墙钟 **34 s → 20 s（−41%）**、进程 133 → 6（−95%），且**不需要白名单**（每个文件一个独立 VM，全局不跨文件泄漏）。★ 顶层不得有 `execArgv`：worker 线程拒绝 `--expose-gc`，整个池会起不来（`ERR_WORKER_INVALID_EXEC_ARGV`） |
 | **同步阻塞调用出现在事件回调里**：`execFileSync` / `spawnSync` / `sleepSync` / `readFileSync` … 落在 `on(` / `once(` / `addEventListener(` / `setTimeout(` / 路由注册体内 | 用户的一次交互被**同步冻结**到 syscall 返回：W9321 实证 —— abort 监听器里的 `execFileSync`×3（各 5s 超时）+ `sleepSync` 退避让「按 Stop」同步卡死约 15s，而 typecheck / lint / 架构 / 测试**全绿** | 门禁 `check:sync-in-callback`（`scripts/check-sync-in-callback.mjs`，接进 `pnpm check`）。改用异步 API（`execFile` / `spawn` / `fs.promises`），或把工作移出回调（预热 / 走队列）。确属刻意且无法异步化：在**违规行或其紧邻上一行**加 `W9323` 注释说明理由（豁免口径同 `check:sleep`）。既有违规登记在 `scripts/baselines/sync-in-callback.json` 棘轮里，**只许下调** |
 | **注释里的 `file.ts:NN` 行号引用会静默腐烂** | 源码一改行号就漂，而没有任何门禁会报：W9321 自己改完 `child.ts` 之后，两处测试注释里指向 `taskkillTree` 的行号就已经失真了，注释在那里悄悄说了一句假话 | 门禁 `check:comment-refs`（`scripts/check-comment-refs.mjs`，接进 `pnpm check`）。改用**符号引用** `[taskkillTree]`（本仓既有约定，见 `packages/tools/src/sandbox/child.ts`）或不含行号的文字描述。确需行号（机械门禁的示例、出处溯源）：在**违规行或其紧邻上一行**加 `W9323` 注释说明 |
+| **一个「修行号漂移」的修复自己造成了行号漂移**：把注释里的 `file.ts:NN` 改成符号引用时**顺手折了行**，把别的文件里的文档锚点推到了空行上 | `doc-conventions` ③b/③c 变红，而**修复者看不见**（它的范围是注释不是文档）、**其它并发 worker 也看不见**（只能排除自己） | 改注释时**不要顺手动折行**；若必须折行，在**同 commit 内**跑全量 `pnpm check` 并修掉被推走的锚点。归因由派工者在安静工作区上做（铁律 10） |
 
 ---
 
