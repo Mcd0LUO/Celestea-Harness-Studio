@@ -44,11 +44,7 @@
    **为什么单独有这一条**：本仓真实事故 —— 派工简报只写了「不要跑全量 `pnpm check`」，
    worker 于是只跑了自己的目标文件；结果一个交付带 3 个 `tsc` 错误、另一个引入 3 处循环
    依赖，两者都自述「全绿」。这 3 道门禁只读、零产物、约 28s，跑它们不违反「一个 builder」。
-4. **棘轮按真实测量调整**：产物体积 / 模块体积只按实测上调，并在文件里**写明增量构成**。
-   说明键用 **`note-W<工号>`**，**不要用顺序号** —— 顺序号是共享计数器，两张树各自测量时会撞号
-   （实测 `note65` 被两笔同时占用，而两道改动各自在独立副本里都不会红，只有合并时才现形）。
-   **跨树合并**时还要注意：两笔各自测过的增量叠加会顶穿基准（实测 js +847 / css +1017），
-   必须按合并后的**实测总量**重设。
+4. **棘轮按真实测量调整**：模块体积只按实测上调，并在文件里**写明增量构成**。
 5. **文档同步**：新增文档必须登记进 `docs/README.md` 的文档地图。
 6. **归属干净**：`find . -user root -type f`（排除 `node_modules`/`.git`/`dist`）应为空。
 
@@ -171,7 +167,7 @@ tag 一推就有自己的 CI 结论；**等它绿了再 `publish`** 才是完整
 | 坑 | 现象 | 正确做法 |
 |---|---|---|
 | 工具写入的文件可能不属于你（例如 DSH 的 write/edit 会落地 `root:root`） | 后续写入 `EACCES`，**别人连变异都写不进去** | 写完立刻把归属改回**你自己**（`sudo chown "$(id -un):$(id -gn)" <files>`）+ `chmod 644`；收尾自查 `find . -user root -type f` |
-| `pnpm --dir apps/web run check` **不重建** | 量的是旧 dist，棘轮基准记错 | 量产物必须走会重建的入口：`pnpm check` 或 `pnpm run build` |
+| `pnpm --dir apps/web run check` **不重建** | 量的是旧 dist，版本门禁量错 | 量产物必须走会重建的入口：`pnpm check` 或 `pnpm run build` |
 | **源码直跑**依赖 `tsconfig` 的 `paths` | `pnpm --dir apps/studio start`（= `tsx src/main.ts`，cwd 在 `apps/studio`）就近读该目录的 tsconfig；它若只继承 `tsconfig.base.json`（无 `paths`），`@celestea/*` 就落到 gitignored 的 `packages/*/dist/` —— 你以为在跑源码，其实在跑**上一次构建的产物**，全新检出直接 `ERR_MODULE_NOT_FOUND` | 跑源码的入口配置必须继承**根** `tsconfig.json`；`tsconfig.build.json` 反过来**不带** `paths`（构建要按依赖顺序解析各自 dist）。机械兜底：`tests/tsconfig-paths.test.ts` |
 | `RLIMIT_AS` 与 Chromium 不兼容 | 浏览器进程 SIGTRAP（133） | 浏览器调用走 `noAddressSpaceLimit` 豁免 |
 | benchmark 跨运行噪声 | 同一提交两次跑 p50 2.6% / p90 12.6%（**本仓开发机实测；换机器请自测，量级可能不同**） | 别信单次对比的 <10% 变动；认真对比用 `--repeat 3` |

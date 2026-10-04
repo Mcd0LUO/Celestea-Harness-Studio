@@ -262,7 +262,8 @@ button,
      ★ 注释里刻意不写「圆角」那一栏的字面量，也不写具体像素数：本仓样式门禁
      （tests/w11-client-plugins.test.ts）用逐行正则扫圆角，且**注释也算内容**、
      正则会贪婪吃到下一个分号 —— 注释里出现「圆角冒号 + 某个像素数」就会被判成
-     硬编码圆角。同类坑见 bundle-size-baseline 的 note37。 */
+     硬编码圆角。同类坑 W9103 已经咬过一次：styles/usage.css 里同样形态的注记
+     被 tests/w847-w8-styles.test.ts 拦下，改法就是这段注释本身。 */
   .settings-page { padding: 0; }
   .settings-shell { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; }
   .settings-layout { flex-direction: column; }

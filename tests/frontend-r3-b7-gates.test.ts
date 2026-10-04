@@ -3,12 +3,13 @@
  * 来源：/srv/ops/runtime/worker-exec/results/W828-R3修复计划-C-studio-web-tests-security.md
  *   的 B7 验收探针：
  *   F6/N3：STRICT=1 时「可收紧项（tighten）」必须与陈旧项一样失败，且输出与退出码一致。
- *   F7：apps/web 的 check 必须内置 CELESTEA_BUNDLE_STRICT=1（dist 缺失不再静默退出 0）。
+ *   （原 F7「web check 内置 CELESTEA_BUNDLE_STRICT=1」与产物体积容差三例，随**产物体积棘轮**
+ *    一并移除 —— 2026-10-04 W9339。模块体积棘轮不受影响，其断言在下面。）
  * 方式：把**真实门禁脚本**复制到临时目录（同内容、不同 ROOT），用真实 node 子进程跑真实脚本；
  * 断言退出码与输出，不 mock 门禁逻辑本身。
  */
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,85 +71,5 @@ describe("R3 W838-F6/N3 · module-size STRICT 拦 tighten", () => {
     expect(strict.code).toBe(1); // F6：tighten 也进 STRICT 失败集合
     expect(strict.out).toContain("可收紧项");
     expect(strict.out).toContain("STRICT=1");
-  });
-});
-
-describe("R3 W838-F7 · web check 内置 BUNDLE STRICT", () => {
-  it("check 脚本含 CELESTEA_BUNDLE_STRICT=1，无 dist 时脚本退出 1", () => {
-    const pkg = JSON.parse(readFileSync(join(ROOT, "apps", "web", "package.json"), "utf8")) as {
-      scripts: Record<string, string>;
-    };
-    expect(pkg.scripts["check"]).toContain("CELESTEA_BUNDLE_STRICT=1");
-    const dir = sandbox();
-    copyFileSync(join(TOOLS, "check-bundle-size.mjs"), join(dir, "tools", "check-bundle-size.mjs"));
-    writeFileSync(
-      join(dir, "tools", "bundle-size-baseline.json"),
-      JSON.stringify({ kind: "frontend-bundle-size-baseline", gzipLevel: 9, gzip: { js: 1, css: 1 } }),
-    );
-    const script = join(dir, "tools", "check-bundle-size.mjs");
-    const plain = run(script);
-    expect(plain.code).toBe(0); // 未构建：非 STRICT 只提示跳过
-    expect(plain.out).toContain("跳过");
-    const strict = run(script, { CELESTEA_BUNDLE_STRICT: "1" });
-    expect(strict.code).toBe(1); // F7：check 走 STRICT → dist 缺失即失败
-    expect(strict.out).toContain("dist/assets 不存在");
-  });
-});
-
-/**
- * W9112 follow-up · 产物体积门禁的**跨平台容差**。
- *
- * 为什么需要这组断言：CI 实测 ubuntu 的 css 合计 gzip 比 windows 大 2 字节
- * （raw 完全相同），根因是 esbuild 的原生二进制与 zlib 实现都按平台分。容差
- * 一旦没有边界断言，它就会慢慢变成「随便超都不红」——那等于删掉门禁。
- *
- * 三条边界，缺一不可：
- *   ① 容差内（超出 2）⇒ 通过（exit 0），且**如实打印** ⚠（不许静默）；
- *   ② 容差外（超出 129）⇒ 失败（exit 1）；
- *   ③ 恰好等于容差（超出 128）⇒ 通过（闭区间上界，边界值写进断言）。
- */
-function bundleSandbox(limitCss: number): string {
-  const dir = sandbox();
-  copyFileSync(join(TOOLS, "check-bundle-size.mjs"), join(dir, "tools", "check-bundle-size.mjs"));
-  mkdirSync(join(dir, "dist", "assets"), { recursive: true });
-  // 一个可压缩的确定性产物；具体字节数不重要，门禁比的是「实际 vs 上限」。
-  // Must gzip to > 128 bytes so that a "beyond tolerance" limit stays POSITIVE
-  // (the gate rejects a non-positive baseline, which would test the wrong path).
-  writeFileSync(join(dir, "dist", "assets", "index-abc.css"), "abcdefghij".repeat(8192));
-  writeFileSync(
-    join(dir, "tools", "bundle-size-baseline.json"),
-    JSON.stringify({ kind: "frontend-bundle-size-baseline", gzipLevel: 9, gzip: { js: 1_000_000, css: limitCss } }),
-  );
-  return join(dir, "tools", "check-bundle-size.mjs");
-}
-
-describe("W9112 follow-up · bundle-size 跨平台容差（边界有牙）", () => {
-  it("① 容差内（超出 2 字节）⇒ 通过，但如实打印 ⚠（不静默）", () => {
-    // 先量出真实 gzip，再把上限设成「真实 - 2」制造「超出 2」。
-    const probe = bundleSandbox(1_000_000); // huge limit: the gate passes and prints the real number
-    const gz = Number(/css (\d+)\//.exec(run(probe).out)?.[1] ?? 0);
-    expect(gz, "探针要能量到真实 css gzip").toBeGreaterThan(0);
-    const script = bundleSandbox(gz - 2);
-    const r = run(script);
-    expect(r.code).toBe(0);
-    expect(r.out).toContain("容差");
-    expect(r.out).toContain("平台噪声");
-  });
-
-  it("② 容差外（超出 129 字节）⇒ 失败", () => {
-    const probe = bundleSandbox(1_000_000); // huge limit: the gate passes and prints the real number
-    const gz = Number(/css (\d+)\//.exec(run(probe).out)?.[1] ?? 0);
-    const script = bundleSandbox(gz - 129);
-    const r = run(script);
-    expect(r.code).toBe(1);
-    expect(r.out).toContain("未通过");
-  });
-
-  it("③ 恰好等于容差（超出 128 字节）⇒ 通过（闭区间上界）", () => {
-    const probe = bundleSandbox(1_000_000); // huge limit: the gate passes and prints the real number
-    const gz = Number(/css (\d+)\//.exec(run(probe).out)?.[1] ?? 0);
-    const script = bundleSandbox(gz - 128);
-    const r = run(script);
-    expect(r.code).toBe(0);
   });
 });

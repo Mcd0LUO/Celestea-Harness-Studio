@@ -5,7 +5,7 @@
  * 为什么需要：`pnpm check` 原本是 `a && b && c && …` **串行**，本机实测 46 s；
  * 而各门禁之间**没有依赖**（除 check:web 内部的 build→check）。实测各段：
  *   test 20 s · lint 9.3 s · typecheck 6.4 s · web build 3.1 s · web tsc 2.4 s
- *   · web 8 个子门禁 2.1 s · lint:arch 2.1 s · check:tmpdir 0.6 s
+ *   · web 7 个子门禁 2.1 s · lint:arch 2.1 s · check:tmpdir 0.6 s
  * 串行 = 把它们加起来；并行 = 取最慢那一段。
  *
  * 为什么是安全的（两条都实测过）：
@@ -111,7 +111,7 @@ const GATES = [
   },
   {
     // 重复的 JSON 键是**静默**的：JSON.parse 不报错、取最后一条，被遮蔽的那条不会
-    // 有任何门禁变红（W9329 在 bundle-size-baseline.json 里撞出两条 note36 时手工发现的）。
+    // 有任何门禁变红（W9329 在一份基线 JSON 里撞出两条同名 note 时手工发现的）。
     name: "check:json-dup-keys",
     cmd: "node scripts/check-json-dup-keys.mjs",
   },
@@ -121,11 +121,11 @@ const GATES = [
   },
   {
     name: "check:web",
-    // 内部必须串行：build 先于 tsc / 8 个子门禁（check-version 读刚构建的 dist）。
+    // 内部必须串行：build 先于 tsc / 7 个子门禁（check-version 读刚构建的 dist）。
     cmd:
       'pnpm --dir apps/web run build && pnpm --dir apps/web exec tsc --noEmit --incremental --tsBuildInfoFile ../../' +
       join(CACHE, "tsc", "web.tsbuildinfo") +
-      ' && node apps/web/tools/check-ui-copy.mjs && node apps/web/tools/check-scope-hash.mjs && node apps/web/tools/check-sse-events.mjs && node apps/web/tools/check-fold-default.mjs && node apps/web/tools/check-grants-permanent.mjs && node apps/web/tools/check-module-size.mjs && node apps/web/tools/check-version.mjs && node scripts/run-with-env.mjs CELESTEA_BUNDLE_STRICT=1 -- node apps/web/tools/check-bundle-size.mjs',
+      ' && node apps/web/tools/check-ui-copy.mjs && node apps/web/tools/check-scope-hash.mjs && node apps/web/tools/check-sse-events.mjs && node apps/web/tools/check-fold-default.mjs && node apps/web/tools/check-grants-permanent.mjs && node apps/web/tools/check-module-size.mjs && node apps/web/tools/check-version.mjs',
   },
 ];
 

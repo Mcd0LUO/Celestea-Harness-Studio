@@ -60,9 +60,10 @@ function applyCssCopyVars(root: ParentNode): void {
  *
  * 刻意**不打日志**：这条守卫是「不写出坏值」的防线，而 `t()` 已经把「拼错的 key」
  * 变成界面上的可见事实（回落 key 本身），诊断信息已经足够。反之，多一行 console.warn
- * 会同时抬高两个机械计数：bundle gzip 棘轮（提示语进产物）与
- * tests/doc-conventions ⑩（ARCHITECTURE.md §6.5.5 的 console.warn 计数由 apps/web/src
- * 派生，实测会从 38 变成 39）—— 后者要改 docs/ARCHITECTURE.md，不在本轮授权清单内。
+ * 会抬高一个机械计数：tests/doc-conventions ⑩（ARCHITECTURE.md §6.5.5 的 console.warn
+ * 计数由 apps/web/src 派生，实测会从 38 变成 39）—— 后者要改 docs/ARCHITECTURE.md，
+ * 不在本轮授权清单内。（原先还有第二个计数：bundle gzip 棘轮 —— 那把棘轮已由
+ * W9339 于 2026-10-04 整体移除，本注释随之只剩这一个理由。）
  */
 function setAttr(node: Element, attr: string, key: string, value: string | undefined): void {
   if (!value || value === key) return;

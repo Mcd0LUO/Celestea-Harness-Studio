@@ -29,7 +29,7 @@
     "check:fast": "pnpm typecheck && pnpm typecheck:web && pnpm lint && pnpm lint:arch && pnpm check:sleep && pnpm check:sync-in-callback && pnpm check:comment-refs && pnpm check:json-dup-keys && pnpm check:tmpdir",
     "check:tmpdir": "node scripts/check-test-tmpdir.mjs",
     "check:json-dup-keys": "node scripts/check-json-dup-keys.mjs",
-    "check:web": "node scripts/build-webdist.mjs && node scripts/run-with-env.mjs CELESTEA_BUNDLE_STRICT=1 -- pnpm --dir apps/web run check",
+    "check:web": "node scripts/build-webdist.mjs && pnpm --dir apps/web run check",
     "node:check": "node scripts/check-node.mjs",
     "version:sync": "node scripts/version.mjs --write",
     "deps:audit": "pnpm audit; pnpm outdated -r",

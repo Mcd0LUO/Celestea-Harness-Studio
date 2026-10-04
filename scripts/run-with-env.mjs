@@ -1,14 +1,18 @@
 /**
  * W891 — set an env var and run a command, portably.
  *
- * Why: `CELESTEA_BUNDLE_STRICT=1 pnpm …` is POSIX shell syntax. pnpm runs package
+ * Why: `KEY=value pnpm …` is POSIX shell syntax. pnpm runs package
  * scripts through `cmd.exe` on Windows (and its shell-emulator is off by default),
  * so the inline form is a hard `is not recognized as an internal or external
  * command` there — i.e. `pnpm check` could never be green on Windows, which is
  * exactly what the new windows-latest CI job measures. Passing the variable
  * through Node's own env works identically on every OS.
  *
- * Usage: node scripts/run-with-env.mjs CELESTEA_BUNDLE_STRICT=1 -- <command> [args…]
+ * (Its original trigger — the bundle-size ratchet's strict switch — was removed
+ *  wholesale by W9339 on 2026-10-04. The rule and this tool outlive it: the rule
+ *  is what tests/cross-platform-scripts.test.ts pins, not that one gate.)
+ *
+ * Usage: node scripts/run-with-env.mjs KEY=value [KEY=value…] -- <command> [args…]
  */
 import { spawnSync } from "node:child_process";
 

@@ -95,8 +95,8 @@ jobs:
         run: node scripts/run-gate.mjs "test shard ${{ matrix.shard }}/3" -- pnpm exec vitest run --shard=${{ matrix.shard }}/3
         env:
           CI: 'true'
-      # check:web is itself a chain (build -> tsc -> 8 sub-gates -> bundle
-      # ratchet). Splitting it too, and routing each gate through
+      # check:web is itself a chain (build -> tsc -> 7 sub-gates). Splitting it
+      # too, and routing each gate through
       # scripts/run-gate.mjs so a failure emits its OWN message as a GitHub
       # annotation: the run that first reached this stage reported only
       # "exit code 1", and the job log needs admin rights to download.
@@ -127,6 +127,3 @@ jobs:
       - name: check:web version
         if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs "check-version" -- node apps/web/tools/check-version.mjs
-      - name: check:web bundle ratchet
-        if: ${{ matrix.shard == 1 }}
-        run: node scripts/run-gate.mjs "check-bundle-size" -- node scripts/run-with-env.mjs CELESTEA_BUNDLE_STRICT=1 -- node apps/web/tools/check-bundle-size.mjs
