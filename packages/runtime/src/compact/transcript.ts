@@ -29,7 +29,7 @@ export const SUMMARY_TIMEOUT_MS = 90_000;
  *
  * W2011 (B5): the section list is a MINIMUM ("至少"), not "必须且只需四个小节",
  * and section 5 is "what is still UNVERIFIED / unknown". The retrospective
- * (`docs/retrospective-2026-09-27.md` §1.5, "叙事会漂，diff 不会") names exactly
+ * (`docs/failure-modes.md` §1.5, "叙事会漂，diff 不会") names exactly
  * this failure mode: a claim that a step was done, repeated onward without ever
  * being checked. A summary is a retelling of a retelling, so it must be allowed
  * to say "this was never verified" instead of restating it as a fact. Kimi Code

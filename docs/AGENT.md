@@ -89,8 +89,8 @@ check:comment-refs → check:json-dup-keys → test → check:web`。
 
 ⚠️ **`typecheck:web` 不能省**：根 `tsc` 的 `include` **不含** `apps/web/**`（前端有自己的
 `apps/web/tsconfig.json`）⇒ 只跑根 `typecheck` 会漏掉全部前端类型错误（W1485 那 3 个错误的藏身处）。
-**为什么这几道扫描器也进了预检**：2026-10-04 实测 —— 它们原来不在 `check:fast` 里，而同一形状这一轮
-咬了三次（W9331 的 `check:comment-refs` 7 处、W9329/W9333 的 `check:sync-in-callback` 12 处），
+**为什么这几道扫描器也进了预检**：2026-10-04 实测 —— 它们原来不在 `check:fast` 里，而同一形状曾咬
+三次（W9331 的 `check:comment-refs` 7 处、W9329/W9333 的 `check:sync-in-callback` 12 处），
 每次都要一个往返才发现。**这不是新增门禁，是让预检面完整。**
 **为什么单独写这一节**：曾有简报只写「不要跑全量 `pnpm check`」，worker 于是只跑了自己的目标文件 ⇒
 一个交付带 3 个 `tsc` 错误、另一个引入 3 处循环依赖，两者都自述「全绿」。
