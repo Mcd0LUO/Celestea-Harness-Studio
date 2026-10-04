@@ -225,8 +225,13 @@ async function placeProgram(programDir: string, source: ProgramSource): Promise<
  */
 function killChildOnAbort(signal: AbortSignal | undefined, child: SandboxChild): () => void {
   if (signal === undefined) return () => undefined;
+  // W9321: `void`, not `await`. This listener IS the abort — `controller.abort()`
+  // runs it synchronously, so awaiting the tree-kill here would make "user
+  // pressed Stop" block on it (the Windows kill was up to ~15s of execFileSync
+  // and stalled the whole event loop). The kill is still issued, in the same
+  // tick; only the waiting is detached.
   const onAbort = (): void => {
-    child.kill();
+    void child.kill();
   };
   if (signal.aborted) onAbort();
   else signal.addEventListener("abort", onAbort, { once: true });
@@ -352,7 +357,10 @@ async function executeProgram(ctx: BrokerContext, run: ProgramRun, state: RunSta
       value: () => {
         timedOut = true;
         if (state.infraError === null) state.infraError = timeoutMessage(child, timeoutMs, state);
-        child.kill();
+        // W9321: the deadline policy is a synchronous `() => R`, so the kill is
+        // issued here and its completion is NOT waited for. `settleChild` below
+        // owns the reap, so nothing depends on this promise.
+        void child.kill();
       },
     });
   } finally {
@@ -360,7 +368,7 @@ async function executeProgram(ctx: BrokerContext, run: ProgramRun, state: RunSta
     endStdin(child.stdin);
   }
   if (pumpError !== null && !timedOut) {
-    child.kill();
+    await child.kill();
     throw pumpError;
   }
   const settled = await settleChild(child, EXIT_GRACE_MS);
@@ -383,7 +391,9 @@ async function settleChild(child: SandboxChild, graceMs: number): Promise<ChildT
   if (exit !== TIMED_OUT) {
     return { exitCode: exit.code, killed: false, cpuExceeded: isCpuSignal(exit.signal), signal: exit.signal };
   }
-  child.kill();
+  // W9321: an async settle path — await, so `wait()` below is never consulted
+  // before the signal has actually been asked for.
+  await child.kill();
   await withTimeout(child.wait(), REAP_GRACE_MS);
   return { exitCode: null, killed: true, cpuExceeded: false, signal: null };
 }
@@ -415,7 +425,7 @@ async function pumpLines(
       const line = await reader.next(deadline - Date.now());
       if (line === TIMED_OUT) {
         state.infraError = timeoutMessage(child, timeoutMs, state);
-        child.kill();
+        await child.kill();
         return;
       }
       if (line === null) return;
@@ -523,7 +533,7 @@ async function answerSubCall(
       // W833 (R3 B1): a reply the child never drains is a wall-clock failure,
       // not a protocol error. Record it, kill the child and let the pump stop.
       if (state.infraError === null) state.infraError = e.message;
-      child.kill();
+      await child.kill();
       return;
     }
     throw runCodeFailure("protocol", `cannot write reply to the program (stdin closed): ${errorText(e)}`);

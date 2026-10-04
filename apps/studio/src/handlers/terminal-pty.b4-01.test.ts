@@ -116,8 +116,17 @@ function wrap(child: ChildProcess): SandboxChild {
     stdout: null,
     stderr: null,
     wait: () => wait,
-    terminate: () => { child.kill("SIGTERM"); },
-    kill: () => { child.kill("SIGKILL"); },
+    // W9321: `terminate`/`kill` are `Promise<void>` on the seam now. This double
+    // wraps a REAL ChildProcess, whose `kill` is a synchronous syscall, so the
+    // promise is already settled — the shape changed, the timing did not.
+    terminate: () => {
+      child.kill("SIGTERM");
+      return Promise.resolve();
+    },
+    kill: () => {
+      child.kill("SIGKILL");
+      return Promise.resolve();
+    },
   } as SandboxChild;
 }
 

@@ -49,8 +49,11 @@ export interface MemoryGuardOptions {
   cgroupPath?: string | null;
   /** VmRSS in KiB for the whole tree; null = unreadable. */
   readRssKb?: (pid: number) => number | null;
-  /** SIGKILL the whole tree. */
-  killTree?: (pid: number) => void;
+  /**
+   * SIGKILL the whole tree. W9321: may be async (the Windows implementation is
+   * `taskkill`) — the watchdog does not wait for it, so a sync stub still works.
+   */
+  killTree?: (pid: number) => void | Promise<void>;
   intervalMs?: number;
 }
 
@@ -133,7 +136,10 @@ function rssGuard(pid: number, limitMb: number, options: MemoryGuardOptions): Me
     lastKb = kb;
     if (kb !== null && kb / 1024 > limitMb) {
       killed = true;
-      killTree(pid);
+      // W9321: a setInterval callback cannot await, and it must not block: the
+      // kill is ISSUED here and its completion is not waited for. `killed` is
+      // already latched, so the watchdog never fires twice.
+      void killTree(pid);
       clearInterval(timer);
     }
   }, intervalMs);
@@ -221,20 +227,30 @@ function childPids(pid: number, procRoot: string): number[] {
   return out;
 }
 
-function defaultKillTree(pid: number): void {
+function defaultKillTree(pid: number): Promise<void> | void {
   // W891: on Windows there is no POSIX process group (and no /proc), so the
   // group branch is skipped entirely rather than attempted-and-caught; taskkill
   // walks the real parent-child chain instead.
-  if (isWindows()) {
-    if (taskkillTree(pid)) return;
-  } else {
-    try {
-      process.kill(-pid, "SIGKILL");
-      return;
-    } catch {
-      /* not a group leader */
-    }
+  //
+  // W9321: the POSIX branch stays synchronous (one syscall), so the direct-child
+  // fallback still runs in this same tick; only the Windows branch defers.
+  if (isWindows()) return defaultKillTreeWindows(pid);
+  try {
+    process.kill(-pid, "SIGKILL");
+    return;
+  } catch {
+    /* not a group leader */
   }
+  directKill(pid);
+}
+
+/** W9321: the Windows tree-kill is `taskkill`, an async external process. */
+async function defaultKillTreeWindows(pid: number): Promise<void> {
+  if (await taskkillTree(pid)) return;
+  directKill(pid);
+}
+
+function directKill(pid: number): void {
   try {
     process.kill(pid, "SIGKILL");
   } catch {

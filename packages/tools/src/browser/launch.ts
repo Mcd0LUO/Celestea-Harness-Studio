@@ -289,8 +289,11 @@ export async function terminateBrowserProcess(
   deps: SignalBrowserDeps = {},
 ): Promise<void> {
   const exited = waitForExit(proc, graceMs);
-  signalBrowser(proc, "SIGTERM", deps);
-  if (!(await exited)) signalBrowser(proc, "SIGKILL", deps);
+  // W9321: `signalBrowser` is async (the Windows tree-kill shells out), and this
+  // is already an async teardown — so await both signals. `exited` was created
+  // BEFORE the SIGTERM, so the grace window still starts at the signal request.
+  await signalBrowser(proc, "SIGTERM", deps);
+  if (!(await exited)) await signalBrowser(proc, "SIGKILL", deps);
 }
 
 /**
@@ -299,6 +302,9 @@ export async function terminateBrowserProcess(
  * parent-child chain instead (best effort, same TOCTOU caveat as the sandbox
  * child wrapper). Without this the launched browser's renderer children leak on
  * close, which is exactly the leak the group signal exists to prevent.
+ *
+ * W9321: async, because the Windows half now awaits an async `taskkill`. The
+ * POSIX half is still one syscall, so nothing about its timing changed.
  */
 export interface SignalBrowserDeps {
   /** Injected platform (tests); defaults to the host. */
@@ -306,16 +312,20 @@ export interface SignalBrowserDeps {
   /** Injected group-kill (tests); defaults to `process.kill(-pid, signal)`. */
   killGroup?: (pid: number, signal: NodeJS.Signals) => void;
   /** Injected tree-kill (tests); defaults to `taskkillTree`. */
-  killTree?: (pid: number) => boolean;
+  killTree?: (pid: number) => boolean | Promise<boolean>;
 }
 
-export function signalBrowser(proc: BrowserProcess, signal: NodeJS.Signals, deps: SignalBrowserDeps = {}): void {
+export async function signalBrowser(
+  proc: BrowserProcess,
+  signal: NodeJS.Signals,
+  deps: SignalBrowserDeps = {},
+): Promise<void> {
   const pid = proc.pid;
   if (pid !== undefined) {
     if (isWindows(deps.platform ?? process.platform)) {
       // taskkill has no signal choice; a SIGTERM request still has to be a /F
       // kill, because Windows has no cooperative SIGTERM for a GUI process.
-      if ((deps.killTree ?? taskkillTree)(pid)) return;
+      if (await (deps.killTree ?? taskkillTree)(pid)) return;
     } else {
       try {
         (deps.killGroup ?? ((p, s) => process.kill(-p, s)))(pid, signal);

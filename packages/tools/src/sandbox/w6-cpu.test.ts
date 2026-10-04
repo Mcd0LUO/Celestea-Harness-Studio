@@ -257,7 +257,9 @@ describe("W1516 A1/A8 through the providers", () => {
 
     expect(spawned.sandbox.cpu_sec).toBe(600);
     expect(await waitForRecord(prlimit.record, "--cpu=600")).toContain("--cpu=600");
-    spawned.child.kill();
+    // W9321: `kill()` is async now — await the cleanup so the group signal is
+    // actually issued before the test finishes.
+    await spawned.child.kill();
   });
 
   it.skipIf(!POSIX_SHELL)("A8: spawn still honours an explicit cpu_sec, clamped", async () => {
@@ -275,8 +277,8 @@ describe("W1516 A1/A8 through the providers", () => {
     expect(record).toContain("--cpu=60");
     expect(explicit.sandbox.cpu_sec).toBe(9);
     expect(clamped.sandbox.cpu_sec).toBe(60);
-    explicit.child.kill();
-    clamped.child.kill();
+    await explicit.child.kill();
+    await clamped.child.kill();
   });
 
   it.skipIf(!POSIX_SHELL)("A8: userspace spawn also defaults to maxCpuSec", async () => {
@@ -289,6 +291,8 @@ describe("W1516 A1/A8 through the providers", () => {
 
     expect(spawned.sandbox.cpu_sec).toBe(600);
     expect(await waitForRecord(prlimit.record, "--cpu=600")).toContain("--cpu=600");
-    spawned.child.kill();
+    // W9321: `kill()` is async now — await the cleanup so the group signal is
+    // actually issued before the test finishes.
+    await spawned.child.kill();
   });
 });

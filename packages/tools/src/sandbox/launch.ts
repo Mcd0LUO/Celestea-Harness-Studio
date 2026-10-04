@@ -95,8 +95,11 @@ export async function captureRun(
   const sandboxed = wrapChild(child, { detached: true });
   const outPromise = readCapped(child.stdout, config.maxOutputBytes);
   const errPromise = readCapped(child.stderr, config.maxOutputBytes);
+  // W9321: fire-and-forget. This listener runs INSIDE `controller.abort()`, so
+  // awaiting the tree-kill here would block the abort itself — the very defect
+  // this slice removes (the Windows kill spent up to ~15s in `execFileSync`).
   const onAbort = (): void => {
-    sandboxed.kill();
+    void sandboxed.kill();
   };
   if (signal !== undefined) {
     // A signal ALREADY aborted never fires "abort" again, so it is honoured here.
@@ -130,7 +133,10 @@ async function timeoutFailure(
   errPromise: Promise<CappedText>,
   timeoutMs: number,
 ): Promise<SandboxError> {
-  sandboxed.kill();
+  // W9321: an already-async settle path, so the kill is awaited here (`wait()`
+  // below is the exit evidence, and it must not be consulted before the signal
+  // has actually been asked for).
+  await sandboxed.kill();
   await withTimeout(sandboxed.wait(), REAP_GRACE_MS);
   const stdout = await outPromise;
   const stderr = await errPromise;
@@ -192,7 +198,7 @@ export function preview(text: string, max: number): string {
   return folded.length > max ? `${folded.slice(0, max)}…` : folded;
 }
 
-/** Signal the whole process group of a detached child (best effort). */
-export function killDetached(child: ChildProcess, signal: NodeJS.Signals): void {
-  signalTree(child, { detached: true }, signal);
+/** Signal the whole process group of a detached child (best effort, W9321 async). */
+export function killDetached(child: ChildProcess, signal: NodeJS.Signals): Promise<void> {
+  return signalTree(child, { detached: true }, signal);
 }

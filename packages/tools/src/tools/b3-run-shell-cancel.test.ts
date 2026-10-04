@@ -141,8 +141,9 @@ describe("B3-01: cancelling a foreground run_shell kills the process", () => {
     controller.abort(new Error("user pressed stop"));
 
     // Wait for the FACT first: the process is gone. The abort path's expensive
-    // step is `taskkillTree` — a SYNCHRONOUS retry loop (child.ts:97-119) — so
-    // racing a fixed timer against the whole settle is a timing guess a loaded
+    // step is `taskkillTree` — a retry loop that used to be SYNCHRONOUS
+    // (`execFileSync` + `sleepSync`, child.ts:97-119) and is async since W9321 —
+    // so racing a fixed timer against the whole settle is a timing guess a loaded
     // runner loses (run 37133964946 measured red on ubuntu / node 26).
     await until(() => !alive(pid), "the cancelled command process to be gone", 60_000);
 

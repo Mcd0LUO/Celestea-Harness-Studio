@@ -88,15 +88,19 @@ export class FakeChild implements SandboxChild {
     return this.waited;
   }
 
-  terminate(): void {
+  // W9321: async-only in shape. The double stays instantaneous on purpose — it
+  // is here to make SIGNALS observable, and a fake that waited would only add
+  // timing noise to every test that uses it.
+  terminate(): Promise<void> {
     this.termAttempts += 1;
-    if (this.script.ignoresSigterm === true) return;
-    this.settle({ code: null, signal: "SIGTERM" });
+    if (this.script.ignoresSigterm !== true) this.settle({ code: null, signal: "SIGTERM" });
+    return Promise.resolve();
   }
 
-  kill(): void {
+  kill(): Promise<void> {
     this.killAttempts += 1;
     this.settle({ code: null, signal: "SIGKILL" });
+    return Promise.resolve();
   }
 
   private settle(exit: SandboxExit): void {

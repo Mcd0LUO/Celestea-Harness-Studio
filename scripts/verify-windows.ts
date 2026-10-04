@@ -115,8 +115,11 @@ function checkPlaywrightCache(): void {
  * Recycle a whole tree the way the PRODUCT does per platform: `taskkill /T` on
  * Windows, the process-group signal on POSIX. Using the product's own
  * `taskkillTree` on win32 is the point — on Linux this branch never runs.
+ *
+ * W9321: `taskkillTree` is async now, so this is too (and still reports its
+ * best-effort verdict, which the row below prints).
  */
-function killTree(pid: number): boolean {
+async function killTree(pid: number): Promise<boolean> {
   if (process.platform === "win32") return taskkillTree(pid);
   try {
     process.kill(-pid, "SIGKILL");
@@ -163,7 +166,7 @@ async function checkTreeKill(dir: string): Promise<void> {
       record("process-tree kill", "FAIL", "fixture pids not alive before the kill (root=" + rootPid + " grand=" + grandPid + ")");
       return;
     }
-    const reported = killTree(rootPid);
+    const reported = await killTree(rootPid);
     const gone = await until(() => !alive(rootPid) && !alive(grandPid), 5_000);
     record(
       "process-tree kill",

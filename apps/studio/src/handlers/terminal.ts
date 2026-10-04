@@ -190,7 +190,10 @@ async function openTerminal(c: Context, deps: Deps, pump: StreamPump, terminals:
 
   const entry = terminals.add(spawned.child, target.resolved?.id ?? null, fields.cols, fields.rows);
   if (entry === null) {
-    spawned.child.kill();
+    // W9321: the kill is now async; this is a rejection path that returns
+    // immediately, so it is fired and not awaited (nothing here reads the child
+    // again — the sandbox does not adopt it at all).
+    void spawned.child.kill();
     return failJson(c, 429, `this process already hosts ${String(terminals.size())} terminals; close one first`, { code: TERMINAL_LIMIT_CODE });
   }
 

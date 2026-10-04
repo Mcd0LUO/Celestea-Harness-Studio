@@ -132,7 +132,9 @@ describe("W1516 §3.3 · run_code names the CPU limit when it is what killed the
     await vi.waitFor(() => {
       expect(sandbox.spawns.length, "broker must reach sandbox.spawn").toBeGreaterThan(0);
     }, { timeout: 5_000 });
-    sandbox.spawns[0]!.child.kill();
+    // W9321: `kill()` is async; awaiting keeps the simulation honest (the fake
+    // child settles inside it, so the broker observes the death as before).
+    await sandbox.spawns[0]!.child.kill();
 
     const error = await failure;
     expect(error).toBeInstanceOf(Error);

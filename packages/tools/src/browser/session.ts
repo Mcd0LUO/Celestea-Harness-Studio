@@ -180,15 +180,18 @@ export class BrowserManager {
     if (session === null) return;
     session.guard.dispose();
     session.client.close();
+    // W9321: `dispose()` is async and its grace window starts at the signal, so
+    // the terminations are awaited (the try/catch stays: an already-reaped child
+    // must not abort the cleanup).
     try {
-      session.child.terminate();
+      await session.child.terminate();
     } catch {
       /* already gone */
     }
     const exit = await withTimeout(session.child.wait(), this.graceMs);
     if (exit === TIMED_OUT) {
       try {
-        session.child.kill();
+        await session.child.kill();
       } catch {
         /* already gone */
       }
@@ -214,7 +217,7 @@ export class BrowserManager {
     const profileDir = mkdtempSync(join(tmpdir(), "celestea-browser-"));
     const spawned = await this.spawnBrowser(this.browserCommand(executable, profileDir));
     if (spawned.sandbox.net_isolated) {
-      spawned.child.kill();
+      await spawned.child.kill();
       removeDir(profileDir);
       throw contractFailure(
         "browser",
@@ -227,7 +230,7 @@ export class BrowserManager {
       const endpoint = await this.readEndpoint(spawned.child);
       client = await (this.options.attach ?? defaultAttach)(endpoint);
     } catch (error) {
-      spawned.child.kill();
+      await spawned.child.kill();
       removeDir(profileDir);
       throw error;
     }

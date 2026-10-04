@@ -159,15 +159,18 @@ describe("B3-01: cancelling a run_code kills the program", () => {
     // The contract under test is "cancelling kills the process", NOT "cancelling
     // finishes inside a fixed budget". The old shape raced the call against a 20s
     // timer — a timing guess, and the losing one: the abort path runs
-    // `taskkillTree`, a SYNCHRONOUS retry loop (3 attempts x 5s execFileSync
-    // timeout + 50/100ms backoff, child.ts:97-119), so on a loaded runner the
-    // expensive step eats the budget and the timer wins over the real outcome.
-    // Measured: red once each in runs 37140967254 and 37133964946, while a local
-    // 22-round loop (10 plain + 12 under 8 busy cores) never reproduced it, and a
-    // sandbox-level probe measured the kill itself at 91-182ms with the grandchild
-    // dead and `wait()` settled 20/20.
+    // `taskkillTree`, a retry loop (3 attempts x 5s timeout + 50/100ms backoff),
+    // so on a loaded runner the expensive step eats the budget and the timer wins
+    // over the real outcome. Measured: red once each in runs 37140967254 and
+    // 37133964946, while a local 22-round loop (10 plain + 12 under 8 busy cores)
+    // never reproduced it, and a sandbox-level probe measured the kill itself at
+    // 91-182ms with the grandchild dead and `wait()` settled 20/20.
     //
-    // So wait for the FACT first — the process is gone. That is also what lets
+    // That loop is ASYNC since W9321 (it used to be `execFileSync` + `sleepSync`,
+    // which blocked the event loop for up to ~15s inside the abort listener). The
+    // reasoning here is unchanged and now applies for a second reason: the loop is
+    // still bounded only by its own attempts, so a fixed timer would still be a
+    // guess. Wait for the FACT first — the process is gone. That is also what lets
     // this test tell a real kill from a no-op one; only then bound the settle,
     // when the expensive part is already known complete.
     await until(() => !alive(pid), "the cancelled program process to be gone", 60_000);

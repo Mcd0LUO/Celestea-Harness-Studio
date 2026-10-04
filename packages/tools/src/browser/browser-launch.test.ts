@@ -142,11 +142,13 @@ describe("F4 launch -- endpoint parsing and discovery", () => {
 });
 
 describe("W891 -- process-tree teardown is a platform decision", () => {
-  it("POSIX: signals the whole process group and never taskkills", () => {
+  it("POSIX: signals the whole process group and never taskkills", async () => {
     const proc = new FakeProcess(4242);
     const groups: Array<[number, NodeJS.Signals]> = [];
     let trees = 0;
-    signalBrowser(proc, "SIGTERM", {
+    // W9321: `signalBrowser` is async now — the win32 half has to await the
+    // tree-kill. The POSIX half is still one syscall, hence the same assertions.
+    await signalBrowser(proc, "SIGTERM", {
       platform: "linux",
       killGroup: (pid, signal) => groups.push([pid, signal]),
       killTree: () => {
@@ -159,11 +161,11 @@ describe("W891 -- process-tree teardown is a platform decision", () => {
     expect(proc.signals).toEqual([]);
   });
 
-  it("win32: taskkills the tree and never uses the (meaningless) negative pid", () => {
+  it("win32: taskkills the tree and never uses the (meaningless) negative pid", async () => {
     const proc = new FakeProcess(4242);
     const killed: number[] = [];
     let groups = 0;
-    signalBrowser(proc, "SIGTERM", {
+    await signalBrowser(proc, "SIGTERM", {
       platform: "win32",
       killGroup: () => {
         groups++;
@@ -178,15 +180,15 @@ describe("W891 -- process-tree teardown is a platform decision", () => {
     expect(proc.signals).toEqual([]);
   });
 
-  it("win32: falls back to the direct child when taskkill cannot reach the tree", () => {
+  it("win32: falls back to the direct child when taskkill cannot reach the tree", async () => {
     const proc = new FakeProcess(4242);
-    signalBrowser(proc, "SIGKILL", { platform: "win32", killTree: () => false });
+    await signalBrowser(proc, "SIGKILL", { platform: "win32", killTree: () => false });
     expect(proc.signals).toEqual(["SIGKILL"]);
   });
 
-  it("POSIX: falls back to the direct child when the group signal fails", () => {
+  it("POSIX: falls back to the direct child when the group signal fails", async () => {
     const proc = new FakeProcess(4242);
-    signalBrowser(proc, "SIGKILL", {
+    await signalBrowser(proc, "SIGKILL", {
       platform: "linux",
       killGroup: () => {
         throw new Error("ESRCH");

@@ -409,14 +409,22 @@ export const TERMINATE_GRACE_MS = 5_000;
 
 export function terminateTree(entry: TerminalEntry, graceMs: number = TERMINATE_GRACE_MS): Promise<void> {
   entry.closed = true;
-  entry.child.terminate();
+  // W9321: fire-and-forget, deliberately. `terminate()` is now async (on Windows
+  // it runs `taskkill`), but the W1528 invariant below is that this function is
+  // BOUNDED by `graceMs` — awaiting the signal would make the bound depend on the
+  // signal implementation resolving, which is exactly the class of hang W1528b
+  // guards against. The kill is issued in this tick; `reapBounded` stays the only
+  // thing that decides when to stop waiting.
+  void entry.child.terminate();
   return reapBounded(entry, graceMs);
 }
 
 /** Wait for the child, SIGKILL the tree if it outlives the grace, wait again. */
 async function reapBounded(entry: TerminalEntry, graceMs: number): Promise<void> {
   if (await settlesWithin(entry.child.wait(), graceMs)) return;
-  entry.child.kill();
+  // W9321: the escalation is awaited — the second `wait()` below is exit
+  // evidence, so it must not be consulted before the SIGKILL was asked for.
+  await entry.child.kill();
   await settlesWithin(entry.child.wait(), graceMs);
 }
 

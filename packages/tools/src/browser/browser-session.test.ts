@@ -48,13 +48,17 @@ class FakeChild implements SandboxChild {
     return this.exitPromise;
   }
 
-  terminate(): void {
+  // W9321: `Promise<void>` — the real Windows tree-kill shells out. The double
+  // stays instantaneous; it exists to record the SIGNAL, not its latency.
+  terminate(): Promise<void> {
     this.signals.push("terminate");
+    return Promise.resolve();
   }
 
-  kill(): void {
+  kill(): Promise<void> {
     this.signals.push("kill");
     this.resolveExit?.({ code: null, signal: "SIGKILL" });
+    return Promise.resolve();
   }
 
   emitEndpoint(): void {
@@ -269,7 +273,7 @@ describe("F4b · BrowserManager lifecycle", () => {
     const sandbox = new FakeSandbox();
     const { manager } = makeManager({ sandbox });
     await manager.open("https://example.com/");
-    sandbox.children[0]!.kill();
+    await sandbox.children[0]!.kill();
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(manager.running).toBe(false);
     await manager.dispose();

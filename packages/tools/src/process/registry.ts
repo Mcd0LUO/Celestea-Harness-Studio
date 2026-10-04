@@ -181,9 +181,12 @@ export class ProcessRegistry {
       return done === undefined ? unknownHandle(handle) : { ok: false, error: exitedMessage(done) };
     }
     entry.state.killPath = true;
-    entry.child.terminate();
+    // W9321: this is an async command path, so both kills are awaited — the
+    // grace window that follows must start AFTER the signal was asked for, and
+    // the whole call must not return before the escalation has been issued.
+    await entry.child.terminate();
     if (!(await this.waitExited(entry, this.options.killGraceMs))) {
-      entry.child.kill();
+      await entry.child.kill();
       await this.waitExited(entry, this.options.killWaitMs);
     }
     return { ok: true, killed: true, handle: entry.handle };
@@ -223,11 +226,21 @@ export class ProcessRegistry {
     });
   }
 
-  /** Kill every still-registered child (shutdown path); idempotent. */
+  /**
+   * Kill every still-registered child (shutdown path); idempotent.
+   *
+   * W9321: the signature stays SYNCHRONOUS even though `kill()` is now async —
+   * this is a shutdown hook (see `session-compose.ts`), which is a sync contract,
+   * and blocking a shutdown on a tree-kill is exactly what this slice removes.
+   * The `void` is safe for a reason worth stating: on Windows the mechanism is
+   * `taskkill`, a SEPARATE process, so it survives our exit and still reaps the
+   * tree; on POSIX the group signal lands synchronously inside `kill()`. The
+   * async part is only the wait, and nobody waits at shutdown.
+   */
   killAll(): void {
     for (const entry of [...this.map.values()]) {
       entry.state.killPath = true;
-      entry.child.kill();
+      void entry.child.kill();
     }
     this.map.clear();
     this.tombstones.clear();

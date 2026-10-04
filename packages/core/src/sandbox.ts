@@ -162,10 +162,21 @@ export interface SandboxChild {
   readonly stdout: Readable | null;
   readonly stderr: Readable | null;
   wait(): Promise<SandboxExit>;
-  /** SIGTERM the process tree (best effort). */
-  terminate(): void;
-  /** SIGKILL the process tree (best effort). */
-  kill(): void;
+  /**
+   * SIGTERM the process tree (best effort). Resolves once the signal has been
+   * *asked for*, never once the tree is gone — `wait()` stays the only exit
+   * evidence.
+   *
+   * W9321: the type is `Promise<void>` because the tree-kill is asynchronous on
+   * Windows. The only mechanism there is `taskkill /T`, an external process;
+   * running it synchronously (the previous shape: up to 3 x 5s `execFileSync`)
+   * blocked the event loop for up to ~15s *inside the `abort` listener itself* —
+   * the exact moment the user pressed Stop. A cancellation path therefore does
+   * NOT await this (`void child.kill()`); the timeout / settle paths do.
+   */
+  terminate(): Promise<void>;
+  /** SIGKILL the process tree (best effort). Async for the same reason. */
+  kill(): Promise<void>;
 }
 
 /**

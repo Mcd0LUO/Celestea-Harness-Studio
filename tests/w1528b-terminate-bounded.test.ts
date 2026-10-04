@@ -38,13 +38,18 @@ function stubbornChild(): { child: SandboxChild; killed: () => boolean; terminat
     stdout: null,
     stderr: null,
     wait: () => wait,
+    // W9321: `terminate`/`kill` are `Promise<void>` now (the real Windows
+    // tree-kill shells out). The fake stays instantaneous — it is here to make
+    // the SIGNALS observable, not to model their latency.
     terminate: () => {
       terminated = true;
       // Deliberately does NOT settle: this is the whole point.
+      return Promise.resolve();
     },
     kill: () => {
       killed = true;
       settle?.({ code: null, signal: "SIGKILL" });
+      return Promise.resolve();
     },
   };
   return { child, killed: () => killed, terminated: () => terminated };
@@ -88,9 +93,13 @@ describe("W1528b · terminateTree is bounded", () => {
       stdout: null,
       stderr: null,
       wait: () => wait,
-      terminate: () => settle?.({ code: 0, signal: "SIGTERM" }),
+      terminate: () => {
+        settle?.({ code: 0, signal: "SIGTERM" });
+        return Promise.resolve();
+      },
       kill: () => {
         killed = true;
+        return Promise.resolve();
       },
     };
     const started = Date.now();
