@@ -144,10 +144,10 @@ async function clickFile(wb: WbMod, name: string): Promise<void> {
  *   280 KB（刚好过线），截断只会发生在**最后一段**，而最后一段的 more=false
  *   本来就会正常收尾 ⇒ 变异跑绿、断言没有判别力（第一版就是这么假绿的，见报告）。
  */
-function makeLines(n: number): string[] {
+function makeLines(n: number, pad = 0): string[] {
   const out: string[] = [];
   for (let i = 0; i < n; i += 1) {
-    out.push('export function fn' + i + '(a: number, b: string, c: boolean): number { const s = "str-' + i + '"; const t = "tail-' + i + '"; return a + s.length + t.length + (c ? 1 : 0); }');
+    out.push('export function fn' + i + '(a: number, b: string, c: boolean): number { const s = "str-' + i + '"; const t = "tail-' + i + '"; return a + s.length + t.length + (c ? 1 : 0); }' + (pad > 0 ? ' // ' + 'x'.repeat(pad) : ''));
   }
   return out;
 }
@@ -161,21 +161,21 @@ describe('文件管理器 · 点文件在面板内流式打开完整文件（W15
   afterEach(() => { vi.unstubAllGlobals(); doc.body.replaceChildren(); });
   // ★ W2035：文件级预算 150s（**只给这一条**，不动全局 testTimeout）。
   //   它是兜底，不是判据 —— 先触发的一定是 waitForFullStream 的停滞判据（30s 无进展）。
-  it('★ 完整文件：5000 行（> 256 KiB）必须**全文**渲染，且不是降级文案', { timeout: 150_000 }, async () => {
-    const lines = makeLines(5000);
+  it('★ 完整文件：2100 行 × ≈320 字符（≈672 KB，> 256 KiB）必须**全文**渲染，且不是降级文案', { timeout: 150_000 }, async () => {
+    const lines = makeLines(2100, 170); // ★ 2100 行 × ≈320 字符 ≈ 672 KB：**行数必须 > 2000**（否则 `files-view` 的「整篇/流式」判据会把它当整篇打开，就不是这条用例要守的流式了），字节仍 > 600 KiB（变异判别力）。比原先的 5000 行少 58% 的 DOM 行。
     const expected = lines.join('\n') + '\n';
     expect(expected.length, '★ 样本必须**远**超过旧的 256 KiB 上限（否则变异抓不住，见 makeLines 注释）').toBeGreaterThan(600 * 1024);
     const srv = pagedServer(lines);
     const { wb } = await setup(srv.fetch);
     await clickFile(wb, 'big.ts');
     // ★ W2035：等「全文渲染完成」，判据是**进展**不是墙钟（见 waitForFullStream 的长注释）。
-    await waitForFullStream(() => shownLines(), 5000);
+    await waitForFullStream(() => shownLines(), 2100);
     // ★ 不降级：页脚不许出现「上限」那句（chat.preview.streamLimit 的文案）。
     expect(footText(), '★ 不许降级成「文件超过预览上限」').not.toContain('上限');
-    expect(shownLines(), '★ DOM 行数必须等于服务端 totalLines').toBe(5000);
+    expect(shownLines(), '★ DOM 行数必须等于服务端 totalLines').toBe(2100);
     expect(shownText(), '★ 逐字节等于完整文件').toBe(expected);
     // ★ 页脚**如实**：流式进度必须报「全部到手」，而不是停在中途。
-    expect(footText(), '★ 页脚如实报告读满').toContain('已加载 5000 / 共 5000');
+    expect(footText(), '★ 页脚如实报告读满').toContain('已加载 2100 / 共 2100');
     expect(srv.calls.length, '分段取（不止一次往返）').toBeGreaterThan(1);
     expect(srv.calls[0], '首段用**小** limit（首屏快）').toContain('limit=400');
     expect(srv.calls[1], '后续段用大 limit（往返少）').toContain('limit=1200');

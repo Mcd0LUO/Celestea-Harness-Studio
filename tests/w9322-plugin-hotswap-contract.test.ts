@@ -33,8 +33,9 @@ describe("W9322 PUT /api/plugins (contract delta)", () => {
     expect(String(put?.request.fields[0]?.note)).toContain("OPTIONAL");
     expect(String(put?.request.fields[1]?.note)).toContain("complement");
     expect(put?.response.fields.map((f) => f.name)).toEqual(["ok", "plugins", "disabled"]);
-    // W9337 归档：文档搬进 docs/archive/decisions/，契约的 docRef 跟着搬 —— 断言守的是"指到真文档"，不是"路径长这样"。
-    expect(put?.docRef).toBe("docs/archive/decisions/feature-plugin-hotswap.md");
+    // 这里**故意不钉** `docRef` 的字面路径：文档归档时它合法地变过，而"指针指到真文件"这件事
+    // 已由 `tests/contract-store.test.ts` 的「契约文档指针可达性」机械守着 ⇒ 两处守同一件事，
+    // 其中一处还钉死了字面量（铁律 11：守后果，不守机制）。
 
     // ① the frozen anchor, ② the file's declared count and its array length,
     // ③ the derived constant the boot assertion reads.
