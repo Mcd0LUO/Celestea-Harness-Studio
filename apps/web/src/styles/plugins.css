@@ -1,12 +1,14 @@
 /* ============================================================================
- * W859 · 设置页「插件」一格（客户端插件热开关 + 宿主插件只读清单）
+ * W859 · 设置页「插件」一格（客户端插件热开关 + 服务端插件清单）
+ *   W9327：服务端一段按 layer 分段，可关的行挂 .plug-switch（与客户端同一开关件），
+ *          不能关的行不挂 —— 拒绝用「没有开关 + 说明原因」表达，不用 disabled 开关。
  *
  *   颜色只引用 tokens.css 的三层 token（--bg-* / --label-* / --state-* /
  *   --interactive-* / --bubble-* / --tip-* 及其 --c-* 兼容别名）；圆角只走
  *   --r-*（开关轨道是胶囊，用 999px）；发丝线用 --hairline；虚线一律不用
  *   （W12 机械门禁）。
  *   1) 两段式布局（客户端插件 / 服务端插件）
- *   2) 只读行与开关行共用 .plug-row-* 骨架
+ *   2) 开关行与无开关行共用 .plug-row-* 骨架
  *   3) 开关：真开关的样子（轨道 + 滑块），不是装饰
  * ============================================================================ */
 
@@ -78,12 +80,18 @@
   font-variant-numeric: tabular-nums;
 }
 .plug-lib .hidden { display: none; }
-/* ---- 2) 行骨架（开关行 / 只读行共用） -------------------------------------- */
+/* ---- 2) 行骨架（开关行 / 无开关行共用） ------------------------------------ */
 .plug-list,
 .plug-host-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+/* W9327：服务端一段按 layer 分段（.plug-cat 复用插件库那套层标题）。 */
+.plug-host-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-flow-answer);
 }
 .plug-row,
 .plug-host {
@@ -111,6 +119,16 @@
   margin-top: 2px;
   font-size: 11.5px;
   color: var(--c-text-3);
+}
+/* W9327：停用策略 + 服务端给的原因（"不能关闭：<reason>"）。
+   服务端的 reason 是英文技术散文，所以给等宽 + 更弱的对比色，**不与文案同级**：
+   用户先读中文策略句，再按需看原文。 */
+.plug-row-reason {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--c-text-3);
+  opacity: 0.85;
+  overflow-wrap: anywhere;
 }
 .plug-host-ver {
   font-family: var(--mono);

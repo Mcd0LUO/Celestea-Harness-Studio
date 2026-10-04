@@ -10,8 +10,11 @@
 //                        .plug-row（开关 = 真注册/真注销，见 src/plugins/）
 //                        .plug-panel（W9108 内联配置面板；与行**相邻**，同 providers）
 //       .plug-status 就地说明（切换结果 / 失败原因）
-//       .plug-sec（服务端插件，只读）
-//         .plug-host-list > .plug-host（名字 + 「服务端内置 · 进程内不可热拔插」）
+//       .plug-sec（**服务端插件**：W9322 起按 `layer` 分两段，optional/idle-only 可开关）
+//         .plug-host-box > .plug-cat[data-layer]
+//            .plug-cat-head（层名 + 该层行数）
+//            .plug-host-list > .plug-host[data-name][data-hot][data-disable]
+//                             名字/版本 + 停用原因 + **按 hot 取值**的徽标 +（可关时）开关
 //         或 .plug-empty（服务端未提供插件清单 —— 不伪造）
 //   铁律：首屏不写「加载中」占位 —— 客户端一段同步画出终态；宿主一段在清单回来前
 //   保持空（回来即画，失败画如实空态）。
@@ -34,11 +37,36 @@ import {
 import type { ClientPluginDescriptor } from '../../plugins';
 import { el, need } from '../../utils/dom';
 import { applyValues, buildConfigPanel, type PluginPanelState } from './config-panel';
-import { fetchHostPlugins, type HostPluginRow } from './host';
+import {
+  HOST_LAYERS,
+  fetchHostPlugins,
+  rowsOfLayer,
+  setHostPlugins,
+  type HostPluginRow,
+  type LayerKind,
+} from './host';
 import { t } from '../../i18n';
 import { iconNode } from '../icons'; // W9324：几何真源在 ui/icons.ts
 
 const HOST = '#settingsPlugins';
+
+/** 一层的标题 key（`'other'` = 认不出的层，如实另起一段）。 */
+const HOST_LAYER_KEY: Record<LayerKind, Parameters<typeof t>[0]> = {
+  host: 'settings.plugins.layerHost',
+  engine: 'settings.plugins.layerEngine',
+  other: 'settings.plugins.layerOther',
+};
+
+/** 切换回调签名（渲染层不关心谁去写，只把「哪一行、要什么」交出去）。 */
+type HostToggleFn = (p: HostPluginRow, want: boolean) => void;
+
+/**
+ * 服务端清单的**客户端镜像**（模块级）。
+ *
+ * 它是切换时算「我要哪些开着」的唯一依据：不另存一份启用状态，也不从 DOM 反推。
+ * 每次 PUT 成功都用**答复里的真值**整表替换它（fail-closed：写失败不动它）。
+ */
+let currentRows: HostPluginRow[] = [];
 
 function section(title: string, note: string): HTMLElement {
   const sec = el('section', 'plug-sec');
@@ -109,25 +137,103 @@ function clientRow(
   return { entry, row, panel: built.panel, state, content: built.content };
 }
 
-/** 一行宿主插件（只读：没有开关，只有名字/版本/说明 + 不可热拔插标注）。 */
-function hostRow(p: HostPluginRow): HTMLElement {
+/**
+ * 一行服务端插件（W9322）。
+ *
+ * 三个字段各读各的真值，互不推导：
+ *   · 徽标按 **`hot`** 渲染（`hot:false` 才写「不可热拔插」；`hot:true` 写「可换代」）。
+ *     旧实现**硬编码**了「进程内不可热拔插」，而那 6 行引擎插件恰恰是可换代的 ——
+ *     面板在说反话。
+ *   · 开关按 **`disable`** 决定：`optional` / `idle-only` 给开关；`required`
+ *     **不给**开关，并把后端的 `reason` 显示出来（拒绝必须说出来）。
+ *   · 认不出的 `disable` → **不画开关**（fail-closed，与后端 policyOf 同一纪律），
+ *     并把原始取值标出来，不假装认识。
+ */
+function hostRow(p: HostPluginRow, toggle: HTMLElement | null): HTMLElement {
   const row = el('div', 'plug-host');
   row.dataset['name'] = p.name;
+  row.dataset['layer'] = p.layerKind;
+  row.dataset['hot'] = String(p.hot);
+  row.dataset['disable'] = p.disableKind;
   const main = el('div', 'plug-row-main');
   const label = el('div', 'plug-row-label', p.name);
   if (p.version !== '') label.appendChild(el('span', 'plug-host-ver', p.version));
   main.appendChild(label);
   if (p.note !== '') main.appendChild(el('div', 'plug-row-hint', p.note));
+  // 停用策略按 disableKind 如实呈现；reason 原样透传（后端写了就别丢）。
+  if (p.disableKind !== 'optional' || p.reason !== '') {
+    main.appendChild(el('div', 'plug-row-hint plug-row-reason', reasonOf(p)));
+  }
   row.appendChild(main);
-  row.appendChild(el('span', 'plug-badge', t('settings.plugins.hostBadge')));
+  row.appendChild(el('span', 'plug-badge', hotBadge(p.hot)));
+  // required / unknown 都不画开关（toggle 传 null）：拒绝必须说出来，而不是给一个按不动的按钮。
+  if (toggle !== null) row.appendChild(toggle);
   return row;
 }
 
-/** 宿主一段的渲染（空列表 = 如实空态）。 */
-function renderHost(box: HTMLElement, rows: HostPluginRow[]): void {
+/** 徽标文案：**按 hot 取值**，不硬编码。 */
+function hotBadge(hot: boolean): string {
+  return hot ? t('settings.plugins.hotSwappable') : t('settings.plugins.hostBadge');
+}
+
+/** 停用说明：策略短语 + 后端给的 reason（`optional` 只在有 reason 时说 reason）。 */
+function reasonOf(p: HostPluginRow): string {
+  const policy =
+    p.disableKind === 'required'
+      ? t('settings.plugins.disableRequired')
+      : p.disableKind === 'idle-only'
+        ? t('settings.plugins.disableIdleOnly')
+        : p.disableKind === 'optional'
+          ? t('settings.plugins.disableOptional')
+          : t('settings.plugins.disableUnknown', { value: p.disable === '' ? '?' : p.disable });
+  return p.reason === '' ? policy : policy + '：' + p.reason;
+}
+
+/** 一行的开关（只在 `optional` / `idle-only` 上建；调用方保证 disableKind 已判定）。 */
+function hostSwitch(p: HostPluginRow, onToggle: HostToggleFn): HTMLElement {
+  const wrap = el('label', 'plug-switch');
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.className = 'plug-switch-input';
+  input.checked = p.enabled;
+  input.addEventListener('change', () => onToggle(p, input.checked));
+  wrap.appendChild(input);
+  wrap.appendChild(el('span', 'plug-switch-track'));
+  return wrap;
+}
+
+/** 这一行该不该给开关？`required` 与**认不出的**取值都没有（fail-closed）。 */
+function switchable(p: HostPluginRow): boolean {
+  return p.disableKind === 'optional' || p.disableKind === 'idle-only';
+}
+
+/** 一层的行节点（含层名小标题）；空层不画标题（不占位、不写「加载中」）。 */
+function hostLayer(layer: LayerKind, rows: HostPluginRow[], onToggle: HostToggleFn): HTMLElement {
+  const sec = el('div', 'plug-cat');
+  sec.dataset['layer'] = layer;
+  const head = el('div', 'plug-cat-head');
+  head.appendChild(el('h6', 'plug-cat-title', t(HOST_LAYER_KEY[layer])));
+  const n = el('span', 'plug-cat-count', String(rows.length));
+  head.appendChild(n);
+  const list = el('div', 'plug-host-list');
+  for (const r of rows) list.appendChild(hostRow(r, switchable(r) ? hostSwitch(r, onToggle) : null));
+  sec.appendChild(head);
+  sec.appendChild(list);
+  return sec;
+}
+
+/** 服务端一段的渲染：按 `layer` 分段（空清单 = 如实空态）。 */
+function renderHost(box: HTMLElement, rows: HostPluginRow[], onToggle: HostToggleFn): void {
   const off = document.createElement('div');
-  if (rows.length === 0) off.appendChild(el('div', 'plug-empty', t('settings.plugins.hostEmpty')));
-  else for (const r of rows) off.appendChild(hostRow(r));
+  if (rows.length === 0) {
+    off.appendChild(el('div', 'plug-empty', t('settings.plugins.hostEmpty')));
+  } else {
+    // 'other'（认不出的层）永远垫底，不与已知层混排 —— 认不出就如实另起一段。
+    for (const layer of HOST_LAYERS) {
+      const part = rowsOfLayer(rows, layer);
+      if (part.length > 0) off.appendChild(hostLayer(layer, part, onToggle));
+    }
+  }
   box.replaceChildren(...off.childNodes);
 }
 
@@ -274,19 +380,42 @@ export async function loadPluginsSection(): Promise<void> {
   clientSec.appendChild(buildLibrary(setStatus));
   clientSec.appendChild(status);
 
-  const hostList = el('div', 'plug-host-list');
+  const hostBox = el('div', 'plug-host-box');
   const hostSec = section(t('settings.plugins.hostTitle'), t('settings.plugins.hostNote'));
-  hostSec.appendChild(hostList);
+  hostSec.appendChild(hostBox);
+  // 服务端那一格的开关：写 PUT /api/plugins（启用表），失败回滚到服务端真值。
+  const onHostToggle: HostToggleFn = (p, want) => {
+    void (async () => {
+      const enabled = currentRows.filter((r) => (r.name === p.name ? want : r.enabled)).map((r) => r.name);
+      const r = await setHostPlugins(enabled);
+      if (!r.ok) {
+        // 回滚：以**服务端真值**为准（内存镜像没动）。
+        for (const row of hostBox.querySelectorAll<HTMLElement>('.plug-host')) {
+          const src = currentRows.find((x) => x.name === row.dataset['name']);
+          const input = row.querySelector<HTMLInputElement>('.plug-switch-input');
+          if (src !== undefined && input !== null) input.checked = src.enabled;
+        }
+        setStatus(userErrorText(new Error(r.text), t('settings.plugins.hostSwitchFailed')), false);
+        return;
+      }
+      // 成功：PUT 的答复就是换代后的真值，整表按它对齐（不靠本地推断）。
+      currentRows = r.rows;
+      renderHost(hostBox, currentRows, onHostToggle);
+      setStatus(t('settings.plugins.hostSwitchOk', { label: p.name, state: want ? t('plugins.on') : t('plugins.off') }), true);
+    })();
+  };
 
   const off = document.createElement('div');
   off.append(clientSec, hostSec);
   host.replaceChildren(...off.childNodes);
 
   try {
-    renderHost(hostList, await fetchHostPlugins());
+    currentRows = await fetchHostPlugins();
+    renderHost(hostBox, currentRows, onHostToggle);
   } catch (err) {
     // 端点缺失/不可达：只画一行如实空态，不弹错、不重试、不伪造清单
-    renderHost(hostList, []);
+    currentRows = [];
+    renderHost(hostBox, [], onHostToggle);
     console.warn('[plugins] ' + userErrorText(err, t('settings.plugins.hostUnavailable')));
   }
 }

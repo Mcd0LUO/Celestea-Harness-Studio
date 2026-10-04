@@ -47,7 +47,7 @@ import type { ExecReq, ExecResp } from './types/exec'; // A3：用户直发命�
 import type { FsListResp } from './types/fs-list'; // H：@提及的文件列举
 import type { FsReadResp } from './types/fs-read'; // F2 P1：工作区文件内容
 import type { GoalResp } from './types/goal'; // A3：持久目标
-// W859：宿主插件清单类型（端点尚未发布；整包按 unknown 校验，见 ./types/plugin）
+// W859/W9322：服务端插件清单类型（两层清单 + 枚举逐项容错，见 ./types/plugin）
 import type { PluginsResp } from './types/plugin';
 // W858：权限族类型整族在 ./types/permission（types.ts 有模块体积棘轮，本轮不追加行数；
 // 先例：ui/attachments.ts 直接 import ./types/attachment）。
@@ -171,8 +171,9 @@ export const api = {
     ),
   tools: () => requestJson<ToolsResp>('/api/tools'),
   /**
-   * W859：GET /api/plugins —— 宿主（服务端）插件清单，设置页「插件」一格的取数口。
-   * 端点尚未发布：404/405/网络不可达 → ApiError，调用方显示如实空态，不伪造清单。
+   * W859/W9322：GET /api/plugins —— 服务端插件清单（host + engine 两层），设置页
+   * 「插件」一格的取数口。端点已发布；404/405/网络不可达 → ApiError，调用方显示
+   * 如实空态，不伪造清单。
    */
   plugins: () => requestJson<PluginsResp>('/api/plugins'),
   /** 当前运行配置（安全剖面，不含密钥）。 */

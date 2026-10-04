@@ -306,7 +306,7 @@ function loadPane(name: PaneName): void {
     // W9103：「使用统计」（摘要条 + 热力图 + 趋势图；数据来自已有的用量账本聚合）
     mountUsagePane();
   } else {
-    // W859：「插件」（客户端插件热开关 + 服务端插件只读清单）
+    // W859：「插件」（客户端插件热开关 + 服务端插件清单；W9327 起可关的行带开关）
     void loadPluginsSection();
   }
 }

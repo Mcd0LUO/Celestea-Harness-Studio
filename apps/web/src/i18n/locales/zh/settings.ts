@@ -115,8 +115,22 @@ export const settings = {
   'settings.plugins.clientTitle': '客户端插件',
   'settings.plugins.clientNote': '开关立即生效，重新打开页面后保持',
   'settings.plugins.hostTitle': '服务端插件',
-  'settings.plugins.hostNote': '只读清单',
+  // W9327：不再是「只读清单」—— optional / idle-only 的行有开关（写启用表）。
+  'settings.plugins.hostNote': '可关的插件下次开启会话生效；不能关的会写明原因',
   'settings.plugins.hostUnavailable': '宿主插件清单暂不可用',
+  // ---- W9327：徽标**按 hot 取值**（不再硬编码「不可热拔插」） ----
+  'settings.plugins.hotSwappable': '可换代',
+  'settings.plugins.layerHost': '启动层',
+  'settings.plugins.layerEngine': '引擎层',
+  // 认不出的层（契约扩枚举而本前端还没跟上）——如实另起一段，不假装是已知层。
+  'settings.plugins.layerOther': '其它层',
+  // ---- W9327：停用策略 + 后端给的原因（拒绝必须说出来） ----
+  'settings.plugins.disableRequired': '不能关闭',
+  'settings.plugins.disableIdleOnly': '没有进行中的会话时可以关闭',
+  'settings.plugins.disableOptional': '可以关闭',
+  'settings.plugins.disableUnknown': '停用方式未识别（{value}）',
+  'settings.plugins.hostSwitchOk': '已{state}「{label}」',
+  'settings.plugins.hostSwitchFailed': '切换失败，已恢复原来的状态。',
   'settings.plugins.search': '搜索插件',
   'settings.plugins.allOn': '全部开启',
   'settings.plugins.allOff': '全部关闭',

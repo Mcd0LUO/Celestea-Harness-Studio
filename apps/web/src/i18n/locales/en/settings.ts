@@ -115,8 +115,23 @@ export const settings = {
   'settings.plugins.clientTitle': 'Client plugins',
   'settings.plugins.clientNote': 'Toggles take effect immediately and persist after reload',
   'settings.plugins.hostTitle': 'Server plugins',
-  'settings.plugins.hostNote': 'Read-only list',
+  // W9327: no longer a read-only list — optional / idle-only rows carry a switch.
+  'settings.plugins.hostNote': 'Switched-off plugins take effect on the next session; the ones that cannot be switched off say why',
   'settings.plugins.hostUnavailable': 'The host plugin list is temporarily unavailable',
+  // ---- W9327: the badge now follows `hot` (no longer hardcoded) ----
+  'settings.plugins.hotSwappable': 'Swappable',
+  'settings.plugins.layerHost': 'Startup layer',
+  'settings.plugins.layerEngine': 'Engine layer',
+  // An unrecognized layer (the contract grew a value this build has not learned yet)
+  // gets its own section rather than being passed off as a known one.
+  'settings.plugins.layerOther': 'Other layers',
+  // ---- W9327: disable policy + the reason the server gave ----
+  'settings.plugins.disableRequired': 'Cannot be switched off',
+  'settings.plugins.disableIdleOnly': 'Can be switched off while no session is running',
+  'settings.plugins.disableOptional': 'Can be switched off',
+  'settings.plugins.disableUnknown': 'Unrecognized disable mode ({value})',
+  'settings.plugins.hostSwitchOk': '"{label}" is now {state}',
+  'settings.plugins.hostSwitchFailed': 'Could not switch that; the previous setting was restored.',
   'settings.plugins.search': 'Search plugins',
   'settings.plugins.allOn': 'Turn all on',
   'settings.plugins.allOff': 'Turn all off',
