@@ -2,7 +2,7 @@
 // ============================================================================
 // bench/markdown-render-bench.mjs — W301 流式 markdown 渲染基准
 //
-// 对比两种渲染模式（不引入新依赖，直接从 frontend/node_modules 取 marked /
+// 对比两种渲染模式（不引入新依赖，直接从 apps/web/node_modules 取 marked /
 // highlight.js）：
 //   全量（现状）：每个节拍对「整段累积文本」marked.parse + 所有代码块重高亮
 //                 （innerHTML 重建 → dataset.hlDone 失效 → 无缓存可言）
@@ -10,9 +10,9 @@
 //                 代码块内容键缓存（命中不重高亮）
 //
 // 用法：
-//   node frontend/bench/markdown-render-bench.mjs            # 基准表 + 正确性校验
-//   node frontend/bench/markdown-render-bench.mjs --verify   # 额外打印边界用例 HTML
-//   node frontend/bench/markdown-render-bench.mjs --fuzz     # 额外跑确定性随机 fuzz
+//   node apps/web/bench/markdown-render-bench.mjs            # 基准表 + 正确性校验
+//   node apps/web/bench/markdown-render-bench.mjs --verify   # 额外打印边界用例 HTML
+//   node apps/web/bench/markdown-render-bench.mjs --fuzz     # 额外跑确定性随机 fuzz
 //
 // 说明：这里只计量「解析 + 高亮」的 CPU（与架构师实测口径一致），不含浏览器
 // 侧的 innerHTML 解析 / 布局 / 绘制 / scrollHeight 强制回流（真实环境会再放大）。

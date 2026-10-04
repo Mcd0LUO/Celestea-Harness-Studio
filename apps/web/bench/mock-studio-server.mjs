@@ -3,7 +3,7 @@
 //   实现「冻结契约」v2（/api/sessions 带 kind/busy，SSE 信封 {v:2,session,...}，
 //   /api/turn 运行中=插话，activate 运行中不再 409，/api/status?session=）
 //   以及 --legacy 模式（旧后端：无 session/kind/busy，busy→409）用于降级自测。
-//   同时静态服务 frontend/dist（与真实后端同一份产物）。
+//   同时静态服务 apps/web/dist（与真实后端同一份产物）。
 //   用法：node bench/mock-studio-server.mjs [--port 8791] [--legacy] [--turn-ms 3000]
 // ============================================================================
 import http from 'node:http';

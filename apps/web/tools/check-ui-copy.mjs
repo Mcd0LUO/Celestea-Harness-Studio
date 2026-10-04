@@ -35,7 +35,7 @@
  * 排除：注释（AST 层面不存在字符串字面量；HTML 侧先剥注释）；
  *       行内含 copy-gate-allow 标记（显式豁免，需在 review 中给出理由）。
  *
- * 用法：pnpm check:copy（frontend/ 目录下）
+ * 用法：pnpm check:copy（apps/web/ 目录下）
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';

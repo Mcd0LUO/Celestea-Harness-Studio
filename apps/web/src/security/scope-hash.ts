@@ -16,7 +16,7 @@
 //
 // 漂移守护（任一端的形状/算法动了都必须机械失败）：
 //   冻结向量   /srv/celestea/studio/contracts/scope-hash-vectors.json
-//   前端侧     frontend/tools/check-scope-hash.mjs（已接进 frontend `pnpm check`）
+//   前端侧     apps/web/tools/check-scope-hash.mjs（已接进 frontend `pnpm check`）
 //   服务端侧   /srv/celestea/studio/tests/scope-hash-vectors.test.ts（vitest）
 //
 // 本文件**零 import、零 DOM**：既要被浏览器 bundle 打包，也要能被 node 直接

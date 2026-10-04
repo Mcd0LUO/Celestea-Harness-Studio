@@ -1,4 +1,4 @@
-// W514 只读冒烟：对**真实后端**（默认 http://127.0.0.1:3777，静态根 = frontend/dist）
+// W514 只读冒烟：对**真实后端**（默认 http://127.0.0.1:3777，静态根 = apps/web/dist）
 // 加载新构建，仅观测（不发任何 POST：不触发 turn / 不切活跃会话）。
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);

@@ -15,7 +15,7 @@
  * 看到陈旧项。让别人的成功把自己的门禁搞红是错的，所以默认报⚠继续；
  * CI 要收紧时置 `CELESTEA_MODULE_SIZE_STRICT=1`，**陈旧项与可收紧项都失败**（R3 W838-F6：此前只有陈旧项进 STRICT，棘轮「可收紧」提示与退出码不一致）。
  *
- * 用法（frontend/ 目录下）：
+ * 用法（apps/web/ 目录下）：
  *   node tools/check-module-size.mjs                          # pnpm check:size
  *   CELESTEA_MODULE_SIZE_STRICT=1 node tools/check-module-size.mjs
  *   CELESTEA_MODULE_SIZE_BASELINE=/tmp/x.json node tools/check-module-size.mjs
@@ -69,7 +69,7 @@ function readBaseline() {
       process.exit(1);
     }
     if (!rel.startsWith('src/')) {
-      console.error(`✗ 例外表条目 ${rel} 必须以 src/ 开头（相对 frontend/ 的路径）`);
+      console.error(`✗ 例外表条目 ${rel} 必须以 src/ 开头（相对 apps/web/ 的路径）`);
       process.exit(1);
     }
   }
