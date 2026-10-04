@@ -280,7 +280,7 @@ function anchorNumberProblems(): string[] {
  * 是 P1 计划，写它是对的）；`历史参考` 已被 ③b/⑤ 一致地排除在外。把三类混在一起查，
  * 唯一的「修法」是删掉有价值的前瞻路径 —— 比漂移更糟。
  *
- * 为什么值得查：`docs/feature-multimodal-attachments/README.md` 曾把附件编解码的落点
+ * 为什么值得查：`docs/feature/multimodal-attachments/README.md` 曾把附件编解码的落点
  * 写成 `packages/core/src/attachments.ts`（该文件从未存在，实现一直在 `message.ts`），
  * 而没有任何门禁看得见 —— 代码路径是最容易被静默搬走、文档却留在原地的引用。
  *

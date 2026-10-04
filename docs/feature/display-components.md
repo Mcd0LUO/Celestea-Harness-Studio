@@ -1,7 +1,7 @@
 # 特性设计 · 可选显示组件（display components）
 
 > 状态：**设计**（**P0 已实现**，W895；**C1：启用表真源搬到服务端已实现**，W895-C1；**C2：可选组件已实现**，W895-C2（**JSON 树已按用户要求移除**），TOC/alerts 已按用户决定砍掉；渲染缝（P1）不再做；**插件库管理面已实现**，W895-L）。本文是目标契约与验收标准的记录；落地见 `apps/web/src/ui/enhance/`、`apps/web/src/plugins/`、`apps/studio/src/store/display-plugins.ts`。
-> 依赖：[ARCHITECTURE.md](./ARCHITECTURE.md) 的分层与 seam 纪律、[DEPENDENCY-POLICY.md](./DEPENDENCY-POLICY.md) §7。
+> 依赖：[ARCHITECTURE.md](../ARCHITECTURE.md) 的分层与 seam 纪律、[DEPENDENCY-POLICY.md](../DEPENDENCY-POLICY.md) §7。
 
 ## 1. 一句话目标
 

@@ -121,7 +121,7 @@ export type Content = TextContent | ToolCallContent | ImageContent;   // ← 唯
 > **「现状」列是 P0 落地前的基线快照，不是当前状态。** 本册状态是「设计（已实现 P0）」，
 > 清单里的「必须怎么改」多数已经改完（例如 `core/src/projection.ts` 现已有 image 分支）。
 > 因此本节的 `file:line` 只在**当时**成立，改动落地后行号会漂 —— 读时请把它当**改动依据**而非**代码位置**；
-> 现行实现位置以 [`ARCHITECTURE.md`](../ARCHITECTURE.md) 与代码本身为准。
+> 现行实现位置以 [`ARCHITECTURE.md`](../../ARCHITECTURE.md) 与代码本身为准。
 > 保留原值是因为删掉它们就丢掉了「为什么这样改」的设计依据（AGENT.md §7 规则 1）。
 
 #### A. `packages/core` —— 真正的冻结契约
@@ -255,7 +255,7 @@ export type Content = TextContent | ToolCallContent | ImageContent;   // ← 唯
 
 ### 4.4 `contracts/` 改动清单（逐条）
 
-1. `contracts/tools.json`：`count 11 → 12`，追加 `read_image` 定义（形状见 §6.2）；`sourceRef` 写 `docs/feature-multimodal-attachments/02-design.md#62`（新工具，非移植）。
+1. `contracts/tools.json`：`count 11 → 12`，追加 `read_image` 定义（形状见 §6.2）；`sourceRef` 写 `docs/feature/multimodal-attachments/02-design.md#62`（新工具，非移植）。
 2. `contracts/session-event.schema.json`：`user_message` 增 `attachments`（数组，items 引用新 `$defs/AttachmentRef`）；`$defs/ToolResult` 的 `value` 不动；`projections.studioMapping.user_message` 补 `attachments` 说明；`note` 记 `W801 adds attachments (9 → 9 event variants, additive field)`。
 3. `contracts/data-files/cli-main-jsonl.schema.json`：无需改动（`$ref`）；可在 `notes` 补一句「附件字节不在此文件，见 `attachments/`」。
 4. `contracts/data-files/index.json`：新增一行「`<session-dir>/attachments/` — 附件对象存储（非 JSON；内容寻址；不入 fixtures）」。
@@ -418,7 +418,7 @@ packages/llm/src/{seam.ts:114-119, wire.ts:17,60,62,66,70, index.ts:32,34}
   "name": "read_image",
   "description": "Read an image (PNG/JPEG/WebP/GIF) and attach it to the conversation so a vision-capable model can see it. Returns metadata; the image content block is delivered with the tool result. Fails on models without image input.",
   "parameters": { "...": "见 §6.1" },
-  "sourceRef": "docs/feature-multimodal-attachments/02-design.md#6"
+  "sourceRef": "docs/feature/multimodal-attachments/02-design.md#6"
 }
 ```
 

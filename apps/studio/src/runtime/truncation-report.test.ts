@@ -8,7 +8,7 @@
  * the path a deployed process actually runs, not a hand-built seam.
  *
  * The mock sends the two \`finish_reason\` values the repo has observed live
- * (docs/feature-multimodal-attachments/01-evidence.md, the two `finish_reason`
+ * (docs/feature/multimodal-attachments/01-evidence.md, the two `finish_reason`
  * observations).
  */
 

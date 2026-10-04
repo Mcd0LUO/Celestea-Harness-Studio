@@ -239,7 +239,7 @@ W9113 自己的报告 §9 把 rail 的 P1-1 明确列为**仍未修**，并写�
    （W9202 实测同一轮里先后看到 8 条 → 5 条 → 0 条，派工者同时实测 7 条）。
 2. **HEAD vs 工作树**：`git show HEAD:<file>` 与工作树逐行比对。
    那轮真实一例：`scripts/export-golden.ts` 被删掉一行导入（`projectMessages,`），
-   于是该文件**从第 30 行起整体上移一行**，而 `docs/feature-multimodal-attachments/02-design.md`
+   于是该文件**从第 30 行起整体上移一行**，而 `docs/feature/multimodal-attachments/02-design.md`
    里那条指向它的锚点当场落到了空行上（`tests/doc-conventions.test.ts` 的 ③b 报的正是它）——
    **该锚点在 HEAD 上是对的，只在未提交的工作树上不成立**。
    （这里**刻意不写出具体的 `file:line`**：那个行号此刻正在漂，写死会让本文自己也过不了 ③b。）

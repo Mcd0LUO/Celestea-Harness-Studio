@@ -10,6 +10,13 @@
 | 文档 | 状态 | 一句话 |
 |---|---|---|
 | [`desktop-packaging.md`](./desktop-packaging.md) | 决定（暂缓） | 桌面端打包：评估外部 PR #5 后**暂缓**，附实测数据与 4 条理由 |
+| [`display-components.md`](./display-components.md) | 设计（**P0 已实现**） | 可选显示组件：把「渲染后增强」与「markdown 扩展」变成显示插件 |
+| [`multimodal-attachments/`](./multimodal-attachments/README.md) | 设计（已实现 P0） | 多模态附件（分册）：图片/文本附件的三入口、能力位与降级 |
+
+分册各页：[`01-evidence.md`](./multimodal-attachments/01-evidence.md) · 
+[`02-design.md`](./multimodal-attachments/02-design.md) · 
+[`03-frontend.md`](./multimodal-attachments/03-frontend.md) · 
+[`04-appendix.md`](./multimodal-attachments/04-appendix.md)
 
 ---
 
