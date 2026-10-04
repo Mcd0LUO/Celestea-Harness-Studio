@@ -186,7 +186,8 @@
   font-weight: 600;
 }
 
-.te-kind[data-k="write"],
+/* 字母标记：18px 方块。**颜色就是语义**（与定稿一致）：
+   M 中性（写入 / 覆盖不可分）、A 绿（新增）、D 红（删除）。 */
 .te-kind[data-k="edit"] {
   color: var(--c-text-2);
   background: var(--c-code-bg);
@@ -242,6 +243,19 @@
   gap: 5px;
   font-family: var(--mono);
   font-size: 12px;
+}
+
+/* 「写入 N 行」这一档：它不是 diffstat（旧内容不可知 ⇒ 没有 −），
+   所以**不用**加绿减红，用次级文字色，与真区间在视觉上分得开。 */
+.te-diff.is-written {
+  color: var(--c-text-2);
+}
+
+/* 表头聚合里的同一档（与 +X −Y 并排时的「写入 N 行」）。 */
+.te-written {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--c-text-2);
 }
 
 /* ---- 行动作：主按钮 + 下拉箭头（常驻可见；靠 hover 才出会失焦） ---- */

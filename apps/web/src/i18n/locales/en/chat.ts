@@ -372,14 +372,18 @@ export const chat = {
   // W9334: the "this turn's edits" display component. The footer carries the coverage
   // boundary (the source is this turn's tool calls; shell/code calls are invisible).
   'chat.turnEdits.title': 'This turn changed {n} files',
-  'chat.turnEdits.kind.write': 'wrote {n}',
   'chat.turnEdits.kind.edit': 'edited {n}',
   'chat.turnEdits.kind.add': 'added {n}',
   'chat.turnEdits.kind.delete': 'deleted {n}',
-  'chat.turnEdits.kindAria.write': 'written (added or overwritten is unknown)',
-  'chat.turnEdits.kindAria.edit': 'edited',
+  'chat.turnEdits.kindAria.edit': 'written this turn (added or overwritten cannot be told apart)',
   'chat.turnEdits.kindAria.add': 'added',
   'chat.turnEdits.kindAria.delete': 'deleted',
+  // Numbers are tiered by what the call proves: an exact replaced range gives +X −Y;
+  // knowing only the new content gives "wrote N lines" (no −, the old content is unknown).
+  'chat.turnEdits.written': 'wrote {n} lines',
+  'chat.turnEdits.scope.diff': '+X −Y sums only the {a} of {b} files whose replaced range could be counted',
+  'chat.turnEdits.scope.written': '"wrote N lines" is the new content line count (the old content is unknown, so there is no −)',
+  'chat.turnEdits.scope.unknown': '{n} more files have no line count',
   'chat.turnEdits.empty': 'No file changes this turn',
   'chat.turnEdits.emptySub': 'No files were added, changed or deleted',
   'chat.turnEdits.more': '{n} more files…',

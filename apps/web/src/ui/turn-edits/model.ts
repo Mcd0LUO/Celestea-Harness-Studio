@@ -2,29 +2,30 @@
 // ui/turn-edits/model.ts — 「本轮编辑」的**纯模型**（W9334）
 // ----------------------------------------------------------------------------
 // 本模块零 DOM / 零网络 / 零 i18n 运行时：只做「工具调用 → 行」「行 → 聚合 /
-// 折叠窗口」的判定。于是阈值、双向折叠、聚合口径、空态、平台门控这些**后果**
-// 都能用真值表钉死（铁律 11：断言只许守后果，不许守机制），而不必去钉某个 `56px`
-// 或 `position: fixed`。
+// 折叠窗口」的判定。于是阈值、双向折叠、聚合口径、可知性分级、空态、平台门控这些
+// **后果**都能用真值表钉死（铁律 11：断言只许守后果，不许守机制）。
 //
 // 行为规格：apps/web/prototype/turn-edits.html（联调定稿的 11 条）。
 //
-// ★ 数字的诚实边界（本组件最容易被「为了让数字好看而假装」的地方）：
-//   来源是**本轮的工具调用**（方案 A）。`write_file` 的参数是「整份新内容」，
-//   它**给不出**旧内容 ⇒ 给不出 diffstat：
-//     · 文件原来存不存在：不知道 ⇒ 因此**不**敢把一行写成 `M`（修改）或 `A`（新增）；
-//     · 新增/删除行数：不知道 ⇒ `add` / `del` 一律 `null`（= 本来源不知道），
-//       渲染层对 `null` 的处理是**整块不出现**（宁可不说，也不说一个偏小的数）——
-//       与插件页「没有可调项就不伪造控件」同一条纪律。
-//   行的 `+X −Y` 与标题右侧的聚合**有完整实现**（合成行下可断言），只是在当前来源
-//   下确实拿不到数字时才沉默。唯一的例外是可证明的一类：同一轮内**第二次**写同一个
-//   路径 ⇒ 该文件一定已存在（前一次写的）⇒ 那一行是**可证明的覆盖**，记 `edit`(M)。
+// ★ 数字的诚实口径（W9334 返工，主会话裁定）：
+//   前一轮把 `write_file` 的行数一律记成「不知道」⇒ 卡片上**一个数字都没有**。
+//   那不是诚实，是**把知道的也说成不知道**（信息量归零）。现在按**可知多少**分三档：
 //
-// ★ 覆盖边界（方案 A 已拍板）：本模型只看得见 `write_file`（模型直接可用的**唯一**
-//   写文件工具）。`run_shell` / `run_code` **也可能**改了文件，它看不见 —— 所以：
+//     ① **精确区间**（args 里有 `old_string` / `new_string`）⇒ `+add −del` 都给，
+//        数值是**这次替换的区间**，不是整文件 diff（口径写在页脚的可见附注里）；
+//     ② **只知新内容**（`write_file` 的 `content`）⇒ 「写入 N 行」：新内容的行数**是可知的**，
+//        而**旧内容不可知** ⇒ 不给 `−`（定稿的 `A` 行本来就是「只有 +、没有 −」）；
+//     ③ 三样都不知道（形状不认识 / 内容不是字符串）⇒ 留空，并且在页脚**如实说留空的是什么**。
+//
+//   行字母回到定稿的 `M` / `A` / `D`（颜色本身就是语义：M 中性、A 绿、D 红）。
+//   `write_file` 是「创建或覆盖」，**分不出** A / M ⇒ 记中性的 `M`，口径写在行标记的
+//   title / aria-label 上（不再自造第四种字母 —— 那是静默改掉联调定稿，已改正）。
+//
+// ★ 覆盖边界（方案 A 已拍板）：本模型只看得见**直接写文件**的工具调用。
+//   `run_shell` / `run_code` **也可能**改了文件，它看不见 —— 所以：
 //     · 标题只说「本轮改动 N 个文件」，**不**声称是全集；
 //     · 一旦本轮有 shell/code 调用，就附一行「另有 N 个调用可能改动了文件」。
-//   反过来：`hidden === 0` 时这份清单在**当前工具面**下就是完整的（没有别的直接
-//   写文件工具），这一点由 [editsOf] 的返回值如实表达，不需要额外声明。
+//   反过来：`hidden === 0` 时这份清单在**当前工具面**下就是完整的，不需要额外声明。
 // ============================================================================
 import type { Key } from '../../i18n';
 
@@ -35,36 +36,37 @@ export const TURN_EDITS_ID = 'display.turnEdits';
 export const TURN_EDITS_THRESHOLD_KEY = 'threshold';
 export const TURN_EDITS_DEFAULT_THRESHOLD = 5;
 
-/**
- * 行的种类。
- *   · `write`  —— 写入了该文件，但**新增还是覆盖不可知**（来源只给整份内容）；
- *   · `edit`   —— **可证明**的覆盖（同一轮内该路径已被写过一次）；
- *   · `add` / `delete` —— 需要来源能分辨「原来有没有这份文件」；当前来源给不出，
- *                 但渲染层必须支持（聚合口径里删除的文件也算进去）。
- */
-export type TurnEditKind = 'write' | 'edit' | 'add' | 'delete';
+/** 行的种类（定稿的三种；字母见 [KIND_LETTER]）。 */
+export type TurnEditKind = 'edit' | 'add' | 'delete';
 
-/** 一行 = 一个**文件**（同一路径被写多次仍是一行，不按调用次数重复计）。 */
+/**
+ * 一行 = 一个**文件**（同一路径被写多次仍是一行，不按调用次数重复计）。
+ *
+ * 三个数字字段**互斥**地表达「这一次调用能证明什么」（见文件头的三档）：
+ *   · `add` / `del` 都有值 ⇒ ①精确区间；
+ *   · `written` 有值       ⇒ ②只知新内容行数（`write_file` 型）；
+ *   · 三者都 `null`        ⇒ ③确实一无所知（页脚会如实说）。
+ */
 export interface TurnEditRow {
   kind: TurnEditKind;
   path: string;
-  /** 新增行数；`null` = 本来源不知道（**不猜**，见文件头）。 */
+  /** 替换区间的新增行数；`null` = 算不出。 */
   add: number | null;
-  /** 删除行数；`null` = 本来源不知道。 */
+  /** 替换区间的删除行数；`null` = 算不出（**旧内容不可知**时不硬凑一个 0）。 */
   del: number | null;
+  /** 只知道「新内容有多少行」时的行数；`null` = 不知道。 */
+  written: number | null;
 }
 
-/** 行的字母标记（定稿的字形集：M/A/D；`write` 补一个诚实的 W，见文件头）。 */
+/** 行的字母标记（定稿的字形集：M 中性 / A 绿 / D 红 —— 颜色就是语义）。 */
 export const KIND_LETTER: Record<TurnEditKind, string> = {
-  write: 'W',
   edit: 'M',
   add: 'A',
   delete: 'D',
 };
 
-/** 行的字母 → 无障碍名（读屏念「W」没有意义，念「写入」才有）。 */
+/** 行的字母 → 无障碍名（读屏念「M」没有意义，念一句话才有）。 */
 export const KIND_ARIA_KEY: Record<TurnEditKind, Key> = {
-  write: 'chat.turnEdits.kindAria.write',
   edit: 'chat.turnEdits.kindAria.edit',
   add: 'chat.turnEdits.kindAria.add',
   delete: 'chat.turnEdits.kindAria.delete',
@@ -72,55 +74,148 @@ export const KIND_ARIA_KEY: Record<TurnEditKind, Key> = {
 
 /** 副标题里的构成词（只有非零项才出现）。 */
 export const KIND_LABEL_KEY: Record<TurnEditKind, Key> = {
-  write: 'chat.turnEdits.kind.write',
   edit: 'chat.turnEdits.kind.edit',
   add: 'chat.turnEdits.kind.add',
   delete: 'chat.turnEdits.kind.delete',
 };
 
-/** 构成的展示顺序（定稿：编辑 · 新增 · 删除；`write` 排在最前，它是「写入」这一大类）。 */
-export const KIND_ORDER: readonly TurnEditKind[] = ['write', 'edit', 'add', 'delete'];
+/** 构成的展示顺序（定稿：编辑 · 新增 · 删除）。 */
+export const KIND_ORDER: readonly TurnEditKind[] = ['edit', 'add', 'delete'];
 
-/** 本模型看得见的**唯一**写文件工具。 */
+/** 本模型看得见的**唯一**直接写文件工具（创建或覆盖）。 */
 export const TURN_EDIT_TOOL = 'write_file';
+
+/** 只会**创建**的工具名（给出 `A`）。当前工具面里没有；认得出就用 —— 不猜。 */
+export const CREATE_TOOLS: ReadonlySet<string> = new Set(['create_file', 'new_file']);
+
+/** 只会**删除**的工具名（给出 `D`）。同上。 */
+export const DELETE_TOOLS: ReadonlySet<string> = new Set(['delete_file', 'remove_file']);
 
 /** 可能改了文件、但本模型看不见的工具（方案 A 的已知边界）。 */
 export const BLIND_TOOLS: ReadonlySet<string> = new Set(['run_shell', 'run_code']);
 
+/** 正文字符串 → 行数（末行没有换行也算一行；空串 = 0 行）。 */
+export function linesOf(text: string): number {
+  if (text === '') return 0;
+  const body = text.endsWith('\n') ? text.slice(0, -1) : text;
+  return body === '' ? 1 : body.split('\n').length;
+}
+
 /** 一次工具调用的事实（调用帧给 name/args，结果帧给 ok）。 */
 export interface TurnCallFact {
   name: string;
-  /** `write_file` 的目标路径（取不到 = null：没有路径就无从统计）。 */
-  path: string | null;
+  args: unknown;
   /** 结果：`true` 成功 / `false` 失败 / `null` 结果还没到（不算已改动）。 */
   ok: boolean | null;
 }
 
-/** 取 `write_file` 类调用的目标路径（非字符串/空白一律 null —— 不猜）。 */
+function str(v: unknown): string | null {
+  return typeof v === 'string' ? v : null;
+}
+
+/** 调用的目标路径（非字符串/空白一律 null —— 不猜）。 */
 export function pathArgOf(name: string, args: unknown): string | null {
-  if (name !== TURN_EDIT_TOOL) return null;
   if (args === null || typeof args !== 'object') return null;
+  if (name !== TURN_EDIT_TOOL && !CREATE_TOOLS.has(name) && !DELETE_TOOLS.has(name)) return null;
   const p = (args as { path?: unknown }).path;
   return typeof p === 'string' && p.trim() !== '' ? p : null;
 }
 
-/** 工具调用 → 行（纯函数；同一路径只出一行，且**只有成功的结果**才算改动了文件）。 */
+/** 一次调用能证明的「数字」：精确区间 / 只知新内容 / 不知道。 */
+export interface ProvenNumbers {
+  add: number | null;
+  del: number | null;
+  written: number | null;
+}
+
+const NOTHING: ProvenNumbers = { add: null, del: null, written: null };
+
+/** 把若干次替换（`old_string` → `new_string`）折成区间合计；一次都没给出 ⇒ null。 */
+function replaceNumbers(pairs: readonly { old: string; next: string }[]): ProvenNumbers {
+  if (pairs.length === 0) return NOTHING;
+  let add = 0;
+  let del = 0;
+  for (const p of pairs) {
+    add += linesOf(p.next);
+    del += linesOf(p.old);
+  }
+  return { add, del, written: null };
+}
+
+/** 从 `edits: [{old_string,new_string}, …]` 里取出全部替换对（形状不认识 ⇒ 空）。 */
+function editPairs(list: unknown): { old: string; next: string }[] {
+  if (!Array.isArray(list)) return [];
+  const out: { old: string; next: string }[] = [];
+  for (const item of list) {
+    if (item === null || typeof item !== 'object') continue;
+    const old = str((item as { old_string?: unknown }).old_string);
+    const next = str((item as { new_string?: unknown }).new_string);
+    if (old !== null && next !== null) out.push({ old, next });
+  }
+  return out;
+}
+
+/**
+ * 一次调用能算出什么（**只认能证明的形状**，不认识的一律「不知道」）。
+ *
+ * 认得的形状（三种，都有真实来源）：
+ *   · `path` + `content`                          ⇒ 写入 N 行（`write_file` / `create_file`）
+ *   · `path` + `old_string` + `new_string`        ⇒ 精确区间（替换型工具）
+ *   · `path` + `edits:[{old_string,new_string}]`  ⇒ 多段替换的区间合计
+ * 注意：替换型工具的 `new_string` 只是**这次替换的新片段**，不是整文件 ⇒ 数值口径
+ * 是「本次替换的区间」（页脚会写明），绝不冒充整文件 diff。
+ */
+export function numbersOf(name: string, args: unknown): ProvenNumbers {
+  if (args === null || typeof args !== 'object') return NOTHING;
+  if (DELETE_TOOLS.has(name)) return NOTHING; // 删了什么内容，调用参数里没有 ⇒ 不知道
+  const rec = args as Record<string, unknown>;
+  const multi = editPairs(rec['edits']);
+  if (multi.length > 0) return replaceNumbers(multi);
+  const old = str(rec['old_string']);
+  const next = str(rec['new_string']);
+  if (old !== null && next !== null) return replaceNumbers([{ old, next }]);
+  const content = str(rec['content']);
+  if (content !== null) return { add: null, del: null, written: linesOf(content) };
+  return NOTHING;
+}
+
+/**
+ * 工具调用 → 行（纯函数；同一路径只出一行，且**只有成功的结果**才算改动了文件）。
+ *
+ * 字母口径（定稿的三档）：
+ *   · `delete` 型工具 ⇒ `D`；`create` 型工具 ⇒ `A`；
+ *   · 同一轮内**第二次**写同一路径 ⇒ `edit`（第一次已把文件写出来 ⇒ 可证明是覆盖）；
+ *   · 其余（`write_file` 的创建或覆盖）⇒ `edit`（中性档 M；分不出 A/M，就不假装分得出）。
+ */
 export function editsOf(calls: readonly TurnCallFact[]): { rows: TurnEditRow[]; hidden: number } {
   const rows: TurnEditRow[] = [];
   const seen = new Map<string, TurnEditRow>();
   let hidden = 0;
   for (const c of calls) {
     if (BLIND_TOOLS.has(c.name)) hidden += 1; // 可能改了文件：照实计数（不看成败）
-    if (c.ok !== true || c.path === null) continue;
-    const prev = seen.get(c.path);
+    if (c.ok !== true) continue;
+    const path = pathArgOf(c.name, c.args);
+    if (path === null) continue;
+    const n = numbersOf(c.name, c.args);
+    const prev = seen.get(path);
     if (prev === undefined) {
-      const row: TurnEditRow = { kind: 'write', path: c.path, add: null, del: null };
-      seen.set(c.path, row);
+      const kind: TurnEditKind = DELETE_TOOLS.has(c.name) ? 'delete' : CREATE_TOOLS.has(c.name) ? 'add' : 'edit';
+      const row: TurnEditRow = { kind, path, ...n };
+      seen.set(path, row);
       rows.push(row);
       continue;
     }
     // 同一轮内第二次落笔 ⇒ 第一次已把文件写出来 ⇒ 这次是**可证明的覆盖**（M 成立）。
-    prev.kind = 'edit';
+    prev.kind = DELETE_TOOLS.has(c.name) ? 'delete' : 'edit';
+    if (n.add !== null && n.del !== null) {
+      prev.add = (prev.add ?? 0) + n.add;
+      prev.del = (prev.del ?? 0) + n.del;
+      prev.written = null;
+    } else if (n.written !== null) {
+      prev.written = (prev.written ?? 0) + n.written;
+      prev.add = null;
+      prev.del = null;
+    }
   }
   return { rows, hidden };
 }
@@ -129,25 +224,51 @@ export function editsOf(calls: readonly TurnCallFact[]): { rows: TurnEditRow[]; 
 export interface TurnEditTotals {
   files: number;
   counts: Record<TurnEditKind, number>;
-  /** 行数合计；`null` = 有行给不出数字 ⇒ 整块聚合不出现（不显示一个偏小的数）。 */
+  /** 精确区间合计：只对**能算出**的那些行求和（一行都算不出 ⇒ null）。 */
   add: number | null;
   del: number | null;
+  /** 参与上面那个合计的行数（页脚要用它写口径）。 */
+  exactRows: number;
+  /** 「写入 N 行」合计（只知新内容的那些行）；一行都没有 ⇒ null。 */
+  written: number | null;
+  writtenRows: number;
+  /** 三样都不知道的行数（页脚要如实说「另有 N 行给不出行数」）。 */
+  unknownRows: number;
 }
 
 export function totalsOf(rows: readonly TurnEditRow[]): TurnEditTotals {
-  const counts: Record<TurnEditKind, number> = { write: 0, edit: 0, add: 0, delete: 0 };
+  const counts: Record<TurnEditKind, number> = { edit: 0, add: 0, delete: 0 };
   let add = 0;
   let del = 0;
-  let known = rows.length > 0;
+  let exactRows = 0;
+  let written = 0;
+  let writtenRows = 0;
+  let unknownRows = 0;
   for (const r of rows) {
     counts[r.kind] += 1;
-    if (r.add === null || r.del === null) known = false;
-    else {
+    if (r.add !== null && r.del !== null) {
       add += r.add;
       del += r.del;
+      exactRows += 1;
+      continue;
     }
+    if (r.written !== null) {
+      written += r.written;
+      writtenRows += 1;
+      continue;
+    }
+    unknownRows += 1;
   }
-  return { files: rows.length, counts, add: known ? add : null, del: known ? del : null };
+  return {
+    files: rows.length,
+    counts,
+    add: exactRows > 0 ? add : null,
+    del: exactRows > 0 ? del : null,
+    exactRows,
+    written: writtenRows > 0 ? written : null,
+    writtenRows,
+    unknownRows,
+  };
 }
 
 /** 副标题的构成项（非零才列；顺序见 [KIND_ORDER]）。 */

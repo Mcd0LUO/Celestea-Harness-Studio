@@ -1,12 +1,17 @@
 // ============================================================================
-// ui/turn-edits/card.ts — 「本轮编辑」卡片的 DOM 层（W9334）
+// ui/turn-edits/card.ts — 「本轮编辑」卡片的 **DOM 结构 + 渲染**（W9334）
 // ----------------------------------------------------------------------------
-// 行为规格：apps/web/prototype/turn-edits.html（联调定稿的 11 条）。本模块只管
-// **长什么样 + 点了会怎样**；数据与折叠口径在 ./model.ts（纯函数，可断言）。
+// 行为规格：apps/web/prototype/turn-edits.html（联调定稿的 11 条）。分工：
+//   · ./model.ts —— 数据与口径（纯函数，可断言）；
+//   · ./interact.ts —— **点了会怎样**（菜单 / 折叠 / 复制 / 打开，含键盘路径）；
+//   · 本模块 —— **长什么样**（表头 / 文件行 / 页脚 + 增强遍入口）。
+// （W9334 返工：数字三档与口径附注把本文件顶到 456 行 ⇒ 按本仓纪律**拆分**，
+//   不是去模块体积例外表登记一个新上限。）
 //
 // 三条纪律：
 //   · 颜色只用 token（`--c-*` / `--mono` / `--card-radius` / `--shadow-panel` /
-//     `--tap-hit`）—— 组件层零硬编码颜色（见 grants.css 的头注）；
+//     `--tap-hit`）—— 组件层零硬编码颜色（见 grants.css 的头注）；字母的颜色就是语义
+//     （M 中性 / A 绿 / D 红），色值由主题决定（与原型逐字同色的是 claude 主题）；
 //   · 装饰性图标一律来自 ui/icons.ts（含 chevron —— 方向靠 CSS transform，**不用**
 //     Unicode 字形 `▾▸▴`：那些来自系统字体，字重与基线和描边图标对不上）；
 //   · 它是**显示组件**：本体是一个增强遍（`display.turnEdits`），关掉插件 ⇒ 它不在
@@ -20,9 +25,8 @@
 import { el } from '../../utils/dom';
 import { t } from '../../i18n';
 import { iconSvg } from '../icons';
-import { openFilePreview } from '../workbench/files-open';
-import { resolveTarget } from '../enhance/file-link';
 import type { Enhancer } from '../enhance/registry';
+import { bindCardInteractions, type CardState } from './interact';
 import {
   breakdownOf,
   canReveal,
@@ -30,7 +34,6 @@ import {
   KIND_ARIA_KEY,
   KIND_LABEL_KEY,
   KIND_LETTER,
-  revealPath,
   splitPath,
   TURN_EDITS_ID,
   turnEditsThreshold,
@@ -44,21 +47,6 @@ const CHEVRON = (dir: 'down' | 'right' | 'up'): string => iconSvg('chevron-fold'
 
 /** 主图标 = 文档轮廓（空态用**同一个轮廓**、只降色，见定稿第 7 条）。 */
 const DOC_ICON = iconSvg('file', { size: 16 });
-
-/** 复制路径后提示的停留时长（ms）。 */
-const TOAST_MS = 1600;
-
-/** 一张卡的本地状态（按**列节点**记账：同一列被反复增强时状态不丢）。 */
-interface CardState {
-  rows: TurnEditRow[];
-  /** 「另有 N 个调用可能改动了文件」的 N（0 = 不出现）。 */
-  shellish: number;
-  /** 整卡折叠（表头按钮）。 */
-  folded: boolean;
-  /** 二次展开：越过阈值显示全部。 */
-  expanded: boolean;
-  toastTimer: number | null;
-}
 
 const cards = new WeakMap<Element, CardState>();
 
@@ -75,53 +63,25 @@ export function turnEditsStateOf(col: Element): CardState | null {
   return cards.get(col) ?? null;
 }
 
-// ---- 动作 ------------------------------------------------------------------
-
-/** 复制文本：clipboard 不可用时走 textarea 回退；两条都失败 ⇒ **如实**报 false。 */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return legacyCopy(text);
-  }
-}
-
-/** 回退复制（老浏览器 / 非安全上下文 / jsdom）。失败如实返回 false，不假装成功。 */
-function legacyCopy(text: string): boolean {
-  const doc = document;
-  const ta = doc.createElement('textarea');
-  ta.value = text;
-  ta.setAttribute('readonly', '');
-  doc.body.appendChild(ta);
-  ta.select();
-  let ok = false;
-  try {
-    // execCommand 在部分环境里根本不存在 —— 取不到就是「复制不了」，不是「复制成功」。
-    ok = typeof doc.execCommand === 'function' && doc.execCommand('copy') === true;
-  } catch {
-    ok = false;
-  }
-  ta.remove();
-  return ok;
-}
-
-/** 「打开」= 与正文里的文件路径**同一个出口**（resolveTarget + openFilePreview）。 */
-function openRow(path: string): void {
-  const abs = resolveTarget(path);
-  if (abs === null) return; // 工作区根未知：宁可不打开，也不猜一个可能读不出来的绝对路径
-  openFilePreview(abs);
-}
-
 // ---- 渲染 ------------------------------------------------------------------
 
-function diffCell(row: TurnEditRow): HTMLElement | null {
-  // 两个数都不知道 ⇒ **不画这个格子**（`+0 −0` 会被读成「没有变化」，那是假话）。
-  if (row.add === null && row.del === null) return null;
-  const box = el('span', 'te-diff');
-  if (row.add !== null && row.add > 0) box.appendChild(el('b', 'te-add', '+' + row.add));
-  if (row.del !== null && row.del > 0) box.appendChild(el('b', 'te-del', '−' + row.del));
-  return box;
+/**
+ * 行右侧的数字格 —— **按可知多少分三档**（见 model.ts 的文件头）：
+ *   ① 精确区间 ⇒ `+add −del`（mono；加绿减红 —— 与定稿同色）；
+ *   ② 只知新内容 ⇒ 「写入 N 行」（次级文字色：它**不是** diffstat，不给 +/− 号）；
+ *   ③ 三样都不知道 ⇒ 不画这个格子（`+0 −0` 会被读成「没有变化」，那是假话）。
+ */
+function numCell(row: TurnEditRow): HTMLElement | null {
+  if (row.add !== null && row.del !== null) {
+    const box = el('span', 'te-diff');
+    if (row.add > 0) box.appendChild(el('b', 'te-add', '+' + row.add));
+    if (row.del > 0) box.appendChild(el('b', 'te-del', '−' + row.del));
+    return box;
+  }
+  if (row.written !== null) {
+    return el('span', 'te-diff is-written', t('chat.turnEdits.written', { n: row.written }));
+  }
+  return null;
 }
 
 function pathCell(path: string): HTMLElement {
@@ -150,12 +110,13 @@ function buildRow(row: TurnEditRow): HTMLElement {
   li.dataset['path'] = row.path;
   const kind = el('span', 'te-kind', KIND_LETTER[row.kind]);
   kind.dataset['k'] = row.kind;
-  // 字母是给眼睛的缩略；读屏念「W」没有意义 —— 用一句话给它一个可访问名。
+  // 字母是给眼睛的缩略（M 中性 / A 绿 / D 红，颜色就是语义）；
+  // 读屏念「M」没有意义 —— 用一句话给它一个可访问名，并把 M 的口径写在 title 上。
   kind.setAttribute('title', t(KIND_ARIA_KEY[row.kind]));
   kind.setAttribute('aria-label', t(KIND_ARIA_KEY[row.kind]));
   li.appendChild(kind);
   li.appendChild(pathCell(row.path));
-  const diff = diffCell(row);
+  const diff = numCell(row);
   if (diff !== null) li.appendChild(diff);
   // 行动作：主按钮「打开」+ 下拉箭头（箭头**保留**；默认动作 = 打开）。
   const acts = el('span', 'te-acts');
@@ -180,6 +141,19 @@ function buildRow(row: TurnEditRow): HTMLElement {
   acts.appendChild(menu);
   li.appendChild(acts);
   return li;
+}
+
+/**
+ * 口径说明（写在聚合的 title / aria-label 上，**可见的同款在页脚**）：说清每个数字
+ * 统计的是哪几行、以及什么没被算进来。不知道的不冒充知道，也不把知道的藏起来。
+ */
+function scopeText(totals: ReturnType<typeof totalsOf>): string {
+  const parts: string[] = [];
+  if (totals.add !== null && totals.del !== null) {
+    parts.push(t('chat.turnEdits.scope.diff', { a: totals.exactRows, b: totals.files }));
+  }
+  if (totals.written !== null) parts.push(t('chat.turnEdits.scope.written'));
+  return parts.join(' ');
 }
 
 function buildHead(state: CardState, totals: ReturnType<typeof totalsOf>, empty: boolean): HTMLElement {
@@ -210,12 +184,22 @@ function buildHead(state: CardState, totals: ReturnType<typeof totalsOf>, empty:
   head.appendChild(text);
   if (empty) return head; // 空态：**去掉折叠按钮与聚合**（定稿第 7 条）
   head.appendChild(el('div', 'te-spacer'));
-  // 聚合：按**全量**算（不随折叠变化）；有行给不出数字时整块不出现。
+  // 聚合：按**全量**算（不随折叠变化）。**已知多少就聚多少**：
+  //   · 精确区间合计 ⇒ `+X −Y`（只统计能算出区间的那几行）；
+  //   · 只知新内容的那些行 ⇒ 「写入 N 行」；
+  // 两块各自都带口径（title / aria-label + 页脚的可见附注），不混成一个假数字。
+  const stats = el('div', 'te-sum');
   if (totals.add !== null && totals.del !== null) {
-    const sum = el('div', 'te-sum');
-    sum.appendChild(el('b', 'te-add', '+' + totals.add));
-    sum.appendChild(el('b', 'te-del', '−' + totals.del));
-    head.appendChild(sum);
+    stats.appendChild(el('b', 'te-add', '+' + totals.add));
+    stats.appendChild(el('b', 'te-del', '−' + totals.del));
+  }
+  if (totals.written !== null) {
+    stats.appendChild(el('span', 'te-written', t('chat.turnEdits.written', { n: totals.written })));
+  }
+  if (stats.childElementCount > 0) {
+    stats.title = scopeText(totals);
+    stats.setAttribute('aria-label', scopeText(totals));
+    head.appendChild(stats);
   }
   const fold = el('button', 'te-fold') as HTMLButtonElement;
   fold.type = 'button';
@@ -227,7 +211,7 @@ function buildHead(state: CardState, totals: ReturnType<typeof totalsOf>, empty:
   return head;
 }
 
-function buildFoot(state: CardState, w: ReturnType<typeof foldWindow>): HTMLElement {
+function buildFoot(state: CardState, w: ReturnType<typeof foldWindow>, totals: ReturnType<typeof totalsOf>): HTMLElement {
   const foot = el('div', 'te-foot');
   if (w.hidden > 0) {
     const more = el('button', 'te-more') as HTMLButtonElement;
@@ -243,6 +227,16 @@ function buildFoot(state: CardState, w: ReturnType<typeof foldWindow>): HTMLElem
     less.appendChild(el('span', null, t('chat.turnEdits.collapse')));
     less.insertAdjacentHTML('beforeend', CHEVRON('up'));
     foot.appendChild(less);
+  }
+  // 数字口径：**能看见**地说清每个数字统计的是哪几行、什么没被算进来。
+  if (totals.add !== null && totals.del !== null) {
+    foot.appendChild(el('span', 'te-note', t('chat.turnEdits.scope.diff', { a: totals.exactRows, b: totals.files })));
+  }
+  if (totals.written !== null) {
+    foot.appendChild(el('span', 'te-note', t('chat.turnEdits.scope.written')));
+  }
+  if (totals.unknownRows > 0) {
+    foot.appendChild(el('span', 'te-note', t('chat.turnEdits.scope.unknown', { n: totals.unknownRows })));
   }
   if (state.shellish > 0) {
     foot.appendChild(el('span', 'te-note', t('chat.turnEdits.otherCalls', { n: state.shellish })));
@@ -273,100 +267,12 @@ export function renderTurnEditsColumn(col: HTMLElement): void {
     for (const row of visibleRows(state.rows, w)) list.appendChild(buildRow(row));
     card.appendChild(list);
   }
-  const foot = buildFoot(state, empty ? { shown: 0, hidden: 0, canCollapse: false } : w);
-  // 空态且没有附注时不必挂页脚（页脚只承载「还有 N 个」/「收起」/附注/提示）。
-  if (!empty || state.shellish > 0 || foot.childElementCount > 1) card.appendChild(foot);
-  card.addEventListener('click', (ev) => onCardClick(col, state, card, ev));
-  card.addEventListener('keydown', (ev) => onCardKeydown(card, ev));
+  const foot = buildFoot(state, empty ? { shown: 0, hidden: 0, canCollapse: false } : w, totals);
+  // 空态且没有附注时不必挂页脚（页脚只承载「还有 N 个」/「收起」/口径附注/提示）。
+  if (!empty || foot.childElementCount > 1) card.appendChild(foot);
+  // 交互归 ./interact.ts；重画回调注入 ⇒ 那边不 import 本模块（不成环）。
+  bindCardInteractions(state, card, () => renderTurnEditsColumn(col));
   col.replaceChildren(card);
-}
-
-// ---- 交互 ------------------------------------------------------------------
-
-function toastOf(card: HTMLElement): HTMLElement | null {
-  return card.querySelector<HTMLElement>('.te-toast');
-}
-
-function toast(state: CardState, card: HTMLElement, text: string, failed = false): void {
-  const box = toastOf(card);
-  if (box === null) return;
-  box.textContent = text;
-  // 「复制失败」不得用成功色印出来 —— 失败是失败。
-  box.classList.toggle('is-err', failed);
-  if (state.toastTimer !== null) window.clearTimeout(state.toastTimer);
-  state.toastTimer = window.setTimeout(() => {
-    state.toastTimer = null;
-    if (box.isConnected) box.textContent = '';
-  }, TOAST_MS);
-}
-
-function closeMenus(card: HTMLElement): void {
-  for (const row of Array.from(card.querySelectorAll('.te-row.is-menu-open'))) {
-    row.classList.remove('is-menu-open');
-    row.querySelector('.te-caret')?.setAttribute('aria-expanded', 'false');
-  }
-}
-
-function openMenu(row: Element, caret: Element): void {
-  row.classList.add('is-menu-open');
-  caret.setAttribute('aria-expanded', 'true');
-  row.querySelector<HTMLElement>('.te-menu-item')?.focus();
-}
-
-function rowPathOf(node: Element | null): string {
-  return node?.closest('.te-row')?.getAttribute('data-path') ?? '';
-}
-
-async function onCardClick(col: HTMLElement, state: CardState, card: HTMLElement, ev: Event): Promise<void> {
-  const target = ev.target as Element | null;
-  const btn = target?.closest<HTMLElement>('[data-act]') ?? null;
-  if (btn === null) {
-    closeMenus(card); // 点空白 = 收起菜单
-    return;
-  }
-  const act = btn.dataset['act'];
-  if (act === 'fold') {
-    state.folded = !state.folded;
-    renderTurnEditsColumn(col);
-    return;
-  }
-  if (act === 'expand' || act === 'collapse') {
-    state.expanded = act === 'expand';
-    renderTurnEditsColumn(col);
-    return;
-  }
-  if (act === 'menu') {
-    const row = btn.closest('.te-row');
-    const open = row?.classList.contains('is-menu-open') === true;
-    closeMenus(card);
-    if (row !== null && !open) openMenu(row, btn);
-    return;
-  }
-  const path = rowPathOf(btn);
-  if (path === '') return;
-  closeMenus(card);
-  if (act === 'open') {
-    openRow(path);
-    return;
-  }
-  if (act === 'reveal') {
-    // 菜单里出现它 = 平台支持 **且** 宿主提供了动作（见 model 的 canReveal）；
-    // 真到执行时能力没了 ⇒ 如实说「不可用」，绝不当成功。
-    if (!revealPath(path)) toast(state, card, t('chat.turnEdits.revealUnavailable'), true);
-    return;
-  }
-  if (act === 'copy') {
-    const ok = await copyText(path);
-    toast(state, card, ok ? t('chat.turnEdits.copied') : t('chat.turnEdits.copyFailed'), !ok);
-  }
-}
-
-function onCardKeydown(card: HTMLElement, ev: KeyboardEvent): void {
-  if (ev.key !== 'Escape') return;
-  const open = card.querySelector('.te-row.is-menu-open');
-  if (open === null) return;
-  closeMenus(card);
-  open.querySelector<HTMLElement>('.te-caret')?.focus();
 }
 
 // ---- 增强遍 -----------------------------------------------------------------

@@ -27,7 +27,7 @@ import { runEnhancers } from '../enhance';
 import { autoscroll } from '../messages/scroll';
 import { onBusyChange, paneOf, type SessionPane } from '../viewctx';
 import { clearTurnEditsCards, createTurnEditsColumn, refreshTurnEditsCards, turnEditsStateOf } from './card';
-import { editsOf, pathArgOf, shouldShowCard, TURN_EDITS_ID, type TurnCallFact } from './model';
+import { editsOf, shouldShowCard, TURN_EDITS_ID, type TurnCallFact } from './model';
 
 /** 一轮的账本：插入顺序 = 调用发生顺序（Map 保证）。 */
 interface Ledger {
@@ -45,10 +45,9 @@ function ledgerOf(ctx: SessionPane): Ledger {
   return led;
 }
 
-/** 工具调用帧：记下身份、目标路径（`write_file` 才有）与「结果未知」。 */
+/** 工具调用帧：记下身份、**原始参数**（数字要按参数形状判定，见 model 的 [numbersOf]）与「结果未知」。 */
 export function noteTurnToolCall(ctx: SessionPane, p: ToolPayload): void {
-  const name = String(p.name || 'tool');
-  ledgerOf(ctx).calls.set(String(p.id), { name, path: pathArgOf(name, p.args), ok: null });
+  ledgerOf(ctx).calls.set(String(p.id), { name: String(p.name || 'tool'), args: p.args, ok: null });
 }
 
 /**

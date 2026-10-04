@@ -1,14 +1,16 @@
 // @vitest-environment jsdom
 /**
- * W9334 验收（乙）：卡片本体 —— 结构 / 文案 / 阈值 / 空态 / 双向折叠 / 平台门控 /
- * 复制失败降级 / 插件门控 / **真 SSE 帧驱动的活路径**。
+ * W9334 验收（乙）：卡片本体 —— 结构 / 字母与颜色 / **数字的可知性三档** / 文案 / 阈值 /
+ * 空态 / 双向折叠 / 平台门控 / 复制失败降级 / 插件门控 / **真 SSE 帧驱动的活路径**。
  *
- * 铁律 11：本文件只守**后果**（用户看得见的东西：哪些行在、按钮在不在、点下去之后
- * 变成什么、失败时说的是不是「失败」），不钉实现（没有 56px、没有 position: fixed、
- * 没有内部函数名）。像素级排版（rtl 截断真的保住了文件名、命中区真的 ≥ --tap-hit）
- * jsdom **量不了** —— 属已知边界，写在交付报告里。
+ * 铁律 11：本文件守**后果**（用户看得见的东西：哪些行在、哪一档数字出现、点下去之后
+ * 变成什么、失败时说的是不是「失败」），不钉实现。两处例外都是**策略**：
+ *   · 零硬编码颜色（本仓明令）；
+ *   · 字母的颜色就是语义（主会话明确要求：M 中性 / A 绿 / D 红），且 jsdom 没有
+ *     样式计算 ⇒ 只能在源码层钉住那三条声明（真机截图是同一条的视觉证据）。
+ * 像素级排版（rtl 截断真的保住文件名、命中区真的 ≥ --tap-hit）由真机探针取证。
  *
- * 行为规格 = apps/web/prototype/turn-edits.html（联调定稿的 11 条）。
+ * 行为规格 = apps/web/prototype/turn-edits.html（联调定稿）。
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,6 +20,7 @@ import { at, click, doc, Ev, flush, resetHarness, WEB, type ElLike } from './lib
 const SESSION = 'ws/s1';
 const ID = 'display.turnEdits';
 const KEY = 'studio:client-plugins-changed';
+const CSS = join(WEB, 'src', 'styles', 'turn-edits.css');
 
 interface PaneLike { el: ElLike; id: string }
 interface ViewMod {
@@ -36,11 +39,9 @@ interface WireMod {
   noteTurnToolCall(ctx: unknown, p: unknown): void;
   noteTurnToolResult(ctx: unknown, p: unknown): void;
   settleTurnEdits(ctx: unknown): void;
-  turnEditsRowsOf(ctx: unknown): { rows: Array<{ kind: string; path: string }>; hidden: number };
 }
 interface CardMod {
   createTurnEditsColumn(rows: unknown[], shellish: number): ElLike;
-  turnEditsStateOf(col: unknown): { rows: unknown[] } | null;
 }
 interface ModelMod { setRevealCapability(cap: unknown): void; setTurnEditsThreshold(n: number): void }
 interface DictMod { localeDict(l: string): Record<string, string>; getLocale(): string }
@@ -61,6 +62,7 @@ const cols = (): ElLike[] => Array.from(doc.querySelectorAll('[data-turn-edits]'
 const card = (): ElLike | null => doc.querySelector('.te');
 const listRows = (): ElLike[] => Array.from(doc.querySelectorAll('.te-row'));
 const text = (sel: string): string => doc.querySelector(sel)?.textContent ?? '';
+const notes = (): string[] => Array.from(doc.querySelectorAll('.te-note')).map((n) => n.textContent ?? '');
 const menuLabels = (): string[] => Array.from(doc.querySelectorAll('.te-menu-item')).map((b) => b.textContent ?? '');
 const toast = (): string => text('.te-toast');
 
@@ -78,21 +80,20 @@ async function boot(): Promise<{ A: ApplyMod; W: WireMod; pane: PaneLike }> {
   return { A, W, pane };
 }
 
-/** 一次成功的写文件调用（调用帧 + 结果帧）。 */
-function write(W: WireMod, pane: PaneLike, id: string, path: string): void {
-  W.noteTurnToolCall(pane, { id, name: 'write_file', args: { path, content: 'x\n' } });
+/** 一次成功的写文件调用（调用帧 + 结果帧；内容行数**是可知的**）。 */
+function write(W: WireMod, pane: PaneLike, id: string, path: string, content = 'x\n'): void {
+  W.noteTurnToolCall(pane, { id, name: 'write_file', args: { path, content } });
   W.noteTurnToolResult(pane, { id, ok: true });
 }
 
-/** 合成行直接建列（用来钉「来源给不出数字」时那条渲染契约）。 */
-async function synthetic(rows: unknown[], shellish = 0): Promise<CardMod> {
+/** 合成行直接建列（用来钉「能算出区间」与「三样都不知道」那两档的渲染契约）。 */
+async function synthetic(rows: unknown[], shellish = 0): Promise<void> {
   const C = (await import(/* @vite-ignore */ at('ui/turn-edits/card.ts'))) as unknown as CardMod;
   const E = (await import(/* @vite-ignore */ at('ui/enhance/index.ts'))) as unknown as { runEnhancers(c: unknown): void };
   const host = doc.createElement('div') as ElLike;
   doc.body.appendChild(host);
   host.appendChild(C.createTurnEditsColumn(rows, shellish));
   E.runEnhancers(host);
-  return C;
 }
 
 function failClipboard(): void {
@@ -120,6 +121,14 @@ function pluginsChanged(): void {
   (globalThis as unknown as { dispatchEvent(e: unknown): void }).dispatchEvent(new Ev(KEY));
 }
 
+/** 样式表里某条选择器的声明块（颜色语义的**策略**断言用；见文件头）。 */
+function cssBlock(selector: string): string {
+  const css = readFileSync(CSS, 'utf8');
+  const at = css.indexOf(selector + ' {');
+  expect(at, '样式表里必须有 ' + selector).toBeGreaterThan(-1);
+  return css.slice(at, css.indexOf('}', at));
+}
+
 beforeEach(() => { resetHarness(); lastES = null; });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); doc.body.replaceChildren(); });
 
@@ -136,7 +145,7 @@ describe('W9334 乙-① 结构（DOM 层面可判的几何）', () => {
     expect(head.querySelector('.te-fold')?.getAttribute('aria-expanded'), '表头默认是展开的').toBe('true');
     expect(listRows()).toHaveLength(1);
     const r = listRows()[0] as ElLike;
-    expect(r.querySelector('.te-kind')?.textContent, '字母标记').toBe('W');
+    expect(r.querySelector('.te-kind')?.textContent, '字母标记').toBe('M');
     expect(r.querySelector('.te-path .te-file')?.textContent, '文件名单独成节点').toBe('sandbox.ts');
     expect(r.querySelector('.te-path .te-dir')?.textContent, '目录单独成节点').toBe('packages/core/src/');
     expect(r.querySelector('.te-open')?.textContent).toBe('打开');
@@ -156,31 +165,87 @@ describe('W9334 乙-① 结构（DOM 层面可判的几何）', () => {
     expect(svg.getAttribute('class'), '方向靠 class，不靠 Unicode 字形').toContain('is-down');
     expect(doc.body.innerHTML, '不得出现 ▾▸▴ 这类系统字体字形').not.toMatch(/[▾▸▴]/);
   });
+});
 
-  it('合成行：M/A/D 三种字母与每行 +X −Y 都画得出来（人给得出数字时）', async () => {
-    await boot();
-    await synthetic([
-      { kind: 'edit', path: 'a.ts', add: 5, del: 1 },
-      { kind: 'add', path: 'b.ts', add: 3, del: 0 },
-      { kind: 'delete', path: 'c.ts', add: 0, del: 46 },
-    ]);
-    expect(Array.from(doc.querySelectorAll('.te-kind')).map((k) => k.textContent)).toEqual(['M', 'A', 'D']);
-    const first = listRows()[0] as ElLike;
-    expect(first.querySelector('.te-diff')?.textContent, '该行 +X −Y').toBe('+5−1');
-    expect(text('.te-sum'), '表头聚合 = 全量').toBe('+8−47');
+describe('W9334 乙-② 字母：定稿的 M/A/D 与三档颜色（颜色就是语义）', () => {
+  it('M 中性 / A 绿 / D 红：三档选择器各自声明了对的 token', () => {
+    const edit = cssBlock('.te-kind[data-k="edit"]');
+    const add = cssBlock('.te-kind[data-k="add"]');
+    const del = cssBlock('.te-kind[data-k="delete"]');
+    expect(edit, 'M 中性色').toContain('color: var(--c-text-2)');
+    expect(add, 'A 绿（颜色就是「新增」的语义）').toContain('color: var(--c-ok)');
+    expect(del, 'D 红').toContain('color: var(--c-err)');
+    expect(add, 'A 的底色也得是绿的淡色，不能与 M 同底').not.toBe(edit);
+    expect(del, 'D 的底色不能与 M 同底').not.toBe(edit);
   });
 
-  it('来源给不出数字（方案 A 的可达路径）⇒ 每行与聚合**都不出现**，不写 +0 −0', async () => {
-    const { W, pane } = await boot();
-    write(W, pane, 'c1', 'a.ts');
-    W.settleTurnEdits(pane);
-    expect(doc.querySelector('.te-diff'), '行的数字块不出现').toBeNull();
-    expect(doc.querySelector('.te-sum'), '聚合块不出现（说一个偏小的数比不说更糟）').toBeNull();
-    expect(text('.te-sub'), '副标题仍然给构成').toContain('写入 1');
+  it('三种字母都画得出来；每行标记带一句话的可访问名（读屏念「M」没有意义）', async () => {
+    await boot();
+    await synthetic([
+      { kind: 'edit', path: 'a.ts', add: null, del: null, written: 9 },
+      { kind: 'add', path: 'b.ts', add: 3, del: 0, written: null },
+      { kind: 'delete', path: 'c.ts', add: 0, del: 46, written: null },
+    ]);
+    expect(Array.from(doc.querySelectorAll('.te-kind')).map((k) => k.textContent)).toEqual(['M', 'A', 'D']);
+    expect(Array.from(doc.querySelectorAll('.te-kind')).map((k) => k.getAttribute('data-k'))).toEqual(['edit', 'add', 'delete']);
+    const aria = (doc.querySelector('.te-kind') as ElLike).getAttribute('aria-label') ?? '';
+    expect(aria.length, 'M 的口径写在可访问名里').toBeGreaterThan(1);
+    expect(aria, 'M 的口径必须说清「新增还是覆盖不可分」').toContain('覆盖');
   });
 });
 
-describe('W9334 乙-② 文案：真实已本地化（不是 key、不是空串，两语不同）', () => {
+describe('W9334 乙-③ 数字的可知性三档：能算的算出来、只知新内容给「写入 N 行」、不知道才留空', () => {
+  it('精确区间 ⇒ 每行 +X −Y；只知新内容 ⇒ 「写入 N 行」（不给 −）', async () => {
+    await boot();
+    await synthetic([
+      { kind: 'edit', path: 'a.ts', add: 109, del: 23, written: null },
+      { kind: 'add', path: 'b.ts', add: 78, del: 0, written: null },
+      { kind: 'edit', path: 'c.ts', add: null, del: null, written: 12 },
+    ]);
+    const cells = Array.from(doc.querySelectorAll('.te-row .te-diff')).map((c) => c.textContent ?? '');
+    expect(cells[0], '精确区间：加绿减红').toBe('+109−23');
+    expect(cells[1], '定稿的 A 行只有 +、没有 −').toBe('+78');
+    expect(cells[2], '只知新内容 ⇒ 标注成「写入 N 行」，不冒充 diffstat').toBe('写入 12 行');
+    expect((doc.querySelectorAll('.te-row .te-diff')[2] as ElLike).getAttribute('class')).toContain('is-written');
+  });
+
+  it('真实来源（write_file）⇒ 每行都给得出「写入 N 行」（前一轮这里是空的，这正是返工点）', async () => {
+    const { W, pane } = await boot();
+    write(W, pane, 'c1', 'a.ts', 'x\ny\nz\n');
+    W.settleTurnEdits(pane);
+    expect(text('.te-row .te-diff'), 'content 的行数是可知的').toBe('写入 3 行');
+    expect(doc.querySelector('.te-sum')?.textContent, '表头也有数字（不再是一个数字都没有）').toBe('写入 3 行');
+  });
+
+  it('三样都不知道 ⇒ 这一行的数字格留空，且页脚**如实说留空的是什么**', async () => {
+    const { W, pane } = await boot();
+    W.noteTurnToolCall(pane, { id: 'c1', name: 'write_file', args: { path: 'a.ts' } }); // 形状不认识
+    W.noteTurnToolResult(pane, { id: 'c1', ok: true });
+    W.settleTurnEdits(pane);
+    expect(doc.querySelector('.te-row .te-diff'), '不知道就不画数字格').toBeNull();
+    expect(notes().join(' | '), '页脚必须说明「N 个文件给不出行数」').toContain('给不出行数');
+  });
+
+  it('表头把所有**已知**的合起来，并分别标注口径（不混成一个假数字）', async () => {
+    await boot();
+    await synthetic([
+      { kind: 'edit', path: 'a.ts', add: 10, del: 2, written: null },
+      { kind: 'edit', path: 'b.ts', add: 5, del: 1, written: null },
+      { kind: 'edit', path: 'c.ts', add: null, del: null, written: 40 },
+    ]);
+    const sum = doc.querySelector('.te-sum') as ElLike;
+    expect(sum.textContent, '精确区间合计 + 写入行数合计').toBe('+15−3写入 40 行');
+    expect(sum.querySelector('.te-add')?.textContent).toBe('+15');
+    expect(sum.querySelector('.te-del')?.textContent).toBe('−3');
+    expect(sum.querySelector('.te-written')?.textContent).toBe('写入 40 行');
+    expect(sum.title, '口径写在聚合的 title 上').toContain('替换区间');
+    const foot = notes().join(' | ');
+    expect(foot, '页脚可见地说明 +X −Y 统计了哪几行').toContain('2/3');
+    expect(foot, '页脚可见地说明「写入 N 行」是什么').toContain('旧内容不可知');
+  });
+});
+
+describe('W9334 乙-④ 文案：真实已本地化（不是 key、不是空串，两语不同）', () => {
   it('卡片上的每一句都等于当前语言字典里的那一句', async () => {
     const { W, pane } = await boot();
     const i18n = (await import(/* @vite-ignore */ at('i18n/index.ts'))) as unknown as DictMod;
@@ -190,12 +255,16 @@ describe('W9334 乙-② 文案：真实已本地化（不是 key、不是空串�
     W.noteTurnToolResult(pane, { id: 'c2', ok: true });
     W.settleTurnEdits(pane);
     expect(text('.te-title')).toBe((d['chat.turnEdits.title'] ?? '').replace('{n}', '1'));
-    expect(text('.te-sub')).toBe((d['chat.turnEdits.kind.write'] ?? '').replace('{n}', '1'));
-    expect(text('.te-note'), '看不见的调用如实附注').toBe((d['chat.turnEdits.otherCalls'] ?? '').replace('{n}', '1'));
+    expect(text('.te-sub')).toBe((d['chat.turnEdits.kind.edit'] ?? '').replace('{n}', '1'));
+    expect(text('.te-row .te-diff')).toBe((d['chat.turnEdits.written'] ?? '').replace('{n}', '1'));
+    expect(notes(), '看不见的调用如实附注（与数字口径各占一行，都在）').toContain(
+      (d['chat.turnEdits.otherCalls'] ?? '').replace('{n}', '1'),
+    );
+    expect(notes(), '数字口径也在').toContain(d['chat.turnEdits.scope.written']);
     expect((doc.querySelector('.te-open') as ElLike).textContent).toBe(d['chat.turnEdits.open']);
     const zh = i18n.localeDict('zh');
     const en = i18n.localeDict('en');
-    for (const k of ['chat.turnEdits.title', 'chat.turnEdits.empty', 'chat.turnEdits.copyFailed', 'chat.turnEdits.otherCalls']) {
+    for (const k of ['chat.turnEdits.title', 'chat.turnEdits.written', 'chat.turnEdits.scope.written', 'chat.turnEdits.copyFailed']) {
       expect(zh[k], k + ' zh').toBeTruthy();
       expect(en[k], k + ' en').toBeTruthy();
       expect(zh[k], k + ' 不得把 key 当文案').not.toBe(k);
@@ -204,7 +273,7 @@ describe('W9334 乙-② 文案：真实已本地化（不是 key、不是空串�
   });
 });
 
-describe('W9334 乙-③ 阈值：插件配置（默认 5）真的决定折几行', () => {
+describe('W9334 乙-⑤ 阈值：插件配置（默认 5）真的决定折几行', () => {
   it('阈值 5 ⇒ 6 个文件只列 5 行 + 「还有 1 个文件…」；配置改成 2 ⇒ 只列 2 行', async () => {
     const { W, pane } = await boot();
     for (let i = 1; i <= 6; i += 1) write(W, pane, 'c' + i, 'f' + i + '.ts');
@@ -213,16 +282,13 @@ describe('W9334 乙-③ 阈值：插件配置（默认 5）真的决定折几行
     expect(text('.te-more'), '还有 1 个文件…').toBe('还有 1 个文件…');
     const M = (await import(/* @vite-ignore */ at('ui/turn-edits/model.ts'))) as unknown as ModelMod;
     M.setTurnEditsThreshold(2);
-    // 阈值是**插件配置**：改完由 apply 层推给实现，卡片按同一条渲染路径重画。
-    const C = (await import(/* @vite-ignore */ at('ui/turn-edits/card.ts'))) as unknown as CardMod;
-    (C as unknown as { turnEditsStateOf(c: unknown): unknown }).turnEditsStateOf;
-    pluginsChanged();
+    pluginsChanged(); // 阈值是**插件配置**：改完由 apply 层推给实现，卡片按同一条渲染路径重画
     expect(listRows(), '阈值 2 ⇒ 只列前 2 行').toHaveLength(2);
     M.setTurnEditsThreshold(5);
   });
 });
 
-describe('W9334 乙-④ 空态：卡片保留、去掉折叠按钮与聚合', () => {
+describe('W9334 乙-⑥ 空态：卡片保留、去掉折叠按钮与聚合', () => {
   it('本轮只有 shell 调用 ⇒ 空态同形图标 + 两句文案 + 覆盖附注；没有折叠按钮、没有聚合', async () => {
     const { W, pane } = await boot();
     const i18n = (await import(/* @vite-ignore */ at('i18n/index.ts'))) as unknown as DictMod;
@@ -240,13 +306,11 @@ describe('W9334 乙-④ 空态：卡片保留、去掉折叠按钮与聚合', ()
     expect((doc.querySelector('.te-icon') as ElLike).className).toContain('is-empty');
     // 静音**同形**：与主图标同一个文档轮廓（同一个 d），只是降色。
     const emptyD = (doc.querySelector('.te-icon svg path') as ElLike).getAttribute('d');
-    const C = (await import(/* @vite-ignore */ at('ui/turn-edits/card.ts'))) as unknown as { createTurnEditsColumn(r: unknown[], s: number): ElLike };
-    const host = doc.createElement('div') as ElLike;
-    doc.body.appendChild(host);
-    host.appendChild(C.createTurnEditsColumn([{ kind: 'write', path: 'a.ts', add: null, del: null }], 0));
-    (await import(/* @vite-ignore */ at('ui/enhance/index.ts')) as unknown as { runEnhancers(c: unknown): void }).runEnhancers(host);
-    const solidD = (host.querySelector('.te-icon svg path') as ElLike).getAttribute('d');
-    expect(emptyD, '空态与常态是同一个文档轮廓').toBe(solidD);
+    await synthetic([{ kind: 'edit', path: 'a.ts', add: null, del: null, written: 1 }], 0);
+    const solidD = (doc.querySelectorAll('.te-icon svg path')[0] as ElLike).getAttribute('d');
+    const mine = Array.from(doc.querySelectorAll('.te-icon')).find((n) => !n.className.includes('is-empty')) as ElLike;
+    expect(emptyD, '空态与常态是同一个文档轮廓').toBe((mine.querySelector('svg path') as ElLike).getAttribute('d'));
+    expect(solidD).toBe(emptyD);
   });
 
   it('纯聊天轮（一个工具调用都没有）⇒ 连卡片都不出现（空卡是噪声）', async () => {
@@ -257,7 +321,7 @@ describe('W9334 乙-④ 空态：卡片保留、去掉折叠按钮与聚合', ()
   });
 });
 
-describe('W9334 乙-⑤ 双向折叠：点开 / 收起 / 再点开都闭合，且聚合不随折叠变', () => {
+describe('W9334 乙-⑦ 双向折叠：点开 / 收起 / 再点开都闭合，且聚合不随折叠变', () => {
   it('「还有 N 个文件…」→ 全部 + 「收起」→ 回到阈值内 → 再展开', async () => {
     const { W, pane } = await boot();
     for (let i = 1; i <= 8; i += 1) write(W, pane, 'c' + i, 'f' + i + '.ts');
@@ -275,12 +339,12 @@ describe('W9334 乙-⑤ 双向折叠：点开 / 收起 / 再点开都闭合，�
   it('聚合按全量算：折叠前后表头是同一个数（折叠一次数字就变 ⇒ 无法解释）', async () => {
     await boot();
     await synthetic([
-      { kind: 'add', path: 'a.ts', add: 3, del: 0 },
-      { kind: 'edit', path: 'b.ts', add: 5, del: 1 },
-      { kind: 'delete', path: 'c.ts', add: 0, del: 46 },
-      { kind: 'edit', path: 'd.ts', add: 2, del: 1 },
-      { kind: 'edit', path: 'e.ts', add: 2, del: 1 },
-      { kind: 'edit', path: 'f.ts', add: 2, del: 1 },
+      { kind: 'add', path: 'a.ts', add: 3, del: 0, written: null },
+      { kind: 'edit', path: 'b.ts', add: 5, del: 1, written: null },
+      { kind: 'delete', path: 'c.ts', add: 0, del: 46, written: null },
+      { kind: 'edit', path: 'd.ts', add: 2, del: 1, written: null },
+      { kind: 'edit', path: 'e.ts', add: 2, del: 1, written: null },
+      { kind: 'edit', path: 'f.ts', add: 2, del: 1, written: null },
     ]);
     expect(listRows()).toHaveLength(5);
     const before = text('.te-sum');
@@ -294,8 +358,7 @@ describe('W9334 乙-⑤ 双向折叠：点开 / 收起 / 再点开都闭合，�
     const { W, pane } = await boot();
     write(W, pane, 'c1', 'a.ts');
     W.settleTurnEdits(pane);
-    const fold = doc.querySelector('.te-fold') as ElLike;
-    click(fold, true);
+    click(doc.querySelector('.te-fold'), true);
     expect(card()?.getAttribute('data-folded')).toBe('true');
     expect((doc.querySelector('.te-fold') as ElLike).getAttribute('aria-expanded')).toBe('false');
     click(doc.querySelector('.te-fold'), true);
@@ -303,18 +366,17 @@ describe('W9334 乙-⑤ 双向折叠：点开 / 收起 / 再点开都闭合，�
   });
 });
 
-describe('W9334 乙-⑥ 平台门控：Linux 上整项不出现（不是禁用）', () => {
+describe('W9334 乙-⑧ 平台门控：Linux 上整项不出现（不是禁用）', () => {
   it('没有宿主动作 / Linux ⇒ 菜单只有「打开」「复制路径」；macOS ⇒ 多出「在文件管理器中显示」', async () => {
     const { W, pane } = await boot();
     const M = (await import(/* @vite-ignore */ at('ui/turn-edits/model.ts'))) as unknown as ModelMod;
     write(W, pane, 'c1', 'a.ts');
     W.settleTurnEdits(pane);
-    const caret = doc.querySelector('.te-caret') as ElLike;
-    click(caret, true);
+    click(doc.querySelector('.te-caret'), true);
     expect(menuLabels()).toEqual(['打开', '复制路径']);
-    click(caret, true);
+    click(doc.querySelector('.te-caret'), true);
     M.setRevealCapability({ platform: 'linux', reveal: () => { /* 不该被调到 */ } });
-    pluginsChanged(); // 重画（同一渲染路径）
+    pluginsChanged();
     click(doc.querySelector('.te-caret'), true);
     expect(menuLabels(), 'Linux：整项**不出现**').toEqual(['打开', '复制路径']);
     const fired: string[] = [];
@@ -329,39 +391,35 @@ describe('W9334 乙-⑥ 平台门控：Linux 上整项不出现（不是禁用�
   });
 });
 
-describe('W9334 乙-⑦ 复制路径：失败要如实显示「复制失败」', () => {
+describe('W9334 乙-⑨ 复制路径：失败要如实显示「复制失败」', () => {
   it('两条路都失败 ⇒ 显示「复制失败」且用失败色；回退成功 ⇒ 「已复制路径」', async () => {
     const { W, pane } = await boot();
     const i18n = (await import(/* @vite-ignore */ at('i18n/index.ts'))) as unknown as DictMod;
     const d = i18n.localeDict(i18n.getLocale());
     write(W, pane, 'c1', 'a.ts');
     W.settleTurnEdits(pane);
+    const copyItem = async (): Promise<void> => {
+      click(doc.querySelector('.te-caret'), true);
+      const item = Array.from(doc.querySelectorAll('.te-menu-item')).find((b) => b.textContent === '复制路径') as ElLike;
+      click(item, true);
+      await flush(2);
+    };
     failClipboard();
     execCommand(null); // execCommand 不存在（jsdom 实况）
-    click(doc.querySelector('.te-caret'), true);
-    const copy = Array.from(doc.querySelectorAll('.te-menu-item')).find((b) => b.textContent === '复制路径') as ElLike;
-    click(copy, true);
-    await flush(2);
+    await copyItem();
     expect(toast()).toBe(d['chat.turnEdits.copyFailed']);
     expect((doc.querySelector('.te-toast') as ElLike).className, '失败不得用成功色').toContain('is-err');
-    // 回退通道能成 ⇒ 如实报成功（不因为 clipboard 不可用就直接放弃）
-    execCommand(true);
-    click(doc.querySelector('.te-caret'), true);
-    const copy2 = Array.from(doc.querySelectorAll('.te-menu-item')).find((b) => b.textContent === '复制路径') as ElLike;
-    click(copy2, true);
-    await flush(2);
+    execCommand(true); // 回退通道能成 ⇒ 如实报成功
+    await copyItem();
     expect(toast()).toBe(d['chat.turnEdits.copied']);
     expect((doc.querySelector('.te-toast') as ElLike).className).not.toContain('is-err');
     okClipboard();
-    click(doc.querySelector('.te-caret'), true);
-    const copy3 = Array.from(doc.querySelectorAll('.te-menu-item')).find((b) => b.textContent === '复制路径') as ElLike;
-    click(copy3, true);
-    await flush(2);
+    await copyItem();
     expect(toast()).toBe(d['chat.turnEdits.copied']);
   });
 });
 
-describe('W9334 乙-⑧ 插件门控：关掉 ⇒ 这张卡整体不出现', () => {
+describe('W9334 乙-⑩ 插件门控：关掉 ⇒ 这张卡整体不出现', () => {
   it('关掉时结算**连空列都不留**；已渲染的卡在关掉后立刻消失，重新打开又回来', async () => {
     const { W, pane } = await boot();
     const R = (await import(/* @vite-ignore */ at('plugins/register.ts'))) as unknown as RegisterMod;
@@ -384,8 +442,8 @@ describe('W9334 乙-⑧ 插件门控：关掉 ⇒ 这张卡整体不出现', () 
   });
 });
 
-describe('W9334 乙-⑨ 活路径：真 SSE 帧驱动（工具帧 → 结果帧 → 轮次终态）', () => {
-  it('一轮里写了文件 ⇒ 轮次结束出现卡片；纯聊天轮 ⇒ 不出现', async () => {
+describe('W9334 乙-⑪ 活路径：真 SSE 帧驱动（工具帧 → 结果帧 → 轮次终态）', () => {
+  it('一轮里写了文件 ⇒ 轮次结束出现卡片且带行数；纯聊天轮 ⇒ 不出现', async () => {
     const { pane } = await boot();
     vi.stubGlobal('EventSource', FakeES);
     const chat = (await import(/* @vite-ignore */ at('chat.ts'))) as unknown as { connectSse(): void };
@@ -393,7 +451,7 @@ describe('W9334 乙-⑨ 活路径：真 SSE 帧驱动（工具帧 → 结果帧 
     expect(pane.id).toBe(SESSION);
     lastES!.fire('status', { phase: 'start', turn: 1, session: SESSION });
     await flush(4);
-    lastES!.fire('tool', { id: 'c1', name: 'write_file', args: { path: 'apps/web/src/ui/icons.ts', content: 'x\n' }, turn: 1, session: SESSION });
+    lastES!.fire('tool', { id: 'c1', name: 'write_file', args: { path: 'apps/web/src/ui/icons.ts', content: 'a\nb\nc\n' }, turn: 1, session: SESSION });
     lastES!.fire('tool_result', { id: 'c1', ok: true, value: 'ok', turn: 1, session: SESSION });
     await flush(4);
     expect(card(), '轮次没结束 ⇒ 还没有卡').toBeNull();
@@ -401,7 +459,9 @@ describe('W9334 乙-⑨ 活路径：真 SSE 帧驱动（工具帧 → 结果帧 
     await flush(6);
     expect(card()).not.toBeNull();
     expect(text('.te-title')).toContain('1');
+    expect((doc.querySelector('.te-kind') as ElLike).textContent, '真实来源的字母是 M').toBe('M');
     expect((doc.querySelector('.te-path .te-file') as ElLike).textContent).toBe('icons.ts');
+    expect(text('.te-row .te-diff'), '真实来源也给得出「写入 N 行」').toBe('写入 3 行');
     // 第二轮：没有任何工具调用 ⇒ 不产生第二张卡
     lastES!.fire('status', { phase: 'start', turn: 2, session: SESSION });
     lastES!.fire('status', { phase: 'completed', turn: 2, session: SESSION });
@@ -410,13 +470,13 @@ describe('W9334 乙-⑨ 活路径：真 SSE 帧驱动（工具帧 → 结果帧 
   });
 });
 
-describe('W9334 乙-⑩ 策略：组件层零硬编码颜色（铁律 11 允许的策略例外）', () => {
+describe('W9334 乙-⑫ 策略：组件层零硬编码颜色（铁律 11 允许的策略例外）', () => {
   it('turn-edits 的 ts/css 里没有 hex / rgb() / hsl() 字面量', () => {
     const files = [
       join(WEB, 'src', 'ui', 'turn-edits', 'model.ts'),
       join(WEB, 'src', 'ui', 'turn-edits', 'card.ts'),
       join(WEB, 'src', 'ui', 'turn-edits', 'wire.ts'),
-      join(WEB, 'src', 'styles', 'turn-edits.css'),
+      CSS,
     ];
     const bad: string[] = [];
     for (const f of files) {
