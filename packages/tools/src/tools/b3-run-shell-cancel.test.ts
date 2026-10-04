@@ -46,6 +46,20 @@ function alive(pid: number | null): boolean {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }
+/**
+ * Poll `probe` until it holds, or FAIL with `what`.
+ *
+ * Throwing is the point: a probe that never becomes true is exactly the
+ * defect under test, and a helper that returned silently would turn "the
+ * kill never happened" into a PASS (the same trap W9225 guards against).
+ */
+async function until(probe: () => boolean, what: string, ms = 60_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!probe()) {
+    if (Date.now() >= deadline) throw new Error("timed out after " + String(ms) + "ms waiting for: " + what);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
 
 /** Wait for `file` to appear and hold a pid, or give up and return null. */
 async function pidIn(file: string, ms: number): Promise<number | null> {
@@ -117,18 +131,23 @@ describe("B3-01: cancelling a foreground run_shell kills the process", () => {
 
     controller.abort(new Error("user pressed stop"));
 
+    // Wait for the FACT first: the process is gone. The abort path's expensive
+    // step is `taskkillTree` — a SYNCHRONOUS retry loop (child.ts:97-119) — so
+    // racing a fixed timer against the whole settle is a timing guess a loaded
+    // runner loses (run 37133964946 measured red on ubuntu / node 26).
+    await until(() => !alive(pid), "the cancelled command process to be gone", 60_000);
+
+    // Only now bound the settle: the expensive part is known complete.
     const settled = await Promise.race([
       Promise.resolve(run).then(
         () => ({ kind: "resolved" }),
         () => ({ kind: "rejected" }),
       ),
-      new Promise<{ kind: string }>((r) => setTimeout(() => r({ kind: "STILL-PARKED" }), 25_000)),
+      new Promise<{ kind: string }>((r) => setTimeout(() => r({ kind: "STILL-PARKED" }), 30_000)),
     ]);
     // Without the abort kill the call stays parked until the 120s wall clock.
-    expect(settled.kind).not.toBe("STILL-PARKED");
-
-    expect(alive(pid), "the foreground command outlived the cancelled turn").toBe(false);
-  }, 70_000);
+    expect(settled.kind, "the aborted call must settle, not stay parked").not.toBe("STILL-PARKED");
+  }, 150_000);
 
   it("a BACKGROUND child deliberately OUTLIVES the cancelled turn", async () => {
     const d = dir();
