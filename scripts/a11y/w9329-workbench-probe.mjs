@@ -22,7 +22,13 @@
 //   Chrome。确定性断言在 tests/w9329-workbench-squeeze.test.ts。
 // ============================================================================
 import http from 'node:http';
-import { readFileSync, existsSync, statSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+// ★ W9323：本探针自带一个本地 HTTP 服务器，**请求处理器里不许有同步阻塞调用**
+//   （会把事件循环冻到 syscall 返回）。所以 fs 一律走 fs/promises：
+//   existsSync → statOrNull()（fs/promises 没有 exists）、readdirSync → readdir、
+//   statSync → stat、readFileSync → readFile、writeFileSync/mkdirSync → writeFile/mkdir。
+//   顶层那句 mkdir 也走 await（ESM 支持顶层 await），这样本文件**不再 import 任何
+//   同步 fs**——从源头上不可能再引入同类违规（而不是靠记得）。
+import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
 import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launchChrome } from '../perf/lib/chrome.mjs';
@@ -36,7 +42,16 @@ const SHOTS = process.env.W9329_SHOTS ?? join(REPO, 'tmp', 'w9329-probe');
 const PORT = Number(process.env.W9329_PORT ?? 3829);
 const CDP = Number(process.env.W9329_CDP_PORT ?? 9482);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-mkdirSync(SHOTS, { recursive: true });
+await mkdir(SHOTS, { recursive: true });
+
+/** stat 的「可能不存在」形态（fs/promises 故意没有 exists）。 */
+async function statOrNull(p) {
+  try {
+    return await stat(p);
+  } catch {
+    return null;
+  }
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -54,8 +69,8 @@ const LONGLINE = join(TMP, 'w9329-longline.ts');
 const SHORTLINES = join(TMP, 'w9329-shortlines.ts');
 
 /** 真·行窗口读（与 apps/studio/src/handlers/fs-read.ts 同口径：1-based offset + limit）。 */
-function readWindow(abs, offset, limit) {
-  const raw = readFileSync(abs, 'utf8');
+async function readWindow(abs, offset, limit) {
+  const raw = await readFile(abs, 'utf8');
   const lines = raw.split('\n');
   const totalLines = raw.endsWith('\n') ? lines.length - 1 : lines.length;
   const from = Math.max(1, offset) - 1;
@@ -82,21 +97,25 @@ function startFixture() {
 
     if (p === '/api/fs/list') {
       const dir = url.searchParams.get('path') ?? '';
-      if (!existsSync(dir)) return json(200, { path: dir, entries: [], truncated: false, error: 'not found' });
-      const entries = readdirSync(dir, { withFileTypes: true })
-        .filter((e) => e.isFile())
-        .map((e) => {
-          const st = statSync(join(dir, e.name));
-          return { name: e.name, type: 'file', size: st.size, mtime: new Date(st.mtimeMs).toISOString() };
-        });
+      const dirStat = await statOrNull(dir);
+      if (dirStat === null || !dirStat.isDirectory()) return json(200, { path: dir, entries: [], truncated: false, error: 'not found' });
+      const dirents = await readdir(dir, { withFileTypes: true });
+      const entries = [];
+      for (const e of dirents) {
+        if (!e.isFile()) continue;
+        const s = await statOrNull(join(dir, e.name));
+        if (s === null) continue;
+        entries.push({ name: e.name, type: 'file', size: s.size, mtime: new Date(s.mtimeMs).toISOString() });
+      }
       return json(200, { path: dir, entries, truncated: false });
     }
     if (p === '/api/fs/read') {
       const abs = url.searchParams.get('path') ?? '';
-      if (!existsSync(abs)) return json(200, { kind: 'text', text: '', offset: 1, limit: 0, totalLines: 0, truncated: false, error: 'ENOENT' });
+      const absStat = await statOrNull(abs);
+      if (absStat === null || !absStat.isFile()) return json(200, { kind: 'text', text: '', offset: 1, limit: 0, totalLines: 0, truncated: false, error: 'ENOENT' });
       const offset = Number(url.searchParams.get('offset') ?? '1') || 1;
       const limit = Number(url.searchParams.get('limit') ?? '2000') || 2000;
-      return json(200, { kind: 'text', ...readWindow(abs, offset, limit) });
+      return json(200, { kind: 'text', ...(await readWindow(abs, offset, limit)) });
     }
 
     if (p === '/api/health') return json(200, { ok: true, name: 'w9329', model: 'w9329', base_url: 'http://127.0.0.1:' + PORT, bind: '127.0.0.1:' + PORT, capabilities: {} }, cors);
@@ -124,13 +143,16 @@ function startFixture() {
     }
     const rel = p === '/' ? '/index.html' : p;
     const full = join(WEB, normalize(rel).replace(/^([.][.][/\\])+/, ''));
-    if (existsSync(full) && statSync(full).isFile()) {
+    const fullStat = await statOrNull(full);
+    if (fullStat !== null && fullStat.isFile()) {
       res.writeHead(200, { ...cors, 'content-type': MIME[extname(full)] ?? 'application/octet-stream' });
-      return res.end(readFileSync(full));
+      return res.end(await readFile(full));
     }
-    if (existsSync(join(WEB, 'index.html'))) {
+    const indexHtml = join(WEB, 'index.html');
+    const indexStat = await statOrNull(indexHtml);
+    if (indexStat !== null && indexStat.isFile()) {
       res.writeHead(200, { ...cors, 'content-type': MIME['.html'] });
-      return res.end(readFileSync(join(WEB, 'index.html')));
+      return res.end(await readFile(indexHtml));
     }
     res.writeHead(404, cors); res.end('not found');
   });
@@ -197,13 +219,13 @@ const PROBE = `(function () {
 const verdict = (ok, detail) => ({ pass: ok === true, detail });
 
 const main = async () => {
-  mkdirSync(TMP, { recursive: true });
+  await mkdir(TMP, { recursive: true });
   // 20 万行巨文件（分块追加必须跨越可观测的时间窗）
-  writeFileSync(HUGE, Array.from({ length: 200000 }, (_, i) => 'const v' + i + ' = "line ' + i + ' ' + 'x'.repeat(60) + '";').join('\n') + '\n', 'utf8');
+  await writeFile(HUGE, Array.from({ length: 200000 }, (_, i) => 'const v' + i + ' = "line ' + i + ' ' + 'x'.repeat(60) + '";').join('\n') + '\n', 'utf8');
   // 200 字符长行（窄容器放不下 ⇒ 折行可判）
-  writeFileSync(LONGLINE, Array.from({ length: 40 }, (_, i) => 'const s' + i + ' = "' + 'y'.repeat(200) + '";').join('\n') + '\n', 'utf8');
+  await writeFile(LONGLINE, Array.from({ length: 40 }, (_, i) => 'const s' + i + ' = "' + 'y'.repeat(200) + '";').join('\n') + '\n', 'utf8');
   // 短行文件（任何宽度都放得下 ⇒ 换行**不该**有影响）
-  writeFileSync(SHORTLINES, Array.from({ length: 40 }, (_, i) => 'const a' + i + ' = ' + i + ';').join('\n') + '\n', 'utf8');
+  await writeFile(SHORTLINES, Array.from({ length: 40 }, (_, i) => 'const a' + i + ' = ' + i + ';').join('\n') + '\n', 'utf8');
 
   const server = await startFixture();
   const chrome = await launchChrome({ port: CDP, width: 1440, height: 900, executablePath: process.env.W9111_CHROME });
@@ -312,7 +334,7 @@ const main = async () => {
       ),
     };
     const shot = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-    writeFileSync(join(SHOTS, 'wrap-on-narrow.png'), Buffer.from(shot.data, 'base64'));
+    await writeFile(join(SHOTS, 'wrap-on-narrow.png'), Buffer.from(shot.data, 'base64'));
 
     // 3c 短行文件在**宽面板**下：开/关行高必须**相同**（换行不该有副作用）
     await setWidth(900);
@@ -358,7 +380,7 @@ const main = async () => {
       '页脚「' + last.footText + '」；DOM 行数 ' + last.lineCount + '、末行号 ' + last.lastLineNo + '（三者必须一致 —— 漂移会让页脚比总数还大）',
     );
     const shot2 = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-    writeFileSync(join(SHOTS, 'wide-stream.png'), Buffer.from(shot2.data, 'base64'));
+    await writeFile(join(SHOTS, 'wide-stream.png'), Buffer.from(shot2.data, 'base64'));
 
     // =====================================================================
     // ⑤ 窄屏诚实降级：正文不被挤到 0 + 面板整块在视口内（原型在这里溢出 53px）
@@ -382,7 +404,7 @@ const main = async () => {
       ),
     };
     const shot3 = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-    writeFileSync(join(SHOTS, 'narrow-overlay.png'), Buffer.from(shot3.data, 'base64'));
+    await writeFile(join(SHOTS, 'narrow-overlay.png'), Buffer.from(shot3.data, 'base64'));
 
     out.consoleErrors = consoleErrors;
     const failed = Object.entries(out.consequences).filter(([, v]) => !v.pass);

@@ -176,6 +176,16 @@ export const BUILTIN_MOUNTS: readonly MountRow[] = [
   { kind: "provide", file: "packages/workers/src/driver.ts", layer: "L1", token: "TOOL_REGISTRY_SERVICE", viaDefinePlugin: false, note: "makeDriverContext() seeds a worker-driving scope." },
   { kind: "provide", file: "packages/workers/src/driver.ts", layer: "L1", token: "SESSION_LOG_SERVICE", viaDefinePlugin: false, note: "makeDriverContext() seeds a worker-driving scope." },
   { kind: "provide", file: "packages/workers/src/driver.ts", layer: "L1", token: "AGENT_LOOP_SERVICE", viaDefinePlugin: false, note: "makeDriverContext() seeds a worker-driving scope." },
+  {
+    kind: "plugin",
+    file: "packages/runtime/src/repeat-guard-mount.ts",
+    layer: "L2",
+    nameArg: "name",
+    defaultName: "celestea.runtime.repeat-guard",
+    viaDefinePlugin: true,
+    provides: ["REPEAT_GUARD_SERVICE"],
+    note: "repeatGuardPlugin(settings, name): the second parameter defaults the mount name. W9331 — the repetition guard as an engine plugin, ported from dsh-guard-repeat-output 2.1.6; DEFAULT ON (it is a protection) but individually switchable.",
+  },
 ];
 
 /** package/app root -> architecture tier (the depcruise tiers). */

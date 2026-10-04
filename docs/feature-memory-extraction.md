@@ -302,7 +302,7 @@ token 估算器（`context-trim.ts`，仍是唯一估算器）；`cacheHitRatio`
 
 **压缩的触发经济学**（修订 3 的正文）
 
-`buildRequest` 每步从 `deriveMessages()` 重组装（`packages/agent-loop/src/loop.ts:299-316`），所以叠层在**中段**替换消息时，压缩点之后的 suffix 缓存全失、之前的前缀仍命中。三条纪律由此推出：**低频**（每轮压一小块 = 每轮烧一次 suffix）、**大块**（一次压足够老的一大段）、**压冷区间**（越靠近当前轮越贵）；**compress 当步生效**（立即减压才是意义所在，代价是本 turn 后续步的 suffix 重算）。缓存收益由既有 `cacheHitRatio`（`packages/runtime/src/usage.ts:67`）观测，不新增指标。
+`buildRequest` 每步从 `deriveMessages()` 重组装（`packages/agent-loop/src/loop.ts:412`），所以叠层在**中段**替换消息时，压缩点之后的 suffix 缓存全失、之前的前缀仍命中。三条纪律由此推出：**低频**（每轮压一小块 = 每轮烧一次 suffix）、**大块**（一次压足够老的一大段）、**压冷区间**（越靠近当前轮越贵）；**compress 当步生效**（立即减压才是意义所在，代价是本 turn 后续步的 suffix 重算）。缓存收益由既有 `cacheHitRatio`（`packages/runtime/src/usage.ts:67`）观测，不新增指标。
 
 **水位与触发**（修订 5 的正文）
 
