@@ -36,6 +36,8 @@ import {
   thinkRetained,
 } from './messages/think-budget';
 import { resetMessages } from './messages/assistant';
+// W9333：等待占位的列 = 助手那一格 ⇒ 思考段的重排锚点也要认它（见 appendThinking 的 target）。
+import { pendingColOf } from './messages/pending';
 import { t } from '../i18n';
 import { iconSvg } from './icons'; // W9324：折叠 chevron 的几何真源在 ui/icons.ts
 // W1512：预算账本住在 ./messages/think-budget.ts，但公开面仍留在 messages.ts
@@ -389,6 +391,13 @@ export function appendThinking(ctx: SessionPane, delta: string): void {
   ) {
     ctx.el.insertBefore(seg.root, target); // 紧贴目标上方
   }
+  // W9333：等待占位是助手那一格的**哨兵** —— 没有正文锚点时，思考段必须排在它**之前**
+  // （占位被接管后就地变成正文，思考段自然落在正文正上方）。否则思考段把占位顶开，
+  // 首个 token 就不能原地接管了（见 pending.ts 的 takePendingCol）。
+  const pend = ctx.assistant || ctx.lastTextCol ? null : pendingColOf(ctx);
+  if (pend && seg.root.compareDocumentPosition(pend) & Node.DOCUMENT_POSITION_PRECEDING) {
+    ctx.el.insertBefore(seg.root, pend);
+  }
   if (seg !== null) {
     // W1505：`ctx.thinkSeg` 的类型是较窄的 view.ThinkSeg（只有 root/head/body/text），
     // 而 retainThinking 需要 ThinkSegDom 的 dropped/note —— 从登记表按 root 反查
@@ -435,3 +444,5 @@ export { appendText, applyFinalText, assistantHasContent, ensureAssistant, final
 export { addUserMessage, laneLabel, renderInboxMessage } from './messages/user';
 export type { MsgKind } from './messages/user';
 export { renderInfoBlock, renderInterjectNote, updateInfoBlock } from './messages/info';
+// W9333：等待占位的对外面（调用方 = chat.ts 的轮次生命周期；实现与理由见 ./messages/pending.ts）
+export { advancePending, clearPending } from './messages/pending';

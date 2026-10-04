@@ -15,6 +15,8 @@ import { buildOmittedNote, clampForRender, MESSAGE_RENDER_LIMIT, setOmittedCount
 import { prunePaneDom } from './dom-cap'; // W1485：消息容器的 DOM 上限
 import { waitFor } from './cadence'; // W1524：合并窗口 = 上次渲染实测耗时（自适应）
 import { autoscroll, autoscrollSoon, hideEmptyHint, renderEmptyHint } from './scroll';
+// W9333：等待占位的就地接管 + 清空会话时收掉它（占位不属于任何消息，必须跟着容器生命周期走）。
+import { clearPending, takePendingCol } from './pending';
 // W9222（F-11）：resetMessages 是「清空会话」的规范复位入口，账本也必须归零 ——
 // 见下方注释（容器对象不变 ⇒ 账本不会随 replaceChildren 自动作废）。
 import { addThinkRetained, thinkRetained } from './think-budget';
@@ -56,6 +58,9 @@ export function resetMessages(ctx: SessionPane): void {
     window.clearTimeout(ctx.render.timer);
     ctx.render.timer = null;
   }
+  // W9333：清空会话也要收掉等待占位（停表 + 摘节点）—— 它不属于任何消息，
+  // 只跟着容器 DOM 走的话，定时器会对着一个已被 replaceChildren 摘掉的节点继续跑。
+  clearPending(ctx);
   ctx.render.deadline = Number.NEGATIVE_INFINITY; // W867：清空后第一帧同样立即渲染
   ctx.render.cost = 0; // W1524：清空后没有实测代价，窗口回到下限
   if (ctx.assistant) doms.delete(ctx.assistant);
@@ -365,7 +370,13 @@ export function ensureAssistant(ctx: SessionPane, into?: HTMLElement): Assistant
     if (ctx.assistant) return ctx.assistant;
     hideEmptyHint(ctx);
   }
-  const col = el('div', 'mcol');
+  // ★ W9333：首个 token 到达 —— **就地接管**等待占位。
+  //   占位块本来就占着助手那一格（同一个 .mcol），这里复用**它那个节点**（同一位置、
+  //   不插入再删除、不跳版）；占位已被更早发生的事件（思考段/工具卡）顶开时返回 null，
+  //   正文落到末尾（事件顺序优先，见 pending.ts 的 takePendingCol）。
+  const reused = target === ctx.el ? takePendingCol(ctx) : null;
+  const col = reused ?? el('div', 'mcol');
+  if (reused) reused.replaceChildren(); // 清掉占位内容；列节点本身原地留下
   const msg = el('div', 'msg assistant');
   const cap = el('div', 'msg-caption');
   cap.appendChild(el('span', 'who', 'Studio'));
@@ -376,7 +387,7 @@ export function ensureAssistant(ctx: SessionPane, into?: HTMLElement): Assistant
   bubble.appendChild(content);
   msg.appendChild(bubble);
   col.appendChild(msg);
-  target.appendChild(col);
+  if (!reused) target.appendChild(col);
   railAdd(ctx, col, 'assistant');
   if (target === ctx.el) railSync(ctx);
 

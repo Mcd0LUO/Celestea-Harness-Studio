@@ -1,0 +1,81 @@
+/* ============================================================================
+   styles/pending.css — W9333：会话内「等待反馈」占位（发送之后、首个 token 之前）
+   ----------------------------------------------------------------------------
+   为什么单独成文件：与 streaming.css / tooltree.css 同一取向 —— 新能力各自新增
+   文件，不动共享 CSS（合并时零冲突）。main.ts 的 CSS 块末尾 import。
+
+   行为规格：apps/web/prototype/thinking.html（联调定稿）。本文件只管**形态**：
+     · 占位与助手消息同列（.mcol，几何由 components.css 给）⇒ 接管时不跳版；
+     · 图标 = **脉冲星芒**：三颗小星芒依次脉冲（三点脉冲的节律 × 星芒的形态）；
+     · 颜色只用 token（组件层不写死颜色 —— 本仓明令，见 grants.css 的头注）；
+     · prefers-reduced-motion 由 tokens.css 的**全局**块关掉（animation-duration
+       0.001ms + iteration-count 1，均带 !important）—— 不再在这里重复一份，
+       否则「哪一份是真源」就有两个答案。文字与秒数在任何动效偏好下都照常。
+   ========================================================================== */
+
+/* ---- 占位行：占据助手那一格（同列、同缩进），本身是一行轻量状态 ---- */
+/* ★ `flex-direction: row` 必须显式写：占位块带 .msg（components.css 的
+   `.msg { display:flex; flex-direction:column }`），只写 display/align-items 的话
+   主轴仍是 column —— 真机实测图标、标签、秒数会**竖着堆成三行**（块高 73.8px 而不是
+   20px）。jsdom 没有布局，这条只有真机探针抓得到（w9333-pending-probe.mjs 的 shape）。 */
+.pend {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  /* 与助手正文首行同一量级，接管时顶边不动（真机探针按顶边量，不按高度量）。 */
+  min-height: 20px;
+}
+
+.pend-ico-box {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  color: var(--c-accent);
+}
+
+.pend-ico {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+/* 阶段标签：它是**唯一**的 live region（role=status 由 JS 写）。 */
+.pend-lab {
+  font-size: var(--fs-secondary);
+  line-height: var(--lh-secondary);
+  color: var(--c-text-2);
+}
+
+/* 秒数：aria-hidden 由 JS 写 —— 读屏**不得**每秒念一次数字。
+   它是「用时」，不是进度条：没有长度、没有百分比、不假装知道还剩多久。 */
+.pend-secs {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+
+/* ---- 脉冲星芒：三颗小星芒依次亮起（每颗整体亮 + 缩放） ----
+   为什么不是「一颗星的四片花瓣依次点亮」：花瓣各只占整颗星约 1/8 墨量，把它从
+   1.0 暗到 0.5 **在 16px 下看不出来**（原型作者真机 8 帧截图实测：七帧一模一样）。
+   三点脉冲读得出来，是因为**每个点整体亮灭**，相对变化量大。
+
+   定位用 <g transform>，动效用 path 上的 CSS transform —— path 的 transform-origin
+   默认就是 g 平移后的 (0,0)，正好是那颗星的中心，不需要 transform-box。 */
+.pend-star {
+  animation: pend-pulsar 1.35s ease-in-out infinite;
+  /* ★ animation-fill-mode: backwards 是**必须**的：正向 animation-delay 期间元素渲染的
+     是**基础样式**（不透明、无缩放），于是「还没开始动」的那两颗是**满亮**的 ——
+     节律整个读不出来（原型作者真机 9 帧实测：0.15s–1.2s 九帧三颗一样亮）。
+     backwards 让延迟期间渲染 0% 关键帧（暗 + 缩小），节律才成立。 */
+  animation-fill-mode: backwards;
+}
+/* 每颗星**各自的**偏移 —— 这就是「依次」。禁止用同一条 --d 覆盖所有 .pend-star。 */
+.pend-star.s1 { animation-delay: 0s; }
+.pend-star.s2 { animation-delay: 0.18s; }
+.pend-star.s3 { animation-delay: 0.36s; }
+
+@keyframes pend-pulsar {
+  0%, 100% { opacity: 0.32; transform: scale(0.68); }
+  35% { opacity: 1; transform: scale(1); }
+}

@@ -39,6 +39,7 @@ import './styles/theme-claude.css'; // Claude Code 风格色卡
 import './styles/usage.css'; // W9103 设置页「使用统计」（摘要条 / 热力图 / 趋势图）
 // W2016：输入框自增长（#input 的 field-sizing 守卫；不支持时由 ui/inputbar/grow.ts 回落）。
 import './styles/field-sizing.css';
+import './styles/pending.css'; // W9333 会话内「等待反馈」占位（脉冲星芒 / 阶段标签 / 用时）
 
 import { api } from './api';
 import { connectSse, initChat } from './chat';

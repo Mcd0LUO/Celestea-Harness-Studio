@@ -17,11 +17,13 @@ import type {
 } from './types';
 import { S } from './state';
 import {
+  advancePending,
   appendText,
   appendThinking,
   applyFinalText,
   assistantHasContent,
   autoscroll,
+  clearPending,
   endTurn,
   ensureAssistant,
   finalizeAssistant,
@@ -145,6 +147,7 @@ function syncChrome(pane: SessionPane): void {
 
 function finalizeTurn(ctx: SessionPane, phase: string): void {
   endTurn(ctx); // 思考段归属随轮次结束清除（跨轮不跨移）
+  clearPending(ctx); // W9333：轮次结束 ⇒ 收掉等待占位（无正文的 cancelled/error/空 completed 也不留）
   const wasStreaming = ctx.streaming;
   setPaneStreaming(ctx, false);
   ctx.turn = null;
@@ -222,6 +225,7 @@ export function onStatus(ctx: SessionPane, p: StatusPayload): void { // export�
     ctx.phase = t('chat.phase.running');
     setPaneStreaming(ctx, true);
     resetTurnStep(ctx); // W263：新一轮工具步数清零
+    advancePending(ctx, 'accepted'); // W9333：本轮已被接受 ⇒ 占位升到「等待响应…」（计时起点不动）
     if (isActivePane(ctx)) {
       S.t0 = ctx.t0;
       setBusy(true);
@@ -270,6 +274,7 @@ function onText(ctx: SessionPane, p: TextPayload): void {
 function onThinking(ctx: SessionPane, p: ThinkingPayload): void {
   if (ctx.turn === null) ctx.turn = p.turn ?? null;
   if (p.turn !== undefined && p.turn !== ctx.turn) return;
+  if (p.delta) advancePending(ctx, 'reasoning'); // W9333：只有真增量才说「思考中…」
   appendThinking(ctx, p.delta || ''); // 弱化思考段：按事件顺序独立渲染
 }
 

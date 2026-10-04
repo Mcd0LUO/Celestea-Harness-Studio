@@ -304,6 +304,12 @@ export const chat = {
   'chat.send.laneSuffix': ' ({lane})',
   'chat.send.queueNotDelivered': 'Queue not delivered ({reason}): the content was restored to the input box',
   'chat.send.steerNotDelivered': 'Interjection not delivered ({reason}): the content was restored to the input box',
+  // W9333：in-conversation "waiting for feedback" placeholder phase copy.
+  //   · "Thinking…" only when reasoning deltas actually arrive (a non-reasoning model
+  //     never sees it); "queued / interjected" reuse the existing keys above.
+  'chat.pend.awaiting': 'Waiting for a response…',
+  'chat.pend.thinking': 'Thinking…',
+  'chat.pend.elapsed': 'Elapsed {seconds}s',
   'chat.phase.cancelled': 'Cancelled',
   'chat.phase.error': 'Error',
   'chat.phase.running': 'Running…',

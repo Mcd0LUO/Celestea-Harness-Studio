@@ -301,6 +301,14 @@ export const chat = {
   'chat.send.laneSuffix': '（{lane}）',
   'chat.send.queueNotDelivered': '排队未送达（{reason}）：已将内容还原到输入框',
   'chat.send.steerNotDelivered': '插话未送达（{reason}）：已将内容还原到输入框',
+  // W9333：会话内「等待反馈」占位的阶段文案。
+  //   · 只有**真的收到 reasoning 增量**才说「思考中」—— 对非推理模型说「思考中」是假话；
+  //   · 「已排队 / 已插话」两条**沿用既有 key**（chat.send.queuedWaiting /
+  //     chat.send.interjectedWaiting），不另造一份同义文案；
+  //   · 计时标签写明是「用时」（它不是进度条，不假装知道还剩多久）。
+  'chat.pend.awaiting': '等待响应…',
+  'chat.pend.thinking': '思考中…',
+  'chat.pend.elapsed': '用时 {seconds} 秒',
   'chat.phase.cancelled': '已取消',
   'chat.phase.error': '出错',
   'chat.phase.running': '运行中…',

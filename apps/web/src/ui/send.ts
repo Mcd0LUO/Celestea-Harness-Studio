@@ -10,6 +10,8 @@
 import { api } from '../api';
 import { S } from '../state';
 import { addUserMessage, laneLabel, renderInfoBlock, renderInterjectNote } from './messages';
+// W9333：会话内「等待反馈」占位（发送之后、首个 token 之前）。
+import { advancePending, clearPending, showPending } from './messages/pending';
 import {
   pendingCount,
   pendingViews,
@@ -103,6 +105,10 @@ function startTurn(ctx: SessionPane, t: string): void {
   ctx.t0 = Date.now();
   ctx.phase = tr('chat.send.starting');
   resetTurnStep(ctx);
+  // ★ W9333：会话流里的等待占位 —— **按下发送**当帧就出现（计时也从这一刻起）。
+  //   此刻请求还在飞（还没被接受）⇒ 阶段如实为「发送中 · 等待送达…」。
+  //   与 ctx.t0 共用同一个时刻：界面上两处「用时」不会各说各话。
+  showPending(ctx, 'delivering', ctx.t0);
   if (isActivePane(ctx)) {
     S.t0 = ctx.t0;
     setBusy(true);
@@ -119,6 +125,9 @@ function startTurn(ctx: SessionPane, t: string): void {
       if (r.session) adoptLocalIfUnbound(r.session);
       if (ctx.turn === null && r.turn !== undefined) ctx.turn = r.turn;
       ctx.phase = tr('chat.send.running');
+      // W9333：请求**已被接受**（答复回来了）⇒ 占位升级为「等待响应…」。
+      //   只升级既有占位，不新建（见 pending.ts 的 reducePhase）；计时起点不动。
+      advancePending(ctx, 'accepted');
       if (isActivePane(ctx)) {
         setStatusTurn(ctx.turn !== null ? ctx.turn : (r.turn ?? 0));
         setStatus(tr('chat.send.running'), 'busy');
@@ -184,6 +193,8 @@ function failTurn(o: {
 }): void {
   const { ctx, key, col, text, items, quotes, err } = o;
   setPaneStreaming(ctx, false);
+  // W9333：发送失败 ⇒ 占位必须收掉（否则它会一直挂在会话流里假装还在等）。
+  clearPending(ctx);
   ctx.phase = tr('chat.send.failedPrefix').replace(/[：: ]+$/, '');
   if (getLegacyOwner() === ctx) setLegacyOwner(null);
   const rolled = items.length > 0 || quotes.length > 0;
