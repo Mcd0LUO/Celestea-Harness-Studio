@@ -42,8 +42,17 @@
 /* 工具条：`.code-wrap` 里 `pre` 前面的一行（正常流，占位）。 */
 .rendered .code-head {
   display: flex; align-items: center; gap: 6px;
-  /* 与 pre 的边框对齐（pre 是 border-box，左右各 1px 边框）。 */
-  padding: 0 2px 4px;
+  /* W9344：整体右对齐 —— 工具条上只有徽标与复制两件装饰，把它们一起推到右上角。
+     为什么给**工具条**右对齐而不是给徽标 `margin-left:auto`：前者让「工具条上的
+     一切」都靠右，新增控件不必各自记得写 auto（漏一个就跑到左边去了）。
+     文档序由 code-extras 保证是 [复制] [徽标]（见该文件 addBadge 的注释），
+     故视觉顺序 = [复制图标] [json]。折叠按钮仍带自己的 margin-left:6px 跟在最右。 */
+  justify-content: flex-end;
+  /* 与 pre 的边框对齐（pre 是 border-box，左右各 1px 边框），并给装饰留出
+     与其尺寸相称的边距 —— W9344：控件移右上角后，贴边会显得被切掉。
+     2px 是「与 pre 边框对齐」的底线，4px 是这一行元素（14px 图标 / 20px 徽标）
+     视觉上不贴边的最小值。 */
+  padding: 2px 4px 4px;
   /* 装饰不该被拖选进复制内容（复制读的是 code.textContent，不受影响）。 */
   user-select: none; -webkit-user-select: none;
 }
@@ -51,13 +60,15 @@
    这一条是「不挡文字」的机械保证：`position:static` ⇒ 不脱离文档流 ⇒ 不重叠。 */
 .rendered .code-head .code-badge,
 .rendered .code-head .code-copy,
+.rendered .code-head .code-copy-note,
 .rendered .code-head .code-fold {
   position: static;
   inset: auto;
   opacity: 1;
 }
-/* 复制按钮推到最右（左边是语言徽标）。 */
-.rendered .code-head .code-copy { margin-left: auto; }
+/* 复制按钮推到徽标左边（原先是「推到最右」）——不再需要 auto：工具条已整体右对齐
+   （见上面 .code-head 的 justify-content），文档序 [复制][徽标] 直接决定视觉顺序。 */
+.rendered .code-head .code-copy { margin-left: 0; }
 .rendered .code-head .code-fold { margin-left: 6px; }
 
 /* 复制按钮此前是「悬停才显形」的浮层（opacity:0，:hover 才 1）。它现在是**占位**：
@@ -66,6 +77,25 @@
 .rendered .code-head .code-copy { color: var(--c-text-3); }
 .rendered .code-head .code-copy:hover,
 .rendered .code-head .code-copy:focus-visible { color: var(--c-text-1); }
+
+/* W9344：复制控件改图标后的外形与命中区。
+   · 图标 14px（ui/icons.ts 的 DEFAULT_SIZE.copy），描边 currentColor ⇒ 跟随上面两行配色；
+   · 命中区仍是 24×24（SC 2.5.8 的下限，也与工具条里其它小元素相称），图形居中；
+   · 内边距 0 是为了让「图标 + 24px 盒」的几何可预期（图标宽 14 ⇒ 左右各留 5px）。 */
+.rendered .code-head .code-copy {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; min-width: 24px;
+  padding: 0; font-size: 0; line-height: 0; /* 保险：不给任何可见文字留空间 */
+}
+.rendered .code-head .code-copy-ico { display: block; flex: 0 0 auto; }
+/* 回显（role=status）：紧挨复制按钮左侧，1.2s 后自行清空（code-copy.ts 的 FEEDBACK_MS）。
+   `empty` 时不占位 ⇒ 平时工具条里看不到它，工具条高度不被它改变。 */
+.rendered .code-head .code-copy-note {
+  color: var(--c-ok); font-size: 11px; line-height: 1.4; white-space: nowrap;
+  margin-right: 4px;
+}
+.rendered .code-head .code-copy-note:empty { display: none; }
+.rendered .code-head .code-copy-note.is-err { color: var(--c-err); }
 
 /* 没有工具条时（两个组件都关掉）不留空隙：上面这条 padding 只作用于存在的工具条。 */
 

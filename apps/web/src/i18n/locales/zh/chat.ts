@@ -345,6 +345,7 @@ export const chat = {
   'plugins.desc.codeCopy.label': '代码块复制',
   'plugins.desc.codeCopy.hint': '每个代码块右上角加「复制」按钮；关闭后代码块保持原样。',
   'chat.codeCopy.copy': '复制',
+  'chat.codeCopy.copyHint': '复制这个代码块的内容',
   'chat.codeCopy.copied': '已复制',
   'chat.codeCopy.failed': '复制失败',
   // W895-C2：四项可选显示组件（增强缝）

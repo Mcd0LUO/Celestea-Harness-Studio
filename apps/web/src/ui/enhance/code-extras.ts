@@ -165,8 +165,18 @@ function addBadge(wrap: HTMLElement, code: Element): void {
   const badge = document.createElement("span");
   badge.className = "code-badge";
   badge.textContent = lang;
-  // W1526：徽标是工具条的**首个子节点**（正常流），不再是压在首行上的浮层。
-  head.insertBefore(badge, head.firstChild);
+  // W1526：徽标住进 `.code-head` 工具条（正常流），不再是压在首行上的浮层。
+  //
+  // W9344：徽标插到工具条**末尾**（`appendChild`，原先是 `insertBefore(firstChild)`）。
+  // 工具条是 `display:flex` 且左对齐，而复制按钮靠自己的 `margin-left:auto` 推到最右 ——
+  // 于是文档序 [复制][徽标] ⇒ 视觉上就是右上角 `[复制图标] [json]`。
+  //
+  // ★ 为什么靠「复制按钮的 margin-left:auto」而不是反过来给徽标 `margin-left:auto`：
+  //   折叠按钮（.code-fold）也在工具条里，且按惯例停在最右（它带 margin-left:6px）。
+  //   若把徽标推到最右，折叠按钮就会排到徽标的**左边**，顺序变成 [复制][展开][json] ——
+  //   而折叠是「撑开内容」的动作，它必须留在最外侧。「哪些控件靠 auto 让位」是
+  //   CSS 的事，「谁在文档序上更靠左」是 DOM 的事，两者分开才不会在增删控件时互相打架。
+  head.appendChild(badge);
 }
 
 /** 把 code 子树按行切成 .cl（幂等：dataset.linesDone）。 */

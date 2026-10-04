@@ -92,6 +92,10 @@ describe('W9324 ② 视觉不回退（迁移前逐字对齐的数值）', () => 
       // statusline 两枚徽标：13px、线宽 1.5
       'mode-standard': { viewBox: '0 0 16 16', strokeWidth: 1.5, size: '13' },
       'mode-execution': { viewBox: '0 0 16 16', strokeWidth: 1.5, size: '13' },
+      // W9344 的复制图标：不是迁移来的，是**新画**的（取代代码块工具条上的文字「复制」）。
+      // 网格/描边**刻意对齐本表既有的 16 网格 · 描边 1.5 档**（与 mode-* 同档），
+      // 渲染尺寸 14px 与 chevron-fold 一致 —— 工具条里的小元素因此视觉同重。
+      copy: { viewBox: '0 0 16 16', strokeWidth: 1.5, size: '14' },
     };
     for (const name of ALL) {
       const want = BEFORE[name];

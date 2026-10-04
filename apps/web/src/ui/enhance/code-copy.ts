@@ -15,8 +15,19 @@
 // 改为住进 `.code-head` 工具条（见 code-chrome.ts）—— 工具条在 `.code-wrap` 里、
 // `pre` 上面，是正常流里的一行。浮层改占位是「装饰与正文永不重叠」的实现方式，
 // 详见 styles/codeblock.css。
+//
+// W9344（代码块工具条）：控件从**文字「复制」改成复制图标**（几何真源 ui/icons.ts），
+// 排在语言徽标的**左侧**（右上角顺序 = [复制图标] [json]）。可访问性**一个字没丢**：
+//   · 可访问名走 aria-label / title，仍是 `chat.codeCopy.copy` 那一套 i18n；
+//   · 图标自身 `aria-hidden`（它的名字由按钮承载，重复播报反而是噪声）；
+//   · 按钮仍是原生 <button> ⇒ 键盘可达、`:focus-visible` 由 .btn 基底的
+//     `outline: 2px solid var(--c-focus-ring)` 画出来（components.css 的既有口径）。
+//   · 回显（已复制/复制失败）走**无障碍播报**（aria-live 的 .code-copy-note）而不是塞进
+//     图标按钮里：图标按钮没有可见文字可换，而「点了有回显」是这条控件既有的行为承诺，
+//     不能丢。按钮的 aria-label 同步成当前状态，焦点停在它上面时也读得出结果。
 // ============================================================================
 import { t } from "../../i18n";
+import { iconNode } from "../icons";
 import { ensureHead } from "./code-chrome";
 import type { Enhancer } from "./registry";
 
@@ -45,7 +56,11 @@ function addCopyButtons(container: Element): void {
     btn.type = "button";
     // 复用既有 .btn 基底（外观与其它按钮一致），只额外定位。
     btn.className = "btn code-copy";
-    btn.textContent = t("chat.codeCopy.copy");
+    // W9344：图标按钮没有可见文字 ⇒ **可访问名必须显式给**（走同一套 i18n）。
+    // title 同时给（鼠标用户悬停看得到，且老 AT 会回落读它）。
+    btn.setAttribute("aria-label", t("chat.codeCopy.copy"));
+    btn.title = t("chat.codeCopy.copyHint");
+    btn.appendChild(iconNode("copy", { className: "code-copy-ico" }));
     btn.addEventListener("click", () => {
       void copyBlock(pre, btn);
     });
@@ -57,14 +72,42 @@ function addCopyButtons(container: Element): void {
   }
 }
 
+/**
+ * 回显：图标按钮的**可访问名**与状态一起改，并挂一个 `aria-live` 的视觉提示。
+ *
+ * 为什么不用 visible text 换字（改动前的做法）：按钮现在只有一枚图标，
+ * 把「已复制 / 复制失败」写进去要么把图标顶掉、要么造出第二个焦点目标。
+ * ⇒ 文案进独立的 `.code-copy-note`（role=status，视觉上紧挨按钮、1.2s 后自行消失），
+ * 读屏与视觉用户拿到的是同一句话；按钮的 aria-label 同步成当前状态，
+ * 让「这个控件现在是什么状态」在焦点停在它上面时也读得出来。
+ */
 async function copyBlock(pre: HTMLElement, btn: HTMLButtonElement): Promise<void> {
   const code = pre.querySelector("code");
   const text = code?.textContent ?? "";
   const ok = await writeClipboard(text);
-  btn.textContent = ok ? t("chat.codeCopy.copied") : t("chat.codeCopy.failed");
+  const state = ok ? t("chat.codeCopy.copied") : t("chat.codeCopy.failed");
+  btn.setAttribute("aria-label", t("chat.codeCopy.copy") + "：" + state);
+  const note = noteOf(btn);
+  note.textContent = state;
+  note.classList.toggle("is-err", !ok);
   window.setTimeout(() => {
-    btn.textContent = t("chat.codeCopy.copy");
+    note.textContent = "";
+    // 名字回到常态，否则复述按钮时会读到上一次的结果。
+    if (btn.isConnected) btn.setAttribute("aria-label", t("chat.codeCopy.copy"));
   }, FEEDBACK_MS);
+}
+
+/** 按钮旁的回显节点（懒建一次，跨次复用 —— 流式重跑增强链不许每次造新节点）。 */
+function noteOf(btn: HTMLButtonElement): HTMLElement {
+  const head = btn.parentElement;
+  let note = head?.querySelector<HTMLElement>(".code-copy-note") ?? null;
+  if (note === null || head === null) {
+    note = document.createElement("span");
+    note.className = "code-copy-note";
+    note.setAttribute("role", "status");
+    head?.insertBefore(note, btn.nextSibling);
+  }
+  return note;
 }
 
 /** 写剪贴板：现代 API 优先，失败回退 execCommand；都失败返回 false。 */

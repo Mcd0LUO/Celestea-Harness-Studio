@@ -346,6 +346,7 @@ export const chat = {
   'plugins.desc.codeCopy.label': 'Code block copy',
   'plugins.desc.codeCopy.hint': 'Add a Copy button to each code block; when off, code blocks stay as they are.',
   'chat.codeCopy.copy': 'Copy',
+  'chat.codeCopy.copyHint': 'Copy the contents of this code block',
   'chat.codeCopy.copied': 'Copied',
   'chat.codeCopy.failed': 'Copy failed',
   // W895-C2: four optional display components (enhancer seam)

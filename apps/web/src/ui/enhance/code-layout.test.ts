@@ -18,6 +18,9 @@
 //   ② 颜色：--hl-* 在**本波的 seam 文件** codeblock.css 里覆盖，且取值等于
 //      highlight.js 官方 VSCode 主题（vs.css = Light+ / vs2015.css = Dark+）
 //      对应 class 的颜色。深色必须覆盖**每一个**浅色 key。
+//
+//   ③ W9344：徽标在工具条**右端**、复制图标在它左边，且都不贴边（见文件末的
+//      describe）—— 像素几何仍由真机量，这里守结构。
 // ============================================================================
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -196,6 +199,45 @@ describe("W1526 ① 装饰元素不挡文字（结构不变量）", () => {
       (fold as HTMLButtonElement).click();
       expect(box.querySelector("pre")!.classList.contains("code-folded")).toBe(false);
     } finally { off(); }
+  });
+});
+
+/**
+ * W9344：徽标移到**右上角**、复制图标在它**左边**。
+ *
+ * 像素几何（谁真的在右上角、与 pre 边框差多少）由真机探针量，见
+ * scripts/a11y/w9344-codehead-probe.mjs。本文件守的是让那组几何**必然成立**的结构事实：
+ *   · 工具条整体右对齐（`justify-content:flex-end`）⇒ 装饰落在工具条右端；
+ *   · 装饰不贴边（padding 右侧 ≥ 2px）⇒ 不是「被切在边上」；
+ *   · 复制按钮**不再**靠 `margin-left:auto` 顶到最右（那正是它跑到 json 右边的原因）。
+ * 不钉 `justify-content` 的具体值之外的任何 px（铁律 11）。
+ */
+describe("W9344 工具条右对齐（结构不变量）", () => {
+  it("工具条整体右对齐：装饰落在右端而不是左端", () => {
+    const body = rule(stripComments(CSS), ".rendered .code-head");
+    expect(body, "装饰在右上角 ⇒ 工具条右对齐").toMatch(/justify-content:\s*flex-end/);
+  });
+
+  it("工具条不贴边：右侧留出与元素相称的 padding", () => {
+    const body = rule(stripComments(CSS), ".rendered .code-head");
+    const m = /padding:\s*([^;]+);/.exec(body);
+    expect(m, "工具条必须显式给 padding").not.toBeNull();
+    const parts = (m![1] ?? "").trim().split(/\s+/);
+    // 省略写法下 1~2 个值 = 上下左右；3 个 = 上 左右 下。取「右」那一项。
+    const right = parts.length === 2 ? parts[1] : parts.length === 3 ? parts[1] : parts[3] ?? parts[1];
+    expect(parseFloat(right ?? "0"), "右缘至少 2px，否则控件像被切掉").toBeGreaterThanOrEqual(2);
+  });
+
+  it("复制按钮不再靠 margin-left:auto 顶到最右（那正是它跑到 json 右边的原因）", () => {
+    const body = rule(stripComments(CSS), ".rendered .code-head .code-copy");
+    expect(body, "右对齐由工具条负责，按钮自己别再 auto").not.toMatch(/margin-left:\s*auto/);
+  });
+
+  it("徽标与复制图标之间有边距（gap 或按钮外边距，二者其一）", () => {
+    const head = rule(stripComments(CSS), ".rendered .code-head");
+    const gap = /gap:\s*(\d+)px/.exec(head);
+    expect(gap, "工具条必须给 gap，两件装饰才分得开").not.toBeNull();
+    expect(Number(gap![1]), "gap 至少 4px").toBeGreaterThanOrEqual(4);
   });
 });
 describe("W1526 ② 高亮配色对齐 VSCode", () => {

@@ -91,6 +91,8 @@ export type IconName =
   | 'grant-shield'
   // messages / toolcards 折叠 chevron（16 网格 · 14px · 描边 1.6）
   | 'chevron-fold'
+  // 代码块工具条的复制按钮（16 网格 · 14px · 描边 1.5；W9344）
+  | 'copy'
   // plugins 展开 chevron（12 网格 · CSS 定尺寸 · 描边 1.6）
   | 'chevron-expand'
   // inputbar 回形针（24 网格 · 16px · 描边 1.8）
@@ -167,12 +169,27 @@ export const ICONS: Record<IconName, IconSpec> = {
     grid: 16,
   },
   // 12 网格：迁移前 plugins 的 chevron() **不写** width/height（尺寸由 .plug-expand svg 定）。
+  // 12 网格：迁移前 plugins 的 chevron() **不写** width/height（尺寸由 .plug-expand svg 给）。
   'chevron-expand': {
     viewBox: '0 0 12 12',
     paths: ['M4 2.5 L8 6 L4 9.5'],
     strokeWidth: 1.6,
     source: 'repo/plugins',
     grid: 12,
+  },
+  // W9344：代码块工具条的「复制」图标（取代原先的文字按钮「复制」）。
+  // 网格与描边**逐字沿用**本表既有的 16 网格 · 描边 1.5 档（mode-standard/execution
+  // 就是这一档），故与工具条里其它小元素视觉同重，不必另定一套刻度。
+  // 几何 = 两片重叠的「纸」：后片右上角的缺口让前片压得住，惯例且不糊（小尺寸下最稳）。
+  copy: {
+    viewBox: '0 0 16 16',
+    paths: [
+      'M5.5 2.5h6a2 2 0 0 1 2 2v6',
+      'M10.5 5.5v6a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h6z',
+    ],
+    strokeWidth: 1.5,
+    source: 'repo/w9344',
+    grid: 16,
   },
   'attach-clip': {
     viewBox: '0 0 24 24',
@@ -210,6 +227,7 @@ const DEFAULT_SIZE: Record<IconName, number> = {
   // 迁移前 plugins 的 chevron() 不设尺寸（CSS 的 .plug-expand svg 给 12px）。
   // 保持「不写 width/height」这个形态，否则会盖过 CSS、改变现有视觉。
   'chevron-expand': 0,
+  'copy': 14,
   'attach-clip': 16,
   'mode-standard': 13,
   'mode-execution': 13,
