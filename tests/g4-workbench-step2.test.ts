@@ -180,8 +180,15 @@ describe('G4 · 多面板工作区（第二步）', () => {
     const { wb } = await setup();
     const p = wb.openPanel('terminal', 'right');
     await flush();
+    // ★ W9329：落点判据读的容器从 .wb-host 换成了它内部的 .wb-dock-area
+    //   （W9329 重做后宿主是 #layout 的静态 flex 项，绝对定位的落点提示挂在
+    //   .wb-dock-area 上，落点高度也以它为基准）。这里给**两者**都打上同样的
+    //   rect，测试不关心到底读哪一个 —— 关心的是「拖到下 1/3 ⇒ bottom」这条不变量。
+    const rect = { top: 0, height: 600, left: 0, width: 900, right: 900, bottom: 600 };
     const host = doc.querySelector('.wb-host') as ElLike;
-    (host as unknown as { getBoundingClientRect(): { top: number; height: number; left: number; width: number; right: number; bottom: number } }).getBoundingClientRect = () => ({ top: 0, height: 600, left: 0, width: 900, right: 900, bottom: 600 });
+    (host as unknown as { getBoundingClientRect(): typeof rect }).getBoundingClientRect = () => rect;
+    const area = doc.querySelector('.wb-dock-area') as ElLike;
+    (area as unknown as { getBoundingClientRect(): typeof rect }).getBoundingClientRect = () => rect;
     const head = doc.querySelector('.wb-panel .wb-head') as ElLike;
     mouse(head, 'mousedown', 10, 10);
     mouse(doc.body as ElLike, 'mousemove', 10, 500); // 下 1/3
@@ -189,8 +196,10 @@ describe('G4 · 多面板工作区（第二步）', () => {
     mouse(doc.body as ElLike, 'mouseup', 10, 500);
     await flush();
     expect(wb.listPanels()[0]?.dock, '拖到下方 ⇒ bottom').toBe('bottom');
-    // 再拖回上方 ⇒ right
+    // 再拖回上方 ⇒ right（重建后 .wb-dock-area 是新节点，重新打 rect）
     const head2 = doc.querySelector('.wb-panel .wb-head') as ElLike;
+    const area2 = doc.querySelector('.wb-dock-area') as ElLike;
+    (area2 as unknown as { getBoundingClientRect(): typeof rect }).getBoundingClientRect = () => rect;
     mouse(head2, 'mousedown', 10, 10);
     mouse(doc.body as ElLike, 'mousemove', 10, 50);
     await flush();

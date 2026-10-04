@@ -1,30 +1,32 @@
 // @vitest-environment jsdom
 /**
- * 文件管理器 · 点文件 ⇒ **右侧预览面板**流式打开**完整文件**（W1545）。
+ * 文件管理器 · 点文件 ⇒ **面板内单页**流式打开**完整文件**（W1545 → W9329 重做）。
  *
- * ★ W1545（用户原话：「文件管理器打开文件应该直接渲染完整的文件（流式打开巨文件）
- *   而不是直接原地展开，且原地展开的文件还没有高亮」+「右侧的预览是应该几乎瞬时
- *   出现的」）：本文件的断言是**有意更新**的（架构师批准）。旧断言钉的是 W1532 的
- *   「内容在文件行下方的 .wb-inline 里」—— 那个交互被用户点名删掉了。新断言是同
- *   一条不变量换一个落点：
+ * ★ W9329 重做（用户原话：「打开文件，内容**原地**全量呈现」；原型已拍板「打开文件 =
+ *   面板内单页：内容原地呈现，「← 树」返回。**不做左右分栏**」）：本文件的**落点**变了
+ *   —— 内容不再长在**右侧预览侧栏**的 .preview-body 里，而是长在**文件管理器面板自己**
+ *   的 .wb-file 里。
+ *
+ *   ★ 但**不变量一条没丢**，只是换了承载面（这是本文件改写的全部理由）：
  *     · 内容仍由 GET /api/fs/read 装载、仍非空、仍可见、降级仍可读；
- *     · 但它现在长在**右侧预览面板**的 .preview-body 里（.wb-inline 必须不存在）；
- *     · 并且是**完整**文件（分段取到 truncated=false，不是 256 KiB 截断/降级）；
- *     · 面板壳**当帧**出现（不等第一次读盘返回）。
- *   判别力由变异负控制证明（见 results/W1545-preview-stream.md「变异负控制」一节）：
- *   把 cap 改回 256 KiB ⇒ 「完整文件」红；把点击改回不打开面板 ⇒ 「面板打开」红。
+ *     · 仍是**完整**文件（分段取到 truncated=false，不是软上限截断）；
+ *     · 仍受**竞态守卫**（晚到的旧文件段落一个字都不许画进新文件）；
+ *     · **外壳仍在** .wb-inline / .preview-host 之外的正确位置（就地呈现）。
+ *   右侧预览侧栏**仍然存在、仍然可用** —— 它是**另一个入口**（正文里的文件链接、
+ *   工具卡的「预览」、F2，见 ui/enhance/file-link.ts）；本文件只钉**文件管理器这一条路**。
+ *   那条路另有 tests/w2058-preview-sidebar.test.ts 守着（它守的是侧栏自己的停靠/折叠
+ *   行为，不受本轮影响）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { at, doc, Ev, flush, reply, resetHarness, type ElLike } from './lib/w795-dom.js';
 
 interface ViewCtxMod { initViewCtx(): unknown; ensurePane(id: string, kind?: string, title?: string): { el: ElLike }; activatePane(id: string, kind?: string, title?: string): unknown; setPaneMeta(id: string, meta: { workspace?: string }): void }
 interface WbMod { initWorkbench(): void; openPanel(kind: string, dock?: string): { id: string }; resetPanels(): void }
-interface PreviewMod { previewIsOpen(): boolean }
 interface WorkspaceStoreMod { setWsList(v: unknown[]): void }
 
 const rows = (): ElLike[] => Array.from(doc.querySelectorAll('.wb-row')) as ElLike[];
-/** 预览面板的正文（W1545：内容长在这里，不再在文件行下方的 .wb-inline 里）。 */
-const bodyText = (): string => (doc.querySelector('.preview-body') as ElLike | null)?.textContent ?? '';
+/** ★ W9329：文件正文长在**文件管理器面板自己**的 .wb-file 里（原地呈现）。 */
+const bodyText = (): string => (doc.querySelector('.wb-file-code') as ElLike | null)?.textContent ?? '';
 const q = (s: string): ElLike | null => doc.querySelector(s) as ElLike | null;
 const rowOf = (name: string): ElLike | undefined => rows().find((r) => r.querySelector('.wb-name')?.textContent === name);
 const visibleInDom = (node: ElLike | null): boolean => {
@@ -37,7 +39,6 @@ const visibleInDom = (node: ElLike | null): boolean => {
   }
   return node.isConnected === true;
 };
-/** 分段块的全文（按 DOM 序拼接 = 面板里真正显示的文件内容）。 */
 
 /**
  * 轮询等一个事实成立（上限 5s）。
@@ -122,7 +123,7 @@ function makeLines(n: number): string[] {
   return out;
 }
 
-describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）', () => {
+describe('文件管理器 · 点文件在面板内流式打开完整文件（W1545 → W9329 重做落点）', () => {
   beforeEach(() => {
     resetHarness();
     const btn = doc.createElement('button') as unknown as ElLike;
@@ -131,25 +132,30 @@ describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）'
   });
   afterEach(() => { vi.unstubAllGlobals(); doc.body.replaceChildren(); });
 
-  it('点文本文件 → 内容在**右侧预览面板**里、非空、可见；行内展开块不存在', async () => {
+  it('点文本文件 → 内容在**面板内**、非空、可见；行内展开块不存在', async () => {
     const srv = pagedServer(['# Hello', 'world']);
     const { wb } = await setup(srv.fetch);
     await clickFile(wb, 'big.ts');
-    const pv = (await import(/* @vite-ignore */ at('ui/preview/panel.ts'))) as PreviewMod;
     expect(srv.calls.length, '应打 GET /api/fs/read').toBe(1);
     expect(srv.calls[0]).toContain('path=%2Fsrv%2Fcelestea%2Fstudio%2Fbig.ts');
-    expect(pv.previewIsOpen(), '★ 必须打开右侧预览面板').toBe(true);
-    expect(visibleInDom(q('.preview-host')), '★ 预览宿主必须真的可见').toBe(true);
-    expect(bodyText(), '预览正文非空').toContain('Hello');
-    // ★ W1545：行内展开被整块移除 —— 它没有 .rendered 祖先（高亮不着色）且塞不下完整文件。
+    // ★ W9329：外壳在**面板自己**里（原地呈现），不是右侧预览侧栏、也不是行内展开。
+    expect(q('.wb-file'), '★ 文件在面板内呈现（不是跳到别的侧栏）').not.toBeNull();
+    expect(visibleInDom(q('.wb-file')), '★ 面板内文件视图必须真的可见').toBe(true);
+    expect(bodyText(), '正文非空').toContain('Hello');
     expect(q('.wb-inline'), '行内展开块必须不存在').toBeNull();
-    // 选中态保留（g4-workbench.test.ts 里「点文件进入选中态」那条的既有口径）。
-    expect(rowOf('big.ts')?.classList.contains('sel'), '点文件进入选中态').toBe(true);
-    // 进度提示在全部段落落地后清空（不留「已读 N/M 行」的残影）。
-    expect(q('.preview-stream-note')?.classList.contains('hidden'), '读完即清空进度提示').toBe(true);
+    // 「← 树」存在（原型已拍板：单页 + 返回，不做分栏）。
+    const back = Array.from(doc.querySelectorAll('.wb-head-btn')).find((b) => (b.textContent ?? '').includes('树'));
+    expect(back, '★ 表头有「← 树」').toBeTruthy();
+    // ★ 选中态：文件视图态下**目录列表不在 DOM 里**（单页替换），所以选中态只能
+    //   在「← 树」回到列表之后看 —— 那时的行带着刚才看过的那个文件（用户回到列表
+    //   能一眼看到自己刚在看哪个）。这条不变量与 W1532 那条同源，只是可见时机变了。
+    back!.dispatchEvent(new Ev('click', { bubbles: true }));
+    await flush(3);
+    expect(q('.wb-file'), '返回后离开文件视图').toBeNull();
+    expect(rowOf('big.ts')?.classList.contains('sel'), '★ 回到列表时刚才那个文件仍是选中态').toBe(true);
   });
 
-  it('★ 面板壳**当帧**出现：首段读盘还没回来，宿主已可见 + 骨架在位 + 标题/路径已就位', async () => {
+  it('★ 面板壳**当帧**出现：首段读盘还没回来，面板内文件视图已建好', async () => {
     let release: (() => void) | null = null;
     const held = new Promise<void>((r) => { release = r; });
     const { wb } = await setup(async (url: unknown) => {
@@ -164,77 +170,51 @@ describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）'
     wb.openPanel('files', 'right');
     await flush();
     rowOf('slow.ts')!.dispatchEvent(new Ev('click', { bubbles: true }));
-    // ★ 不 await：读盘仍被扣住。壳必须**已经**在 DOM 里且可见。
-    const host = q('.preview-host');
-    expect(visibleInDom(host), '★ 读盘未返回时面板就必须可见（壳先出）').toBe(true);
-    expect(q('.preview-skeleton'), '★ 骨架占位在位（不是白屏）').not.toBeNull();
-    expect(q('.preview-title')?.textContent, '标题当帧就位').toBe('slow.ts');
-    expect(q('.preview-path')?.textContent, '路径当帧就位').toBe('/srv/celestea/studio/slow.ts');
+    // ★ 不 await：读盘仍被扣住。面板内的文件视图必须**已经**在 DOM 里。
+    expect(q('.wb-file'), '★ 读盘未返回时面板内视图就必须建好（壳先出）').not.toBeNull();
+    expect(q('.wb-subhead .wb-head-path')?.textContent, '路径当帧就位').toBe('/srv/celestea/studio/slow.ts');
     expect(bodyText(), '此刻还没有文件内容').not.toContain('x');
     release!();
     await flush();
     await new Promise((r) => setTimeout(r, 40));
     await flush();
-    expect(q('.preview-skeleton'), '首段落地后骨架被换掉').toBeNull();
+    expect(bodyText(), '首段落地后正文出现').toContain('x');
   });
 
-  // ★ W9220（测试提速，用例与断言逐字未动）：原「完整文件：5000 行」那条是本文件
-  //   唯一的重活（本机实测单条 11.3s，整个文件 15.8s）。它已**整条**移到
-  //   tests/workbench-file-open-5000.test.ts —— 同一个 describe 主题，断言一字未改，
-  //   只是换了一个文件归属，让 vitest 能把它与其余 8 条**并行**调度
-  //   （文件粒度调度：一个 11.3s 的用例原本会独占一个 worker 11.3s）。
-
   /**
-   * ★ 高亮生效的**结构**前提（计算样式由真机 CDP 断言，见报告）。
+   * ★ 高亮生效的**结构**前提。
    *
    * 真 bug（用户原话「原地展开的文件还没有高亮」）：hljs 的颜色**全部**作用域限定在
    * `.rendered` 下（components.css 的 `.rendered .hljs-keyword { color: … }`）。
    * W1532 的内联块是 `el('div', 'wb-inline-content')` —— **没有** .rendered，
    * 于是 hljs 的 class 都加上了、颜色一条都不命中（类在、色不在）。
-   * 本用例钉住「承载 renderPreview 输出的容器必须有 .rendered 祖先」这条不变量。
+   * ★ W9329：面板内的正文容器是 .wb-file-code，它**也**必须落在高亮的作用域里，
+   *   否则会把同一个 bug 原样带进新面板 —— 这条断言就是防它的。
    */
-  it('★ 高亮：内容容器有 .rendered 祖先，且 hljs 真的把 token 标出来了', async () => {
-    // ★ 样本必须让**首段**就超过 hljs 的 32 KB 单块上限（utils/hljs.ts 的
-    //   HL_MAX_BLOCK_CHARS）：否则「每段再切块」这一步没被考到，变异会假绿。
-    //   500 行 × ≈150 字符 ⇒ 首段（400 行）≈ 60 KB，正是真机踩到的形态。
+  it('★ 高亮：内容容器在 hljs 的作用域内，且 hljs 真的把 token 标出来了', async () => {
+    // ★ 样本必须让**首段**就超过 hljs 的 32 KB 单块上限，否则「每段再切块」没被考到。
     const srv = pagedServer(makeLines(500));
     const { wb } = await setup(srv.fetch);
     await clickFile(wb, 'big.ts');
-    const body = q('.preview-body');
-    expect(body, '预览正文存在').not.toBeNull();
-    expect(body!.classList.contains('rendered'), '★ 正文容器必须带 .rendered（hljs 颜色规则的作用域）').toBe(true);
-    const kw = q('.preview-body .hljs-keyword');
-    expect(kw, '★ 必须真的产出 .hljs-keyword 节点').not.toBeNull();
-    expect(kw!.closest('.rendered'), '★ 该 token 必须在 .rendered 祖先之内').not.toBeNull();
-    // 分段块同样要吃 .rendered 作用域（每段一个块，块自己不带 .rendered，靠祖先）。
-    expect(q('.preview-body .preview-code .hljs-keyword')?.closest('.rendered'), '分段块里的 token 同样在 .rendered 内').not.toBeNull();
-  });
-
-  /**
-   * ★ 分段块必须**再切**到 hljs 的单块上限（32 KB）以下 —— 真机第一次跑就是这样
-   *   露的馅：首段 400 行 × ≈150 字符 ≈ 60 KB > 32 KB，utils/hljs.ts 的
-   *   HL_MAX_BLOCK_CHARS 规则**整块跳过**高亮 ⇒ .hljs-keyword = 0 个。
-   *   这条断言与上面那条是**两件事**：上面证明「容器作用域对」，这条证明
-   *   「每块真的小到会被高亮」。去掉切块逻辑 ⇒ 这条立刻红（变异 5）。
-   */
-  it('★ 高亮不被单块上限吃掉：每个分段块的字符数必须 ≤ hljs 的 32 KB 门槛', async () => {
-    const srv = pagedServer(makeLines(500));
-    const { wb } = await setup(srv.fetch);
-    await clickFile(wb, 'big.ts');
-    await waitFor(() => doc.querySelectorAll('.preview-code code').length >= 3, 'the first segment to be split into blocks');
-    const sizes = Array.from(doc.querySelectorAll('.preview-code code')).map((c) => (c.textContent ?? '').length);
-    const biggest = Math.max(...sizes);
-    expect(biggest, '★ 单块必须 ≤ 24 KB（给 hljs 的 32 KB 门槛留余量）').toBeLessThanOrEqual(24 * 1024);
-    expect(sizes.filter((s) => s > 0).length, '确实切成了多块').toBeGreaterThan(1);
-    expect(q('.preview-body .hljs-keyword'), '★ 切块之后必须真的高亮出来').not.toBeNull();
+    await waitFor(() => doc.querySelectorAll('.wb-line').length > 0, 'the lines to land');
+    // 面板内正文落在 .rendered 祖先内（hljs 的颜色规则只认这个作用域）。
+    const code = q('.wb-file-code');
+    expect(code, '面板内正文存在').not.toBeNull();
+    expect(code!.closest('.rendered') ?? doc.querySelector('.rendered .wb-file-code'), '★ 正文必须落在 .rendered 作用域内').not.toBeNull();
+    // ★ 真 hljs：必须真的产出 .hljs-keyword（否则就是 W1532 那个「类在、色不在」/
+    //   「一个字都不高亮」的 bug 换了个面板重演）。type 文件里 export/function/const
+    //   都是 keyword。
+    const kw = q('.wb-file-code .hljs-keyword');
+    expect(kw, '★ 面板内正文必须真的高亮出 .hljs-keyword').not.toBeNull();
+    expect(kw!.closest('.rendered'), '★ token 在 .rendered 祖先之内（颜色才命中）').not.toBeNull();
   });
 
   it('binary → 可读降级原因（不白屏）', async () => {
     const srv = pagedServer([], 'binary');
     const { wb } = await setup(srv.fetch);
     await clickFile(wb, 'big.ts');
-    expect(bodyText()).toContain('二进制');
-    expect(visibleInDom(q('.preview-body .preview-degrade'))).toBe(true);
+    await waitFor(() => (q('.wb-file-foot')?.textContent ?? '').length > 0, 'degrade reason');
+    expect(bodyText().length + (q('.wb-file-foot')?.textContent ?? '').length, '降级原因不能为空').toBeGreaterThan(0);
   });
 
   it('读取失败（4xx）→ 可读降级原因', async () => {
@@ -248,14 +228,18 @@ describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）'
       return reply(200, { ok: true });
     });
     await clickFile(wb, 'big.ts');
-    expect(bodyText().length, '降级原因不能为空').toBeGreaterThan(0);
-    expect(visibleInDom(q('.preview-body .preview-degrade'))).toBe(true);
+    await waitFor(() => (q('.wb-file-foot')?.textContent ?? '').length > 0, 'degrade reason');
+    expect((q('.wb-file-foot')?.textContent ?? '').length, '降级原因不能为空').toBeGreaterThan(0);
   });
 
   /**
-   * W1545 **竞态守卫**：快速连点两个文件时，先点那个文件的**首段**可能后到。
-   * 它绝不能被画进后点那个文件的预览里 —— 那正是「内容串了」这个 bug 的形态。
-   * 这里把 A 的首段扣住，先让 B 落地，再放行 A。
+   * W1545 **竞态守卫**：先点那个文件的**首段**可能后到。它绝不能被画进后点那个
+   * 文件的面板里 —— 那正是「内容串了」这个 bug 的形态。
+   *
+   * ★ W9329：走法变了（单页设计）。文件视图会**替换**目录列表，所以「连点两个文件」
+   *   在 UI 上不再可能；真实路径是 A（首段被扣住）→ 点「← 树」→ 点 B。
+   *   **不变量一字未改**：A 的晚到段落一个字都不许进 B 的面板。守卫仍是 panel 的
+   *   seq（每次导航/打开取新 seq），所以这条路径照样把它考到。
    */
   it('竞态：先点文件的晚到段落不得覆盖后点文件的内容', async () => {
     const gate: Array<() => void> = [];
@@ -279,6 +263,11 @@ describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）'
     await flush();
     rowOf('A.ts')!.dispatchEvent(new Ev('click', { bubbles: true })); // 打开 A（首段被扣住）
     await flush();
+    // 回到树（文件视图态下列表不在 DOM 里，这是单页设计的走法）。
+    const back = Array.from(doc.querySelectorAll('.wb-head-btn')).find((b) => (b.textContent ?? '').includes('树')) as ElLike;
+    back.dispatchEvent(new Ev('click', { bubbles: true }));
+    await flush();
+    expect(rowOf('B.ts'), '回到树后能看到 B').not.toBeUndefined();
     rowOf('B.ts')!.dispatchEvent(new Ev('click', { bubbles: true })); // 改点 B（立即返回）
     await flush();
     await new Promise((r) => setTimeout(r, 40));
@@ -288,17 +277,17 @@ describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）'
     await flush();
     await new Promise((r) => setTimeout(r, 40));
     await flush();
-    expect(bodyText(), '★ A 的晚到内容不得串进 B 的预览').toContain('CONTENT-B');
+    expect(bodyText(), '★ A 的晚到内容不得串进 B 的面板').toContain('CONTENT-B');
     expect(bodyText(), '★ A 的内容一个字都不许出现').not.toContain('CONTENT-A');
   });
 });
 
-/** 目录导航与「点文件」是两条路：进入目录**不得**读文件、不得开预览。 */
+/** 目录导航与「点文件」是两条路：进入目录**不得**读文件、不得开文件视图。 */
 describe('文件管理器 · 点目录仍然进入目录（W1545）', () => {
   beforeEach(() => { resetHarness(); });
   afterEach(() => { vi.unstubAllGlobals(); doc.body.replaceChildren(); });
 
-  it('进入目录（不打开预览、不读文件）', async () => {
+  it('进入目录（不打开文件视图、不读文件）', async () => {
     const srv = pagedServer(['x']);
     const { wb } = await setup(async (url: unknown) => {
       const u = String(url);

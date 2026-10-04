@@ -1,7 +1,26 @@
 /* ============================================================================
- * styles/workbench.css — G4：多面板工作区（右上角入口 + 可停靠面板区 + 文件管理器）。
- *   布局：.wb-host 是 #main 内的普通 flex 子项（位于 .chat-shell 之后），
- *   不动 #layout 的 #sidebar + #main 三栏骨架（理由见 ui/workbench/panel.ts 头注）。
+ * styles/workbench.css — G4/W9329：多面板工作区（右上角入口 + 右侧/底部面板区 +
+ *   文件管理器）。
+ * ----------------------------------------------------------------------------
+ * ★ W9329 重做（**覆盖式 ⇒ 挤压式**）：本文件此前把 .wb-host 写成
+ *   `position:absolute; inset:0`，面板是浮在对话区**之上**的（同一文件第 3 行与
+ *   ui/workbench/panel.ts 的头注释都写着「普通 flex 子项…对话区被压缩而不是覆盖」——
+ *   **注释说挤压、代码是覆盖**，这是本轮要消掉的那处自相矛盾）。
+ *
+ *   现在的形态（照 prototype/right-panel.html 的已拍板行为）：
+ *     #layout = [ #sidebar | #main | .wb-splitter | .wb-host ]
+ *   · .wb-host 是 **#layout 的 flex 子项**（不是 #main 的绝对定位孩子）⇒ 面板占的
+ *     宽度**从会话列里扣**，是真正的**挤压**；两者在 flex 轴上首尾相接，**轴对齐
+ *     矩形不可能相交**（与 preview.css 同一判定法：相邻块 ⇒ 不相交）。
+ *   · 为什么宿主放 **#layout** 而不是 #main：#main 是 `flex-direction:column`，而
+ *     tests/w871:96 断言 .chat-shell 的父节点**必须**是 #main、w1462:84 与
+ *     w867:124 断言 #statusbar / #messages 必须是 #main 的**直接子项**。把宿主塞进
+ *     #main 的某一行会同时推翻三条门禁。挂到 #layout 之后，#main 的子结构**一字未动**
+ *     ⇒ 三条门禁原样成立，而挤压照样成立（挤压发生在 #layout 这一层）。
+ *   · ★ `min-width: 0` 是**最容易漏的一行**：#layout 是 flex row，#main 已有
+ *     `flex:1; min-width:0`（layout.css:170）⇒ 它能被扣宽；宿主则用 `flex: 0 0 <宽度>`
+ *     **不参与**收缩。少了 #main 的 min-width:0，flex 根本不让会话列变窄，整套
+ *     「撑开」会静默退化成「溢出」——这正是本轮真机要量的第一条。
  * ============================================================================ */
 
 /* ---- 右上角入口按钮 ---- */
@@ -36,43 +55,81 @@
 .wb-menu-label { font-size: 13px; color: var(--c-text-1); }
 .wb-menu-desc { font-size: 11.5px; color: var(--c-text-3); }
 
-/* ---- 面板区（#main 内的可停靠容器；绝对定位，不动 #layout 骨架） ----
-   选择理由与代价（报告里详述）：绝对定位的 dock 区 **零骨架改动、零背景重排**，
-   但面板会覆盖在对话区之上而不是把对话区挤窄（真·挤压布局要改 #main 的子结构，
-   而 w871 断言 .chat-shell 的父节点必须是 #main）。 */
-.wb-host { position: absolute; inset: 0; z-index: 24; pointer-events: none; }
+/* ---- 面板宿主（W9329：#layout 里的**挤压式**列，不是覆盖层） ----------------
+   形状与 prototype/right-panel.html 的 `.panel` 逐条对应：
+     .wb-host  ≡  .panel    （flex:0 0 <宽>，min-width 给下限）
+     .wb-split ≡  .split    （可拖拽分隔条）
+   「撑开 ≠ 覆盖」的结构保证：**两者是 #layout 同一行里的 flex 兄弟**，首尾相接。
+   不用 position:absolute —— 绝对定位会**脱离** flex 流，面板宽度就不再从会话列里扣，
+   那正是本轮重做前的形态。 */
+.wb-host {
+  /* ★ W9329：宽度走**一个**自定义属性 --wb-col-w，两种形态各自读它：
+       挤压态 = flex-basis（本站这一条）；
+       覆盖态 = width（下方 .wb-host.overlay 那一条）。
+     ★ 为什么**不**写内联 width（真机实测踩到的 bug）：内联 `style.width` 会
+     **压过**样式表里的 `width: min(var(--wb-col-w), 92vw)`（内联优先），于是从
+     覆盖态改宽时面板宽度**冻在旧值**上 —— 实测：760 → 420 后宿主仍是 760px，
+     `--wb-col-w` 已经变成 420px 但没人读它。变量只有一个、不参与优先级之争。 */
+  flex: 0 0 var(--wb-col-w, 420px);
+  display: flex;
+  /* 竖排「右侧」区（面板横向排开时）位于右侧；竖排时纵向分 bottom/right 两段。 */
+  min-width: 0;
+  z-index: 24; /* 与 .preview-host(35) 的关系见 preview.css 的共存规则 */
+  background: var(--c-surface);
+  border-left: var(--hairline) solid var(--border-l1);
+}
 .wb-host.hidden { display: none; }
-.wb-dock { position: absolute; inset: 0; pointer-events: none; }
-.wb-zone { pointer-events: none; }
+/* ★ 覆盖形态（.wb-host.overlay）的全部声明集中在文件末尾的「窄屏诚实降级」一节，
+   这里**不再**散落第二条 —— 同一个类名分两处声明正是 W9329 要清掉的那类写法。 */
+
+/* 停靠区。
+   ★ W9329 修掉了「一个类名两个意图」：此前 panel.ts 的停靠**按钮**写
+   `wb-btn wb-dock`，而这里的停靠**浮层**也叫 `.wb-dock`（`position:absolute; inset:0`）
+   ⇒ 按钮被那条 inset:0 拉伸铺满整个面板，里面的 ⇩ 居中渲染成「浮在正中间的箭头」
+   （用户报障）。现在两个意图各有各的类名，彼此永不命中：
+     · 停靠**浮层**（面板区的容器） = .wb-dock-area
+     · 停靠**按钮**（面板头里）   = .wb-dock-btn（无任何布局声明，纯按钮） */
+.wb-dock-area {
+  position: relative; /* 拖动落点提示（.wb-drop-hint）的定位包含块 */
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
 /* 底部：贴底一行（面板横向排开） */
 .wb-zone.bottom {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
+  flex: 0 0 auto;
   display: flex; flex-direction: row; align-items: stretch;
-  padding: 0 4px 4px;
+  border-top: var(--hairline) solid var(--border-l1);
 }
-/* 右侧：贴右一列（面板纵向排开），下沿让开 bottom 区高度 */
+/* 右侧：贴右一列（面板纵向排开），上沿让开 topbar、下沿让开 bottom 区高度 */
 .wb-zone.right {
-  position: absolute;
-  top: 0; right: 0; bottom: var(--wb-bottom-h, 0px);
+  flex: 1 1 auto;
   display: flex; flex-direction: row; align-items: stretch;
-  padding: 4px 4px 0 0;
+  min-height: 0;
+  min-width: 0;
 }
 
-/* 面板框 */
+
+/* 面板框。
+   W9329：它是**停靠列**里的一格，不是浮在正文上的卡片 ⇒ 圆角与四周描边**全部去掉**
+   （会画到相邻的会话列上，且「卡片」形态与「撑开」语义相反）。分界改由
+   .wb-host 的 border-left（发丝线）与 .wb-panel 的 border-left 承担 —— 与
+   preview.css 的 .preview-panel 同一口径。 */
 .wb-panel {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   flex: 0 0 auto;
-  pointer-events: auto; /* dock 宿主穿透，面板本身可交互 */
-  border: var(--hairline) solid var(--border-l1);
-  border-radius: var(--r-md);
-  background: var(--c-surface-raised);
+  background: var(--c-surface);
+  border-left: var(--hairline) solid var(--border-l1);
   overflow: hidden;
 }
-.wb-panel.focused { border-color: var(--c-accent-ring); }
+.wb-zone.right > .wb-panel:first-child { border-left: none; }
+/* 焦点态：左侧发丝线加粗为 accent（不用 outline，避免画到会话列上）。 */
+.wb-panel.focused { border-left: 2px solid var(--c-accent-ring); }
 .wb-head {
   display: flex;
   align-items: center;
@@ -81,6 +138,7 @@
   border-bottom: var(--hairline) solid var(--border-l1);
   background: var(--c-layer-2);
   flex: 0 0 auto;
+  min-width: 0;
 }
 .wb-title { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--c-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wb-btn {
@@ -95,12 +153,29 @@
 }
 .wb-btn:hover { color: var(--c-text-1); }
 .wb-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 6px 8px; }
+/* ★ W9329：文件打开态的正文**贴边**（无内边距）—— 真机要量「代码列宽 == 面板宽 −
+   行号列宽(56)」这条**精确**等式，body 上任何横向内边距都会让等式偏掉。 */
+.wb-body:has(> .wb-file) { padding: 0; overflow: hidden; }
 
-/* 分隔条（拖拽 resize） */
-.wb-resizer { flex: 0 0 5px; background: transparent; position: relative; z-index: 2; pointer-events: auto; }
-.wb-resizer.right { cursor: col-resize; }
-.wb-resizer.bottom { cursor: row-resize; }
-.wb-resizer:hover { background: var(--c-accent-soft); }
+/* 分隔条（拖拽 resize；rAF 节流）。
+   ★ W9329：它是 #layout 里的**挤压分隔条**，与 .sidebar-resizer 同族 —— 视觉 5px、
+   命中区扩到 ~11px。hover/focus 走 --c-accent-soft，与侧栏拖条同一套反馈。 */
+.wb-splitter {
+  flex: 0 0 5px;
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+  z-index: 2;
+}
+.wb-splitter::after {
+  content: "";
+  position: absolute; top: 0; bottom: 0; left: 1px; right: 1px;
+  background: var(--border-l1);
+}
+.wb-splitter:hover::after,
+.wb-splitter:focus-visible::after { background: var(--c-accent-ring); }
+.wb-splitter:focus-visible { outline: 2px solid var(--c-focus-ring); outline-offset: -2px; }
 
 /* ---- 文件管理器 ---- */
 .wb-crumbs { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; min-width: 0; }
@@ -143,7 +218,73 @@
 .wb-placeholder { font-size: 12px; color: var(--c-text-3); padding: 4px 2px; }
 .wb-row.open { background: var(--c-accent-soft); color: var(--c-text-1); }
 
-/* 拖动停靠时的落点提示 */
+/* ---- W9329 · 打开文件 = **面板内单页**（不弹模态、不左右分栏） --------------
+   照 prototype/right-panel.html 的 renderFull / renderStream 逐条对应：
+     .wb-file     ≡  .file
+     .wb-file-code≡  .file .code
+     .wb-line     ≡  .file .ln     （行号列 .wb-line-no + 文本列 .wb-line-tx）
+     .wb-file-foot≡  .file .foot   （**如实**的加载状态）
+   「← 树」返回按钮与「换行」开关都在**面板表头**（.wb-head），不塞进正文。
+   ------------------------------------------------------------------------- */
+.wb-file { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+/* 正文滚动容器。★ padding 上下为 0、左右也交给内部各行 ⇒ 整块与面板等宽（真机要量
+   「代码列宽 == 面板宽 − 行号列宽」，任何额外横向内边距都会让这条等式偏掉）。 */
+.wb-file-code {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 0 14px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  /* ★ W9329：`scrollbar-gutter: stable` **为那条精确等式而存在**。
+     派工单给的基线是「代码列 clientWidth 必须精确等于 面板容器宽 − 行号列宽(56px)」。
+     真机实测（headless Chrome 153，原型）这条**不成立**：实测恒定偏大 41px，
+     拆开是 1px border-left + 15px 滚动条槽 + 25px min-content 顶开。
+     滚动条槽就是那 15px：它**按内容出现/消失**（内容短时无槽）⇒ 同一块面板的
+     代码列宽度会随文件长短跳 15px，「精确等于」根本无从断言。
+     `scrollbar-gutter: stable` 把那条槽**永远预留** ⇒ 宽度与内容无关，等式才成立。
+     （原型没有这条，所以它的等式是漂的 —— 详见 results 报告「对基线的更正」。） */
+  scrollbar-gutter: stable;
+}
+.wb-line { display: flex; }
+/* 行号列：宽度固定、**不参与换行**（行号永远单行居右）。56px 是 prototype 的口径，
+   也是真机校验等式里的那个常数。 */
+.wb-line-no {
+  flex: 0 0 56px;
+  text-align: right;
+  padding-right: 14px;
+  color: var(--c-text-3);
+  user-select: none;
+  white-space: pre;
+}
+/* 文本列：默认横向滚动（不折行）。padding-right 给一点右呼吸，与 prototype 一致。 */
+.wb-line-tx { flex: 1 1 auto; min-width: 0; white-space: pre; padding-right: 16px; }
+/* ★ 自动换行（W9329，全局**阅读偏好**，不进会话级状态）。
+   `overflow-wrap: anywhere` **必须有**：只写 pre-wrap 的话，一行 200 字符的长字符串
+   仍然不折行（pre-wrap 只在**空白**处折）——用户会以为开关坏了。这两行是原型的原话。
+   行号列不动、续行在 .wb-line-tx 左侧对齐（.tx 自身是 flex 项，天然悬挂缩进）。 */
+.wb-file.wrap .wb-line-tx { white-space: pre-wrap; overflow-wrap: anywhere; }
+.wb-line:hover { background: var(--interactive-bg-hover, var(--c-layer-2)); }
+/* 页脚：**如实**的加载状态。两种模式的文案**必须分开**（见 files-view 的渲染）：
+   普通文件「共 N 行 · 已全部加载（无截断）」；流式「流式：已加载 N / 共 M 行」。 */
+.wb-file-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-top: var(--hairline) solid var(--border-l1);
+  font-size: 11.5px;
+  color: var(--c-text-3);
+  font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* 拖动停靠时的落点提示。
+   W9329：宿主不再是 position:absolute ⇒ 这里的绝对定位需要一个定位包含块，
+   由 .wb-dock-area 提供的 position:relative 承担（面板区自身的盒子）。 */
 .wb-drop-hint {
   position: absolute;
   z-index: 3;
@@ -227,3 +368,95 @@
    那个 frame 的高度是 calc(100% - 34px)，排在它后面的兄弟会被推出可视区。 */
 .wb-url-external { color: var(--c-accent); white-space: nowrap; }
 .wb-frame { width: 100%; height: calc(100% - 34px); min-height: 200px; border: 1px solid var(--c-border-subtle); border-radius: var(--r-sm); background: var(--c-layer-2); }
+
+/* ---- W9329 · 面板表头的三个控件（← 树 / 换行 / 关闭） -----------------------
+   全部在 .wb-head 里，**不进正文**：与 preview.css 的 .preview-head 同一口径
+   （W1526 的教训：hover 才显形 / opacity:0 的控件在触屏上等于不存在）。
+   换行开关是**全局阅读偏好**（aria-pressed 表达状态，不是装饰）。 */
+.wb-head-btn {
+  flex: 0 0 auto;
+  border: 1px solid var(--c-border-subtle);
+  border-radius: var(--r-sm);
+  background: var(--c-surface-raised);
+  color: var(--c-text-2);
+  font-size: 11.5px;
+  line-height: 1.4;
+  padding: 2px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wb-head-btn:hover { background: var(--interactive-bg-hover, var(--c-layer-2)); color: var(--c-text-1); }
+.wb-head-btn:focus-visible { outline: 2px solid var(--c-focus-ring); outline-offset: -2px; }
+.wb-head-btn[aria-pressed="true"] { background: var(--c-accent-soft); color: var(--c-text-1); font-weight: 600; }
+/* 表头里的路径（文件打开态）：单行省略，绝不把按钮挤出面板。 */
+.wb-head-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--c-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* ★ W9329：文件管理器的**自己的表头条**（路径 / 换行 / ← 树），在 .wb-head 下方。
+   为什么单独一条而不是塞进 .wb-head：.wb-head 是所有面板共用的（dock 切换 + 关闭），
+   文件页的「← 树」只在**文件态**存在 —— 共用一行会让「返回」按钮在树态下留下空位。
+   树态下这一条是**空**的（files.ts 不碰它），高度为 0（:empty），不占空间。 */
+.wb-subhead {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  min-width: 0;
+  border-bottom: var(--hairline) solid var(--border-l1);
+  background: var(--c-surface);
+}
+.wb-subhead:empty { display: none; }
+
+/* ---- W9329 · 窄屏**诚实降级**（覆盖式 + 明确提示，而不是把正文挤到不可读） ----
+   判据是**量出来的**，不是 @media 猜的：panel.ts 每次布局后量「#main 可用宽」与
+   「面板最小宽」，容不下就把 .wb-host 切到 .overlay（退出 flex 流 → 覆盖式），
+   同时在会话列顶出一条 .wb-narrow-note 说明「已改为覆盖式」。
+
+   为什么必须是覆盖式而不是继续挤：会话列窄到 360px 以下时正文 660px 上限失效、
+   行内代码与表格一起横向溢出 —— 那正是「挤到不可读」。宁可让面板盖住一段正文，
+   也要保证**没打开面板时**（以及拖宽面板时）正文是完整的。 */
+.wb-host.overlay {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  z-index: 26; /* 高于 .wb-host 的 24（同层覆盖，不与 .preview-host(35) 争） */
+  /* ★ W9329 真机实测修掉的缺陷：原型写的是 `flex-basis: min(var(--panel-w), 92vw)`，
+     但**绝对定位元素上 flex-basis 完全不生效**（headless Chrome 153 实测：
+     computed flex-basis 420px / 699.2px 均未被采用）。position:fixed + width:auto
+     触发 shrink-to-fit 公式 min(max(min-content, available), max-content)，
+     而面板里长代码的 min-content 很大 ⇒ 实测宽 813.13px 冲出视口左侧 53px。
+     ⇒ 必须显式写 **width**（不是 flex-basis）并加 max-width 兜底。
+     ★ 读的是与挤压态**同一个** --wb-col-w（见 .wb-host 的注释：内联 width 会压过
+     这一条，所以宽度只走变量）。 */
+  width: min(var(--wb-col-w, 420px), 92vw);
+  max-width: 92vw;
+  overflow: hidden;
+  box-shadow: var(--shadow-panel);
+}
+body.wb-overlay-open .wb-splitter { display: none; }
+/* 窄屏提示条：挂在会话列顶部，**如实**说明当前是覆盖式。 */
+.wb-narrow-note {
+  position: absolute;
+  top: 8px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 27;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--c-border-subtle);
+  border-radius: var(--card-radius);
+  background: var(--c-surface-raised);
+  box-shadow: var(--shadow-panel);
+  font-size: 11.5px;
+  color: var(--c-text-2);
+  white-space: nowrap;
+  pointer-events: none;
+}

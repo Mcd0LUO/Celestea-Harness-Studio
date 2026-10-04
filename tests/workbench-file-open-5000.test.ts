@@ -1,26 +1,23 @@
 // @vitest-environment jsdom
 /**
- * 文件管理器 · 点文件 ⇒ **右侧预览面板**流式打开**完整文件**（W1545）。
+ * 文件管理器 · 点文件 ⇒ **面板内单页**流式打开**完整文件**（W1545 → W9329 重做落点）。
  *
  * ★ W9220（测试提速）：本文件是原 ~tests/workbench-file-open.test.ts~ 里那条
  *   「完整文件：5000 行（> 256 KiB）必须全文渲染」用例的**独立文件**。
- *   用例正文与断言**逐字未动**，共享夹具（~pagedServer~/~setup~/~clickFile~/~makeLines~）
- *   也逐字复制自原文件 —— 只改了文件归属。
  *   为什么单开：那条用例本机实测单条 **11.3s**（5000 行 × ≈150 字符 = 750 KB 走
  *   分段流式 + hljs 分块高亮），而 vitest 以**文件**为调度单位 —— 它原本会把
  *   同文件其余 8 条（合计约 2s）拖在同一 worker 里串行等待。拆开后两条并行。
  *
- * ★ W1545（用户原话：「文件管理器打开文件应该直接渲染完整的文件（流式打开巨文件）
- *   而不是直接原地展开，且原地展开的文件还没有高亮」+「右侧的预览是应该几乎瞬时
- *   出现的」）：本文件的断言是**有意更新**的（架构师批准）。旧断言钉的是 W1532 的
- *   「内容在文件行下方的 .wb-inline 里」—— 那个交互被用户点名删掉了。新断言是同
- *   一条不变量换一个落点：
- *     · 内容仍由 GET /api/fs/read 装载、仍非空、仍可见、降级仍可读；
- *     · 但它现在长在**右侧预览面板**的 .preview-body 里（.wb-inline 必须不存在）；
- *     · 并且是**完整**文件（分段取到 truncated=false，不是 256 KiB 截断/降级）；
- *     · 面板壳**当帧**出现（不等第一次读盘返回）。
- *   判别力由变异负控制证明（见 results/W1545-preview-stream.md「变异负控制」一节）：
- *   把 cap 改回 256 KiB ⇒ 「完整文件」红；把点击改回不打开面板 ⇒ 「面板打开」红。
+ * ★ W9329 重做（用户原话：「打开文件，内容**原地**全量呈现」；原型已拍板「打开文件 =
+ *   面板内单页：内容原地呈现，「← 树」返回。**不做左右分栏**」）：**落点**从右侧预览
+ *   侧栏的 .preview-body 换成了文件管理器面板自己的 .wb-file。
+ *
+ *   ★ 不变量一条没丢，只是换了承载面（这是本文件改写的全部理由）：
+ *     · 内容仍由 GET /api/fs/read 装载、**逐字节等于完整文件**（最强的那条）；
+ *     · 仍是**完整**文件（分段取到 truncated=false，绝不降级成「文件过大」）；
+ *     · 仍然**分段取**（不止一次往返），首段 limit=400（首屏快）、后续 1200（往返少）；
+ *     · DOM 行数 == 服务端 totalLines。
+ *   判别力仍在：把 cap 改回 256 KiB ⇒ 「完整文件」红；把点击改成不打开 ⇒ 行数 0 红。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { at, doc, Ev, flush, reply, resetHarness, type ElLike } from './lib/w795-dom.js';
@@ -30,17 +27,18 @@ interface WbMod { initWorkbench(): void; openPanel(kind: string, dock?: string):
 interface WorkspaceStoreMod { setWsList(v: unknown[]): void }
 
 const rows = (): ElLike[] => Array.from(doc.querySelectorAll('.wb-row')) as ElLike[];
-/** 预览面板的正文（W1545：内容长在这里，不再在文件行下方的 .wb-inline 里）。 */
 const q = (s: string): ElLike | null => doc.querySelector(s) as ElLike | null;
-/** 分段块的全文（按 DOM 序拼接 = 面板里真正显示的文件内容）。 */
-const shownText = (): string =>
-  Array.from(doc.querySelectorAll('.preview-code code')).map((c) => c.textContent ?? '').join('');
-const shownLines = (): number => {
-  const s = shownText();
-  if (s === '') return 0;
-  const n = s.split('\n').length;
-  return s.endsWith('\n') ? n - 1 : n;
+/**
+ * 面板内正文的**全文**（按 DOM 序把每行的文本列拼回来 = 面板里真正显示的文件内容）。
+ * ★ 每个 .wb-line 自带行号列与文本列，所以「全文」= 文本列按 \n 连接 + 末尾 \n。
+ *   （旧口径是拼 .preview-code code 的段块；段块天然带 \n，本形态每行一个节点。）
+ */
+const shownText = (): string => {
+  const txs = Array.from(doc.querySelectorAll('.wb-file-code .wb-line-tx')).map((c) => c.textContent ?? '');
+  return txs.length === 0 ? '' : txs.join('\n') + '\n';
 };
+const shownLines = (): number => doc.querySelectorAll('.wb-file-code .wb-line').length;
+const footText = (): string => q('.wb-file-foot')?.textContent ?? '';
 
 /**
  * 流式装载的**停滞预算**（不是总预算）。
@@ -58,20 +56,7 @@ const STREAM_STALL_MS = 30_000;
  */
 const STREAM_CEILING_MS = 120_000;
 
-/**
- * 等「分段流式装载真的读完」：判据是**进展**，不是墙钟。
- *
- * 为什么需要轮询：分段之间会**让出一帧**（requestAnimationFrame，见 preview/stream.ts），
- * 而 jsdom 的 rAF 是按 ~16ms 的宏任务跑的 —— 用固定 flush 猜段数会随机器负载 flake
- * （本仓 W896 的教训：把「猜宏任务数」换成「等事实成立」）。
- *
- * ★ 为什么不再用「总预算 30s」（W2035 修的就是它）：
- *   本用例的**语义**是「5000 行（>256 KiB）必须**全文**渲染」，与耗时无关；耗时却
- *   完全由宿主争用决定（W2035 实测：空闲 9.5s；12 路争用 20.5–29.0s；再挤 >30s）。
- *   拿总耗时当闸门 ⇒ 机器一忙就红，且报错与断言无关（负载下抓到的是
- *   `Test timed out in 30000ms`，不是任何一条断言失败）。
- *   ⇒ 让**阈值**让步、**语义**不让步：断言一字未改，只把「多久算坏」从墙钟换成停滞。
- */
+/** 等「分段流式装载真的读完」：判据是**进展**，不是墙钟（理由同上）。 */
 async function waitForFullStream(
   progress: () => number,
   target: number,
@@ -166,7 +151,7 @@ function makeLines(n: number): string[] {
   }
   return out;
 }
-describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）', () => {
+describe('文件管理器 · 点文件在面板内流式打开完整文件（W1545 → W9329 重做落点）', () => {
   beforeEach(() => {
     resetHarness();
     const btn = doc.createElement('button') as unknown as ElLike;
@@ -175,8 +160,7 @@ describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）'
   });
   afterEach(() => { vi.unstubAllGlobals(); doc.body.replaceChildren(); });
   // ★ W2035：文件级预算 150s（**只给这一条**，不动全局 testTimeout）。
-  //   它是兜底，不是判据 —— 先触发的一定是 waitForFullStream 的停滞判据（30s 无进展）；
-  //   150s 只为「一直在长但长不到头」这种病态兜底，且远大于实测最坏合法耗时（29.0s）。
+  //   它是兜底，不是判据 —— 先触发的一定是 waitForFullStream 的停滞判据（30s 无进展）。
   it('★ 完整文件：5000 行（> 256 KiB）必须**全文**渲染，且不是降级文案', { timeout: 150_000 }, async () => {
     const lines = makeLines(5000);
     const expected = lines.join('\n') + '\n';
@@ -185,14 +169,13 @@ describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）'
     const { wb } = await setup(srv.fetch);
     await clickFile(wb, 'big.ts');
     // ★ W2035：等「全文渲染完成」，判据是**进展**不是墙钟（见 waitForFullStream 的长注释）。
-    //   负载下这条用例合法地要 20.5–29.0s（12 路争用实测），而 vitest 的 30s testTimeout
-    //   是**文件级**的墙钟预算 —— 于是机器一忙就报 `Test timed out in 30000ms`。
-    //   断言一字未改；改的只是「多久算坏」。文件级预算同步抬到 150s（下面 it 的第三参），
-    //   让停滞判据（30s 无进展）成为**先**触发的那个，而不是被 vitest 抢答。
     await waitForFullStream(() => shownLines(), 5000);
-    expect(q('.preview-degrade'), '★ 不许降级成「文件过大」').toBeNull();
+    // ★ 不降级：页脚不许出现「上限」那句（chat.preview.streamLimit 的文案）。
+    expect(footText(), '★ 不许降级成「文件超过预览上限」').not.toContain('上限');
     expect(shownLines(), '★ DOM 行数必须等于服务端 totalLines').toBe(5000);
     expect(shownText(), '★ 逐字节等于完整文件').toBe(expected);
+    // ★ 页脚**如实**：流式进度必须报「全部到手」，而不是停在中途。
+    expect(footText(), '★ 页脚如实报告读满').toContain('已加载 5000 / 共 5000');
     expect(srv.calls.length, '分段取（不止一次往返）').toBeGreaterThan(1);
     expect(srv.calls[0], '首段用**小** limit（首屏快）').toContain('limit=400');
     expect(srv.calls[1], '后续段用大 limit（往返少）').toContain('limit=1200');

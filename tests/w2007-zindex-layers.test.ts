@@ -91,8 +91,10 @@ const LEGACY_MAGIC: { file: string; value: number; sel: string; why: string }[] 
   { file: "taskpanel.css", value: 3, sel: ".tp-panel", why: "任务面板：消息流内部的局部层叠，从不与浮层同屏。" },
   { file: "views.css", value: 1, sel: ".chatcol-resizer", why: "聊天列拖条：只在主区内部生效，不参与全站浮层之争。" },
   { file: "workbench.css", value: 60, sel: ".wb-menu", why: "工作台入口菜单：理想是 --z-float(20)，但 .preview-host(35) 占同一个右上角 ⇒ 降到 20 会被预览面板**视觉盖住**（面板 pointer-events:none，点击仍穿透 ⇒ 不会有测试变红，只会让用户看不见菜单）。这类「改了无法证明无回归」的项一律不碰。" },
-  { file: "workbench.css", value: 24, sel: ".wb-host", why: "工作台面板宿主：贴边常驻且 pointer-events:none，理想是 --z-dock(10)。" },
-  { file: "workbench.css", value: 2, sel: ".wb-resizer", why: "工作台分栏拖条：只在面板内部生效，不参与全站浮层之争。" },
+  { file: "workbench.css", value: 24, sel: ".wb-host", why: "工作台面板宿主：W9329 重做后它是 #layout 的静态 flex 子项（挤压式，不再是覆盖浮层），z-index 其实**不参与任何浮层之争**（无 positioned 同级）。保留 24 而非收敛，是因为 .wb-menu(60) 的既有理由里写着「.preview-host(35) 与它同屏」—— 动它会牵连那条未验证的结论。" },
+  { file: "workbench.css", value: 2, sel: ".wb-splitter", why: "工作台分栏拖条：#layout 内的局部层叠，只与相邻面板头重叠，从不与浮层同屏。旧的 .wb-resizer(2) 已被 W9329 的 .wb-splitter 取代，值沿用。" },
+  { file: "workbench.css", value: 26, sel: ".wb-host.overlay", why: "窄屏覆盖式面板：必须高于 .wb-host(24) 自己的常规态（同一元素的两态），理想是 --z-dock(10)。不与 .preview-host(35) 争——两者不会同时处于覆盖态。" },
+  { file: "workbench.css", value: 27, sel: ".wb-narrow-note", why: "窄屏降级提示条：必须高于覆盖面板(26) 一点，否则会被自己的面板盖住。理想与面板同层(--z-dock 10)；单独 +1 是「贴在面板之上」这一条的最小表达。" },
   { file: "workbench.css", value: 3, sel: ".wb-drop-hint", why: "拖放高亮提示：只在工作台面板内部出现，不与任何浮层同屏。" },
   { file: "workerstrip.css", value: 25, sel: ".ws-strip", why: "worker 快捷条：相对序被 tests/w866 明确钉住（必须高于 .railv3(20) 且低于 .railv3-card(40)）⇒ 不能单独挪。" },
 ];

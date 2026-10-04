@@ -58,6 +58,12 @@ describe('G4 · 多面板工作区（第一步）', () => {
         if (p.endsWith('/src')) return reply(200, { path: p, parent: '/', entries: [ { name: 'ui', type: 'dir', size: null, mtime: null }, { name: 'main.ts', type: 'file', size: 1234, mtime: '2026-09-19T00:00:00.000Z' } ], roots: [], truncated: false });
         return reply(200, { path: p, parent: null, entries: [ { name: 'src', type: 'dir', size: null, mtime: null }, { name: 'README.md', type: 'file', size: 2048, mtime: null } ], roots: [], truncated: false });
       }
+      // ★ W9329：点文件现在在**面板内**读全文（files-view 走 files-open 的
+      //   /api/fs/read 分段读）。不给这个端点的话，文件页会落进「读失败」降级分支，
+      //   面板里就一行正文都没有 —— 那测不到「原地呈现」这条保证。
+      if (u.includes('/api/fs/read')) {
+        return reply(200, { kind: 'text', text: 'const a = 1;\nconst b = 2;\n', offset: 1, limit: 400, totalLines: 2, truncated: false });
+      }
       return reply(200, { ok: true });
     });
     const wb = (await import(/* @vite-ignore */ at('ui/workbench/index.ts'))) as WbMod;
@@ -132,6 +138,19 @@ describe('G4 · 多面板工作区（第一步）', () => {
     const fileRow = rows().find((r) => r.querySelector('.wb-name')?.textContent === 'main.ts') as ElLike;
     fileRow.dispatchEvent(new Ev('click', { bubbles: true }));
     expect(fileRow.classList.contains('sel'), '点文件进入选中态').toBe(true);
+    // ★ W9329 更正：点文件现在**在面板内单页**打开（内容原地呈现 + 「← 树」返回），
+    //   不再跳到右侧预览侧栏。这条断言原来只查「选中态」，那条不变量**一字未丢**
+    //   （仍在上面一行）；这里补的是重做后**新增**的保证：面板内出现文件正文。
+    await flush();
+    expect(doc.querySelector('.wb-file'), '★ 文件在面板内呈现（不是跳到别的侧栏）').not.toBeNull();
+    expect(doc.querySelector('.wb-line'), '★ 正文按行渲染').not.toBeNull();
+    // 「← 树」回到目录列表
+    const back = Array.from(doc.querySelectorAll('.wb-head-btn')).find((b) => (b.textContent ?? '').includes('树')) as ElLike;
+    expect(back, '★ 表头有「← 树」').not.toBeUndefined();
+    back.dispatchEvent(new Ev('click', { bubbles: true }));
+    await flush();
+    expect(doc.querySelector('.wb-file'), '返回后回到目录树').toBeNull();
+    expect(rows().map((r) => r.querySelector('.wb-name')?.textContent)).toEqual(['ui', 'main.ts']);
     // 上级回到工作区根
     (doc.querySelector('.wb-crumb') as ElLike).dispatchEvent(new Ev('click', { bubbles: true }));
     await flush();

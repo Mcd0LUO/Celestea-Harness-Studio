@@ -217,6 +217,15 @@ export const chat = {
   'chat.wb.dirTruncated': 'This directory has too many entries; only the first part is shown',
   'chat.wb.dirEmpty': '(this directory is empty)',
   'chat.wb.upAtRoot': 'Already at the root',
+  // W9329: opening a file = a single page inside the panel; three head controls + narrow-screen notice.
+  'chat.wb.backToTree': '← Tree',
+  'chat.wb.wrapOn': 'Wrap: on',
+  'chat.wb.wrapOff': 'Wrap: off',
+  'chat.wb.resize': 'Drag to resize the panel (arrow keys work too)',
+  'chat.wb.narrowOverlay': 'Window too narrow: the panel switched to overlay mode',
+  // Honest footer: streaming and whole-file are two separate wordings and must stay separate.
+  'chat.wb.fileTotal': '{n} lines total · fully loaded (no truncation)',
+  'chat.wb.fileStream': 'Streaming: loaded {loaded} / {total} lines',
   'chat.wb.menu.files': 'File manager',
   'chat.wb.menu.filesDesc': 'Browse the current workspace\'s folders and files',
   'chat.wb.menu.terminal': 'Terminal',

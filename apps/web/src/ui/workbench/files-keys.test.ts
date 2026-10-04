@@ -4,15 +4,23 @@
 //
 // 守五件事，每件对应一条**变异负控制**（见报告 §5）：
 //   ① 行**能**被键盘聚焦（roving tabindex：列表整体 1 个停靠点，行可编程聚焦）；
-//   ② **Enter / Space 与 click 等效** —— 目录进入 / 文件预览 / 选中态；
+//   ② **Enter / Space 与 click 等效** —— 目录进入 / 打开文件 / 选中态；
 //   ③ 列表的 **Tab 停靠点数量** = 1，与目录条目数**无关**（MAX_DIR_ENTRIES = 200）；
 //   ④ **鼠标行为一字不变**：click 的处理器没动，且键鼠两条路的可观测量逐项相同；
 //   ⑤ **边界与焦点归属**：↑↓ 钳制不环绕、Home/End 到两端、键盘进目录后焦点接回列表。
+//
+// ★ W9329：被观测的「打开文件」出口换了 —— 点文件不再调 files-open 的
+//   openFilePreview（跳到右侧预览侧栏），而是调 files-view 的 renderFileView
+//   （在**本面板内**原地呈现）。**被守的不变量一字未改**（「Enter/Space 与 click
+//   打开**同一个绝对路径**」），只是换了被 mock 的那个入口 —— 它是新落点上
+//   唯一的「打开」出口，正是 openFilePreview 原来的位置。
 //
 // ★ 与 tests/w2040-wbrow-keyboard.test.ts 的分工：那个文件守**样式面**
 //   （焦点环的 token / 对比度 / 不得被 outline:none 重置）；本文件只守行为。
 // ★ 与 apps/web/src/ui/enhance/file-link-keys.test.ts（W2025）的分工：那个文件守
 //   **正文路径**（行内元素 ⇒ 一个容器一个停靠点）；本文件守**列表项**（roving）。
+//   正文路径的出口**仍是** openFilePreview（见 enhance/file-link.ts:54），故那个
+//   文件的 mock 不受本轮影响。
 // ============================================================================
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -22,8 +30,10 @@ const h = vi.hoisted(() => ({
   tree: {} as Record<string, { name: string; type: string }[]>,
 }));
 
-vi.mock('./files-open', () => ({
-  openFilePreview: (abs: string) => { h.opened.push(abs); },
+// W9329：文件行的「打开」出口 = renderFileView（面板内单页）。它替代了旧口径的
+// openFilePreview（右侧预览侧栏）成为**这一个**入口的唯一可观测点。
+vi.mock('./files-view', () => ({
+  renderFileView: async (d: { path: string }) => { h.opened.push(d.path); },
 }));
 vi.mock('../commands/files', () => ({ workspacePath: () => '/ws' }));
 vi.mock('../../api', () => ({
@@ -159,7 +169,7 @@ describe('W2040 ② Enter / Space 与 click 等效', () => {
     expect(names(), '两边都真的进了新目录').toEqual(namesByClick);
   });
 
-  it('②b 文件行：Space 打开预览，与 click 打开**同一个绝对路径**', async () => {
+  it('②b 文件行：Space 打开文件，与 click 打开**同一个绝对路径**', async () => {
     await render(panel());
     const byClick = (() => { clickOn(rows()[2] as HTMLElement); return h.opened.slice(); })();
     expect(byClick).toEqual(['/ws/a.ts']);
@@ -198,7 +208,7 @@ describe('W2040 ② Enter / Space 与 click 等效', () => {
 });
 
 describe('W2040 ④ 鼠标行为一字不变', () => {
-  it('④a click 仍然选中文件并打开预览（既有处理器没被替换）', async () => {
+  it('④a click 仍然选中文件并打开文件（既有处理器没被替换）', async () => {
     await render(panel());
     clickOn(rows()[2] as HTMLElement);
     expect(h.opened).toEqual(['/ws/a.ts']);

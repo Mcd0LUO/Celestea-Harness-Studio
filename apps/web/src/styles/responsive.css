@@ -302,8 +302,9 @@ button,
 @media (max-width: 640px) {
   /* 不让位：正文吃满整宽（停靠会让正文窄到不可用） */
   body.preview-open #main { padding-right: 0; }
-  /* 工作台也不再退让：窄屏下没有「让出来的那条带」，再退就会凭空留白 */
-  body.preview-open .wb-host { right: 0; }
+  /* W9329：窄屏下工作台**自己**改覆盖式（由 panel.ts 量宽后加 .wb-host.overlay），
+     旧规则 `body.preview-open .wb-host { right: 0 }` 已删除 —— 宿主现在是 #layout 的
+     静态 flex 项，right 对它不生效，留着就是一条「看着在管事、实际空转」的规则。 */
   .preview-host {
     position: fixed;
     top: 0;

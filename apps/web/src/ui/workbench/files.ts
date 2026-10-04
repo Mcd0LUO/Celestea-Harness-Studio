@@ -28,7 +28,8 @@ import { workspacePath } from '../commands/files';
 import type { FsListEntry } from '../../types/fs-list';
 import { nextSeq, type PanelState } from './state';
 import { joinPath, parentOfPath } from '../fs-path'; // 平台路径（win32 盘符/UNC vs POSIX）
-import { openFilePreview } from './files-open';
+import { renderFileView } from './files-view'; // W9329：面板内单页（原地呈现）
+import { syncCurrentSession } from './session-sync'; // W9329：当前文件写回会话
 import { bindListKeys, consumeFocusAfterNav, focusFirstRow, markRowButton, ROW_SEL } from './files-keys'; // W2040/W2053：行的键盘通道
 import { t } from '../../i18n';
 
@@ -36,6 +37,14 @@ import { t } from '../../i18n';
 interface FilesData {
   path: string;
   selected: string | null;
+  /**
+   * W9329：当前**打开**的文件（绝对路径）；null = 显示文件树。
+   *
+   * ★ 它是**面板内**的导航状态，不是会话级状态：会话级的那份在 session-state.ts
+   *   （用于「切会话回到各自的文件」）。两者分工：本字段管「这个面板现在显示树还是
+   *   显示文件」，session-state 管「切回这个会话时回到哪一页」。
+   */
+  openFile: string | null;
 }
 
 /** 人类可读大小。 */
@@ -59,9 +68,10 @@ function dataOf(panel: PanelState): FilesData {
   const d = panel.data as unknown as Partial<FilesData> | undefined;
   if (d && typeof d.path === 'string') {
     if (d.selected === undefined) d.selected = null;
+    if (d.openFile === undefined) d.openFile = null;
     return d as FilesData;
   }
-  const init: FilesData = { path: workspacePath(), selected: null };
+  const init: FilesData = { path: workspacePath(), selected: null, openFile: null };
   panel.data = init as unknown as Record<string, unknown>;
   return init;
 }
@@ -72,12 +82,37 @@ export async function renderFilesPanel(
   panel: PanelState,
   seq: number,
   isCurrent: (id: string, seq: number) => boolean,
+  head?: HTMLElement,
 ): Promise<void> {
   const data = dataOf(panel);
   if (data.path === '') {
     body.replaceChildren(el('div', 'wb-notice', t('chat.wb.noWorkspace')));
     return;
   }
+  // ★ W9329：已打开文件 ⇒ **面板内单页**（内容原地呈现，「← 树」返回）。
+  //   这一支在**任何网络请求之前**返回：文件已经打开着，导航到别的目录不该把它
+  //   弹回文件树（那正是「打开文件 = 原地呈现」的反面）。
+  if (data.openFile !== null) {
+    if (head) {
+      const pathLabel = el('span', 'wb-head-path', data.openFile);
+      pathLabel.title = data.openFile;
+      head.replaceChildren(pathLabel);
+    }
+    await renderFileView({
+      body,
+      head: head ?? el('div', 'wb-head'),
+      path: data.openFile,
+      isCurrent: () => isCurrent(panel.id, seq),
+      onBack: () => {
+        data.openFile = null;
+        syncCurrentSession();
+        void renderFilesPanel(body, panel, nextSeq(panel.id), isCurrent, head);
+      },
+    });
+    return;
+  }
+  // 文件树态：表头只放面板自带的那几个（dock / 关闭由 panel.ts 的 head() 提供），
+  // 这里**不碰** head（它归 panel.ts 所有）。
   const path = data.path;
   let resp;
   try {
@@ -106,8 +141,9 @@ export async function renderFilesPanel(
     if (atRoot) return;
     data.path = parentOfPath(path);
     data.selected = null;
+    data.openFile = null; // 回到树
     // 导航取**新** seq：晚到的旧目录结果会被 isCurrent 判为过期而丢弃。
-    void renderFilesPanel(body, panel, nextSeq(panel.id), isCurrent);
+    void renderFilesPanel(body, panel, nextSeq(panel.id), isCurrent, head);
   });
   bar.appendChild(up);
   const label = el('span', 'wb-crumb wb-crumb-cur', path);
@@ -117,7 +153,7 @@ export async function renderFilesPanel(
   if (resp.truncated === true) off.appendChild(el('div', 'wb-notice', t('chat.wb.dirTruncated')));
   const list = el('div', 'wb-list');
   if (entries.length === 0) list.appendChild(el('div', 'wb-notice', t('chat.wb.dirEmpty')));
-  for (const e of entries) list.appendChild(row(e, data, path, body, panel, isCurrent));
+  for (const e of entries) list.appendChild(row(e, data, path, body, panel, isCurrent, head));
   // W2040：列表整体的键盘通道（roving tabindex：整个列表只占 1 个 Tab 停靠点）。
   // 挂在**列表**上而不是每一行：行是每次导航整体重建的，委托让重建不需要注销动作。
   bindListKeys(list);
@@ -135,6 +171,7 @@ function row(
   body: HTMLElement,
   panel: PanelState,
   isCurrent: (id: string, seq: number) => boolean,
+  head?: HTMLElement,
 ): HTMLElement {
   // W2040：行是**列表项**（不是 W2025 正文里的行内元素）⇒ 走 roving tabindex：
   // 每行都可被编程聚焦（-1），但同一时刻只有一行进 Tab 序列（0，由 bindListKeys 分配）。
@@ -155,16 +192,19 @@ function row(
     if (e.type === 'dir') {
       data.path = joinPath(dir, e.name);
       data.selected = null;
-      void renderFilesPanel(body, panel, nextSeq(panel.id), isCurrent);
+      void renderFilesPanel(body, panel, nextSeq(panel.id), isCurrent, head);
       return;
     }
-    // W1545：点文件 ⇒ **右侧预览面板**（不再是行下方内联展开）。
+    // W9329：点文件 ⇒ **面板内单页**（内容原地呈现，不弹模态、不跳页、不分栏）。
     // 清选中态按**本面板**作用域（同一种面板可多开，document 级会误伤别的面板）。
     body.querySelectorAll(ROW_SEL).forEach((n) => n.classList.remove('sel'));
     r.classList.add('sel');
     data.selected = e.name;
-    // 同步调用：面板壳当帧出现，内容由 files-open.ts 分段喂（首段小 ⇒ 首屏快）。
-    openFilePreview(joinPath(dir, e.name));
+    data.openFile = joinPath(dir, e.name);
+    // 同步调用：面板壳当帧出现，内容由 files-view.ts 分段喂（首段小 ⇒ 首屏快）。
+    void renderFilesPanel(body, panel, nextSeq(panel.id), isCurrent, head);
+    // ★ W9329：「当前文件」是**会话级**状态 ⇒ 写回本会话（切回该会话仍在这一页）。
+    syncCurrentSession();
   });
   return r;
 }

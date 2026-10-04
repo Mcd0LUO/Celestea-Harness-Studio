@@ -59,6 +59,19 @@ export interface StreamSink {
   isCurrent(): boolean;
   /** 进度 / 上限提示（只改文本，不重建节点）。 */
   note(text: string): void;
+  /**
+   * W9329：**每段文本 → DOM 的渲染钩子**（缺省 = 走 hljs 增强缝的老路径）。
+   *
+   * 为什么要这个口子：分段追加 / 竞态守卫 / 让帧 / 逐段补高亮这四件事是本模块的
+   * **既有能力**（W1545 真机调出来的 O(n²) 修复都在 append 里），工作台的文件面板
+   * 需要**另一套每段 DOM**（带 56px 固定行号列的 .wb-line，见 workbench.css）——
+   * 但它**不许**另写一套流式循环（那样 chunk/竞态/让帧三处会各自漂移）。
+   * 于是本模块只把「一段文本怎么变成 DOM」这一步交出去，其余照旧。
+   *
+   * 返回值：该段新建块的**作用域容器**（runEnhancers 只对它跑；与老路径同一个约定）。
+   * 返回 null = 本段没有内容，不要挂任何节点。
+   */
+  renderSegment?(text: string, startLine: number, scope: HTMLElement): HTMLElement | null;
 }
 
 /**
@@ -125,7 +138,7 @@ function newBlock(path: string, cls: string, text: string): HTMLElement {
  *   .preview-seg 的 content-visibility:auto 让浏览器跳过视口外的分段
  *   （实测总耗时 30.5s → 3.8s，见 preview.css 的长注释）。
  */
-function append(sink: StreamSink, cls: string, text: string): HTMLElement {
+function append(sink: StreamSink, cls: string, text: string, startLine: number): HTMLElement {
   // 作用域容器：只用来**收集**本段新建的块，让增强缝恰好只走这一段。
   // ★ 它必须**已经挂在 body 上**：增强遍按 document 语义操作（createElement /
   //   appendChild / getComputedStyle），脱离 document 的子树会让部分实现静默跳过
@@ -134,6 +147,12 @@ function append(sink: StreamSink, cls: string, text: string): HTMLElement {
   const scope = el('div', 'preview-seg');
   if (text === '') return scope; // 空段：连容器都不挂（不留空盒子）
   sink.body.appendChild(scope);
+  // ★ W9329：调用方给了自己的每段 DOM（工作台文件面板的 .wb-line 行）⇒ 走它，
+  //   不建 pre/code，其余三约束（作用域容器、content-visibility、逐段补高亮）照旧。
+  if (sink.renderSegment) {
+    sink.renderSegment(text, startLine, scope);
+    return scope;
+  }
   for (const part of splitForHighlight(text)) {
     if (part === '') continue;
     scope.appendChild(newBlock(sink.path, cls, part));
@@ -167,6 +186,8 @@ export async function streamInto(sink: StreamSink, stream: () => Promise<StreamF
   const cls = sink.kind === 'diff' ? 'preview-diff' : 'preview-code';
   let total = 0;
   let loaded = 0;
+  /** W9329：本段首行的 0-based 行号（供 renderSegment 出固定行号列）。 */
+  let startLine = 0;
   let first = true;
   let degraded: string | null = null;
   for (;;) {
@@ -191,8 +212,18 @@ export async function streamInto(sink: StreamSink, stream: () => Promise<StreamF
     }
     // ① 先落 DOM（未高亮的纯文本）。这一步之后**当帧**就有内容可看 —— 面板「瞬时
     //    出现」靠的就是它：首帧不等 hljs。
-    const fresh = append(sink, cls, fill.text);
-    if (fill.text !== '') loaded += fill.text.split('\n').length;
+    const fresh = append(sink, cls, fill.text, startLine);
+    if (fill.text !== '') {
+      // ★ W9329 更正：这里**必须**按「行数」而不是 split('\n').length 计数。
+      //   段文本以 \n 结尾时，split 会多算一个空行 ⇒ 每段 startLine 偏大 1。
+      //   实测（真机 20000 行 / 17 段）：页脚一度显示「已加载 20017 / 共 20000」，
+      //   行号也从 20001 起 —— 累计 17 段的漂移。rAF 让帧时序一变就变。
+      //   口径与 files-open.countLines 完全一致（末行无换行也算一行）。
+      const t = fill.text.endsWith('\n') ? fill.text.slice(0, -1) : fill.text;
+      const n = t === '' ? 0 : t.split('\n').length;
+      loaded += n;
+      startLine += n;
+    }
     const denom = total > 0 ? total : loaded;
     sink.note(t('chat.preview.streamRead', { loaded: Math.min(loaded, denom), total: denom }));
     if (!fill.more) {

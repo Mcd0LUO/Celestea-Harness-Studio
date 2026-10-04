@@ -218,6 +218,15 @@ export const chat = {
   'chat.wb.dirTruncated': '这个目录条目太多，只显示了前一部分',
   'chat.wb.dirEmpty': '（这个目录是空的）',
   'chat.wb.upAtRoot': '已在根目录',
+  // W9329：打开文件 = 面板内单页；表头三个控件 + 窄屏降级提示。
+  'chat.wb.backToTree': '← 树',
+  'chat.wb.wrapOn': '换行：开',
+  'chat.wb.wrapOff': '换行：关',
+  'chat.wb.resize': '拖动调整面板宽度（← → 键也可以）',
+  'chat.wb.narrowOverlay': '窗口太窄，面板已改为覆盖式',
+  // 页脚**如实**的加载状态：流式与整篇两套文案，必须分开写。
+  'chat.wb.fileTotal': '共 {n} 行 · 已全部加载（无截断）',
+  'chat.wb.fileStream': '流式：已加载 {loaded} / 共 {total} 行',
   'chat.wb.menu.files': '文件管理器',
   'chat.wb.menu.filesDesc': '浏览当前工作区的文件夹与文件',
   'chat.wb.menu.terminal': '终端',

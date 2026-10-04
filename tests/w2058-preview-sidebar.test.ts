@@ -167,10 +167,22 @@ describe("W2058 ② 预览 = 停靠侧栏（不再覆盖正文）", () => {
     expect(doc.body.classList.contains("preview-open"), "关闭 ⇒ 撤销让位").toBe(false);
   });
 
-  it("与**工作台右栏**共存：预览打开时 .wb-host 让开同一条带（两者都贴 #main 右缘）", () => {
+  it("与**工作台右栏**共存：两者是**相邻块**（W9329 挤压式重做后结构上不可能相交）", () => {
     const preview = css("preview.css");
-    expect(rule(preview, "body.preview-open .wb-host"), "★ 工作台必须退到预览左侧，否则被盖住")
-      .toMatch(/right:\s*var\(--preview-w\)/);
+    // ★ W9329 更正：旧实现里 .wb-host 是 #main 的**绝对定位**孩子（inset:0），
+    //   与预览宿主都贴 #main 右缘 ⇒ 必须靠 `body.preview-open .wb-host{right:...}`
+    //   把工作台推到预览左侧。现在 .wb-host 改成了 **#layout 的 flex 兄弟**（整列在
+    //   #main 右侧），而预览宿主是 #main **内**的绝对定位孩子（靠 #main 的
+    //   padding-right 让出一条带）⇒ 二者是相邻块，轴对齐矩形**零重叠**，那条
+    //   `right` 规则对新的宿主**已失效**（不再是绝对定位项）。保留它就是一条
+    //   「看着在管共存、实际空转」的规则，本轮把它删了。
+    //   共存不变量改由 W9329 的真机矩形断言（tests/w9329-workbench-squeeze.test.ts）
+    //   保住——那才是能真正区分「挤压」与「覆盖」的判据。
+    expect(preview, "旧的让位规则必须已删除（对新的 flex 宿主不生效）")
+      .not.toMatch(/body\.preview-open \.wb-host/);
+    // #main 的让位（padding-right）仍在 —— 那才是预览与工作台共存所依赖的东西。
+    expect(rule(preview, "body.preview-open #main"), "#main 仍让出 --preview-w")
+      .toMatch(/padding-right:\s*var\(--preview-w\)/);
   });
 
   it("面板不再有浮层阴影（分界改由 border-left 发丝线承担）", () => {
@@ -186,7 +198,11 @@ describe("W2058 ② 预览 = 停靠侧栏（不再覆盖正文）", () => {
     expect(block, "必须存在 ≤640px 的预览档（含 body.preview-open #main）").not.toBe("");
     expect(block, "窄屏不让位（390px 里让不出 560px）").toMatch(/body\.preview-open #main \{[^}]*padding-right:\s*0/);
     expect(block, "窄屏宿主回到 fixed 全高").toMatch(/position:\s*fixed/);
-    expect(block, "窄屏工作台也不再退让").toMatch(/body\.preview-open \.wb-host \{[^}]*right:\s*0/);
+    // ★ W9329：旧的 `body.preview-open .wb-host{right:0}` 同样删了 —— 宿主现在是
+    //   #layout 的静态 flex 项，right 对它不生效。工作台窄屏的覆盖式由它**自己**
+    //   量宽后加 .wb-host.overlay 决定（见 workbench.css 与 w9329 的窄屏用例）。
+    expect(block, "窄屏不再有针对 .wb-host 的退让规则（对新宿主不生效）")
+      .not.toMatch(/body\.preview-open \.wb-host/);
   });
 
   it("★ z-index 层级门禁未被本轮改动带偏（.preview-host 仍是 35，登记项仍在）", () => {
@@ -227,13 +243,24 @@ describe("W2058 ③ 变异负控制（调包必红）", () => {
     expect(rule(broken, ".preview-host"), "★ fixed 是改动前的覆盖式形态").toMatch(/position:\s*fixed/);
   });
 
-  it("调包 D：把 .wb-host 的退让删掉 ⇒ 「与工作台共存」这条断言必红", () => {
-    const real = css("preview.css");
-    const broken = real.replace("body.preview-open .wb-host { right: var(--preview-w); }", "");
-    expect(broken, "前置：调包确实删了规则").not.toBe(real);
-    let threw = false;
-    try { rule(broken, "body.preview-open .wb-host"); } catch { threw = true; }
-    expect(threw, "★ 删掉退让后 rule() 必须找不到规则（= 断言会红）").toBe(true);
+  it("调包 D：把 .wb-host 重新写成 #main 的绝对定位孩子 ⇒ 「相邻块」这条断言必红", () => {
+    // ★ W9329：调包目标换了。原来的调包是「删掉 body.preview-open .wb-host 让位」，
+    //   而那条规则本轮已被删除（对新的 flex 宿主不生效）—— 调包一个不存在的规则
+    //   会**假绿**（前置断言 broken === real 就红，但那是「没调包成功」的红，
+    //   不是「判据有牙」的红）。改成把 .wb-host 改回**旧形态**（绝对定位），
+    //   那正是本轮重做前的代码 —— 它会让「两者相邻」这条保证彻底失效。
+    const real = css("workbench.css");
+    const broken = real.replace(
+      ".wb-host {\r\n",
+      ".wb-host {\r\n  position: absolute;\r\n  inset: 0;\r\n",
+    ).replace(
+      ".wb-host {\n",
+      ".wb-host {\n  position: absolute;\n  inset: 0;\n",
+    );
+    expect(broken, "前置：调包确实改了 CSS").not.toBe(real);
+    // 判据在调包后必须失败：宿主一旦绝对定位，就退出 flex 流 ⇒ 不再与 #main 相邻。
+    expect(rule(real, ".wb-host"), "真实实现：宿主是静态 flex 项").not.toMatch(/position:\s*absolute/);
+    expect(rule(broken, ".wb-host"), "★ 绝对定位 = 重做前的覆盖式形态").toMatch(/position:\s*absolute/);
   });
 
   it("调包 E：折叠阈值调到极大 ⇒ 聊天的「仍然折叠」断言必红（证明那条断言测的是折叠本身）", async () => {
