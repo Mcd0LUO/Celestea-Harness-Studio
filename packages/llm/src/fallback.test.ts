@@ -83,8 +83,8 @@ const REQ = { messages: [userMessage("hi")] };
  *
  * A guard in the same magnitude as scheduler jitter turns a case into a
  * load-dependent coin flip. This file already had that lesson once (the
- * stream-idle guard, W887e, quoted at `timeout.test.ts:133`); W2039 is the
- * response-header guard hitting the same wall:
+ * stream-idle guard, W887e, quoted in [timeout.test.ts]'s "a healthy fast stream
+ * is not killed" case); W2039 is the response-header guard hitting the same wall:
  *
  *   the response-header case passed `responseTimeoutMs: 60` to a `clientFor`
  *   serving BOTH targets. The silent primary MUST trip its 60ms guard - that is

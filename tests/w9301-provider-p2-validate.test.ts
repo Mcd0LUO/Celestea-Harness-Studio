@@ -2,7 +2,7 @@
 /**
  * F4-03 / F4-04 · 提供商表单的两条校验不变量。
  *
- * F4-03「预保存的结果被忽略」：`requestJson` 对 4xx/5xx 抛 ApiError（api.ts:128），
+ * F4-03「预保存的结果被忽略」：`[requestJson]` 对 4xx/5xx 抛 ApiError，
  *   但 **HTTP 200 + `{ok:false,error}` 不抛** —— 那是 `ClearResp` 契约允许的形状
  *   （types/batch.ts 的 `OkResp`）。「获取模型」的预保存链旧代码是
  *   `.then(() => api.fetchProviderModels(id))`，无视回执 ⇒ 保存被拒也照样继续拉模型，
@@ -10,8 +10,8 @@
  *   修法：抽 `checkSaved` 复用，两条路径同一口径（被拒即抛，交给 .catch 渲染）。
  *
  * F4-04「半填模型行静默消失」：旧过滤是 `id || name`（**或**），所以「只填了显示名、
- *   id 空着」的行会进 payload，但后端 `parseModel` 遇 `id === ''` 整行 `return null`
- *   （apps/studio/src/store/providers.ts:287）⇒ 整行蒸发且无任何提示。
+ *   id 空着」的行会进 payload，但后端 [parseModel]（apps/studio/src/store/providers.ts 的
+ *   整行校验入口）遇 `id === ''` 整行 `return null` ⇒ 整行蒸发且无任何提示。
  *   修法：保存/获取前显式拦下并说清是哪一行缺 id（空行仍照旧跳过）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

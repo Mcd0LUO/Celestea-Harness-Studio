@@ -143,7 +143,7 @@ describe('文件管理器 · 点文件在右侧预览里流式打开（W1545）'
     expect(bodyText(), '预览正文非空').toContain('Hello');
     // ★ W1545：行内展开被整块移除 —— 它没有 .rendered 祖先（高亮不着色）且塞不下完整文件。
     expect(q('.wb-inline'), '行内展开块必须不存在').toBeNull();
-    // 选中态保留（g4-workbench.test.ts:134 的既有口径：点文件进入选中态）。
+    // 选中态保留（g4-workbench.test.ts 里「点文件进入选中态」那条的既有口径）。
     expect(rowOf('big.ts')?.classList.contains('sel'), '点文件进入选中态').toBe(true);
     // 进度提示在全部段落落地后清空（不留「已读 N/M 行」的残影）。
     expect(q('.preview-stream-note')?.classList.contains('hidden'), '读完即清空进度提示').toBe(true);

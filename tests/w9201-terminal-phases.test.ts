@@ -3,7 +3,7 @@
 // tests/w9201-terminal-phases.test.ts — W9201（P1）终态 phase 集合的机械门禁。
 //
 // 缺陷：chat.ts 的 onStatus 手写 `completed || cancelled || error` 三个字面量，
-// 而契约 contracts/sse-events.json:167 的 status.phase 枚举里有 **5 个**终态：
+// 而契约 contracts/sse-events.json 里 status 事件的 status.phase 字段枚举有 **5 个**终态：
 //   completed | cancelled | error | step_limit | interrupted
 // ⇒ step_limit（步数预算耗尽）与 interrupted（流被撕断）到达时**不调 finalizeTurn**：
 //   ctx.streaming 永远为 true、assistant 气泡永远停在 streaming、输入栏永远「插话」

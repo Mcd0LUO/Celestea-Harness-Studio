@@ -217,7 +217,7 @@ async function placeProgram(programDir: string, source: ProgramSource): Promise<
  *
  * Contract details that matter:
  *   * a signal ALREADY aborted never fires `abort` again, so it is checked once
- *     here (same reason as `question-registry.ts:105`);
+ *     here (same reason as `question-registry.ts`'s already-aborted check);
  *   * the kill is the same tree-kill the timeout path uses, so a cancelled
  *     program leaves no grandchildren behind;
  *   * returning the unsubscribe (instead of trusting `{once:true}`) keeps the

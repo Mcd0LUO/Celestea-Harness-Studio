@@ -201,7 +201,7 @@ describe("POST /api/turn over the real engine", () => {
     // lane=next-turn、turn 1 只见自己的输入、drain 顺序），与流的时长无关。原脚本
     // 4000 字符 / 8 每块 / 3ms ≈ 500 帧 ≈ 1.5s（本机实测整条 8.07s），是当时为了
     // 「第二个请求落下时这一轮还在跑」而选的**过大**余量。改用仓库已有的 W896 模式
-    // （1600 字符 / 1ms，见 session-independence.test.ts:34 的同款取舍）：仍提供
+    // （1600 字符 / 1ms，见 session-independence.test.ts 的 [SLOW_TEXT] 同款取舍）：仍提供
     // `0.2s 的忙窗口（对 in-process 请求往返有 10x 余量），但不再为时长本身付费。
     await collectUntilTerminal(sub, frames, 25_000);
     sub.close();

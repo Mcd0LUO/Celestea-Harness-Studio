@@ -26,7 +26,8 @@
 
 1. **聚焦测试**：新行为有测试；纯函数优先，DOM 用 jsdom，跨平台用可注入 seam。
 2. **变异负控制**：把实现改坏一次，确认测试**真的**变红（不是「我觉得会红」）。
-3. **全量 `pnpm check` 绿**：`typecheck → lint → lint:arch → test → check:web`。
+3. **全量 `pnpm check` 绿**：`typecheck → lint → lint:arch → check:sleep → check:sync-in-callback →
+   check:comment-refs → test → check:web`。
    **派工场景**：worker 交付前**必须**跑 `pnpm check:fast`（`typecheck` + `typecheck:web` +
    `lint` + `lint:arch`，约 34s、只读、可与别的 builder 并发）；全量 `pnpm check` 由**派工者**
    在收口时统一跑（铁律 7 只约束 builder）。
@@ -166,6 +167,8 @@ tag 一推就有自己的 CI 结论；**等它绿了再 `publish`** 才是完整
 | 时序敏感用例 | 并发构建时 flaky（本仓真实发生过 2 条） | 静默条件下重跑；不要用「flaky」搪塞，要定位 |
 | **下界断言写成了定时器预算本身**（setTimeout(40) 之后断言 elapsed >= 40） | 在 CI 偶发红：Node 的定时器**允许提前约 1 ms** 触发（文档明确不保证精确），而 Date.now() 只有 1 ms 粒度 ⇒ ubuntu 4 核并发分片下实测到 **39**（W9263 实证，apps/studio/src/w2029-shutdown-honesty.test.ts ③） | 用**单调时钟** performance.now()，并留**明确余量**（例：40 ms 预算断 >= 35），在注释里写清「余量仍能区分『走满预算』与『立刻返回（~0）』」—— 这不是给轮询加预算，是去掉一个**按规范就不成立**的断言。已有同类正确写法可参考：packages/llm/src/timeout.test.ts（300 ms 预算断 >= 250）、packages/tools/src/run-code/w833-broker-limits.test.ts（1 s 预算断 >= 900） |
 | **CI 的 Windows runner 只有 4 核**，而 vitest 会为每个测试文件 spawn 一个 worker（日志自己会写 `Isolate N workers spawned`） | 轮询型用例（如 `tests/w795-optimistic-grants.test.ts`）在**本机 28 核怎么跑都绿**、在 CI 偶发 `Error: timed out waiting for ...`；且常出现在**纯文档提交**上（证明与改动无关） | 先按「负载 flake」判：本机重跑 + `taskset -c 0-3` 限核重跑，都绿即可判非回归；**不要**为了绿去加大轮询预算（那是掩盖）。根治方向是降并行度：W9220 已把主池换成 **`vmThreads`**（VM 上下文隔离，见 `docs/ARCHITECTURE.md` §6.4.7）—— 本机实测墙钟 **34 s → 20 s（−41%）**、进程 133 → 6（−95%），且**不需要白名单**（每个文件一个独立 VM，全局不跨文件泄漏）。★ 顶层不得有 `execArgv`：worker 线程拒绝 `--expose-gc`，整个池会起不来（`ERR_WORKER_INVALID_EXEC_ARGV`） |
+| **同步阻塞调用出现在事件回调里**：`execFileSync` / `spawnSync` / `sleepSync` / `readFileSync` … 落在 `on(` / `once(` / `addEventListener(` / `setTimeout(` / 路由注册体内 | 用户的一次交互被**同步冻结**到 syscall 返回：W9321 实证 —— abort 监听器里的 `execFileSync`×3（各 5s 超时）+ `sleepSync` 退避让「按 Stop」同步卡死约 15s，而 typecheck / lint / 架构 / 测试**全绿** | 门禁 `check:sync-in-callback`（`scripts/check-sync-in-callback.mjs`，接进 `pnpm check`）。改用异步 API（`execFile` / `spawn` / `fs.promises`），或把工作移出回调（预热 / 走队列）。确属刻意且无法异步化：在**违规行或其紧邻上一行**加 `W9323` 注释说明理由（豁免口径同 `check:sleep`）。既有违规登记在 `scripts/baselines/sync-in-callback.json` 棘轮里，**只许下调** |
+| **注释里的 `file.ts:NN` 行号引用会静默腐烂** | 源码一改行号就漂，而没有任何门禁会报：W9321 自己改完 `child.ts` 之后，两处测试注释里指向 `taskkillTree` 的行号就已经失真了，注释在那里悄悄说了一句假话 | 门禁 `check:comment-refs`（`scripts/check-comment-refs.mjs`，接进 `pnpm check`）。改用**符号引用** `[taskkillTree]`（本仓既有约定，见 `packages/tools/src/sandbox/child.ts`）或不含行号的文字描述。确需行号（机械门禁的示例、出处溯源）：在**违规行或其紧邻上一行**加 `W9323` 注释说明 |
 
 ---
 

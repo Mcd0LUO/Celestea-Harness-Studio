@@ -97,6 +97,19 @@ const GATES = [
     cmd: "node scripts/check-sleep-debt.mjs",
   },
   {
+    // W9323：事件回调 / 定时器 / 请求处理器里不许有同步阻塞调用（棘轮）。
+    // 上下文：W9321 修了 child.ts 的 taskkillTree（execFileSync×3 + sleepSync 在 abort
+    // 监听器里 ⇒ 按 Stop 同步卡死约 15s），但同一类还有多少处当时没人知道。
+    name: "check:sync-in-callback",
+    cmd: "node scripts/check-sync-in-callback.mjs",
+  },
+  {
+    // W9323：注释里的 file.ts:NN 行号引用会静默腐烂（W9321 自己的注释就已失真）。
+    // 改成 [symbol] 符号引用；现状基线已清零（改前 110 → 改后 0）。
+    name: "check:comment-refs",
+    cmd: "node scripts/check-comment-refs.mjs",
+  },
+  {
     name: "test",
     cmd: "pnpm exec vitest run",
   },

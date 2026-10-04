@@ -187,8 +187,8 @@ describe('W9298 · F1-03 · done 帧只在「全局空闲」时推进挂起切�
     sl.pendingPatch = { reasoning_effort: 'max' };
 
     chat.onDoneGuarded(a, { turn: 1, text: 'x' });
-    // 后端顺序（real-runtime-adapter.ts:547-554）：`done` 先于 status:completed ⇒ 此刻 A 自己
-    // 仍登记为 busy；守卫据此**排除自己**（它马上由那条 completed 收尾）。
+    // 后端顺序（[drive]：runTurn 发完 done 帧**之后**才 emitStatus 发终态 status）
+    // ⇒ 此刻 A 自己仍登记为 busy；守卫据此**排除自己**（它马上由那条 completed 收尾）。
     expect(sl.pendingPatch, '全局空闲时必须照旧消费（W750/W795 的既有契约）').toBeNull();
   });
 

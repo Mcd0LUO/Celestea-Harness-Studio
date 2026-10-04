@@ -72,8 +72,9 @@ function addCols(pane: Pane, n: number, cls = 'mcol'): void {
 
 /**
  * W9201：造一个**带嵌套子列**的顶层列 —— 复刻 W1467 的 run_code 子调用树
- * （toolcards.ts:239-240 建 `.toolcard-subs`，:278 把子列的 `.mcol` 挂进去；
- * restore-tool.ts:72 同构；tooltree.css:15 的注释明写「可再嵌套」）。
+ * （[buildToolCard] 建 `.toolcard-subs`，[mountToolCard] 把子列的 `.mcol` 挂进去；
+ * restore-tool.ts 的 [mountToolCard] 调用同构；tooltree.css 的结构图里
+ * `.toolcard-subs` 那行明写「可再嵌套」）。
  *
  * 为什么必须有这个夹具：改动前的 `prunePaneDom` 用「连续区间删除」，它隐含
  * 「doomed 全在同一父节点下」这条**从未被任何测试碰过**的假设。本文件原先只用
@@ -207,7 +208,7 @@ describe('W9201 · ②b 嵌套子列（P0 回归）：回收边界切到子列�
   });
 
   /**
-   * tooltree.css:15 的注释明写「`.toolcard-subs` 可再嵌套」（子调用里再 run_code）。
+   * tooltree.css 的结构图里 `.toolcard-subs` 那一行明写「可再嵌套」（子调用里再 run_code）。
    * 深度 ≥2 时「末条」的 nextSibling 落在**最内层**容器里，旧区间删除同样会一路删到 null。
    * 这条覆盖的是「嵌套深度不是 1」这一支 —— 与上面两条是不同的形状。
    */

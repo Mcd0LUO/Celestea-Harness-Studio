@@ -41,7 +41,9 @@
     "check:serial": "pnpm typecheck && pnpm lint && pnpm lint:arch && pnpm check:tmpdir && pnpm test && pnpm check:web",
     "test:changed": "vitest run --changed",
     "test:related": "vitest related",
-    "check:sleep": "node scripts/check-sleep-debt.mjs"
+    "check:sleep": "node scripts/check-sleep-debt.mjs",
+    "check:sync-in-callback": "node scripts/check-sync-in-callback.mjs",
+    "check:comment-refs": "node scripts/check-comment-refs.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",

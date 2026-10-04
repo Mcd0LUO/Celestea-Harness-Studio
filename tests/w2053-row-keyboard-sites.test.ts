@@ -12,11 +12,13 @@
 //   2. ui/sessiontree/workers.ts .ws-worker-row    —— 点它开 worker 会话
 //   3. ui/sessiontree/workers.ts .ws-worker-parent —— worker 分组头（**可点的那种**）
 //
-// ★ 位点 3 的复核更正（不照抄简报）：简报说「workers.ts:109 是分组折叠头」。读源码后
-//   109 行那个是 **orphans 分支的「未关联」纯标签**（workers.ts:109-112，**没有 click
-//   监听**）—— 它不可点，不该是交互项。真正可点、真的需要键盘通道的是 **:95** 那个
-//   「父会话 → 其 worker 子行」的分组头（有 click、有 title）。本遍改的是 :95。
-//   给 :109 那个标签加 tabindex 会造出一个**假的交互项**（Tab 上去按 Enter 什么都不
+// ★ 位点 3 的复核更正（不照抄简报）：简报说「workers.ts 里 `markRowButton(head, …)`
+//   那一段是分组折叠头」。读源码后
+//   那个「已分组」分支里的 `head` 其实是 **orphans 分支的「未关联」纯标签**（`head.title`
+//   为空、**没有 click 监听**）—— 它不可点，不该是交互项。真正可点、真的需要键盘通道的是
+//   **已分组分支**那个「父会话 → 其 worker 子行」的分组头（有 click、有 title）。
+//   本遍改的是 `markRowButton(head, pname.textContent ?? '')` 那一处。
+//   给 orphans 那个标签加 tabindex 会造出一个**假的交互项**（Tab 上去按 Enter 什么都不
 //   发生）—— 那比不可达更糟。见报告「诚实清单」。
 // ============================================================================
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

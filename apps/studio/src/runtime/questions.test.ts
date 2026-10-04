@@ -213,7 +213,7 @@ describe("W783 · the maximum wait (§6)", () => {
 
   it("clamps a sub-millisecond timeout_ms to 1ms at the real caller (W834 F06)", async () => {
     // The acceptance probe for F06: the request goes through the REAL service
-    // (`user-questions.ts:144` calls `askTimeoutMs`), so a 0.5 request must park
+    // (`UserQuestionService.ask` calls `askTimeoutMs`), so a 0.5 request must park
     // with a 1ms resolved wait and a deadline of now+1 — not an immediate 0ms.
     const registry = createQuestionRegistry();
     const now = 1_000_000;

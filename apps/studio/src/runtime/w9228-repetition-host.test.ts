@@ -1,7 +1,7 @@
 /**
  * W9228 · W9225 F-09 的生产半边：重复塌陷的**唯一存活记录**必须真的产生。
  *
- * 审计原文（results/W9208-core与llm.md:206-235）：`repetitionDiagnostics` 在全仓
+ * 审计原文（results/W9208-core与llm.md 的「重复塌陷」一节）：`repetitionDiagnostics` 在全仓
  * 只有 loop.ts 的声明与单测的用例，**没有任何 host 传入**，于是生产路径恒有
  * `this.diagnostics === null` ⇒ `CollapseDriver.log()` 第一行就 return：
  * 既不写 `repetitions.jsonl`，也不写被丢弃文本的副本，而重复塌陷会**丢弃整段模型

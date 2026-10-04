@@ -437,7 +437,7 @@ describe("background memory extraction (Phase 1, feature-memory-extraction.md)",
 
 /**
  * W836 R3 batch F (P2-2): the two host views the adapter wires
- * (`real-runtime-adapter.ts:593/598`) must count a rolled `.1` segment, so a
+ * (`RealRuntimeAdapter.usageLedger` / `RealRuntimeAdapter.costBlock`) must count a rolled `.1` segment, so a
  * rotation cannot zero `/api/status.cost`. The probe drives those real view
  * functions over a `UsageLedgerFile` with a tiny threshold.
  */

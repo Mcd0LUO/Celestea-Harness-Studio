@@ -34,7 +34,7 @@ function makeQueue(): StudioHarness {
   // ★ Windows 上 setTimeout 的真实节拍是 ~13-15ms（本机实测 setTimeout(3) 平均 14.3ms），
   //   300 帧 ⇒ 白等 ~4.3s。改成 16 帧（1600 字符 / 100 每块）≈ 0.2s 的忙窗口：
   //   对 in-process 请求往返仍有 10x 以上余量（与仓库 W896 在
-  //   session-independence.test.ts:34 的同款取舍一致），但不再为定时器粒度付费。
+  //   session-independence.test.ts 的 [SLOW_TEXT] 同款取舍一致），但不再为定时器粒度付费。
   const h = makeEngineHarness({ sessions: { s1: [], s2: [] }, llm: { script, deltaMs: 3, chunkChars: 100 } });
   script.push({ text: "x".repeat(1600) }); // 16 帧的忙窗口（见上）
   harnesses.push(h);

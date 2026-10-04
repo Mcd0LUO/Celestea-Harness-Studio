@@ -408,7 +408,7 @@ describe("B2-02 — a thrown LlmError is believed, not relabelled", () => {
   });
 
   it("folds a timeout to the frozen outcome vocabulary, keeping the message", () => {
-    // TurnOutcome.error.kind is frozen to generate|stream (core/src/types.ts:22);
+    // TurnOutcome.error.kind is frozen to generate|stream ([TurnOutcome]);
     // the timeout fact stays visible in the message, as the host adapter does.
     const outcome = errorOutcomeFromThrown(new LlmError("llm timeout: response headers not received within 60000ms", "timeout"));
     expect(outcome.error.kind).toBe("generate");

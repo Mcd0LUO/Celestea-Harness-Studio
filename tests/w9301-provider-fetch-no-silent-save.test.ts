@@ -8,9 +8,9 @@
  * 显示旧值（fetch 路径从不调 onSaved）—— 落盘与显示不一致，用户无从察觉。
  * 真机复现：results/audit3-r2/F4/probeG.mjs（落盘 UNSAVED-NAME，行仍 ProbeZ）。
  *
- * 根因：`POST /api/providers/{id}/models/fetch`（apps/studio/src/handlers/providers.ts:112）
- * 只做 `store.find(id)` 读既有行，**根本不需要先保存** —— 编辑既有 provider 时那次
- * saveProvider 纯属多余的副作用。
+ * 根因：`POST /api/providers/{id}/models/fetch`（apps/studio/src/handlers/providers.ts 的
+ * [registerModelsFetch]，它只 `deps.providers.find(id)` 读既有行，**根本不需要先保存**）——
+ * 编辑既有 provider 时那次 saveProvider 纯属多余的副作用。
  *
  * 本文件钉住修复后的两条不变量：
  *   ① 编辑既有 provider：点「获取模型」⇒ **一次 POST 都不发**（直接 fetch）；

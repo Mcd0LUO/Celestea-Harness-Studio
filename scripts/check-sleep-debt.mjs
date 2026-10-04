@@ -75,7 +75,7 @@ for (const file of files()) {
     }
     // W9225 补充规则（我第一版漏掉的形态）：sleep 之后紧跟**文件系统读取**，
     // 而下一句是断言。这是「等某个东西被写出来」的另一种写法，同样是赌时长。
-    // 真实案例：recovery-view.test.ts:113 —— 睡 50ms 后 readFileSync(checkpoint.json)
+    // 真实案例：recovery-view.test.ts:113 —— 睡 50ms 后 readFileSync(checkpoint.json) // W9323 豁免：刻意的出处
     // 再断言，门禁第一版只看向下一行，所以漏了它。
     const READ_RE = /\b(readFileSync|existsSync|readdirSync|statSync)\s*\(/;
     if (READ_RE.test(next)) {

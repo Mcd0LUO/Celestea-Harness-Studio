@@ -315,8 +315,8 @@ function hasSameOriginEvidence(c: Context): boolean {
  * four POSTs without the confirm header answer 403,403,403,409, so a stale form
  * can lock its own operator out for five minutes. The one-line fix (count only
  * an illegal cap) was written and passes, but it turns
- * `apps/studio/src/grants.test.ts:409-411` red — that case builds its three
- * refusals from missing headers, i.e. it pins this very defect. That test file
+ * `apps/studio/src/grants.test.ts`'s cooldown case red — that case builds its
+ * three refusals from missing headers, i.e. it pins this very defect. That test file
  * is outside this batch's write scope (handlers/ + store/ + auth/ only), so the
  * fix was reverted and is handed back for whoever owns the test.
  */

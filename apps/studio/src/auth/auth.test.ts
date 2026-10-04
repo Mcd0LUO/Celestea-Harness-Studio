@@ -145,7 +145,7 @@ describe("failure limiter", () => {
  * W896：真实子进程 + 满负载 ⇒ 偶发 spawn EAGAIN/EMFILE。
  *
  * `verifyPassword` 的契约里 "error" 是**如实上报**「helper 用不了」，且它内部已对非超时的
- * spawn 失败重试一次（见 htpasswd.ts:34-40）。6 路 CPU 争用下实测复现：ghost 用户那次
+ * spawn 失败重试一次（见 [verifyPassword] 里那次重试）。6 路 CPU 争用下实测复现：ghost 用户那次
  * spawn 撞上资源耗尽 → 返回 "error" 而非 "denied"。
  * 这是**宿主瞬时状况**，不是被测逻辑的缺陷 —— 把瞬时 EAGAIN 当断言失败会制造 flake。
  * 这里重试**整个校验**（最多 3 次）：真出现「永久 error」时仍会红（重试也救不了），

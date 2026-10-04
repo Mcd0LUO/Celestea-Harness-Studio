@@ -33,8 +33,8 @@ describe("contracts/tools.json · agent_swarm", () => {
     expect(parameters.required).toEqual(["description", "items", "prompt_template"]);
     // 封闭对象：未声明参数必须是 schema 错误，不是静默忽略。
     expect(parameters.additionalProperties).toBe(false);
-    // 2..128 与 packages/swarm 的实现常量同源（SWARM_MIN_ITEMS / SWARM_MAX_SUBAGENTS，
-    // packages/swarm/src/types.ts:110-112）：契约写窄了模型会被拒，写宽了实现会炸，
+    // 2..128 与 packages/swarm 的实现常量同源（[SWARM_MIN_ITEMS] / [SWARM_MAX_SUBAGENTS]，
+    // 声明在 packages/swarm/src/types.ts 的「常量」小节）：契约写窄了模型会被拒，写宽了实现会炸，
     // 两个方向都是错 —— 所以这里钉死成实现常量的值，而不是各自写一份。
     const items = parameters.properties?.["items"];
     expect(items?.minItems).toBe(2);

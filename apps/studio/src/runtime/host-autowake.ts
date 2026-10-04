@@ -29,7 +29,7 @@ export interface HostAutowakeOptions {
   wake: (session: string | null, input: string | null) => boolean;
   /**
    * W9220（测试提速，行为不变）：可注入的定时器，原样转交 `AutowakeLoop` 早已接受的
-   * `AutowakeOptions.timing`（packages/runtime/src/autowake.ts:122）。省略 = 真实
+   * `AutowakeOptions.timing`（packages/runtime/src/autowake.ts 的 `AutowakeOptions`）。省略 = 真实
    * `setTimeout`/`clearTimeout`（生产路径逐字节不变）；测试注入「立即触发」后，
    * 「恰好一次唤醒 / 顺序」这类不变量与 250ms 轮询节拍解耦。
    */

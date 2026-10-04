@@ -51,7 +51,7 @@ export interface OfflineStep {
    * 「帧数 × deltaMs」造一个「够长」的忙窗口，等于把测试押在跨平台不确定性上：
    * 同一份配置在 Windows 上忙 ~280ms、在 Linux 上只忙 ~48ms，于是
    * 「睡 60ms 后断言仍然忙」在 Windows 绿、在 Linux 红 —— 这是 W9220 引入的
-   * **真实 CI 事故**（ubuntu 两个 job 变红，w833-adapter-payload.test.ts:92）。
+   * **真实 CI 事故**（ubuntu 两个 job 变红，w833-adapter-payload.test.ts 的 `hold` 用例）。
    *
    * `hold` 把「忙窗口」与「平台定时器粒度」解耦：断言从
    * 「赌它还没跑完」变成「我控制它什么时候跑完」。

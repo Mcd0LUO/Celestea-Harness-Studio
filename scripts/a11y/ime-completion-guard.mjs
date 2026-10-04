@@ -167,7 +167,7 @@ async function armDrawer() {
 /**
  * 桌面：给一个真实锚点登记 hint 并 focus 它（onFocusIn 直接弹卡，不等停留）。
  *
- * ★ 必须走 ui/hint/index.ts（= main.ts:102 的 initHints 用的**同一个**模块实例），
+ * ★ 必须走 ui/hint/index.ts（= main.ts 里 `initHints()` 用的**同一个**模块实例），
  *   不能直接 import card.ts —— 实测那样拿到的是**未装配**的实例（hintsMounted()=false、
  *   提供者表为空）⇒ 卡永远弹不出来 ⇒ 用例变成假绿（本轮实测踩到，已修）。
  */

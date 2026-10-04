@@ -142,9 +142,9 @@ describe("deriveMessagesFrom carries attachments (stage 2, section 4.2A/6.4)", (
 
 /**
  * W834 F07 (R3 batch A): the codec must enforce the FROZEN AttachmentRef schema
- * (contracts/session-event.schema.json:22-61) — 64 lowercase hex chars and
- * integer dimensions >= 1 — not merely "string + finite number". The probe is
- * the codec entry point itself plus the row-level parser that consumes it.
+ * ([session-event.schema.json]'s AttachmentRef definition) — 64 lowercase hex
+ * chars and integer dimensions >= 1 — not merely "string + finite number". The
+ * probe is the codec entry point itself plus the row-level parser that consumes it.
  */
 describe("AttachmentRef codec matches the frozen schema (W834 F07)", () => {
   const HEX = "ab".repeat(32);

@@ -6,7 +6,7 @@
  * WHY THIS FILE AND NOT packages/workers/src/registry.test.ts (the 落点 column of
  * §2.4). The entry point B8 names — "对同一 wid 跑两次 recoverOnBoot()" — is the
  * studio boot PAIR, not a package function: observeWorkerTableOnBoot +
- * recoverWorkerTableOnBoot, called back to back in app.ts:317-331. That pair
+ * recoverWorkerTableOnBoot, called back to back in [createStudioApp]'s boot sweep. That pair
  * lives here, and the third assertion B8 demands ("审计 0 行") is only expressible
  * against the studio's audit channel (RecoveryAuditWriter ->
  * <data dir>/recovery-audit.jsonl). A packages/workers copy would have to fake
@@ -28,7 +28,8 @@
  *
  * ★ THE ONE DIVERGENCE FROM THE DOC'S LITERAL "审计 0 行": the P0 sweep writes its
  * worker_observed SUMMARY line on EVERY boot, even when there is nothing to
- * observe (worker-recovery.ts:54; recovery-audit.ts:14 documents it as "always
+ * observe ([observeWorkerTableOnBoot] always writes its SUMMARY line; [RecoveryAuditWriter]
+ * documents it as "always
  * exactly one"). The second boot therefore writes exactly ONE audit line — the
  * summary — and zero ACTION lines. Both halves are asserted below so neither can
  * drift silently; the second test names the divergence explicitly.
@@ -96,7 +97,7 @@ function harness(dir: string) {
   return {
     observe: (): WorkerRecoveryReport => observeWorkerTableOnBoot(input),
     act: (report: WorkerRecoveryReport): RecoveryApplied[] | null => recoverWorkerTableOnBoot(input, report),
-    /** ONE boot = the P0 observation then the P2 action (app.ts:317-331). */
+    /** ONE boot = the P0 observation then the P2 action ([createStudioApp]'s boot sweep). */
     boot: (): RecoveryApplied[] | null => recoverWorkerTableOnBoot(input, observeWorkerTableOnBoot(input)),
     table: (): string => readFileSync(input.path as string, "utf8"),
     results: (): string[] => readdirSync(input.resultsDir),

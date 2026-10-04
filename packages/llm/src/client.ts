@@ -72,8 +72,8 @@ export class OpenAiCompatClient implements Llm {
     this.#apiKey = options.apiKey;
     this.#model = options.model;
     this.#reasoningEffort = options.reasoningEffort ?? null;
-    // W835 (R3 batch D / P2-2): 0 = "clear cap" (contracts/endpoints.json:540),
-    // never a literal max_tokens:0 on the wire.
+    // W835 (R3 batch D / P2-2): 0 = "clear cap" (the endpoints contract's
+    // max_output_tokens note), never a literal max_tokens:0 on the wire.
     const maxOut = options.maxOutputTokens;
     this.#maxOutputTokens = typeof maxOut === "number" && Number.isFinite(maxOut) && maxOut > 0 ? Math.floor(maxOut) : null;
     this.#connectMs = timeoutMsOf(options.connectTimeoutMs, DEFAULT_TIMEOUTS.connectMs);

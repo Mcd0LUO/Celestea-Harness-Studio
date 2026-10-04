@@ -166,7 +166,7 @@ export const MAX_STEER_EXTENSIONS = 8;
  *
  * A `timeout` kind folds to `"generate"` — a guard trips BEFORE any stream
  * exists — because `TurnOutcome.error.kind` is frozen to
- * `"generate" | "stream"` (`core/src/types.ts:22`); the timeout
+ * `"generate" | "stream"` ([TurnOutcome]); the timeout
  * distinction stays visible in the message (`llm timeout: …`) and in the
  * provider seam's own event, exactly as the host adapter in
  * `apps/studio/src/runtime/llm-assembly.ts` already does.

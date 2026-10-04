@@ -108,7 +108,7 @@ export function finishReasonOf(chunk: unknown): string | undefined {
  * arrived is a PREFIX (a half sentence, a half JSON tool-call argument).
  *
  * "length" is OpenAI's documented value and the one the repo has observed live
- * (docs/feature-multimodal-attachments/01-evidence.md:104). The comparison is
+ * (the multimodal evidence log, §2.2). The comparison is
  * case-insensitive and trimmed because gateways do not all forward the string
  * byte-identically; every other value ("stop", "tool_calls", "content_filter",
  * a value from a future provider, ...) and an ABSENT reason are false.

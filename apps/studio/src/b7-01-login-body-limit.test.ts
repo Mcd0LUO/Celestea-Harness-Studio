@@ -2,8 +2,9 @@
  * B7-1 (audit round 3) — `POST /auth/login` has the request-body ceiling that
  * W9230 already gave every other POST.
  *
- * The defect: `handlers/common.ts:110-120` (W9230's own comment) names this
- * route as one of the two the ceiling was written FOR — "an unauthenticated
+ * The defect: the `DEFAULT_JSON_BODY_BYTES` note in `handlers/common.ts`
+ * (W9230's own comment) names this route as one of the two the ceiling was
+ * written FOR — "an unauthenticated
  * `/auth/login` (not under the token gate) ... could be handed an arbitrarily
  * large body and OOM the process" — but login never routes through
  * `readJsonBody` (it also has to accept a urlencoded FORM post), so it read

@@ -175,7 +175,7 @@ export type Content = TextContent | ToolCallContent | ImageContent;   // ← 唯
 
 | 文件:行 | 现状 | 必须怎么改 |
 | --- | --- | --- |
-| `llm/src/seam.ts:163-168` | `collectMessageText` 静默丢弃非 text 块 | **保留**（它只答「文本是什么」）；新增 `collectMessageParts(content)` 产出 `WireContentPart[]`，并在注释里写明「切勿用它处理带图消息」 |
+| `llm/src/seam.ts:165-170` | `collectMessageText` 静默丢弃非 text 块 | **保留**（它只答「文本是什么」）；新增 `collectMessageParts(content)` 产出 `WireContentPart[]`，并在注释里写明「切勿用它处理带图消息」 |
 | `llm/src/wire.ts:58-64` | `WireMessage.content: string \| null` | 放宽为 `string \| WireContentPart[] \| null` |
 | `llm/src/wire.ts:200` | `mapMessage` 四个 role 分支 | `user`：有图则产数组；`tool`：有图则**不在这里产**（交给 buildRequestBody 拆分）；`system`/`assistant` 保持纯文本 |
 | `llm/src/wire.ts:231-253` | `buildRequestBody` 逐条 push `mapMessage` | 新增：单个 seam message 可能展开成 **2 条** wire message（tool 文本 + user 图片），并保持顺序 |

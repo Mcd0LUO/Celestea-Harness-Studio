@@ -8,7 +8,7 @@
 // 「done 到达时完全可能有一次渲染还排在窗口里，turn 结束本来就该立刻对齐终态」。
 // 空文本的 done（工具步的 done、被掐断的流、provider 只回完整文本的兜底）不带正文，
 // 于是终态 DOM 停在旧内容上，最长再等一个合并窗口（RENDER_WINDOW_MAX=50ms），
-// 而 chat.ts:271 紧接着就 autoscroll 了（滚到底、DOM 却是旧的）。
+// 而 chat.ts 的 onDone 末尾紧接着就 autoscroll 了（滚到底、DOM 却是旧的）。
 //
 // 两层断言（缺一层就守不住）：
 //   ① **行为**：view.text 非空 + 有排队渲染 + applyFinalText(ctx, view, '')

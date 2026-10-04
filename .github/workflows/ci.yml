@@ -80,6 +80,15 @@ jobs:
       - name: check:tmpdir
         if: ${{ matrix.shard == 1 }}
         run: node scripts/run-gate.mjs check:tmpdir -- pnpm check:tmpdir
+      # W9323：同步阻塞调用不得出现在事件回调 / 定时器 / 请求处理器里。
+      # 上下文：W9321 的 taskkillTree 让「按 Stop」同步卡死约 15s，同类缺陷当时没人知道有多少。
+      - name: check:sync-in-callback
+        if: ${{ matrix.shard == 1 }}
+        run: node scripts/run-gate.mjs check:sync-in-callback -- pnpm check:sync-in-callback
+      # W9323：注释里的 file.ts:NN 行号引用会静默腐烂，改用 [symbol] 符号引用。
+      - name: check:comment-refs
+        if: ${{ matrix.shard == 1 }}
+        run: node scripts/run-gate.mjs check:comment-refs -- pnpm check:comment-refs
       # 分片只在 test 上生效；其余门禁跑在 shard 1 上（每 OS×Node 组合各一次），
       # 否则同一份 typecheck/lint 会被重复跑 3 遍（纯浪费，且 CI 分钟数翻倍）。
       - name: test (shard ${{ matrix.shard }}/3)

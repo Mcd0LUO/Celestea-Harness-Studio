@@ -90,7 +90,8 @@ export const DEFAULT_RULES: RedactionRule[] = [
   // registered-secret pass uses MIN_SECRET_LEN (8), so a 10- or 11-character
   // {"token":"..."} / {"password":"..."} passes through. Measured and left as is.
   //
-  // Why not lower it to MIN_SECRET_LEN: redact-w824.test.ts:36 pins
+  // Why not lower it to MIN_SECRET_LEN: redact-w824.test.ts's "keeps short
+  // (non-credential) and non-credential JSON values intact" case pins
   // {"token":"short12345"} (exactly 10 characters) as VERBATIM. That test is the
   // P0 that introduced this rule (W824 F01, from R2 W821 E1), and its title states
   // the intent -- "keeps short (NON-CREDENTIAL) ... values intact". The two

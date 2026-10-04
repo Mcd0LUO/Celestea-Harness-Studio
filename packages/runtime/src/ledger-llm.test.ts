@@ -16,7 +16,7 @@ import { failureOf, streamFailure } from "./ledger-llm.js";
  * On "timeout" being a real member here: the provider seam widens
  * `StreamEvent.failed.kindOf` with `"timeout"` (the `TODO(core-timeout-kind)` in
  * `packages/llm/src/seam.ts`), and only the core-typed host adapter
- * (`apps/studio/.../llm-assembly.ts:98`) folds it back to `"stream"`. This
+ * ([coreEvent] in `apps/studio/.../llm-assembly.ts`) folds it back to `"stream"`. This
  * observer wraps whichever `Llm` it is handed, so both spellings reach it in a
  * real deployment — which is exactly why a MESSAGE-SNIFFING rule was wrong:
  * the two spellings carry the same semantics but different text.

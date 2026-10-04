@@ -18,7 +18,8 @@
  *     `stopping` 必为 true。
  *
  * ## 捕获日志
- * `log()` 走 `console.log`（server.ts:146）。这里临时替换 `console.log` 并在
+ * `log()` 走 `console.log`（server.ts 里的 `logListeningBanner` 与 `loud` 分支）。
+ * 这里临时替换 `console.log` 并在
  * finally 还原；`onListening` 在启动横幅**之后**触发，所以它那一刻的行号就是
  * 「启动噪声 / 退出日志」的精确分界，不需要靠前缀猜。
  */

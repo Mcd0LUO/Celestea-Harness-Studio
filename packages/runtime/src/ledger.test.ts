@@ -284,7 +284,7 @@ describe("C4: failures are booked as unknown cost", () => {
    * The scripted `kindOf: "timeout"` below is deliberate: this observer wraps
    * whichever `Llm` it is handed, and the PROVIDER seam widens the union with
    * `"timeout"` (`TODO(core-timeout-kind)` in packages/llm/src/seam.ts) — only
-   * the core-typed host adapter in `llm-assembly.ts:98` folds it back to
+   * the core-typed host adapter's [coreEvent] in `llm-assembly.ts` folds it back to
    * `"stream"`. So both spellings reach this function in real deployments. The
    * core-typed `StreamEvent` cannot express `"timeout"`, hence the cast below.
    */

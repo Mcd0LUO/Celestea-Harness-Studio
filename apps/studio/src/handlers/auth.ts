@@ -139,8 +139,9 @@ function denied(c: Context, wantsJson: boolean, status: number, error: string, p
  * B7-1 (audit round 3): the login body's ceiling.
  *
  * Why this route had none. W9230 added `DEFAULT_JSON_BODY_BYTES` to
- * `readJsonBody`, and its own module comment (handlers/common.ts:110-120)
- * names this route as one of the two it was written FOR — "an unauthenticated
+ * `readJsonBody`, and its own module comment (the `DEFAULT_JSON_BODY_BYTES`
+ * note in `handlers/common.ts`) names this route as one of the two it was
+ * written FOR — "an unauthenticated
  * `/auth/login` (not under the token gate) ... could be handed an arbitrarily
  * large body and OOM the process". But login never came through
  * `readJsonBody`: it has to accept a urlencoded FORM post as well as JSON, so
@@ -158,12 +159,12 @@ const LOGIN_BODY_BYTES = DEFAULT_JSON_BODY_BYTES;
 /**
  * Read the login body under a ceiling, or null when it is absent/oversize.
  *
- * Same two-half shape as `readJsonBody` (common.ts:142-155), for the same two
- * reasons: `content-length` is refused BEFORE a single byte is buffered (the
- * declared length is attacker-chosen but the refusal it triggers costs nothing),
- * and the bytes actually read are re-checked because a chunked request declares
- * no length at all. UTF-16 code units are a LOWER bound on the byte count, so
- * this errs in the safe direction.
+ * Same two-half shape as `readJsonBody` (its `bodyTooLarge` refusal plus the
+ * post-read re-check), for the same two reasons: `content-length` is refused
+ * BEFORE a single byte is buffered (the declared length is attacker-chosen but
+ * the refusal it triggers costs nothing), and the bytes actually read are
+ * re-checked because a chunked request declares no length at all. UTF-16 code
+ * units are a LOWER bound on the byte count, so this errs in the safe direction.
  */
 async function readLoginBody(
   c: Context,

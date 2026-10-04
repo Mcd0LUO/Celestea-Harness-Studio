@@ -3,10 +3,10 @@
  * 只上报一次。
  *
  * 根因（本文件就是它的可执行复现）：
- *   packages/llm/src/image-fallback.ts:132 的 onDowngrade 在**每一次带图请求**上
+ *   [createImageDowngradeLlm] 的 onDowngrade 在**每一次带图请求**上
  *   触发；会话历史里的图片附件会保留，于是一个多步回合里每一步重发图片都会再被
  *   上游 400 → 再次 onDowngrade → 再次 reportImageDowngrade → 再次 bus.emit
- *   （apps/studio/src/runtime/real-runtime-adapter.ts:235）。N 步 = N 条 status 帧。
+ *   （适配器上唯一的默认 `createImageDowngradeReporter`）。N 步 = N 条 status 帧。
  *
  * 两层证据：
  *   ① 适配器级（真引擎 / 真总线）：带图 + 一次工具调用的回合，两步都带图 →

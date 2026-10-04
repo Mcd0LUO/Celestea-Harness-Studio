@@ -139,7 +139,7 @@ export class AdapterFallback {
     maxRetries?: () => number;
     /**
      * W9220（测试提速，行为不变）：可注入的退避等待，原样转交
-     * `createFallbackWiring` 的既有 `sleep` 缝（fallback-host.ts:216/362/454）。
+     * `createFallbackWiring` 各重试/回退等待点既有的 `sleep` 缝。
      * 省略 = 真实 `setTimeout`，生产路径逐字节不变；测试可注入「不等待」把
      * 重试的**顺序/次数/上报**与**真实退避时长**解耦。
      */

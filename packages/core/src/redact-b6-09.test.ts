@@ -90,10 +90,12 @@ describe("B6-09: the vendor prefixes that had no rule", () => {
 
 describe("B6-10 (not changed, documented): the json-credential floor", () => {
   it("stays at 12, and the divergence from MIN_SECRET_LEN is deliberate", () => {
-    // Measured, then left alone: redact-w824.test.ts:36 pins a 10-character token
-    // value as verbatim. Below 12 a value is more likely a placeholder or a fixture
-    // marker than a live credential, so the floor is a policy choice, not an
-    // oversight. This test records the decision so a future change cannot move it.
+    // Measured, then left alone: redact-w824.test.ts's "keeps short
+    // (non-credential) and non-credential JSON values intact" case pins a
+    // 10-character token value as verbatim. Below 12 a value is more likely a
+    // placeholder or a fixture marker than a live credential, so the floor is a
+    // policy choice, not an oversight. This test records the decision so a future
+    // change cannot move it.
     const short = JSON.stringify({ token: "short12345" });
     const long = JSON.stringify({ token: "longenough12" });
     expect(createRedactor([]).redact(short)).toBe(short);

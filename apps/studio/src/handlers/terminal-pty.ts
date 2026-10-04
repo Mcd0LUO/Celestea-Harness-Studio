@@ -400,7 +400,8 @@ export const TERMINATE_GRACE_MS = 5_000;
  * release its pty) therefore hung the close request **forever**: the handler
  * never returned, the id was never dropped, and the panel could not be reopened
  * (observed as a 30s test timeout under load). Escalation is what makes the
- * function's contract true; `launch.ts:108-109` is the same two-step pattern.
+ * function's contract true; `launch.ts`'s `timeoutFailure` is the same two-step
+ * pattern (kill, then a bounded reaping wait).
  *
  * W9220: graceMs is an OPTIONAL parameter (default unchanged) purely so the
  * W1528b fake child -- SIGTERM ignored, settles only on SIGKILL -- need not really

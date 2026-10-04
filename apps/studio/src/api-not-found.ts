@@ -30,8 +30,8 @@
  *
  * It stays the handler's own frozen shape — `{"error": "not found"}` —
  * which is one of the two documented exceptions to the `{"ok":false,"error"}
- * convention (see handlers/common.ts:6-7). Only the STATUS and the new `Allow`
- * header change, so `contracts/endpoints.json` §conventions needs no edit: this
+ * convention (see the note in `handlers/common.ts`). Only the STATUS and the
+ * new `Allow` header change, so `contracts/endpoints.json` §conventions needs no edit: this
  * is the 404 body a path-mismatch answers with, which is what that clause
  * already describes. `ok:false` is deliberately NOT added — it would be a new
  * shape on a route whose body is frozen.
@@ -39,7 +39,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import type { RegisteredRoute } from "./routes.js";
 
-/** The frozen body for a path that does not answer (common.ts:6-7). */
+/** The frozen body for a path that does not answer (see `handlers/common.ts`). */
 function notFoundBody(c: Context): Response {
   return c.json({ error: "not found" }, 404);
 }

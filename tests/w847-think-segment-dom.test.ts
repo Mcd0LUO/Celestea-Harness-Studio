@@ -2,8 +2,8 @@
 /**
  * W847 · 思考段「实时流 vs 历史重放」分段一致性（用户实报）
  *
- * 缺陷：落盘的 ThinkingBuffer（packages/agent-loop/src/thinking.ts:26-31）在
- * text/done/terminal 处把一段连续推理 flush 成一条 thinking_delta 行，所以历史
+ * 缺陷：落盘的 ThinkingBuffer（packages/agent-loop/src/thinking.ts 的 [ThinkingBuffer]
+ * 类里 text/done/terminal 处的 flush 分支）把一段连续推理 flush 成一条 thinking_delta 行，所以历史
  * 重放天然是 thinking → tool → thinking → tool … 交替；而 live 侧 ctx.thinkSeg
  * 原先只在 endTurn（整轮结束）清空，整轮所有 reasoning 累进同一个段，导致
  * 「刷新后才发现有间隔的思考」。

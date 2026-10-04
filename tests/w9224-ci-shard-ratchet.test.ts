@@ -48,7 +48,7 @@ describe("W9224 · CI 分片覆盖完整性", () => {
 
   it("④ 非 test 门禁必须只在 1 个分片上跑（否则同一份工作重复 3 遍）", () => {
     // 逐个门禁检查：有 `if: matrix.shard == 1` 才算合格。
-    for (const name of ["typecheck", "lint", "lint:arch", "check:tmpdir", "check:web build", "check:web version", "check:web bundle ratchet"]) {
+    for (const name of ["typecheck", "lint", "lint:arch", "check:tmpdir", "check:sync-in-callback", "check:comment-refs", "check:web build", "check:web version", "check:web bundle ratchet"]) {
       // 取该步骤名之后的两行（步骤体内），检查紧随其后的条件。
       const idx = CI.indexOf(`- name: ${name}\n`);
       expect(idx, `必须存在步骤 ${name}`).toBeGreaterThan(-1);

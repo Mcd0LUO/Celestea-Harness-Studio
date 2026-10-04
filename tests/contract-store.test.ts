@@ -293,7 +293,8 @@ describe('契约文档指针可达性', () => {
    *      必须解析到真实文件。这是本条的主判据。
    *   ② `crates/**` = 已退役的参照实现，**不是**仓内指针：不能判它「坏」，
    *      但它也不该再被当成可解析入口——若哪天有人把它写回来，这里要求带
-   *      `retired-engine/` 前缀（仓内已有该写法先例：packages/llm/README.md:3），
+   *      `retired-engine/` 前缀（仓内已有该写法先例：packages/llm/README.md 的
+   *      "Parity target" 一节），
    *      让「这是历史引用」成为**显式**事实，而不是靠读者自己推断。
    *
    * 只取**首 token**作为路径：现有 `sourceRef` 的形态是

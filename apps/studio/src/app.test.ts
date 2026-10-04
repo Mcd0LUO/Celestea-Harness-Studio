@@ -334,8 +334,8 @@ describe("B2-05 — an uncaught handler exception still answers with the contrac
   // would never run. Driving a REAL route through a throwing runtime exercises
   // exactly the path a production bug takes.
   function throwingHarness(thrown: unknown) {
-    // GET /api/providers is registered as a bare one-liner (providers.ts:47:
-    // `c.json(deps.providers.response())`) with no try/catch, so a store that
+    // GET /api/providers is registered as a bare one-liner in `providers.ts`
+    // (`c.json(deps.providers.response())`) with no try/catch, so a store that
     // throws propagates straight out of the handler — the uncaught path B2-05 is
     // about. Making the store throw reproduces it exactly.
     const h = makeHarness({ files: { "providers.json": { providers: [] } } });

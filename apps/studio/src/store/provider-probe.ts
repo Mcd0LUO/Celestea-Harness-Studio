@@ -55,9 +55,10 @@ export type ProbeProtocol = (typeof PROBE_PROTOCOLS)[number];
  * truth is the engine's own transport, not the protocol's spec.
  *
  * Measured fact (2026-10-02): the engine's transport
- * (`packages/llm/src/transport.ts:95`) sends `authorization: Bearer` for EVERY
- * protocol, `anthropic_messages` included; the anthropic adapter adds only the request
- * BODY (`packages/llm/src/anthropic/wire.ts`). That is a real gap in the adapter - it
+ * (`requestHeaders` in `packages/llm/src/transport.ts`) sends `authorization: Bearer`
+ * for EVERY protocol, `anthropic_messages` included; the anthropic adapter adds only
+ * the request BODY (`packages/llm/src/anthropic/wire.ts`). That is a real gap in the
+ * adapter - it
  * claims a protocol whose native auth is `x-api-key` + `anthropic-version` - and it is
  * registered as P19 in `docs/pitfalls.md`. **When that adapter grows protocol-native
  * headers, this function must move with it**; writing the coupling down here is the

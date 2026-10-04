@@ -293,7 +293,7 @@ export type ContextWindowSource = "profile" | "fallback" | "unknown";
  *
  * DSH computes `projectedTokens = pressureTokens + surfaceTokens - sampledSurfaceTokens`
  * so that occupancy answers for the NEXT request rather than the last one
- * (`dsh-token-meter/lib/types/usage-projection.js:178-187`). Same shape here:
+ * (DSH's `usage-projection` in `dsh-token-meter/lib/types/`). Same shape here:
  * remember the model-visible estimate observed when a NEW `prompt_tokens` value
  * arrived, and add whatever the visible surface has grown by since.
  *

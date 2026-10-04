@@ -9,8 +9,8 @@
  *
  * B7-6: `fsRoots()` on win32 used to START at the drive root, and
  * `handlers/fs.ts` opens the browser at `roots[0]` when the client sends no
- * `?path=` — which `apps/web/src/ui/fsbrowser.ts:257` does on every open
- * (`loadDirs('')`). So every Windows user's directory picker landed in
+ * `?path=` — which `apps/web/src/ui/fsbrowser.ts` 的 `loadDirs('')` does on
+ * every open. So every Windows user's directory picker landed in
  * `Windows/`, `Program Files/`, `$Recycle.Bin/`. The USERPROFILE now comes
  * first (the same reason POSIX lists `/home` first); the drive root is kept as
  * the second shortcut and stays reachable from the breadcrumb root button.
@@ -137,9 +137,9 @@ describe("B7-5 · method mismatch is 405 + Allow; an unknown path stays 404", ()
     const wrongPath = await call(a, "GET", "/api/does-not-exist");
     expect(wrongVerb.status).not.toBe(wrongPath.status);
     // The BODY shape is deliberately unchanged: `{"error": ...}` is one of the
-    // two documented exceptions to the ok:false convention (common.ts:6-7), so
-    // contracts/endpoints.json §conventions needs no edit and no client branch
-    // that reads `error` breaks.
+    // two documented exceptions to the ok:false convention (see the note in
+    // `handlers/common.ts`), so contracts/endpoints.json §conventions needs no
+    // edit and no client branch that reads `error` breaks.
     expect(JSON.parse(wrongVerb.body)).toEqual(JSON.parse(wrongPath.body));
   });
 

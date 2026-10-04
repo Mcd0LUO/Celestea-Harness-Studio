@@ -11,12 +11,12 @@
  *   contracts/probe-evidence.json 更是**不匹配任何规则** ⇒ 被提交进公开仓。
  *
  *   它们全部【只被 writeFileSync 写、全仓无一处读】（核实见报告）：
- *     scripts/compare-replay.ts:65-67    → reports/replay-diff.{json,md}
- *     scripts/replay-e2e.ts:12           → reports/replay-e2e.{json,md}
- *     scripts/contracts/report.ts:78     → contracts/probe-evidence.json
- *     scripts/contracts/report.ts:80     → reports/contract-probe.md
+ *     scripts/compare-replay.ts 的 main 收尾三连写  → reports/replay-diff.{json,md}
+ *     scripts/replay-e2e.ts 的 [main] 两连写        → reports/replay-e2e.{json,md}
+ *     scripts/contracts/report.ts 的 [writeEvidence] → contracts/probe-evidence.json
+ *                                                 → reports/contract-probe.md
  *
- *   行号在 2026-10-02 更新过一次：EX-02/03/04 三处重构把写盘点搬进了
+ *   这些落点 2026-10-02 更新过一次：EX-02/03/04 三处重构把写盘点搬进了
  *   scripts/golden/* 与 scripts/contracts/*。这些注释**没有任何门禁盯着**（文档锚点有
  *   tests/doc-conventions.test.ts 的 ③b/③c，注释没有），所以它们是最容易悄悄烂掉的一类。
  *

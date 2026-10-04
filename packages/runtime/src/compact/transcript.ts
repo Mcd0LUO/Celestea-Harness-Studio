@@ -33,7 +33,8 @@ export const SUMMARY_TIMEOUT_MS = 90_000;
  * this failure mode: a claim that a step was done, repeated onward without ever
  * being checked. A summary is a retelling of a retelling, so it must be allowed
  * to say "this was never verified" instead of restating it as a fact. Kimi Code
- * does the same (`compaction-instruction.md:35-38,59-62`).
+ * does the same in its own compaction instruction (the "still unverified"
+ * section and the drift-avoidance rules around it).
  *
  * ★ Section 5 is placed FIRST among the sections, not last, and that is load
  * bearing: [clip] keeps the HEAD of a string, and `plan.ts` runs the summary

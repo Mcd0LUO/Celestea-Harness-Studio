@@ -45,7 +45,7 @@ export const BUS_CAPACITY = 512;
  *
  * B7-6: the ORDER of the win32 list is the user-visible half, because
  * `handlers/fs.ts` opens the browser at `roots[0]` when the client sends no
- * `?path=` — and `apps/web/src/ui/fsbrowser.ts:257` does exactly that
+ * `?path=` — and `apps/web/src/ui/fsbrowser.ts` does exactly that
  * (`loadDirs('')`) every time the directory picker opens. The list therefore
  * used to START every Windows user in `C:\`, i.e. the first screen of the
  * picker was `Windows/`, `Program Files/`, `$Recycle.Bin/` and a dozen other
@@ -55,8 +55,9 @@ export const BUS_CAPACITY = 512;
  * also removes a platform asymmetry rather than adding a special case.
  *
  * The drive root is KEPT, just not first: it is still a legitimate one-click
- * shortcut, and the breadcrumb UI has its own root button (`fsbrowser.ts:112`)
- * for reaching it in one click. Only the OPENING directory changes.
+ * shortcut, and the breadcrumb UI has its own root button (the `rootBtn` in
+ * `fsbrowser.ts`'s `renderCrumbs`) for reaching it in one click. Only the
+ * OPENING directory changes.
  */
 export function fsRoots(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): string[] {
   if (platform !== "win32") return ["/src", "/tmp", "/srv", "/home"];

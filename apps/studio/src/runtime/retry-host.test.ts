@@ -276,7 +276,8 @@ describe("F-06 — the retry budget reaches the provider through the REAL adapte
    *
    * 本用例证的是「重试预算真的到达 provider」（calls() 次数 + audit 行 + status 帧），
    * 不是「退避真的等了 500/1000/2000ms」——后者由 packages/llm/src/retry.test.ts
-   * 用注入的 sleeps[] 精确断言。`sleep` 是 retry.ts:161 早已存在的缝，
+   * 用注入的 sleeps[] 精确断言。`sleep` 是 packages/llm/src/retry.ts 的 `RetryOptions.sleep`
+   * 早已存在的缝，
    * 只是此前没从 adapter 接到调用点；现在 `RealRuntimeAdapterOptions.sleep` 原样透传。
    */
   const NO_WAIT = async (): Promise<void> => undefined;

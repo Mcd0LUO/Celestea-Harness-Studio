@@ -73,7 +73,7 @@ function stubHistory(n = 100): void {
 
 /**
  * 装配一个聚焦会话。`withRail` 时额外 initRail()（幂等）—— F-06 的长条断言需要它：
- * railAdd 在 mainEl 为 null 时**直接 return**（rail.ts:294），不装配就永远没有长条。
+ * railAdd 在 mainEl 为 null 时**直接 return**（[railAdd] 的第一行守卫），不装配就永远没有长条。
  */
 async function bootPane(id: string, withRail = false): Promise<{ pane: Pane; V: ViewCtxMod }> {
   const V = (await import(/* @vite-ignore */ at('ui/viewctx.ts'))) as ViewCtxMod;

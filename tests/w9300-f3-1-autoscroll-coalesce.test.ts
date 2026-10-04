@@ -37,7 +37,7 @@ let rafQueue: Array<() => void> = [];
 
 beforeAll(async () => {
   installDom();
-  // window === globalThis（见 w1467-dom.ts:186），所以这里装 rAF 即是页面上的 rAF。
+  // window === globalThis（见 tests/lib/w1467-dom.ts 的 [installDom]），所以这里装 rAF 即是页面上的 rAF。
   (globalThis as unknown as Record<string, unknown>)["requestAnimationFrame"] = (cb: () => void): number => {
     rafQueue.push(cb);
     return rafQueue.length;

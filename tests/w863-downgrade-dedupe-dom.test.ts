@@ -5,9 +5,9 @@
  * 现象：用户在 Studio 里看到「很多叠加的可滑动的块」，全是同一条
  * 「模型 … 拒绝了图像输入（上游 400）…」。
  * 根因：后端一个多步回合每一步都重发历史图片 → 每步一条降级 status 帧
- * （apps/studio/src/runtime/real-runtime-adapter.ts:235）；前端
- * apps/web/src/ui/downgrade.ts:12 每收到一帧就 renderInfoBlock **追加一个新块**
- * （apps/web/src/ui/messages/info.ts:14）。
+ * （apps/studio/src/runtime/real-runtime-adapter.ts 的 [createImageDowngradeReporter] 那一栏）；
+ * 前端 [renderImageDowngrade]（apps/web/src/ui/downgrade.ts）每收到一帧就调
+ * [renderInfoBlock]（apps/web/src/ui/messages/info.ts）**追加一个新块**。
  *
  * 本文件用 jsdom 加载**真实模块**（pathToFileURL 动态 import，不复刻逻辑）：
  * 同一 ctx 连发 5 帧同签名 → 恰好 1 个 .msg.info、文案=最新、flash 1 次；

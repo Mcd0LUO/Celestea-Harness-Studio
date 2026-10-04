@@ -47,7 +47,8 @@ describe("B6-05: transport.redact inherits core's rule table", () => {
     const key = "9f8e7d6c5b4a3210";
     expect(redact("invalid api key: " + key, [key])).not.toContain(key);
     // An arbitrary provider key with no shape stays visible when NOT registered --
-    // the exact behaviour transport-w824.test.ts:28 pins.
+    // the exact behaviour transport-w824.test.ts's "redacts the client's own key
+    // by literal replacement (N2 fallback)" case pins.
     expect(redact("invalid api key: " + key)).toContain(key);
   });
 

@@ -3,7 +3,8 @@
  * W2027 · `scripts/perf` 的**启动窗口**门禁：Chrome 一诞生就必须在收尾表里。
  *
  * 缺陷（W2021 修完之后仍然存在的那一半）：W2021 让「boot **完成之后**收到信号」不再留
- * 孤儿 —— 登记发生在 `launchChrome()` **返回之后**（app.mjs:85）。可 Chrome 进程在
+ * 孤儿 —— 登记发生在 `launchChrome()` **返回之后**（app.mjs 的「进程收尾」小节：
+ * `chrome.unregister()` 那一段之后）。可 Chrome 进程在
  * `launchChrome` 内部 `spawn()` 的那一刻就存在了，而 `launchChrome` 返回前还要轮询
  * `/json/version`（每 150ms 一次，上限 25s）并跑若干 CDP 命令 —— 这【数百 ms ~ 数秒】里
  * 收到 SIGTERM，Node 直接退出，登记表里没有它，Chrome 被 init 收养。

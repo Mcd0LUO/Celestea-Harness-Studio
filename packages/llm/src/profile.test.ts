@@ -126,8 +126,8 @@ describe("profile -> config resolution", () => {
     expect(resolveClientConfig({ api_key_env: "MY_KEY" }, {}).apiKey).toBe("");
   });
 
-  // W835 (R3 batch D / P2-2): contracts/endpoints.json:540 says
-  // max_output_tokens 0 = clear cap, so resolveClientConfig must answer null
+  // W835 (R3 batch D / P2-2): the endpoints contract's max_output_tokens
+  // note says 0 = clear cap, so resolveClientConfig must answer null
   // (the wire then omits max_tokens) instead of passing 0 to the provider.
   it("treats max_output_tokens 0 as a cleared cap, not a zero-token request", () => {
     expect(resolveClientConfig({ max_output_tokens: 0 }, {}).maxOutputTokens).toBeNull();

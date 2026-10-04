@@ -167,7 +167,8 @@ describe("W9206-15: loadAuthSecret 读路径收紧权限并限制长度", () => 
   });
 
   /**
-   * 源码守卫（与 w9206-security-fixes.test.ts:191-200 同一手法）。
+   * 源码守卫（与 w9206-security-fixes.test.ts 里「the terminal spawn wires a
+   * stdin error listener and re-checks writability」同一手法）。
    *
    * 为什么需要它：Windows 上 `chmod` 基本无效（`FILE_MODES_MEANINGFUL` 为
    * false），所以「读路径收紧 0600」这条修复在本机无法用 statSync 观测 ——
@@ -395,7 +396,8 @@ describe("W9206-39: /api/fs/list 先排序截断，再对幸存者 lstat", () =>
    * 「先截断再 lstat 幸存者」返回逐字节相同的列表），所以断言输出永远抓不到
    * 它 —— 它省的是**工作量**（十万级目录的主线程同步 lstat 数）。
    * 因此把「截断发生在 describeEntry 之前」写成对源码的断言（与
-   * w9206-security-fixes.test.ts:191-200 同一手法）：变异成旧顺序 ⇒ 本用例红。
+   * w9206-security-fixes.test.ts 里那条终端源码守卫同一手法）：变异成旧顺序 ⇒
+   * 本用例红。
    */
   it("截断发生在 describeEntry（lstat）之前 —— 跨平台有牙的源码守卫", async () => {
     const { fileURLToPath } = await import("node:url");

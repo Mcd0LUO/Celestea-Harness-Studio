@@ -404,8 +404,8 @@ async function* consume(
       if (isProducedEvent(event)) produced += 1;
       if (event.kind === "done") {
         closeStep({ kind: "ok" });
-        // The terminal event is FORWARDED, not swallowed: the loop derives the
-        // turn's `assistant_message` from it (loop.ts:246-253).
+        // The terminal event is FORWARDED, not swallowed: [DefaultAgentLoop]
+        // derives the turn's `assistant_message` from it in [finishStep].
         yield event;
         return { kind: "done" };
       }

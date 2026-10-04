@@ -75,11 +75,12 @@ export type {
  * into core needs three files this cut may not touch or must not change:
  *   1. `contracts/session-event.schema.json` freezes `TurnOutcome.error.kind`
  *      to exactly ["generate","stream"], and W744 EXECUTES that schema
- *      (`tests/contract-parity.test.ts:68,119`): widening core's
+ *      (`tests/contract-parity.test.ts`'s W744 schema cases): widening core's
  *      `TurnOutcome.error.kind` would let the engine mint rows the frozen
  *      contract rejects;
- *   2. `packages/agent-loop/src/step.ts:49` forwards `kindOf` into
- *      `TurnOutcome.error.kind` verbatim, so `StreamEvent.failed.kindOf`
+ *   2. `packages/agent-loop/src/step.ts`'s [terminalFromStreamEvent] forwards
+ *      `kindOf` into `TurnOutcome.error.kind` verbatim, so
+ *      `StreamEvent.failed.kindOf`
  *      cannot be widened alone (agent-loop is W747's file);
  *   3. `contracts/` is frozen — a real widening is a contract change with a
  *      decision record, not a worker's bounded cut.
@@ -148,7 +149,8 @@ export type LlmStream = AsyncIterable<StreamEvent>;
  * [StreamEvent] widening above (hence not a re-export — the return type is the
  * provider's stream). A provider stream is therefore NOT assignable to core's
  * `Llm`; the single host adapter converts it (and drops "timeout" to "stream"
- * for the frozen contract): `apps/studio/src/runtime/llm-assembly.ts:69-96`.
+ * for the frozen contract): [coreEvent] in
+ * `apps/studio/src/runtime/llm-assembly.ts`.
  */
 export interface Llm {
   /** Start a streaming turn; pre-stream failures reject with an LlmError. */

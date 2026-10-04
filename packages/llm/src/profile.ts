@@ -104,8 +104,9 @@ export function resolveClientConfig(
     model: nonEmpty(profile?.model) ?? DEFAULT_MODEL,
     reasoningEffort:
       typeof profile?.reasoning_effort === "string" ? profile.reasoning_effort : null,
-    // W835 (R3 batch D / P2-2): 0 means "clear the cap" (endpoints.json:540),
-    // so it resolves to null (the wire then omits max_tokens) rather than 0.
+    // W835 (R3 batch D / P2-2): 0 means "clear the cap" (the endpoints contract's
+    // max_output_tokens note), so it resolves to null (the wire then omits
+    // max_tokens) rather than 0.
     maxOutputTokens:
       typeof maxOut === "number" && Number.isInteger(maxOut) && maxOut > 0 ? maxOut : null,
     connectTimeoutMs: tiers.connectMs ?? 0,

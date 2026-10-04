@@ -100,9 +100,10 @@ export type GrantsRead = { exists: boolean; file?: GrantsFile; error?: string };
  * same root cause seen from the other end.
  *
  * `collectKnownSecrets` already accepted `providersJson`; the caller simply never
- * passed it. The path is resolved exactly like `config.ts:121` — explicit
- * `CELESTEA_PROVIDERS_FILE`, else `CELESTEA_WORKSPACES_FILE`'s directory (the
- * grants env is pinned to the workspaces file, so the data dir follows), else cwd.
+ * passed it. The path is resolved exactly like `config.ts`'s `providersFile`
+ * entry in `loadStudioConfig` — explicit `CELESTEA_PROVIDERS_FILE`, else
+ * `CELESTEA_WORKSPACES_FILE`'s directory (the grants env is pinned to the
+ * workspaces file, so the data dir follows), else cwd.
  *
  * A missing / unreadable / non-object file contributes **nothing** and never
  * throws: this is a screen that makes refusals MORE likely, so failing closed
@@ -122,9 +123,10 @@ function providersJsonFor(env: NodeJS.ProcessEnv): unknown {
 
 /**
  * The providers file this Studio actually reads, resolved with the same priority
- * chain as `config.ts:121` — an env override wins, else the data dir the grants
- * env already pins (`CELESTEA_WORKSPACES_FILE`), else cwd. `null` = no chain
- * applies (no env at all), which reads as "no known secrets beyond the env".
+ * chain as `loadStudioConfig`'s `providersFile` — an env override wins, else the
+ * data dir the grants env already pins (`CELESTEA_WORKSPACES_FILE`), else cwd.
+ * `null` = no chain applies (no env at all), which reads as "no known secrets
+ * beyond the env".
  */
 function providersFileOf(env: NodeJS.ProcessEnv): string | null {
   const explicit = env["CELESTEA_PROVIDERS_FILE"];

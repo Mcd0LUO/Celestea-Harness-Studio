@@ -4,13 +4,13 @@
  * The two features meet in exactly one place, and it is the reason the overlay
  * was placed inside the `deriveMessages()` seam rather than beside it: the dedup
  * state machine decides "is this resident row still model-visible?" by running
- * the loop's OWN trim over `log.deriveMessages()`
- * (turn-context-dedup.ts:98 trimmedView). So a resident row that a compression
- * block swallowed stops being visible — not because it was trimmed, but because
- * the view no longer renders it — and state ③ has to notice and re-inject.
+ * the loop's OWN trim over `log.deriveMessages()` ([trimmedView]). So a resident
+ * row that a compression block swallowed stops being visible — not because it was
+ * trimmed, but because the view no longer renders it — and state ③ has to notice
+ * and re-inject.
  *
- * The one-directional safety declared at turn-context-dedup.ts:28-30 is what
- * makes this safe: the simulation can only ever cut DEEPER than the real loop
+ * The one-directional safety declared in [turn-context-dedup.ts] is what makes
+ * this safe: the simulation can only ever cut DEEPER than the real loop
  * (receipts and the user input land between the decision and the first step), so
  * a row the simulation still calls visible may in truth be gone, and it gets
  * re-injected next turn. Compression cannot break that, because it only ever
@@ -147,11 +147,12 @@ describe("W1900 · a swallowed resident row is invisible, so ③ re-injects it",
   });
 
   it("compression makes a row invisible and never the reverse (one-directional safety)", () => {
-    // The safety the dedup module declares (turn-context-dedup.ts:28-30) rests
-    // on the overlay only ever REMOVING visibility. Folding a range can make a
-    // resident row disappear from the view; decompressing the same range brings
-    // the ORIGINAL row back, which is ② again (visible, unchanged, skip) — it
-    // never produces a decision the pre-Phase-2 code could not have made.
+    // The safety the dedup module declares (its "Visibility is SIMULATED" design
+    // note) rests on the overlay only ever REMOVING visibility. Folding a range
+    // can make a resident row disappear from the view; decompressing the same
+    // range brings the ORIGINAL row back, which is ② again (visible, unchanged,
+    // skip) — it never produces a decision the pre-Phase-2 code could not have
+    // made.
     const log = residentLog(3);
     const store = new MemoryCompressionStore();
     const open = compressedLog(log, store);

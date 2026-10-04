@@ -122,7 +122,7 @@ export function failureOf(error: unknown): LedgerStepOutcome {
  * `timeout` is a real member of this union — not a hypothetical — is that this
  * observer can sit on either side of the host adapter: the provider seam widens
  * `StreamEvent.failed.kindOf` with `"timeout"` (see the `TODO(core-timeout-kind)`
- * in `packages/llm/src/seam.ts`), and `apps/studio`'s `llm-assembly.ts:98` folds
+ * in `packages/llm/src/seam.ts`), and `apps/studio`'s [coreEvent] folds
  * it back to `"stream"` only for the CORE-typed engine. `stepObservedLlm` wraps
  * whichever Llm it is handed, so a deployment that observes the provider seam
  * directly really does deliver `kindOf: "timeout"` here. Both spellings are

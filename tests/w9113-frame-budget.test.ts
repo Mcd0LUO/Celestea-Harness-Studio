@@ -257,7 +257,7 @@ describe('W9201 · ④ status 帧同样受帧内预算约束', () => {
    * 「消息容器 + 状态栏 + 会话条」的事件（onStatus → finalizeTurn / renderInfoBlock；
    * onStatusInbox → renderInboxMessage 追加一整条 .mcol）。一个帧里同步 emit 一批
    * status 就能重现 W9111 的整帧串行，且会破坏「本帧一旦有积压其后一律排队」的
-   * 全局保序（frame-budget.ts:34-36 的硬不变量）。
+   * 全局保序（[frame-budget] 模块头「为什么『保序』是硬不变量」那一段）。
    *
    * 判据用**信息块条数**（.msg.info 是 onStatus 里 renderInfoBlock 的产物，每个带
    * hint 的 status 一条）—— 它比 .mcol 更窄：不会把别的写入路径算进来。

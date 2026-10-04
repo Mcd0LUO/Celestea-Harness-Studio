@@ -205,11 +205,12 @@ describe("W9271: probe speaks each declared request_format, and fails closed on 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe("http://allowed.test/v1/models");
     expect(calls[0]?.method).toBe("GET");
-    // MIRROR, not a guess: packages/llm/src/transport.ts:95 sends Bearer for EVERY
-    // protocol, anthropic_messages included, so a probe sending x-api-key here would
-    // call a row the engine cannot use healthy - a lie in the direction that ships a
-    // broken config. The adapter's missing protocol-native auth is registered as P19
-    // (docs/pitfalls.md); fix it THERE, and this assertion moves with it.
+    // MIRROR, not a guess: `requestHeaders` in packages/llm/src/transport.ts
+    // sends Bearer for EVERY protocol, anthropic_messages included, so a probe
+    // sending x-api-key here would call a row the engine cannot use healthy -
+    // a lie in the direction that ships a broken config. The adapter's missing
+    // protocol-native auth is registered as P19 (docs/pitfalls.md); fix it
+    // THERE, and this assertion moves with it.
     expect(calls[0]?.headers["authorization"]).toBe("Bearer secret-key");
     expect(calls[0]?.headers["x-api-key"]).toBeUndefined();
   });

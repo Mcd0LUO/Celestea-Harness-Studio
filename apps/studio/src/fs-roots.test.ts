@@ -18,7 +18,7 @@ describe('fsRoots', () => {
 
   // B7-6: the ORDER changed, and it is the user-visible half. `handlers/fs.ts`
   // opens the browser at `roots[0]` when the client sends no `?path=` — which
-  // `apps/web/src/ui/fsbrowser.ts:257` does on every open (`loadDirs('')`). The
+  // `apps/web/src/ui/fsbrowser.ts` 的 `loadDirs('')` does on every open. The
   // list therefore started every Windows user in the DRIVE ROOT, i.e. the first
   // screen of the picker was Windows/, Program Files/, $Recycle.Bin/. The
   // profile now comes first — the same reason POSIX lists /src and /home.

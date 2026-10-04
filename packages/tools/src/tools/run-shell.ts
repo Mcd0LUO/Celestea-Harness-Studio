@@ -85,7 +85,7 @@ export function runShellTool(options: RunShellToolOptions): Tool {
     spec: () => spec,
     execute: (args: unknown): Promise<unknown> => run(args, undefined),
     // `render: null` is the seam's "use the default" value: the registry applies
-    // `humanRender` itself (`registry.ts:90`), which is exactly what the old
+    // `humanRender` itself ([registry.ts]), which is exactly what the old
     // `fnTool` face got for free. Passing it here would import humanRender and
     // risk a cycle for no behavioural gain.
     executeWith: (input: ToolInput): Promise<ToolExecOutcome> =>
