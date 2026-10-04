@@ -31,7 +31,7 @@ export interface EndpointField {
 }
 export interface EndpointRequest {
   /**
-   * W1528: `"text"` is a RAW request body (the terminal's keystroke channel).
+   * `"text"` is a RAW request body (the terminal's keystroke channel).
    * A keystroke must not pay JSON escaping, and a literal newline has to survive
    * byte-for-byte, so that one endpoint declares its body as text rather than
    * pretending to be `json`.
@@ -173,35 +173,34 @@ export interface DataFilesIndex {
  * the frozen check a tautology and the drift gate would stop existing.
  */
 export const FROZEN_COUNTS = {
-  // W860: 57 -> 60 (GET|PUT /api/sessions/{id}/tools + GET /api/plugins).
-  // W870: 60 -> 61 (PUT /api/sessions/{id}/model, the session-scoped model switch).
-  // G5: 61 -> 62 (GET /api/fs/list, the Win-style file-manager listing);
-  // G2: 62 -> 63 (POST /api/exec, immediate shell execution without the model).
-  // G5 follow-up: 63 -> 64 (GET /api/fs/read, the file manager viewer).
-  // W895-C1: 64 -> 66 (GET|PUT /api/display-plugins, the server-side source of
-  // truth for the client display-component switches).
-  // W1528: 66 -> 69 (POST /api/terminal + POST /api/terminal/{id}/input +
-  // POST /api/terminal/{id}/close, the workbench terminal's real-PTY face).
-  // W9209: 69 -> 70 (POST /api/sessions/{id}/goal, the persistent session goal the
-  // /goal slash command and the statusline badge have always called).
-  // W9322: 70 -> 71 (PUT /api/plugins, the plugin hot-swap enabled table --
-  // docs/feature-plugin-hotswap.md; the GET side already existed since W860).
+  // The increment history of these three numbers is NOT recorded here on purpose:
+  // the values are FROZEN (never derived), so a `57 -> 60 -> 61 ...` chain would be
+  // a changelog that only git can verify, and every edit to it is a chance to write
+  // a step that contradicts the contract files. What matters is audited instead --
+  // the drift gate checks each count against the contract file it anchors, so an
+  // endpoint or tool that is added without moving this anchor still goes red.
+  //
+  // `endpoints` covers the API surface: session-scoped tool get/put, the session
+  // model switch, the Win-style file-manager listing/read, immediate shell
+  // execution without the model, the server-side display-component switches, the
+  // workbench terminal's real-PTY face (open/input/close), the persistent session
+  // goal, and the plugin hot-swap enabled table (docs/feature-plugin-hotswap.md;
+  // its GET side already existed before that switch was added).
   endpoints: 71,
-  // W783: 8 -> 9 (`question`); W1528: 9 -> 10 (`terminal`, the first event that
-  // is neither a turn event nor a host status frame).
+  // `sseEvents` covers the frame vocabulary: `question` is the first event that is
+  // neither a turn event nor a host status frame, and `terminal` is the raw pty
+  // byte channel (opaque output, produced by the terminal handler).
   sseEvents: 10,
-  // W884: 13 -> 14 (`load_skill`, the on-demand half of skill progressive
-  // disclosure; the catalog half adds no tool).
-  // F4: 14 -> 16 (`browser_open` + `browser_act`, the session browser tools).
-  // B2 (F3 P1): 16 -> 18 (`remember` + `forget`, the workspace-memory write pair).
-  // W1533: 18 -> 19 (`update_tasks`, the model's todo list -- the panel reads it
-  // back off the existing tool/tool_result frames, so no endpoint is added).
-  // W1900 (Phase 2): 19 -> 22 (`compress` + `decompress` + `context_status`, the
-  // model-driven context compression face; the block list lives in a session
-  // sidecar, so still ZERO endpoints).
-  // W-swarm: 22 -> 23 (`agent_swarm`, the one-call batch of parallel lightweight
-  // subagent turns; members are unregistered and write no receipt, and the roster
-  // is in-memory on the existing statusline surface, so still ZERO endpoints).
+  // `tools` is the model-visible tool surface. The ones that add an ENDPOINT are
+  // counted above; these add none, riding the existing turn-start context lane or
+  // the existing dispatch and the existing tool/tool_result frames:
+  //   `load_skill` (on-demand half of skill progressive disclosure; the catalog
+  //   half adds no tool), the browser pair, the workspace-memory write pair,
+  //   `update_tasks` (the model's todo list, read back off those frames by the
+  //   panel), the model-driven compression trio (its block list lives in a session
+  //   sidecar), and `agent_swarm` (a one-call batch of parallel lightweight
+  //   subagent turns; members are unregistered and write no receipt, and the roster
+  //   is in-memory on the existing statusline surface).
   tools: 23,
 } as const;
 

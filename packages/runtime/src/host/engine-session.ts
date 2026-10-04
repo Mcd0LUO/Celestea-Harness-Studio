@@ -16,13 +16,12 @@
  * `turn_start`/`turn_end` it records also updates `<dir>/checkpoint.json`. An
  * in-memory (detached) session has no directory and therefore no sidecar.
  *
- * W747: moved verbatim from `apps/studio/src/runtime/engine-session.ts` into the
- * runtime's host layer (behaviour, export names and log format unchanged; the old
- * path is now a re-export shim). The only edit is the import of the intra-package
- * session binding (`../session-binding.js` instead of the `@celestea/runtime`
- * alias, which would be a package self-cycle). `sessionIdOfDir` came with it, out
- * of the host's grants reader (`engine-grants.ts`), because the id space is what
- * this module already documents; the old path re-exports it unchanged.
+ * Lives in the runtime's host layer, not `apps/studio/src/runtime/`, so that a
+ * package may not import an app. The intra-package session binding is imported
+ * as `../session-binding.js` rather than via the `@celestea/runtime` alias, which
+ * would be a package self-cycle. `sessionIdOfDir` came along from the host's
+ * grants reader (`engine-grants.ts`), because the id space is what this module
+ * already documents; `apps/studio` re-exports it unchanged.
  */
 
 import { basename, dirname } from "node:path";

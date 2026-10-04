@@ -33,14 +33,12 @@
  * The module is store-free: it consumes the three `ProvidersStore` methods it
  * needs, so the rules are unit-testable without a data file.
  *
- * W747: moved verbatim from `apps/studio/src/runtime/provider-target.ts` into the
- * runtime's host layer (rules, export names and behaviour unchanged; the old
- * path is now a re-export shim). The ONE edit is the profile slice below: the
- * host view (`EngineProfile`) lives in `apps/studio/src/runtime-adapter.ts` and a
- * package may not import an app, so the three fields this module actually reads
- * are declared here as the minimal structural `ProfileSlot` that the host view
- * already satisfies. `applyProviderTarget` is generic in it, so a caller holding
- * an `EngineProfile` gets that exact type back.
+ * The module lives in the runtime's host layer, not
+ * `apps/studio/src/runtime/`, because a package may not import an app. That is
+ * the one reason the three fields this module actually reads are declared here as
+ * the minimal structural `ProfileSlot`: the host view (`EngineProfile`) lives in
+ * `apps/studio/src/runtime-adapter.ts`, and `applyProviderTarget` is generic in
+ * `ProfileSlot`, so a caller holding an `EngineProfile` gets that exact type back.
  */
 
 /** The startup-profile slice this module reads (satisfied by the host's view). */

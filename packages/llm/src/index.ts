@@ -8,7 +8,7 @@
  * (SSE framing, wire mapping, HTTP transport) stay private so callers depend on
  * the `Llm` seam, not on the provider.
  *
- * W2066 added the wire-protocol seam above that one: `RouteAdapter` owns ONE
+ * Above that one seam is the wire-protocol one: `RouteAdapter` owns ONE
  * protocol and the routes that speak it, `AdapterRegistry` resolves one per call
  * and REFUSES by name (`NO_ADAPTER`) when the requested protocol has no adapter.
  * A caller still only depends on the `Llm` seam — which is what lets the retry,

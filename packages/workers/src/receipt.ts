@@ -121,7 +121,7 @@ export function executeReceipt(req: ReceiptRequest): ReceiptResult {
 }
 
 /**
- * W1470 (moved out of `registry.ts`): the terminal VERDICT of one brief turn.
+ * The terminal VERDICT of one brief turn.
  *
  * A turn error fails the worker; so does a receipt whose report could not be
  * written, because then no deliverable exists for the coordinator to read
