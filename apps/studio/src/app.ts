@@ -31,6 +31,7 @@ import { API_ENDPOINT_COUNT, routeTable, type RegisteredRoute } from "./routes.j
 import { loadStudioConfig, type StudioConfig } from "./config.js";
 import { apiTokenMiddleware, registerTokenBootstrap } from "./auth/api-token.js";
 import { composeStudio, type EngineFactory, type StudioServices } from "./plugins.js";
+import { PluginSwitch } from "./plugin-hotswap.js";
 import { registerHandlers } from "./handlers/index.js";
 import { crossSiteRefusal } from "./handlers/common.js";
 import { apiNotFound } from "./api-not-found.js";
@@ -130,7 +131,7 @@ export type StudioEngineDeps = (stores: StoreServices) => StudioEngineInput;
  * `<data dir>/worker-results`.
  */
 export function createStudioEngine(deps: StudioEngineDeps): EngineFactory {
-  return (stores) => {
+  return (stores, plugins) => {
     const input = deps(stores);
     const dataDir = dirname(input.workspacesFile);
     const resultsDir = join(dataDir, "worker-results");
@@ -144,6 +145,10 @@ export function createStudioEngine(deps: StudioEngineDeps): EngineFactory {
       profile: input.profile,
       env: input.env,
       resultsDir,
+      // 插件热插拔（`docs/feature-plugin-hotswap.md` §3.1/§6.2）：composer 在**每次
+      // `compose()`** 时读一次当前开关，所以「下一 turn 边界生效」不需要第二份状态。
+      // 一个没有开关的调用方（内嵌宿主、直接调本工厂的测试）保持全 mount。
+      ...(plugins === undefined ? {} : { pluginSwitches: () => plugins.engineSwitches() }),
       // W516: every instance reads its session's grants at compose time. The env
       // is pinned to the workspaces file the host ACTUALLY composed, so the
       // fail-closed root rules resolve the same data dir (grants-service.ts).
@@ -327,8 +332,15 @@ export function createStudioApp(opts: StudioAppOptions = {}): StudioApp {
   const config = opts.config ?? loadStudioConfig({ cwd: opts.cwd, env });
   // Filled in right after composition; the engine reads it lazily (see HostRef).
   const host: HostRef = { services: null };
+  // 插件热插拔：开关必须在**引擎工厂之前**存在，工厂才能把它交给适配器当
+  // `pluginSwitches` 钩子（每次 `compose()` 读一次）。
+  const plugins = new PluginSwitch({
+    dir: dirname(config.paths.workspacesFile),
+    hostNames: () => host.services?.hostPluginNames ?? [],
+    now: () => Math.floor((opts.now ?? Date.now)() / 1000),
+  });
   const runtime = opts.runtime ?? defaultRuntime(config, env, host);
-  const services = composeStudio({ config, runtime, env, now: opts.now });
+  const services = composeStudio({ config, runtime, env, now: opts.now, plugins });
   host.services = services;
   const table = routeTable();
   const app = new Hono();

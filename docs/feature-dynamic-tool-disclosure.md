@@ -179,7 +179,7 @@ $ pgrep -af 'dsh/lib/bin.js'
 | `ExposedRegistry.schemas()/dispatch()` | 同文件 :144-151 | `schemas()` 过滤、`dispatch()` 对 hidden 名**执行前**返回 `folded()`（不执行） |
 | `innerRegistry` getter | 同文件 :122-125 | `run_code` handle 绑内层 → 子调用放行 |
 | `executionExposure` / `faceForMode` | 同文件 :78-104 | 模式基线折叠（standard 11 / execution 6） |
-| 装配点 | `apps/studio/src/runtime/engine-plugins.ts:190-197` | `ctx.provide(TOOL_REGISTRY_SERVICE, exposed)` |
+| 装配点 | `apps/studio/src/runtime/engine-plugins.ts:325-328` | `ctx.provide(TOOL_REGISTRY_SERVICE, exposed)` |
 | loop 读面 | `packages/agent-loop/src/loop.ts:178` | 每 step `buildRequest` 里 `seams.registry.schemas()` |
 | `{{tools}}` 渲染 | `apps/studio/src/handlers/config-shape.ts:224-234`、`apps/studio/src/runtime/real-runtime-adapter.ts:380-382,401-406` | 见 §2.4 裁决 |
 | 只读读者 | `GET /api/tools?session=`（`handlers/health.ts:22`） | P0 沿用，不加端点 |
@@ -358,7 +358,7 @@ W 组与 A 组绝对 token 不同（前缀更长、历史占比更高），但**
   dispatch() = effectiveHidden 命中 → tool_unavailable_in_mode，执行前拒绝
   ~~~
 - `faceForMode`（compose 期读面，`real-runtime-adapter.ts:346-349`）改为「模式基线 + **初始**披露集」；初始披露集建议 = 模式基线。
-- **`run_code` 子调用放行语义保持不变**：`run_code` 的 `RegistryHandle` 绑**内层** registry（`packages/tools/src/plugin.ts`、`engine-plugins.ts:190-197`），`ExposedRegistry` 只过滤 Context face；子调用既不经 `schemas()` 也不经 `dispatch` 的 hidden 检查。
+- **`run_code` 子调用放行语义保持不变**：`run_code` 的 `RegistryHandle` 绑**内层** registry（`packages/tools/src/plugin.ts`、`engine-plugins.ts:325-328`），`ExposedRegistry` 只过滤 Context face；子调用既不经 `schemas()` 也不经 `dispatch` 的 hidden 检查。
 - **与 DSH 的刻意分歧**（§2.5）：DSH `restrict()` 的对齐语义会**连带限制 run_code 子调用**；我们**不学**这一点——本仓的设计选择是「模型直调受限、程序内可达」。若要学，等于把 execution 模式的 `run_code` 逃生通道关掉，属于产品语义变更（**待裁决** Q7）。
 - 语义澄清：动态披露是「模型可见性」，模式折叠是「模型直调性」，两者都在同一个 `ExposedRegistry` 上表达，但**拒绝理由必须保持可区分**（**待裁决** Q4）。
 

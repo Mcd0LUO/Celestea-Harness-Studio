@@ -150,6 +150,27 @@ export interface EnginePluginInput {
    * session performs.
    */
   compression?: CompressionHost | null;
+  /**
+   * 插件热插拔（`docs/feature-plugin-hotswap.md` §3.1/§6.2）：**本代不注册任何工具**。
+   *
+   * 为什么是「空注册表」而不是「不 mount 插件」：`resolveSeams()`
+   * （`packages/agent-loop/src/seams.ts`）把 `TOOL_REGISTRY_SERVICE` 当作**必需** seam，
+   * 缺失时直接抛 `missing ToolRegistryService in context`。也就是说「不 mount 工具插件」
+   * 并不是「关掉工具」，而是**整代不能跑**——一个每轮都抛错的会话不是产品语义。
+   *
+   * 所以关掉工具插件的语义是：注册表照旧 provide（seam 仍然成立、`run_code` 的
+   * 嵌套派发仍然有地方可去），但**里面一个工具都没有**——没有 builtin、没有 worker 工具、
+   * 没有 `run_code`。于是 `GET /api/tools` 与模型 prompt 的 `{{tools}}` **在同一个
+   * `compose()` 里一起变空**，这正是 contracts/tools.json 那条单一真源要求的原子性。
+   *
+   * 缺省 = 全量（逐字节等于热插拔之前的行为）。
+   */
+  emptyTools?: boolean;
+  /**
+   * 插件热插拔（§3.1/§4）：`disabled` 只过滤**将要 mount 的插件对象**。
+   * 名字是 `Plugin.name()` 的原值。缺省/空 = 全 mount。
+   */
+  disabled?: readonly string[];
 }
 
 /**
@@ -242,23 +263,25 @@ export function engineTools(opts: EnginePluginInput): EngineTools {
   const busHolder: BusHolder = { current: null };
   const questions = opts.questions === undefined || opts.questions === null ? null : userQuestionsOf(opts.questions, busHolder);
   const tools: Tool[] = [
-    ...builtinTools({
-      sandbox,
-      processes,
-      http,
-      // W884: `load_skill` resolves its two source layers from the session's own
-      // workspace — the value the composer resolved via `sessionWorkspaceOf`.
-      workspace: scope?.workspace ?? null,
-      env,
-      ...(questions === null ? {} : { questions }),
-      ...(opts.attachments === undefined ? {} : { attachments: opts.attachments }),
-      ...(opts.imageInputAllowed === undefined ? {} : { imageInputAllowed: opts.imageInputAllowed }),
-      model: opts.profile.model,
-      ...(opts.compression === undefined ? {} : { compression: opts.compression }),
-    }),
-    ...(opts.tools ?? []),
+    ...(opts.emptyTools === true
+      ? []
+      : builtinTools({
+          sandbox,
+          processes,
+          http,
+          // W884: `load_skill` resolves its two source layers from the session's own
+          // workspace — the value the composer resolved via `sessionWorkspaceOf`.
+          workspace: scope?.workspace ?? null,
+          env,
+          ...(questions === null ? {} : { questions }),
+          ...(opts.attachments === undefined ? {} : { attachments: opts.attachments }),
+          ...(opts.imageInputAllowed === undefined ? {} : { imageInputAllowed: opts.imageInputAllowed }),
+          model: opts.profile.model,
+          ...(opts.compression === undefined ? {} : { compression: opts.compression }),
+        })),
+    ...(opts.emptyTools === true ? [] : (opts.tools ?? [])),
   ];
-  if (opts.workers !== null) tools.push(...workerTools(opts.workers));
+  if (opts.emptyTools !== true && opts.workers !== null) tools.push(...workerTools(opts.workers));
   const assembly = assembleTools({
     tools,
     sandbox,
@@ -273,7 +296,9 @@ export function engineTools(opts: EnginePluginInput): EngineTools {
     // W1467: the sub-call sink rides the SAME assembly the program dispatches
     // through, so a nested row can never be recorded by a different registry
     // than the one that executed it.
-    ...(opts.onRunCodeEvent === undefined ? {} : { runCode: { events: opts.onRunCodeEvent } }),
+    // 插件热插拔：关掉工具插件时 `run_code` 也一起关（见 `emptyTools` 的说明）——
+    // 它是「派发到任何工具的程序入口」，留着它等于把刚关掉的工具面从后门还回去。
+    ...(opts.emptyTools === true ? { runCode: false as const } : opts.onRunCodeEvent === undefined ? {} : { runCode: { events: opts.onRunCodeEvent } }),
   });
   // W791 (P1, §5.2 #2 — the "关键机关"): the CONTEXT sees the mode's model-visible
   // face while `run_code`'s RegistryHandle stays bound to the INNER registry
@@ -554,13 +579,24 @@ export function engineLoopPlugin(profile: Profile, name = "studio.engine.agent-l
   return agentLoopPlugin(agentConfigFromProfile(profile), {}, name);
 }
 
-/** Convenience: the three plugins in mount order (llm, loop, tools). */
+/**
+ * 便利：三个插件按 mount 顺序（llm, loop, tools）。
+ *
+ * 热插拔（`docs/feature-plugin-hotswap.md` §4）：`input.disabled` 里的名字**不会**
+ * 进入返回的插件数组，所以下一代 `Context` 里没有它们的服务——这就是「换代而不是
+ * 卸载」的全部实现。`tools` 句柄照旧返回（见 `EnginePluginInput.disabled` 的说明：
+ * shutdown 钩子仍然需要它）。
+ *
+ * **工具插件是唯一的例外，而且必须例外**：它的名字**永远留在**插件数组里，
+ * 因为 `TOOL_REGISTRY_SERVICE` 是 `resolveSeams()` 的必需 seam——抽掉它整代就跑不起来。
+ * 「关掉工具」由 `input.emptyTools` 表达（注册表照旧 provide，里面空无一物），
+ * 所以 `disabled` 过滤仍然对 `studio.engine.llm` / `studio.engine.agent-loop` 生效。
+ */
 export function enginePlugins(input: EnginePluginInput): { plugins: Plugin[]; tools: EngineTools } {
   const tools = engineTools(input);
-  return {
-    plugins: [engineLlmPlugin(input.llm), engineLoopPlugin(input.profile), tools.plugin],
-    tools,
-  };
+  const off = new Set(input.disabled ?? []);
+  const plugins = [engineLlmPlugin(input.llm), engineLoopPlugin(input.profile), tools.plugin];
+  return { plugins: plugins.filter((plugin) => !off.has(plugin.name())), tools };
 }
 
 /**

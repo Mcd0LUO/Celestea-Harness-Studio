@@ -49,6 +49,7 @@ import { CapacityError } from "../runtime-adapter.js";
 import { bindingFor, closeLog, workerSessionPrefix, type CheckpointWiring, type SessionTarget } from "./engine-session.js";
 import { DEFAULT_SESSION_MODE, effectiveMode } from "../store/mode.js";
 import { enginePlugins, type DisclosureOptions, type QuestionWiring } from "./engine-plugins.js";
+import type { EnginePluginSwitches } from "../plugin-catalog.js";
 import type { PendingQuestion, QuestionRegistry } from "../question-registry.js";
 import { questionAnsweredRow, questionAskedRow } from "../question-rows.js";
 import { EMPTY_GRANTS } from "./engine-grants.js";
@@ -247,6 +248,18 @@ export interface SessionComposerOptions {
    * streamed live — a host that omits it gets the replay tree only.
    */
   publishRunCodeEvent?: (sessionId: string | null, event: SessionEvent) => void;
+  /**
+   * 插件热插拔（`docs/feature-plugin-hotswap.md` §3.1/§6.2）：**本代要关掉的引擎层
+   * 插件**，late-bound 读取。
+   *
+   * 为什么是**读取函数**而不是一个快照数组：换代必须发生在 turn 边界，而
+   * `compose()` 正是那个边界。如果这里存一份 compose 时刻的副本，`composeStudio`
+   * 就得在每次开关变更时把它推给每一个 composer——多一条会漂移的通道。让 composer
+   * 在**每次 compose 时**读一次当前值，就没有第二份状态。
+   *
+   * 缺省 = 全部 mount（逐字节等于热插拔之前的行为）。
+   */
+  pluginSwitches?: () => EnginePluginSwitches;
 }
 
 /** Non-negative integer from the environment, else the frozen default. */
@@ -338,6 +351,11 @@ export class SessionComposer {
   /** Compose one session generation (the registry's build factory). */
   compose(sessionId: string | null, dir: string | null): Runtime {
     const profile = this.profileFor(sessionId);
+    // 插件热插拔（`docs/feature-plugin-hotswap.md` §3.1）：**就在这个边界**读一次
+    // 当前的开关。`compose()` 是「一代」的构造点，所以「开关变更在下一 turn 边界
+    // 生效」不需要任何额外机制——`invalidateAll()` 把实例标脏，下一次 `ensure()`
+    // 走到这里，读到的就是新值。
+    const switches = this.opts.pluginSwitches?.() ?? { tools: false, workers: false, swarm: false, watchdog: false };
     // W804 (multimodal P0 section 5): the session's attachment store. It lives
     // INSIDE the session directory, so trash/archive/delete carry it along. The
     // DETACHED generation (dir === null, the face /api/tools and the default
@@ -375,6 +393,19 @@ export class SessionComposer {
     const runCodeHolder: { runtime: Runtime | null } = { runtime: null };
     const onRunCodeEvent = this.runCodeSink(sessionId, runCodeHolder);
     const compression = this.compressionWiring();
+    // 插件热插拔（§3.1/§4）：关掉引擎层插件的两条路，各有各的理由。
+    //
+    // ① **工具插件走 `emptyTools`，不走 `disabled`**：`TOOL_REGISTRY_SERVICE` 是
+    //    `resolveSeams()` 的必需 seam，不 provide 它整代会在第一个 turn 抛
+    //    `missing ToolRegistryService in context`。所以「关掉工具」= 注册表照旧
+    //    provide 但**里面一个工具都没有**（连 `run_code` 也没有），于是
+    //    `GET /api/tools` 与 prompt 的 `{{tools}}` 在同一个 `compose()` 里一起变空——
+    //    这正是 contracts/tools.json 那条单一真源要求的原子性。
+    // ② **其它引擎插件走 `disabled`**（真的不 mount）：它们提供的服务都不是必需 seam。
+    //
+    // 工具装配即使一个工具都不注册也照样构造：`Runtime.shutdown` 要靠
+    // `engine.tools.processes.dispose()` 回收本代 `run_shell background:true`
+    // 派生的子进程（W855 #1）。
     const engine = enginePlugins({
       profile,
       // W791 (P1, §5.2 #2): the mode decided at compose time. The DETACHED
@@ -388,6 +419,11 @@ export class SessionComposer {
       imageInputAllowed,
       llm: this.engineLlm(sessionId, profile, ledger, attachments),
       workers: null, // the workers plugin registers the three tools, in compose order
+      // `EnginePluginInput.emptyTools`（这里）= 「装配一个**空**注册表」；
+      // `ComposeConfig.emptyTools`（下面那处）= 「这一代的工具面是空的」。
+      // 两个都要传，而且必须成对：前者让 `GET /api/tools` / prompt 的 `{{tools}}`
+      // 变空，后者让 compose 不再让 workers / swarm 往注册表里注册。
+      ...(switches.tools ? { emptyTools: true } : {}),
       ...(this.opts.disclosure === undefined || sessionId === null ? {} : { disclosure: this.opts.disclosure }),
       ...(this.opts.tools === undefined ? {} : { tools: this.opts.tools }),
       ...(this.opts.sandbox === undefined ? {} : { sandbox: this.opts.sandbox }),
@@ -452,17 +488,23 @@ export class SessionComposer {
           ...(bindings.contextUsage === undefined ? {} : { contextUsage: bindings.contextUsage }),
         });
       },
-      workers: this.workerWiring(sessionId, profile),
+      // 插件热插拔（§3.2）：三个开关各自对应一个真实的装配点。`false` 与
+      // `undefined` 在这里**不等价**——`undefined` 走环境默认（watchdog 默认开），
+      // 所以「关掉」必须显式传 `false`，不能靠省略。
+      workers: switches.workers ? false : this.workerWiring(sessionId, profile),
       // agent_swarm (feature §5.3): the swarm plugin needs the SAME loopFactory
       // the host turn uses, because a member IS a one-shot turn. Passing it here
       // is what makes the tool exist at all — `ensureSwarmWiring` mounts nothing
       // without a loopFactory (a member turn cannot be built), so omitting this
       // line silently produced "unknown tool: agent_swarm" in production.
-      swarm: this.swarmWiring(),
+      swarm: switches.swarm ? false : this.swarmWiring(),
       // W740: the watchdog settings come from the process environment; the
       // composition root reads them and registers the stop hook with the sweep.
       env: this.opts.env,
-      ...(this.opts.watchdog === undefined ? {} : { watchdog: this.opts.watchdog }),
+      // 插件热插拔：`emptyTools` 由**这一个**布尔量表达「这一代没有工具」，
+      // 由 `compose()` 统一落实（它同时压掉 workers 与 swarm 两条注册路径）。
+      ...(switches.tools ? { emptyTools: true } : {}),
+      ...(switches.watchdog ? { watchdog: false as const } : this.opts.watchdog === undefined ? {} : { watchdog: this.opts.watchdog }),
       ...(this.opts.now === undefined ? {} : { now: this.opts.now }),
     });
     // W783: bind the just-composed runtime into the question wiring, so
@@ -495,7 +537,7 @@ export class SessionComposer {
    *
    * i.e. on the HEALTHY path the trailing `holdbackChars` of every reasoning
    * burst are never released: `releaseAfterStream` calls `thinking.flush()`,
-   * and `flush()` only releases `held - holdbackChars` (`thinking.ts:101`).
+   * and `flush()` only releases `held - holdbackChars` ([ThinkingBuffer.releasable]).
    * The only caller that would release the remainder is the TRUNCATE arm of
    * `repetition-cut.ts`, which a healthy turn never reaches. Turning it on from
    * here would silently truncate the tail of every normal turn's reasoning —

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Celestea Studio HTTP API contract (70 endpoints)",
+  "title": "Celestea Studio HTTP API contract (71 endpoints)",
   "generatedAt": "2026-09-10T01:20:00Z",
   "phase": "P0 contract freeze",
   "source": {
@@ -8,7 +8,7 @@
     "routes": "frozen from the retired backend implementation (original source file deleted 2026-09-15); kept as contracts/route-table.snapshot.json (38 route() declarations = 43 method+path, minus 4 static = 39 API endpoints)",
     "liveServer": "http://127.0.0.1:3777 (read-only probes only)",
     "routeSnapshot": "contracts/route-table.snapshot.json",
-    "routeTable": "W725 added GET /api/sessions/{id}/context (43 -> 44); W516 added 4 TypeScript-only endpoints (GET|POST|DELETE /api/sessions/{id}/grants + GET /api/sessions/{id}/grants/confirm-token); the retired backend has no counterpart (see contracts/route-table.snapshot.json tsOnlyRoutes). W783 added GET /api/questions + POST /api/questions/{id}/answer (47 -> 49). W785 added GET /api/usage/ledger (49 -> 50). W791 added POST /api/sessions/{id}/mode (50 -> 51; P1 session working mode, TS-only). W9 added the six permission endpoints (51 -> 57). W860 added GET|PUT /api/sessions/{id}/tools and GET /api/plugins (57 -> 60). W870 added PUT /api/sessions/{id}/model (60 -> 61; the session-scoped model switch the statusline picker targets, TS-only). W881 removed the retired backend's archived HTTP contract (docs/archive/frontend/api-contract.md) from the public repo, so the endpoints it documented now reference their own frozen entry here. W1528 added POST /api/terminal + POST /api/terminal/{id}/input + POST /api/terminal/{id}/close (66 -> 69; the workbench terminal's real-PTY face, TS-only). W9209 added POST /api/sessions/{id}/goal (69 -> 70; the persistent session goal the /goal slash command and the statusline badge have always called, TS-only)."
+    "routeTable": "W725 added GET /api/sessions/{id}/context (43 -> 44); W516 added 4 TypeScript-only endpoints (GET|POST|DELETE /api/sessions/{id}/grants + GET /api/sessions/{id}/grants/confirm-token); the retired backend has no counterpart (see contracts/route-table.snapshot.json tsOnlyRoutes). W783 added GET /api/questions + POST /api/questions/{id}/answer (47 -> 49). W785 added GET /api/usage/ledger (49 -> 50). W791 added POST /api/sessions/{id}/mode (50 -> 51; P1 session working mode, TS-only). W9 added the six permission endpoints (51 -> 57). W860 added GET|PUT /api/sessions/{id}/tools and GET /api/plugins (57 -> 60). W870 added PUT /api/sessions/{id}/model (60 -> 61; the session-scoped model switch the statusline picker targets, TS-only). W881 removed the retired backend's archived HTTP contract (docs/archive/frontend/api-contract.md) from the public repo, so the endpoints it documented now reference their own frozen entry here. W1528 added POST /api/terminal + POST /api/terminal/{id}/input + POST /api/terminal/{id}/close (66 -> 69; the workbench terminal's real-PTY face, TS-only). W9209 added POST /api/sessions/{id}/goal (69 -> 70; the persistent session goal the /goal slash command and the statusline badge have always called, TS-only). W9322 added PUT /api/plugins (70 -> 71; the plugin hot-swap enabled table — docs/feature-plugin-hotswap.md)."
   },
   "conventions": {
     "responseBody": "JSON (application/json) except SSE and static assets",
@@ -28,7 +28,7 @@
     "500": "persist failure / compose failure / IO failure",
     "502": "worker tool hard dispatch failure ONLY (src/api.rs:419-433)"
   },
-  "count": 70,
+  "count": 71,
   "endpoints": [
     {
       "id": "get_health",
@@ -4410,7 +4410,7 @@
       "path": "/api/plugins",
       "group": "plugins",
       "rustHandler": "(none - TypeScript-only, W860)",
-      "docRef": "contracts/endpoints.json#get_plugins",
+      "docRef": "docs/feature-plugin-hotswap.md",
       "request": {
         "kind": "none",
         "fields": []
@@ -4426,16 +4426,96 @@
           },
           {
             "name": "plugins",
-            "type": "array<{name:string,layer:string,hot:boolean}>",
+            "type": "array<{name:string,layer:\"host\"|\"engine\",hot:boolean,enabled:boolean,disable:\"optional\"|\"idle-only\"|\"required\",reason?:string}>",
             "required": true,
-            "note": "W860: the plugins THIS process mounted at startup, in mount order; layer is always \"host\" and hot always false"
+            "note": "W9322: TWO layers in mount order — the host startup plugins (from composeStudio's own mount record) then the engine plugins every session composes (ENGINE_PLUGIN_NAMES). `hot` is per row and TRUE for every current row: hot means 're-assembled per generation', not 'safe to disable'. Whether a row may be switched off is `disable` (plus `reason` when it is not `optional`); a client must NOT infer that from `hot`."
+          },
+          {
+            "name": "disabled",
+            "type": "array<string>",
+            "required": true,
+            "note": "the plugin names the user switched OFF — the same projection as plugins[].enabled === false, and the same storage semantic as GET /api/display-plugins (a newly added plugin is absent here => ON)"
+          },
+          {
+            "name": "warnings",
+            "type": "array<string>",
+            "required": false,
+            "optional": true,
+            "note": "present ONLY when plugins.json was ignored (unparsable / foreign version / wrong shape); it then says every plugin is enabled"
           }
         ]
       },
       "errors": [],
       "notes": [
-        "W860: the names come from composeStudio recording pluginNames(storePlugins(...)) + pluginNames(hostPlugins(...)) at mount time — never a hand-maintained constant list.",
-        "BOUNDARY: host STARTUP plugins only (the five store plugins + the three host singletons studio/bus, studio/runtime, studio/settings). Plugins the ENGINE mounts while composing a session are NOT part of this inventory."
+        "W860: the host-layer names come from composeStudio recording pluginNames(storePlugins(...)) + pluginNames(hostPlugins(...)) at mount time — never a hand-maintained constant list.",
+        "W9322 (docs/feature-plugin-hotswap.md): the boundary is now BOTH layers. The host startup layer (the five store plugins + the three host singletons studio/bus, studio/runtime, studio/settings) and the engine layer every session composes (studio.engine.llm, studio.engine.agent-loop, celestea.tools, celestea.runtime.workers, celestea.runtime.swarm, celestea.runtime.watchdog). The engine names are pinned by a test that composes a REAL session and compares Runtime.pluginNames against them, so the list cannot drift.",
+        "BOUNDARY (unchanged): labels and hints are the frontend's i18n and never travel through this endpoint."
+      ],
+      "probe": {
+        "checked": false,
+        "reason": "TypeScript-only endpoint"
+      }
+    },
+    {
+      "id": "put_plugins",
+      "method": "PUT",
+      "path": "/api/plugins",
+      "group": "plugins",
+      "rustHandler": "(none - TypeScript-only, W9322)",
+      "docRef": "docs/feature-plugin-hotswap.md",
+      "request": {
+        "kind": "json",
+        "fields": [
+          {
+            "name": "disabled",
+            "type": "array<string>",
+            "required": false,
+            "note": "the full disabled-name list (replace semantics). At most 64 names. OPTIONAL: an older client that does not send it keeps the stored list unchanged (back-compat, both directions — the same rule as PUT /api/display-plugins)."
+          },
+          {
+            "name": "enabled",
+            "type": "array<string>",
+            "required": false,
+            "note": "the full ENABLED-name list (the complement; replace semantics) — the shape a client that already holds GET's plugins[] can post back. OPTIONAL and mutually exclusive with `disabled`: sending both is 422 unless they agree. Names outside the server's catalog are DROPPED, never persisted (a row that can never take effect must not reach the file)."
+          }
+        ]
+      },
+      "response": {
+        "status": 200,
+        "shape": "object",
+        "fields": [
+          {
+            "name": "ok",
+            "type": "boolean",
+            "required": true
+          },
+          {
+            "name": "plugins",
+            "type": "array<{name:string,layer:string,hot:boolean,enabled:boolean,disable:string,reason?:string}>",
+            "required": true,
+            "note": "the whole table AFTER the write, in the GET shape (one construction, two readers)"
+          },
+          {
+            "name": "disabled",
+            "type": "array<string>",
+            "required": true,
+            "note": "the persisted disabled list"
+          }
+        ]
+      },
+      "errors": [
+        { "status": 409, "error": "cannot change {names} while {n} session(s) are active: {why}", "note": "W9322: studio/bus and studio/runtime may only be swapped while NO session has an in-flight turn; the refusal carries busy_sessions[] so the client can name the blocker" },
+        { "status": 422, "error": "plugin '{name}' cannot be disabled: {why}", "note": "W9322: the row is `disable: \"required\"` (a store another plugin captures in mount(), the Llm/agent-loop seam compose() resolves, or the settings singleton the prompt assembly calls). Rejected OUT LOUD, never silently ignored." },
+        { "status": 422, "error": "field 'disabled' must be an array of strings" },
+        { "status": 422, "error": "field 'disabled' must not contain an empty name" },
+        { "status": 422, "error": "field 'disabled' must hold at most 64 names" },
+        { "status": 422, "error": "fields 'disabled' and 'enabled' contradict each other on '{name}'" },
+        { "status": 500, "error": "cannot persist plugins: {e}" }
+      ],
+      "notes": [
+        "W9322 (docs/feature-plugin-hotswap.md §3/§4/§5): the enabled table of the assembly plugins, server-side. Writes go through a DEDICATED SerialQueue (store/plugins.ts), so two concurrent PUTs cannot interleave their tmp+rename and lose the later update.",
+        "EFFECT TIMING = the turn boundary: a change never interrupts a running turn. The write notifies the engine (RuntimeAdapter.invalidateAll -> SessionRuntimeRegistry.invalidateAll), so an idle instance is recomposed at once and a busy one is only MARKED — its next turn boundary composes the next generation. Nothing is ever unmounted in place: Context has no removal primitive and Plugin has no unmount, so the whole generation is rebuilt in a NEW Context in mount order and the reference is swapped atomically (docs/feature-plugin-hotswap.md §4).",
+        "The tool registry and the model prompt swap in the SAME compose step, which is the hard constraint from packages/swarm/src/plugin.ts:8-11: the contract is the single source for GET /api/tools and the model prompt, so a lazy registration would let the two disagree."
       ],
       "probe": {
         "checked": false,

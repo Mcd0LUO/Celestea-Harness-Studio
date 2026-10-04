@@ -441,6 +441,15 @@ export interface RuntimeAdapter {
    */
   invalidateSession?(session: string | null): boolean;
   /**
+   * 插件热插拔（`docs/feature-plugin-hotswap.md` §3.1）：**整代换代**——开关表变了，
+   * 每个实例的下一代都必须在下一个 turn 边界按新开关重组。
+   *
+   * 语义与一次配置 epoch bump 完全一致（空闲实例立即重组，在跑的 turn 只被标记），
+   * 因为「不打断正在跑的 turn」正是 `SessionRuntimeRegistry.invalidateAll` 已经
+   * 保证的事。可选：一个没有「代」概念的适配器（假引擎）没有可换的东西。
+   */
+  invalidateAll?(): void;
+  /**
    * W794: the session's DIRECTORY is going away (delete / archive) — cut the
    * model response it may be streaming right now and hand back the engine
    * instance it owned.

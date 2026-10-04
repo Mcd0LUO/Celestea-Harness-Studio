@@ -184,7 +184,9 @@ export const FROZEN_COUNTS = {
   // POST /api/terminal/{id}/close, the workbench terminal's real-PTY face).
   // W9209: 69 -> 70 (POST /api/sessions/{id}/goal, the persistent session goal the
   // /goal slash command and the statusline badge have always called).
-  endpoints: 70,
+  // W9322: 70 -> 71 (PUT /api/plugins, the plugin hot-swap enabled table --
+  // docs/feature-plugin-hotswap.md; the GET side already existed since W860).
+  endpoints: 71,
   // W783: 8 -> 9 (`question`); W1528: 9 -> 10 (`terminal`, the first event that
   // is neither a turn event nor a host status frame).
   sseEvents: 10,

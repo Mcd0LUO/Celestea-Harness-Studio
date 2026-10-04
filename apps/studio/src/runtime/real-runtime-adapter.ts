@@ -164,6 +164,17 @@ export interface RealRuntimeAdapter extends RuntimeAdapter {
   watchdogRunning(session?: string | null): boolean;
   /** The session's live worker registry, or null when it has no instance. */
   workersOf(session?: string | null): WorkerRegistry | null;
+  /**
+   * 插件热插拔（W9322）：**这个会话当前那一代真正 mount 的插件名**，按 mount 顺序。
+   *
+   * 存在的理由只有一条：让 `GET /api/plugins` 的引擎层清单**可被证伪**。
+   * `plugin-inventory.test.ts` 用真实装配出来的这一串去对比
+   * `ENGINE_PLUGIN_NAMES`，所以清单里多一行、少一行、或者引擎换了名字而清单没跟着换，
+   * 那条用例立刻变红——清单因此不是第二份「手抄的常量」。
+   *
+   * `null`（无实例）= `[]`：一个没装配过的会话没有代可言。
+   */
+  pluginNames(session?: string | null): string[];
   /** Tear every live instance down (idempotent). */
   shutdown(): Promise<void>;
 }
@@ -449,6 +460,30 @@ class RealEngine implements RealRuntimeAdapter {
    */
   invalidateSession(session: string | null): boolean { return this.registry.invalidateSession(session); }
 
+  /**
+   * 插件热插拔（`docs/feature-plugin-hotswap.md` §3.1）：**整代换代**。
+   *
+   * 语义刻意与 `configure()` 的 epoch bump 完全一致，因为它就是同一个机制：
+   * 空闲实例立即重组，**在跑的 turn 只被标记**，下一个 turn 边界才换——所以
+   * 「开关变更不打断正在跑的 turn」不需要任何新代码，它复用的是配置热更新那条
+   * 已经被测试覆盖过的路径。
+   *
+   * **必须 bump epoch**（实测教训）：`SessionRuntimeRegistry.invalidateAll()`
+   * 只做「标记」，真正决定要不要重组的是 `settleEpoch()`，而它的第一道门是
+   * `entry.profileEpoch >= this.epoch()` -> 直接返回。epoch 不动时，
+   * 一个空闲实例的下一次 `ensure()` 会认为「没什么要换的」并**原样返回旧代**——
+   * 于是开关写进去了、`engineSwitches()` 也对了，可引擎那一代根本没换。
+   * 把 epoch 一起推进去，`ensure()` / `settleDeferred()` / `sweep()` 三条路
+   * 就都会重组（`ensure` 走 `settleEpoch`，另外两条走 `needsRebuild`）。
+   *
+   * 这对配置热更新**没有副作用**：`configure()` 本来就会 bump，本方法只是让
+   * 「插件换代」也成为一次真正的代际变化。
+   */
+  invalidateAll(): void {
+    this.baseEpoch += 1;
+    this.registry.invalidateAll();
+  }
+
   /** W794: the session is being removed — see `session-release.ts`. */
   releaseSession(session: string | null): Promise<boolean> {
     const release = { registry: this.registry, cancel: (id: string) => this.cancel(id), forget: (id: string) => this.autowake.forget(id), settleMs: releaseSettleMs(this.env) };
@@ -605,6 +640,9 @@ class RealEngine implements RealRuntimeAdapter {
 
   /** The session's live worker registry, or null when it has no instance. */
   workersOf(session?: string | null): WorkerRegistry | null { return this.registry.peek(session ?? null)?.runtime.workers ?? null; }
+
+  /** 插件热插拔（W9322）：这一代真正 mount 的插件名（见接口上的说明）。 */
+  pluginNames(session?: string | null): string[] { return [...(this.registry.peek(session ?? null)?.runtime.pluginNames ?? [])]; }
 
   /**
    * The terminal `status` frame's `error`, for a turn that failed by RETURNING

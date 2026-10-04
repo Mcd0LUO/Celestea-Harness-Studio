@@ -72,7 +72,7 @@ import { createUsageTracker, type UsageAccounting } from "./usage.js";
 import type { InjectionLane, PendingInjection } from "@celestea/core";
 import { createSessionInbox, type SessionInbox } from "./inbox.js";
 import { checkpointInboxSink } from "./inbox-checkpoint.js";
-import { ensureSwarmWiring, type SwarmWiring } from "./swarm-wiring.js";
+import { ensureSwarmWiring, type SwarmHost, type SwarmWiring } from "./swarm-wiring.js";
 import { ensureWorkerWiring, type WorkerHost, type WorkerWiring } from "./worker-wiring.js";
 import { checkpointStoreOf } from "@celestea/session";
 import {
@@ -114,6 +114,24 @@ export interface ComposeConfig {
   extraction?: MemoryExtractionScheduler;
   /** Worker orchestration wiring; `false` disables it. */
   workers?: WorkerWiring | false;
+  /**
+   * W9322 (docs/feature-plugin-hotswap.md §3.1): **this generation's tool face is
+   * EMPTY** — the host switched the tools plugin off.
+   *
+   * It is NOT the same as "mount no tools plugin": `resolveSeams()` treats
+   * `TOOL_REGISTRY_SERVICE` as a REQUIRED seam and throws
+   * `missing ToolRegistryService in context` when it is absent, so a generation
+   * with no registry cannot run a single turn. The host therefore provides the
+   * registry (empty) and asks this root to register nothing into it.
+   *
+   * Enforced HERE, in one place, because the tool face has three writers — the
+   * tools plugin, the workers plugin and the swarm wiring — and a flag per writer
+   * would let one of them quietly put back what the user switched off. `true`
+   * also suppresses both orchestration wirings, so the face is really empty.
+   *
+   * Absent/false = the pre-W9322 behaviour, byte for byte.
+   */
+  emptyTools?: boolean;
   /**
    * Batch sub-agent wiring (`agent_swarm`); `false` disables it (default: off until
    * the host passes a `loopFactory` — a member turn cannot be built without one).
@@ -168,10 +186,18 @@ export function compose(config: ComposeConfig): Runtime {
 
   const binding = config.sessionBinding ?? null;
   const bound = binding === null ? null : bindSession(ctx, binding);
+  // 插件热插拔（W9322）：`emptyTools` = 这一代的工具面是空的。注册表**仍然**被
+  // provide（`resolveSeams()` 把它当必需 seam，缺了整代跑不起来），但**没有任何东西
+  // 注册进去**——包括下面两个会往注册表里塞工具的编排插件。
+  //
+  // 为什么要在这里判断，而不是让 host 传 `workers: false` + `swarm: false`：
+  // 「空工具面」是一个整体语义，散成三个开关就有三种写错的方式（漏一个 =
+  // 刚关掉的工具从后门回来）。host 说一次「这一代没有工具」，这里负责到底。
+  const emptyTools = config.emptyTools === true;
   const plugins = config.plugins ?? [];
   mountPlugins(ctx, plugins);
 
-  const workerHost = ensureWorkerWiring(ctx, config.workers);
+  const workerHost = ensureWorkerWiring(ctx, emptyTools ? false : config.workers);
   const mounted = mountWatchdogOf(ctx, config, workerHost);
   const session = requireSession(ctx);
   const sessionRef = { log: session };
@@ -199,7 +225,7 @@ export function compose(config: ComposeConfig): Runtime {
   // into the tool registry) and AFTER `agentConfig` is derived, because a member
   // inherits the host's model / system prompt / step budget from it.
   const swarmHost =
-    config.swarm === false || config.swarm === undefined
+    emptyTools || config.swarm === false || config.swarm === undefined
       ? null
       : ensureSwarmWiring(ctx, { ...config.swarm, agentConfig, ...(config.loopFactory === undefined ? {} : { loopFactory: config.loopFactory }), signal: config.swarm.signal ?? (() => swarmSignal.current) });
   const inbox = config.inbox ?? createSessionInbox();
@@ -271,7 +297,7 @@ export function compose(config: ComposeConfig): Runtime {
     llm,
     tools,
     agentLoop,
-    plugins: pluginNamesOf(plugins, workerHost, mounted),
+    plugins: pluginNamesOf(plugins, workerHost, mounted, swarmHost),
     shutdownHooks: [...(config.shutdownHooks ?? []), stopWatchdog(mounted)],
     // W1900: the Runtime writes the single water-level reader here.
     usagePlane,
@@ -281,17 +307,26 @@ export function compose(config: ComposeConfig): Runtime {
 
 /**
  * The plugin set that was mounted, in mount order (order is contract): the host
- * plugins, then the workers plugin (when this root mounted it), then the W740
- * watchdog — which is always LAST, because it may only adjudicate rows a fully
- * mounted worker registry already owns.
+ * plugins, then the workers plugin (when this root mounted it), then the swarm
+ * plugin, then the W740 watchdog — which is always LAST, because it may only
+ * adjudicate rows a fully mounted worker registry already owns.
+ *
+ * W9322: the SWARM plugin used to be missing here. `ensureSwarmWiring` really
+ * mounts it (step 4c, which is why `agent_swarm` is in the registry and in the
+ * model's prompt), but `pluginNames` never named it — so this list, documented as
+ * "the plugin set that was mounted", was incomplete for exactly the one plugin
+ * the hot-swap inventory has to be able to switch off. The `swarmHost` handle was
+ * already available at the call site; it is now threaded in like `workerHost`.
  */
 export function pluginNamesOf(
   plugins: readonly Plugin[],
   workerHost: WorkerHost | null,
   mounted: MountedWatchdog | null = null,
+  swarmHost: SwarmHost | null = null,
 ): string[] {
   const names = pluginNames(plugins);
   if (workerHost !== null && workerHost.mountedPlugin !== null) names.push(workerHost.mountedPlugin);
+  if (swarmHost !== null && swarmHost.mountedPlugin !== null) names.push(swarmHost.mountedPlugin);
   if (workerHost !== null && mounted !== null) names.push(WATCHDOG_PLUGIN_NAME);
   return names;
 }

@@ -1,6 +1,6 @@
 # 插件热插拔：引擎层进清单 + 全层可换代
 
-> 状态：**设计（待实现）**。决定：2026-10-04。
+> 状态：**已实现（W9322）**。决定：2026-10-04；实现：见 §8。
 > 起因：设置页「插件」的服务端一格只显示 8 个 host 装配 token，用户认不出的功能一个都不在里面。
 
 ---
@@ -10,9 +10,9 @@
 - `GET /api/plugins` 只返回 host 启动层的 8 个 plugin：`studio/workspaces` / `sessions` / `session-ops` /
   `providers` / `prompts` / `bus` / `runtime` / `settings`。它们是**服务注入 token**，不是功能。
 - 真正的功能插件在 `packages/{agent-loop,core,session,swarm,tools,workers}/src/plugin.ts`（如 `@celestea/swarm`
-  注册 `agent_swarm`），它们**每会话由引擎装配**，被 `apps/studio/src/plugins.ts:94-96` 的边界注释**刻意排除**。
+  注册 `agent_swarm`），它们**每会话由引擎装配**，被 `apps/studio/src/plugins.ts:119-124` 的边界注释**刻意排除**。
   这是 W860 的有意设计，因此**没有任何测试会抓到它**。
-- `apps/studio/src/handlers/plugins.ts:21-22` 把 `hot` **硬编码为 `false`**，`layer` 的类型字面量只写了 `"host"`。
+- `apps/studio/src/handlers/plugins.ts:20-23`（W860 原文）把 `hot` **硬编码为 `false`**，`layer` 的类型字面量只写了 `"host"`。
   接口形状早已预留，只是从未填充。
 
 ## 2. 目标
@@ -85,3 +85,54 @@
 - 不做运行时**下载/加载外部**插件（与 `feature-display-components.md` 的"构建期装配"口径一致）。
 - 不改 `Context` 的 API（不加 remove）；换代取代卸载。
 - 不做插件间依赖的自动求解；mount 顺序仍是语义，沿用 `mountPlugins` 的顺序表。
+
+## 8. 实现记录（W9322）——三处设计文档没写、但实现时必须决定的事
+
+写在这里，因为它们**改变了本节的字面含义**，后来读文档的人不该以为它们不存在。
+
+### 8.1 工具插件是唯一「关掉≠不 mount」的引擎插件
+
+`resolveSeams()`（`packages/agent-loop/src/seams.ts`）把 `TOOL_REGISTRY_SERVICE` 当作
+**必需 seam**，缺失时抛 `missing ToolRegistryService in context`。所以 §4 的
+「按 mount 顺序重建整代」对**工具插件**不成立：不 provide 它，下一代根本跑不了第一个 turn。
+
+落地语义因此是：注册表**照旧 provide 但里面一个工具都没有**（连 `run_code` 也没有），
+并且由 `compose({ emptyTools: true })` 统一压掉三个会往注册表塞工具的地方
+（tools 插件 / workers 插件 / swarm wiring）——一个布尔量，而不是三个开关
+（三个开关就有三种漏一个的写法，漏掉的那个会把刚关掉的工具从后门放回来）。
+`GET /api/tools` 与 prompt 的 `{{tools}}` 因此仍在**同一个 `compose()`** 里一起变空，
+§3.1 的原子性约束没有被牺牲。
+
+其余引擎插件（workers / swarm / watchdog）走 §4 的原语义：真的不 mount。
+
+### 8.2 `Runtime.pluginNames` 曾经漏掉 swarm 插件（已修）
+
+`compose()` 的第 4c 步真的 mount 了 swarm 插件（所以 `agent_swarm` 在注册表和 prompt 里），
+但 `pluginNamesOf()` 从未把它写进 `Runtime.pluginNames`。于是「本代 mount 了哪些插件」
+这份记录对**恰好是热插拔必须能关掉的那个插件**是错的。W9322 把 `swarmHost` 传进
+`pluginNamesOf()`（与 `workerHost` 同形），顺序为 host → workers → swarm → watchdog。
+
+这是清单反漂移测试（装配一个真实会话，逐名对比）当场抓出来的——手写清单的第一版
+把工具插件写成 `celestea.tools`（真名是 `studio.engine.tools`），也是同一条断言抓的。
+
+### 8.3 `invalidateAll()` 必须 bump epoch
+
+`SessionRuntimeRegistry.invalidateAll()` 只做「标记」；真正决定要不要重组的是
+`settleEpoch()`，而它的第一道门是 `entry.profileEpoch >= this.epoch()` → 直接返回。
+epoch 不动时，一个空闲实例的下一次 `ensure()` 会认为「没什么要换的」并**原样返回旧代**：
+开关写进去了、`engineSwitches()` 也对了，可引擎那一代根本没换。
+
+所以 `RealRuntimeAdapter.invalidateAll()` 同时推进 `baseEpoch`——语义与一次 `configure()`
+完全相同（空闲实例立即重组、在飞的 turn 只被标记），而 `ensure` / `settleDeferred` /
+`sweep` 三条路都会因此重组。
+
+### 8.4 `studio/bus` / `studio/runtime` 的「允许更换」落到了哪一步
+
+§3.2 说这两行只在**无活跃会话**时才能换。落地实现：
+- 有活跃会话（`busySessions()` 非空）时 `PUT` **被拒 409 + 原因 + `busy_sessions[]`**；
+- 无活跃会话时写入被接受，并按 §3.1 的 turn 边界语义生效（同一条 `invalidateAll` 通道）。
+
+**没有做**的是「重建 host Context 本身」：`StudioServices`（含 `bus`/`runtime` 两个字段与
+已注册的全部路由闭包）是**进程启动时一次性**装配的，换掉它的实例需要重建整个
+`composeStudio` 并重新注册 71 条路由——那是另一个量级的工作，且 §3.2 的验收点
+（有活跃会话时必须拒绝）不依赖它。这一点在 W9322 的报告里作为「刻意没做」明列。
