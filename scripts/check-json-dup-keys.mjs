@@ -36,11 +36,12 @@ const list = explicit.length > 0 ? explicit : files();
 
 const failures = [];
 let scanned = 0;
+const unparsed = [];
 for (const file of list) {
   let text;
   try { text = readFileSync(file, "utf8"); } catch { continue; }
   scanned += 1;
-  try { JSON.parse(text); } catch { continue; }
+  try { JSON.parse(text); } catch { unparsed.push(file); continue; }
   let dups;
   try { dups = scanDuplicateKeys(text); } catch { continue; }
   for (const d of dups) failures.push({ file: file, path: d.path, key: d.key, first: d.first, again: d.again });
@@ -60,4 +61,15 @@ if (failures.length > 0) {
   console.error("  修法：给其中一条换一个键名（本项目 note 类键按最大号 +1 递增）。");
   process.exit(1);
 }
-console.log("✓ JSON 重复键门禁通过（扫 " + scanned + " 个 JSON，0 处重复键）");
+console.log(
+  "✓ JSON 重复键门禁通过（读过 " + scanned + " 个 JSON，其中 " + (scanned - unparsed.length)
+    + " 个合法解析、0 处重复键）",
+);
+// 解析不过的文件**由别的门禁负责**（本门禁只查合法 JSON）—— 但必须**看得见**：
+// 否则「扫了 N 个」会让人以为 N 个都查过了（W9339 指出过这一点）。
+if (unparsed.length > 0) {
+  console.log(
+    "  （" + unparsed.length + " 个解析不过、未参与本门禁：" + unparsed.slice(0, 5).join(", ")
+      + (unparsed.length > 5 ? " …" : "") + "）",
+  );
+}

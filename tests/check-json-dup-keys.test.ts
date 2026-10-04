@@ -79,7 +79,9 @@ describe("JSON 重复键门禁（端到端跑真 CLI）", () => {
     //   「0 处重复键」就变成一句什么也没查的话。
     expect(() => JSON.parse(readFileSync(p, "utf8")), "文件必须是合法 JSON，否则门禁会静默跳过它").not.toThrow();
     const out = execFileSync("node", [CLI, p], { cwd: REPO, encoding: "utf8" });
-    expect(out).toContain("（扫 1 个 JSON，0 处重复键）");
+    // 守**后果**（这份契约是干净的、退出码 0），不守**我的措辞** —— 措辞会改，
+    // 而「读过几个 / 几个合法解析」的分母写法就不该被钉住（铁律 11）。
+    expect(out).toContain("0 处重复键");
   });
 
   it("真仓库现在干净：不传参数枚举全仓 ⇒ exit 0", () => {
