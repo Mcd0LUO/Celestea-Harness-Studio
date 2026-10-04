@@ -16,6 +16,10 @@
 //   ⑤ **不破坏既有行为**：贴底时新列仍把视图留在底部；用户上滚后新列**不把人拽回**，
 //      并顺带量浮标的落位（在消息区右下角内、不压到输入胶囊）。
 //
+// ★ W9340：脚手架（静态 fixture 服务端 / Vite 反代 / 截图落盘 / **CDP 输入原语**
+//   （滚轮 / 按键 / Tab / 点击）/ verdict 表 + PASS/FAIL 汇总 + 退出码）已收进
+//   scripts/a11y/lib/harness.mjs —— 本文件只剩「场景 + 断言」。
+//
 // 用法（前置：Vite dev server 起着；Chrome 由 perf/lib/chrome.mjs 自行查找）：
 //   pnpm --dir apps/web dev --port 3787 --strictPort
 //   node scripts/a11y/w9336-jump-probe.mjs
@@ -24,80 +28,16 @@
 // ★ 刻意不进 `pnpm check`（与 w2058 / w9329 / w9333 同一取向）：它需要 Vite + Chrome。
 //   确定性断言在 tests/w9336-jump-bottom.test.ts。
 // ============================================================================
-import http from 'node:http';
-import { mkdirSync, writeFileSync } from 'node:fs';
-// W9323：请求处理器是**回调**，里面不许有同步阻塞调用 —— 静态服务走 fs/promises。
-// 顶层（不在任何回调里）的 mkdirSync / writeFileSync 不在此列，保持同步。
-import { readFile, stat } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { launchChrome } from '../perf/lib/chrome.mjs';
+import { join } from 'node:path';
+import {
+  repoRoot, startFixture, launchProbeChrome, createProbe, createInput, sleep,
+} from './lib/harness.mjs';
 
-const VITE = process.env.W9336_VITE ?? 'http://127.0.0.1:3787';
-const REPO = process.env.W9336_REPO ?? fileURLToPath(new URL('../..', import.meta.url)).replace(/[\\/]$/, '');
-const WEB = join(REPO, 'apps', 'web');
+const VITE = process.env.W9336_VITE ?? process.env.W9111_VITE ?? 'http://127.0.0.1:3787';
+const REPO = repoRoot('W9336_REPO');
 const SHOTS = process.env.W9336_SHOTS ?? join(REPO, 'tmp', 'w9336-probe');
 const PORT = Number(process.env.W9336_PORT ?? 3836);
 const CDP = Number(process.env.W9336_CDP_PORT ?? 9486);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-mkdirSync(SHOTS, { recursive: true });
-
-const MIME = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8', '.ts': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2',
-};
-
-/** 假后端：够真应用跑起来（会话/状态/空历史），/src 与 /@ 反代到 Vite。 */
-function startFixture() {
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-    const p = url.pathname;
-    const cors = {
-      'access-control-allow-origin': req.headers.origin ?? '*',
-      'access-control-allow-headers': 'content-type',
-      'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-    };
-    const json = (code, obj) => {
-      const b = JSON.stringify(obj);
-      res.writeHead(code, { ...cors, 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(b) });
-      res.end(b);
-    };
-    if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
-    if (p === '/api/health') return json(200, { ok: true, name: 'w9336', model: 'w9336', capabilities: {} }, cors);
-    if (p === '/api/status') return json(200, { model: 'w9336', busy: false, session: 'w9336/main' }, cors);
-    if (p === '/api/sessions') return json(200, { sessions: [{ id: 'w9336/main', title: 'W9336 取证', kind: 'session', busy: false, active: true }], active_session: 'w9336/main' }, cors);
-    if (p === '/api/workspaces') return json(200, { workspaces: [{ name: 'w9336', path: REPO, sessions: 1 }], active_session: 'w9336/main' }, cors);
-    if (p === '/api/events') { res.writeHead(200, { ...cors, 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' }); return; }
-    for (const q of ['/api/config', '/api/providers', '/api/prompts', '/api/tools', '/api/plugins', '/api/permissions/presets', '/api/questions']) {
-      if (p === q) return json(200, { ok: true, model: 'w9336', available: { models: [], efforts: [] }, providers: [], prompts: [], tools: [], plugins: [], presets: [], questions: [], disabled: [], messages: [] }, cors);
-    }
-    if (p === '/auth/check') return json(200, { ok: true, username: 'w9336' }, cors);
-    if (p === '/api/usage/ledger') return json(200, { ok: true, entries: [] }, cors);
-    const m = /^\/api\/sessions\/(.+)\/(messages|context)$/.exec(p);
-    if (m) return json(200, m[2] === 'messages' ? { ok: true, session: m[1], messages: [] } : { ok: true, context: [] }, cors);
-    if (p.startsWith('/src/') || p.startsWith('/@') || p.startsWith('/node_modules/')) {
-      try {
-        const up = await fetch(VITE + p + url.search, { headers: { origin: 'http://127.0.0.1:' + PORT } });
-        const body = Buffer.from(await up.arrayBuffer());
-        res.writeHead(up.status, { ...cors, 'content-type': up.headers.get('content-type') ?? 'text/javascript; charset=utf-8' });
-        return res.end(body);
-      } catch (err) { res.writeHead(502, cors); return res.end('vite proxy failed: ' + String(err)); }
-    }
-    const rel = p === '/' ? '/index.html' : p;
-    const full = join(WEB, normalize(rel).replace(/^([.][.][/\\])+/, ''));
-    try {
-      if ((await stat(full)).isFile()) {
-        const body = await readFile(full);
-        res.writeHead(200, { ...cors, 'content-type': MIME[extname(full)] ?? 'application/octet-stream' });
-        return res.end(body);
-      }
-    } catch { /* 不存在：404 */ }
-    res.writeHead(404, cors); res.end('not found');
-  });
-  return new Promise((r) => server.listen(PORT, '127.0.0.1', () => r(server)));
-}
 
 // ---- 页内脚本 --------------------------------------------------------------
 
@@ -225,49 +165,9 @@ const FOCUS_RING = `(function () {
   };
 })()`;
 
-// ---- CDP 输入原语 ----------------------------------------------------------
-
-/** 真滚轮：先把指针移到消息区中部（滚轮按指针位置派发）。 */
-async function wheel(page, deltaY, times) {
-  const pt = await page.eval(`(function () { var r = window.__w9336.pane.el.getBoundingClientRect();
-    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
-  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y, buttons: 0 });
-  for (let i = 0; i < times; i += 1) {
-    await page.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: pt.x, y: pt.y, deltaX: 0, deltaY, buttons: 0 });
-    await sleep(40);
-  }
-}
-
-/** 真鼠标点击浮标正中（真 hit-test，而不是 element.click()）。 */
-async function clickButton(page) {
-  const pt = await page.eval(`(function () { var r = document.querySelector('.jump-bottom').getBoundingClientRect();
-    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
-  await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1, buttons: 1 });
-  await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1, buttons: 0 });
-  return pt;
-}
-
-/** 真按键（Tab / Enter / Space 都是浏览器的默认行为在起作用，不是我们替它调的）。 */
-async function press(page, key, code, vk, text) {
-  const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
-  await page.send('Input.dispatchKeyEvent', { type: text === undefined ? 'rawKeyDown' : 'keyDown', ...base, ...(text === undefined ? {} : { text }) });
-  await page.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
-}
-
-/** 真 Tab 走到浮标：先把顺序焦点起点放到消息容器（那是它的前一个可聚焦祖先）。 */
-async function tabToButton(page, max = 6) {
-  await page.eval(`(function () { window.__w9336.pane.el.focus(); return document.activeElement === window.__w9336.pane.el; })()`);
-  for (let i = 1; i <= max; i += 1) {
-    await press(page, 'Tab', 'Tab', 9);
-    await sleep(60);
-    const at = await page.eval(`(function () { var a = document.activeElement;
-      return { cls: a ? a.className : null, isBtn: a === document.querySelector('.jump-bottom') }; })()`);
-    if (at.isBtn) return i;
-  }
-  return -1;
-}
-
-const verdict = (ok, detail) => ({ pass: ok === true, detail });
+// verdict 表 / 汇总 / 退出码都在 harness 里（判据、阈值、文案仍归本探针）。
+const P = createProbe({ title: 'W9336 真机取证', shots: SHOTS, pad: 20 });
+const verdict = P.verdict;
 const round = (n) => Math.round(n * 10) / 10;
 
 /** WCAG 相对亮度 / 对比度（与 tests/w9226 的算式同口径）。 */
@@ -317,14 +217,20 @@ function movement(samples) {
 }
 
 const main = async () => {
-  const server = await startFixture();
-  const chrome = await launchChrome({ port: CDP, width: 1440, height: 900, executablePath: process.env.W9111_CHROME });
-  const { page } = chrome;
-  const consoleErrors = [];
-  page.on('Runtime.consoleAPICalled', (x) => { if (x.type === 'error') consoleErrors.push((x.args ?? []).map((a) => a.value ?? a.description ?? a.type).join(' ')); });
-  page.on('Runtime.exceptionThrown', (x) => { consoleErrors.push('EXCEPTION ' + (x.exceptionDetails?.exception?.text ?? '')); });
+  const out = P.out;
+  const fixture = await startFixture({
+    port: PORT,
+    label: 'w9336',
+    repo: REPO,
+    vite: VITE,
+    session: { title: 'W9336 取证' },
+  });
+  const browser = await launchProbeChrome({ port: CDP, width: 1440, height: 900 });
+  const { page } = browser;
+  const consoleErrors = browser.consoleErrors;
+  out.consoleErrors = consoleErrors;
   const ev = (s) => page.eval(s);
-  const out = { consequences: {}, raw: {}, consoleErrors };
+  const input = createInput(page);
 
   try {
     await page.navigate('http://127.0.0.1:' + PORT + '/');
@@ -347,7 +253,7 @@ const main = async () => {
     const above = await ev(SCROLL_BY(201)); // 越过阈值
     await sleep(80);
     const aboveG = await ev(GEO);
-    await wheel(page, -120, 6); // 真滚轮往上滚（用户路径）
+    await input.wheel(-120, 6, { at: 'window.__w9336.pane.el' }); // 真滚轮往上滚（用户路径）
     await sleep(120);
     const wheelG = await ev(GEO);
     out.raw.threshold = { atBottom, below, belowG, above, aboveG, wheelG };
@@ -381,7 +287,7 @@ const main = async () => {
     await ev(SCROLL_BY(1200));
     await sleep(80);
     await ev(SAMPLER);
-    const clickPt = await clickButton(page);
+    const clickPt = await input.click('.jump-bottom', { hover: false });
     await sleep(900);
     const smoothSamples = await ev('window.__w9336.samples');
     const smoothG = await ev(GEO);
@@ -400,7 +306,7 @@ const main = async () => {
     await ev(SCROLL_BY(1200));
     await sleep(80);
     await ev(SAMPLER);
-    await clickButton(page);
+    await input.click('.jump-bottom', { hover: false });
     await sleep(700);
     const rmSamples = await ev('window.__w9336.samples');
     const rmG = await ev(GEO);
@@ -416,18 +322,18 @@ const main = async () => {
     // ---- ⑤ 键盘：真 Tab 聚焦 + 焦点环 + 真 Enter / 真 Space ----
     await ev(SCROLL_BY(1200));
     await sleep(100);
-    const tabs = await tabToButton(page);
+    const tabs = await input.tabTo('.jump-bottom', { max: 6, from: 'window.__w9336.pane.el' });
     await sleep(80);
     const ring = await ev(FOCUS_RING);
     const ringHex = over(ring.outlineColor, ring.ringBg);
     const ringContrast = round(contrast(ringHex, ring.ringBg));
-    await press(page, 'Enter', 'Enter', 13, '\r');
+    await input.press('Enter', 'Enter', 13, '\r');
     await sleep(500);
     const afterEnter = await ev(GEO);
     await ev(SCROLL_BY(1200));
     await sleep(120);
-    const tabs2 = await tabToButton(page);
-    await press(page, ' ', 'Space', 32, ' ');
+    const tabs2 = await input.tabTo('.jump-bottom', { max: 6, from: 'window.__w9336.pane.el' });
+    await input.press(' ', 'Space', 32, ' ');
     await sleep(500);
     const afterSpace = await ev(GEO);
     out.raw.keyboard = { tabs, ring, ringHex, ringContrast, afterEnter, tabs2, afterSpace };
@@ -508,23 +414,21 @@ const main = async () => {
     for (const theme of ['mono', 'claude']) {
       await ev(`(function () { document.documentElement.dataset.theme = ${JSON.stringify(theme)}; return true; })()`);
       await sleep(100);
-      const shot = await page.send('Page.captureScreenshot', { format: 'png' });
-      writeFileSync(join(SHOTS, 'jump-' + theme + '.png'), Buffer.from(shot.data, 'base64'));
+      await P.shots.save(page, 'jump-' + theme + '.png');
     }
     await ev(`(function () { document.documentElement.dataset.theme = 'mono'; return true; })()`);
 
     out.consoleErrors = consoleErrors;
-    const failed = Object.entries(out.consequences).filter(([, v]) => !v.pass);
-    writeFileSync(join(SHOTS, 'probe.json'), JSON.stringify(out, null, 2));
-    console.log('\n===== W9336 真机取证 =====');
-    for (const [k, v] of Object.entries(out.consequences)) console.log((v.pass ? 'PASS ' : 'FAIL ') + k.padEnd(20) + v.detail);
-    console.log('consoleErrors: ' + (consoleErrors.length === 0 ? '(empty)' : JSON.stringify(consoleErrors)));
-    console.log(failed.length === 0 ? '\n全部 PASS' : `\n${failed.length} 条 FAIL`);
-    console.log('产物：' + SHOTS);
-    if (failed.length > 0) process.exitCode = 1;
+    await P.finish({
+      heading: 'W9336 真机取证',
+      pad: 20,
+      jsonPath: join(SHOTS, 'probe.json'),
+      trailer: ['产物：' + SHOTS],
+      exitCodeOnFail: 1,
+    });
   } finally {
-    await chrome.close();
-    server.close();
+    await browser.close();
+    await fixture.close();
   }
 };
 

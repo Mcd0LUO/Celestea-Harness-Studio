@@ -22,6 +22,11 @@
 //   ⑥ **秒数不进可访问性树**（CDP Accessibility.getFullAXTree）：aria-hidden 的秒数
 //      节点必须不出现在可播报节点里；阶段标签是 live=polite 的 status。
 //
+// ★ W9340：脚手架（静态 fixture 服务端 / Vite 反代 / 截图落盘 / verdict 表 +
+//   PASS/FAIL 汇总 + 退出码）已收进 scripts/a11y/lib/harness.mjs —— 本文件只剩
+//   「场景 + 断言」。原先「请求处理器里不许有同步阻塞调用」（W9323）那条自律现在
+//   由 harness 结构性保证（它一个同步 fs 都不 import）。
+//
 // 用法：
 //   pnpm --dir apps/web dev --port 3787 --strictPort      # 前置（本脚本只读 /src/**）
 //   W9111_CHROME=<chrome-headless-shell> node scripts/a11y/w9333-pending-probe.mjs
@@ -29,81 +34,16 @@
 // ★ 刻意不进门禁（与 w9329/w2058 同一取向）：需要 Vite dev server + Chrome。
 //   确定性断言在 tests/w9333-pending-placeholder.test.ts。
 // ============================================================================
-import http from 'node:http';
-import { mkdirSync, writeFileSync } from 'node:fs';
-// W9323：请求处理器是**回调**，里面不许有同步阻塞调用 —— 静态服务走 fs/promises。
-// 顶层（不在任何回调里）的 mkdirSync / writeFileSync 不在此列，保持同步。
-import { readFile, stat } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { launchChrome } from '../perf/lib/chrome.mjs';
+import { join } from 'node:path';
+import {
+  repoRoot, startFixture, launchProbeChrome, createProbe, sleep,
+} from './lib/harness.mjs';
 
-const VITE = process.env.W9333_VITE ?? 'http://127.0.0.1:3787';
-const REPO = process.env.W9333_REPO ?? fileURLToPath(new URL('../..', import.meta.url)).replace(/[\\/]$/, '');
-const WEB = join(REPO, 'apps', 'web');
+const VITE = process.env.W9333_VITE ?? process.env.W9111_VITE ?? 'http://127.0.0.1:3787';
+const REPO = repoRoot('W9333_REPO');
 const SHOTS = process.env.W9333_SHOTS ?? join(REPO, 'tmp', 'w9333-probe');
 const PORT = Number(process.env.W9333_PORT ?? 3833);
 const CDP = Number(process.env.W9333_CDP_PORT ?? 9483);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-mkdirSync(SHOTS, { recursive: true });
-
-const MIME = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8', '.ts': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2',
-};
-
-function startFixture() {
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-    const p = url.pathname;
-    const cors = {
-      'access-control-allow-origin': req.headers.origin ?? '*',
-      'access-control-allow-headers': 'content-type',
-      'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-    };
-    const json = (code, obj) => {
-      const b = JSON.stringify(obj);
-      res.writeHead(code, { ...cors, 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(b) });
-      res.end(b);
-    };
-    if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
-    if (p === '/api/health') return json(200, { ok: true, name: 'w9333', model: 'w9333', capabilities: {} }, cors);
-    if (p === '/api/status') return json(200, { model: 'w9333', busy: false, session: 'w9333/main' }, cors);
-    if (p === '/api/sessions') return json(200, { sessions: [{ id: 'w9333/main', title: 'W9333 取证', kind: 'session', busy: false, active: true }], active_session: 'w9333/main' }, cors);
-    if (p === '/api/workspaces') return json(200, { workspaces: [{ name: 'w9333', path: REPO, sessions: 1 }], active_session: 'w9333/main' }, cors);
-    if (p === '/api/events') { res.writeHead(200, { ...cors, 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' }); return; }
-    for (const q of ['/api/config', '/api/providers', '/api/prompts', '/api/tools', '/api/plugins', '/api/permissions/presets', '/api/questions']) {
-      if (p === q) return json(200, { ok: true, model: 'w9333', available: { models: [], efforts: [] }, providers: [], prompts: [], tools: [], plugins: [], presets: [], questions: [], disabled: [], messages: [] }, cors);
-    }
-    if (p === '/auth/check') return json(200, { ok: true, username: 'w9333' }, cors);
-    if (p.startsWith('/src/') || p.startsWith('/@') || p.startsWith('/node_modules/')) {
-      try {
-        const up = await fetch(VITE + p + url.search, { headers: { origin: 'http://127.0.0.1:' + PORT } });
-        const body = Buffer.from(await up.arrayBuffer());
-        res.writeHead(up.status, { ...cors, 'content-type': up.headers.get('content-type') ?? 'text/javascript; charset=utf-8' });
-        return res.end(body);
-      } catch (err) { res.writeHead(502, cors); return res.end('vite proxy failed: ' + String(err)); }
-    }
-    const rel = p === '/' ? '/index.html' : p;
-    const full = join(WEB, normalize(rel).replace(/^([.][.][/\\])+/, ''));
-    // W9323：**异步**读（旧写法 existsSync + readFileSync 把事件循环冻到 syscall 返回；
-    // 而且目录命中时 readFileSync 会抛 EISDIR —— stat().isFile() 顺手把这条也堵上）。
-    // 不存在 / 是目录 ⇒ 落到下面的 404（与旧行为一致，且不再可能抛未捕获异常）。
-    try {
-      if ((await stat(full)).isFile()) {
-        const body = await readFile(full);
-        res.writeHead(200, { ...cors, 'content-type': MIME[extname(full)] ?? 'application/octet-stream' });
-        return res.end(body);
-      }
-    } catch {
-      /* 不存在：404 */
-    }
-    res.writeHead(404, cors); res.end('not found');
-  });
-  return new Promise((r) => server.listen(PORT, '127.0.0.1', () => r(server)));
-}
 
 /** 页内：把占位放好（走真组件），并把量到的几何读回来。 */
 const SETUP = `(async function () {
@@ -188,18 +128,19 @@ const freezeFn = (d, fillNone) => `(function () {
   return out;
 })()`;
 
-const verdict = (ok, detail) => ({ pass: ok === true, detail });
+// verdict 表 / 汇总 / 退出码都在 harness 里（判据、阈值、文案仍归本探针）。
+const P = createProbe({ title: 'W9333 真机取证', shots: SHOTS, pad: 22 });
+const verdict = P.verdict;
 const round2 = (n) => Math.round(n * 100) / 100;
 
 const main = async () => {
-  const server = await startFixture();
-  const chrome = await launchChrome({ port: CDP, width: 1440, height: 900, executablePath: process.env.W9111_CHROME });
-  const { page } = chrome;
-  const consoleErrors = [];
-  page.on('Runtime.consoleAPICalled', (p) => { if (p.type === 'error') consoleErrors.push((p.args ?? []).map((a) => a.value ?? a.description ?? a.type).join(' ')); });
-  page.on('Runtime.exceptionThrown', (p) => { consoleErrors.push('EXCEPTION ' + (p.exceptionDetails?.exception?.text ?? '')); });
+  const out = P.out;
+  const fixture = await startFixture({ port: PORT, label: 'w9333', repo: REPO, vite: VITE, session: { title: 'W9333 取证' } });
+  const browser = await launchProbeChrome({ port: CDP, width: 1440, height: 900 });
+  const { page } = browser;
+  const consoleErrors = browser.consoleErrors;
+  out.consoleErrors = consoleErrors;
   const ev = (s) => page.eval(s);
-  const out = { consequences: {}, raw: {}, consoleErrors };
 
   try {
     await page.navigate('http://127.0.0.1:' + PORT + '/');
@@ -211,8 +152,7 @@ const main = async () => {
     for (const theme of ['mono', 'dark']) {
       await ev(`(function(){ document.documentElement.dataset.theme = '${theme}'; return true; })()`);
       await sleep(80);
-      const shot = await page.send('Page.captureScreenshot', { format: 'png' });
-      writeFileSync(join(SHOTS, 'pending-' + theme + '.png'), Buffer.from(shot.data, 'base64'));
+      await P.shots.save(page, 'pending-' + theme + '.png');
     }
     await ev(`(function(){ document.documentElement.dataset.theme = 'mono'; return true; })()`);
     await sleep(60);
@@ -358,16 +298,16 @@ const main = async () => {
     );
 
     out.consoleErrors = consoleErrors;
-    const failed = Object.entries(out.consequences).filter(([, v]) => !v.pass);
-    writeFileSync(join(SHOTS, 'probe.json'), JSON.stringify(out, null, 2));
-    console.log(JSON.stringify(out, null, 2));
-    console.log('\n===== W9333 真机取证 =====');
-    for (const [k, v] of Object.entries(out.consequences)) console.log((v.pass ? 'PASS ' : 'FAIL ') + k.padEnd(22) + v.detail);
-    console.log('consoleErrors: ' + (consoleErrors.length === 0 ? '(empty)' : JSON.stringify(consoleErrors)));
-    console.log(failed.length === 0 ? '\n全部 PASS' : `\n${failed.length} 条 FAIL`);
+    await P.finish({
+      heading: 'W9333 真机取证',
+      pad: 22,
+      printJson: true,
+      jsonPath: join(SHOTS, 'probe.json'),
+      exitCodeOnFail: 1,
+    });
   } finally {
-    await chrome.close();
-    server.close();
+    await browser.close();
+    await fixture.close();
   }
 };
 

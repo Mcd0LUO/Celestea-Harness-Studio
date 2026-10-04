@@ -10,6 +10,15 @@
 //      量 .preview-panel 与 #messages 的轴对齐矩形是否相交（本仓 modes.ts 的判定法）。
 //   ③ 截图（桌面 / 触摸端各一张）。
 //
+// ★ W9340：本探针**只出证据、不出 verdict**（它是取证快照，不是验收门禁）——
+//   脚手架（静态 fixture 服务端 / Vite 反代 / 截图落盘 / 汇总与退出码）已收进
+//   scripts/a11y/lib/harness.mjs。原先那句「请求处理器里不许有同步阻塞调用」（W9323）
+//   现在由 harness 结构性保证。
+// ★ 同一轮顺手修掉一个**只在 Windows 上犯**的真 bug：原来自带服务端用
+//   `new URL('../..', import.meta.url).pathname` 取仓库根，在 Windows 上是 `/D:/…`，
+//   经 `path.join` 变成 `\D:\…` ⇒ `apps/web/index.html` 永远 404、页面其实是 404 文本，
+//   探针量到的是「没穿衣服的页面」。harness 的 repoRoot() 一律走 fileURLToPath。
+//
 // 用法：
 //   pnpm --dir apps/web dev --port 3787 --strictPort      # 前置（本脚本只读 /src/**）
 //   W9111_CHROME=<chrome-headless-shell> node scripts/a11y/w2058-preview-probe.mjs
@@ -19,112 +28,17 @@
 // ★ 刻意不进门禁（与 ime-enter-guard.mjs / audit-touch-targets.mjs 同一取向）：
 //   需要 Vite dev server + Chrome，不是确定性离线门禁。确定性断言在 tests/。
 // ============================================================================
-import http from 'node:http';
-import { readFileSync, existsSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, extname, normalize, dirname, basename } from 'node:path';
-import { launchChrome } from '../perf/lib/chrome.mjs';
+import { dirname, join } from 'node:path';
+import {
+  repoRoot, startFixture, fsRoutes, launchProbeChrome, createProbe, sleep,
+} from './lib/harness.mjs';
 
-const VITE = process.env.W9111_VITE ?? 'http://127.0.0.1:3787';
-const REPO = process.env.W2058_REPO ?? new URL('../..', import.meta.url).pathname.replace(/\/$/, '');
-const WEB = join(REPO, 'apps', 'web');
+const REPO = repoRoot('W2058_REPO');
 const TAG = process.env.W2058_TAG ?? 'unknown';
 const TARGET = process.env.W2058_TARGET ?? join(REPO, 'tmp', 'dsh-archive-dryrun', 'REPORT.md');
 const SHOTS = process.env.W2058_SHOTS ?? '/tmp/w2058-preview';
 const PORT = Number(process.env.W2058_PORT ?? 3814);
 const CDP = Number(process.env.W2058_CDP_PORT ?? 9474);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-mkdirSync(SHOTS, { recursive: true });
-
-const MIME = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8', '.ts': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2',
-};
-
-/** 真·行窗口读（与 apps/studio/src/handlers/fs-read.ts 同口径：1-based offset + limit）。 */
-function readWindow(abs, offset, limit) {
-  const raw = readFileSync(abs, 'utf8');
-  const lines = raw.split('\n');
-  const totalLines = raw.endsWith('\n') ? lines.length - 1 : lines.length;
-  const from = Math.max(1, offset) - 1;
-  const slice = lines.slice(from, from + limit);
-  const text = slice.join('\n') + (from + slice.length < lines.length ? '\n' : '');
-  const readLines = slice.length;
-  return { text, offset, limit, totalLines, truncated: from + readLines < lines.length };
-}
-
-function startFixture() {
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-    const p = url.pathname;
-    const cors = {
-      'access-control-allow-origin': req.headers.origin ?? '*',
-      'access-control-allow-headers': 'content-type',
-      'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-    };
-    const json = (code, obj) => {
-      const b = JSON.stringify(obj);
-      res.writeHead(code, { ...cors, 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(b) });
-      res.end(b);
-    };
-    if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
-
-    // ---- 真文件系统的两个端点（预览面板唯一的两个数据来源） ----
-    if (p === '/api/fs/list') {
-      const dir = url.searchParams.get('path') ?? '';
-      if (!existsSync(dir)) return json(200, { path: dir, entries: [], truncated: false, error: 'not found' });
-      const names = readFileSync('/dev/null'); // unreachable
-      return json(200, { path: dir, entries: [], truncated: false });
-    }
-    if (p === '/api/fs/read') {
-      const abs = url.searchParams.get('path') ?? '';
-      if (!existsSync(abs)) return json(200, { kind: 'text', text: '', offset: 1, limit: 0, totalLines: 0, truncated: false, error: 'ENOENT' });
-      const offset = Number(url.searchParams.get('offset') ?? '1') || 1;
-      const limit = Number(url.searchParams.get('limit') ?? '2000') || 2000;
-      return json(200, { kind: 'text', ...readWindow(abs, offset, limit) });
-    }
-
-    // ---- 最小应用壳所需端点 ----
-    if (p === '/api/health') return json(200, { ok: true, name: 'w2058-fixture', model: 'w2058', base_url: 'http://127.0.0.1:' + PORT, bind: '127.0.0.1:' + PORT, capabilities: {} }, cors);
-    if (p === '/api/status') return json(200, { model: 'w2058', reasoning_effort: null, steps: 0, tokens_per_sec: 0, context_usage: { used: 0, window: 1000000, ratio: 0 }, usage: {}, session: 'w2058/main', busy: false }, cors);
-    if (p === '/api/sessions') return json(200, { sessions: [{ id: 'w2058/main', title: 'W2058 取证', kind: 'session', busy: false, active: true, events: 0, workspace: 'w2058' }], active_session: 'w2058/main' }, cors);
-    if (p === '/api/workspaces') return json(200, { workspaces: [{ name: 'w2058', path: dirname(dirname(TARGET)), sessions: 1 }], active_session: 'w2058/main' }, cors);
-    if (p === '/api/events') { res.writeHead(200, { ...cors, 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' }); return; }
-    for (const q of ['/api/config', '/api/providers', '/api/prompts', '/api/tools', '/api/plugins', '/api/permissions/presets', '/api/questions']) {
-      if (p === q) return json(200, { ok: true, model: 'w2058', available: { models: [], efforts: [] }, providers: [], prompts: [], tools: [], plugins: [], presets: [], questions: [], disabled: [], messages: [] }, cors);
-    }
-    if (p === '/auth/check') return json(200, { ok: true, username: 'w2058' }, cors);
-    if (p === '/api/usage/ledger') return json(200, { ok: true, entries: [] }, cors);
-    const mMsg = /^\/api\/sessions\/(.+)\/messages$/.exec(p);
-    if (mMsg) return json(200, { ok: true, session: decodeURIComponent(mMsg[1]), messages: [] }, cors);
-    const mCtx = /^\/api\/sessions\/(.+)\/context$/.exec(p);
-    if (mCtx) return json(200, { ok: true, context: [] }, cors);
-
-    // ---- Vite（TS 转换） ----
-    if (p.startsWith('/src/') || p.startsWith('/@') || p.startsWith('/node_modules/')) {
-      try {
-        const up = await fetch(VITE + p + url.search, { headers: { origin: 'http://127.0.0.1:' + PORT } });
-        const body = Buffer.from(await up.arrayBuffer());
-        res.writeHead(up.status, { ...cors, 'content-type': up.headers.get('content-type') ?? 'text/javascript; charset=utf-8' });
-        return res.end(body);
-      } catch (err) { res.writeHead(502, cors); return res.end('vite proxy failed: ' + String(err)); }
-    }
-    // ---- 静态 ----
-    const rel = p === '/' ? '/index.html' : p;
-    const full = join(WEB, normalize(rel).replace(/^([.][.][/\\])+/, ''));
-    if (existsSync(full) && statSync(full).isFile()) {
-      res.writeHead(200, { ...cors, 'content-type': MIME[extname(full)] ?? 'application/octet-stream' });
-      return res.end(readFileSync(full));
-    }
-    if (existsSync(join(WEB, 'index.html'))) {
-      res.writeHead(200, { ...cors, 'content-type': MIME['.html'] });
-      return res.end(readFileSync(join(WEB, 'index.html')));
-    }
-    res.writeHead(404, cors); res.end('not found');
-  });
-  return new Promise((r) => server.listen(PORT, '127.0.0.1', () => r(server)));
-}
 
 /** 页内探针：读 DOM 实测值 + 矩形相交判定。 */
 const PROBE = `(function () {
@@ -171,13 +85,21 @@ const PROBE = `(function () {
 })()`;
 
 const main = async () => {
-  const server = await startFixture();
-  const chrome = await launchChrome({ port: CDP, width: 1440, height: 900 });
-  const { page } = chrome;
-  const consoleErrors = [];
-  page.on('Runtime.consoleAPICalled', (p) => { if (p.type === 'error') consoleErrors.push((p.args ?? []).map((a) => a.value ?? a.description ?? a.type).join(' ')); });
-  page.on('Runtime.exceptionThrown', (p) => { consoleErrors.push('EXCEPTION ' + (p.exceptionDetails?.exception?.description ?? p.exceptionDetails?.text ?? '')); });
-  const out = { tag: TAG, target: TARGET, viewports: {}, consoleErrors };
+  const P = createProbe({ title: 'W2058 文件预览面板 · 真机取证', shots: SHOTS, pad: 20 });
+  const evidence = { tag: TAG, target: TARGET, viewports: {}, consoleErrors: [] };
+  const fixture = await startFixture({
+    port: PORT,
+    label: 'w2058',
+    repo: REPO,
+    session: { id: 'w2058/main', title: 'W2058 取证', workspace: 'w2058', workspacePath: dirname(dirname(TARGET)) },
+    // 预览面板只读文件（不列目录）⇒ list: 'empty'
+    routes: fsRoutes({ list: 'empty' }),
+    spaFallback: true,
+  });
+  const browser = await launchProbeChrome({ port: CDP, width: 1440, height: 900 });
+  const { page } = browser;
+  P.out.consoleErrors = browser.consoleErrors;
+  evidence.consoleErrors = browser.consoleErrors;
   try {
     await page.navigate('http://127.0.0.1:' + PORT + '/');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
@@ -189,17 +111,19 @@ const main = async () => {
       await page.send('Emulation.setDeviceMetricsOverride', { width: vp.w, height: vp.h, deviceScaleFactor: 1, mobile: vp.touch });
       if (vp.touch) await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
       await sleep(700);
-      out.viewports[vp.name] = await page.eval(PROBE);
-      const shot = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-      const f = join(SHOTS, TAG + '-' + vp.name + '.png');
-      writeFileSync(f, Buffer.from(shot.data, 'base64'));
-      out.viewports[vp.name].screenshot = f;
+      evidence.viewports[vp.name] = await page.eval(PROBE);
+      evidence.viewports[vp.name].screenshot = await P.shots.save(page, TAG + '-' + vp.name + '.png');
     }
-    out.consoleErrors = consoleErrors;
-    console.log(JSON.stringify(out, null, 2));
+    console.log(JSON.stringify(evidence, null, 2));
+    // 本探针不带断言：verdict 表为空 ⇒ 汇总行是「0 条 FAIL」。run.sh / 报告靠 JSON 与截图判读。
+    await P.finish({
+      heading: 'W2058 文件预览面板 · 真机取证',
+      pad: 20,
+      trailer: ['产物：' + SHOTS + '（本探针只出证据、不带断言）'],
+    });
   } finally {
-    await chrome.close();
-    await new Promise((r) => server.close(r));
+    await browser.close();
+    await fixture.close();
   }
 };
 main().catch((e) => { console.error('probe failed:', e); process.exit(1); });

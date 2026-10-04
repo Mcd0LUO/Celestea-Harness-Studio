@@ -14,6 +14,11 @@
 //          （原型在这里有 53px 溢出视口的真 bug，本轮修掉并锚住）。
 //   ② 流式**分块追加**的原始数字 + 页脚如实（进度 == 实际画出的行数）。
 //
+// ★ W9340：脚手架（静态 fixture 服务端 / Vite 反代 / 截图落盘 / verdict 表 +
+//   PASS/FAIL 汇总 + 退出码）已收进 scripts/a11y/lib/harness.mjs —— 本文件只剩
+//   「场景 + 断言」。原先那句「请求处理器里不许有同步阻塞调用」（W9323）现在由
+//   harness 从源头上保证：它一个同步 fs 都不 import，请求回调里只有 fs/promises。
+//
 // 用法：
 //   pnpm --dir apps/web dev --port 3787 --strictPort       # 前置（本脚本只读 /src/**）
 //   W9111_CHROME=<chrome-headless-shell> node scripts/a11y/w9329-workbench-probe.mjs
@@ -21,44 +26,17 @@
 // ★ 刻意不进门禁（与 w2058-preview-probe.mjs 同一取向）：需要 Vite dev server +
 //   Chrome。确定性断言在 tests/w9329-workbench-squeeze.test.ts。
 // ============================================================================
-import http from 'node:http';
-// ★ W9323：本探针自带一个本地 HTTP 服务器，**请求处理器里不许有同步阻塞调用**
-//   （会把事件循环冻到 syscall 返回）。所以 fs 一律走 fs/promises：
-//   existsSync → statOrNull()（fs/promises 没有 exists）、readdirSync → readdir、
-//   statSync → stat、readFileSync → readFile、writeFileSync/mkdirSync → writeFile/mkdir。
-//   顶层那句 mkdir 也走 await（ESM 支持顶层 await），这样本文件**不再 import 任何
-//   同步 fs**——从源头上不可能再引入同类违规（而不是靠记得）。
-import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
-import { join, extname, normalize } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { launchChrome } from '../perf/lib/chrome.mjs';
+import { join } from 'node:path';
+import { writeFile } from 'node:fs/promises';
+import {
+  repoRoot, startFixture, fsRoutes, launchProbeChrome, createProbe, ensureDir, sleep,
+} from './lib/harness.mjs';
 
-const VITE = process.env.W9111_VITE ?? 'http://127.0.0.1:3787';
-// ★ Windows：import.meta.url 是 file:///D:/...，直接 pathname 会得到 '/D:/...'，
-//   再 join 就变成 'D:\D:\...'（ENOENT）。必须经 fileURLToPath 规范化。
-const REPO = process.env.W9329_REPO ?? fileURLToPath(new URL('../..', import.meta.url)).replace(/[\\/]$/, '');
-const WEB = join(REPO, 'apps', 'web');
+// ★ Windows：仓库根一律经 fileURLToPath 规范化（见 harness 的 repoRoot）。
+const REPO = repoRoot('W9329_REPO');
 const SHOTS = process.env.W9329_SHOTS ?? join(REPO, 'tmp', 'w9329-probe');
 const PORT = Number(process.env.W9329_PORT ?? 3829);
 const CDP = Number(process.env.W9329_CDP_PORT ?? 9482);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-await mkdir(SHOTS, { recursive: true });
-
-/** stat 的「可能不存在」形态（fs/promises 故意没有 exists）。 */
-async function statOrNull(p) {
-  try {
-    return await stat(p);
-  } catch {
-    return null;
-  }
-}
-
-const MIME = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8', '.ts': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2',
-};
 
 const TMP = join(REPO, 'tmp');
 /** 巨文件（流式 + 分块追加）。20 万行：2 万行在本地盘 <200ms 就读完，抓不到中间态。 */
@@ -67,97 +45,6 @@ const HUGE = join(TMP, 'w9329-huge.ts');
 const LONGLINE = join(TMP, 'w9329-longline.ts');
 /** 短行文件：任何面板宽都放得下 ⇒ 换行开关「不该有影响」的对照。 */
 const SHORTLINES = join(TMP, 'w9329-shortlines.ts');
-
-/** 真·行窗口读（与 apps/studio/src/handlers/fs-read.ts 同口径：1-based offset + limit）。 */
-async function readWindow(abs, offset, limit) {
-  const raw = await readFile(abs, 'utf8');
-  const lines = raw.split('\n');
-  const totalLines = raw.endsWith('\n') ? lines.length - 1 : lines.length;
-  const from = Math.max(1, offset) - 1;
-  const slice = lines.slice(from, from + limit);
-  const text = slice.join('\n') + (from + slice.length < lines.length ? '\n' : '');
-  return { text, offset, limit, totalLines, truncated: from + slice.length < lines.length };
-}
-
-function startFixture() {
-  const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-    const p = url.pathname;
-    const cors = {
-      'access-control-allow-origin': req.headers.origin ?? '*',
-      'access-control-allow-headers': 'content-type',
-      'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-    };
-    const json = (code, obj) => {
-      const b = JSON.stringify(obj);
-      res.writeHead(code, { ...cors, 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(b) });
-      res.end(b);
-    };
-    if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
-
-    if (p === '/api/fs/list') {
-      const dir = url.searchParams.get('path') ?? '';
-      const dirStat = await statOrNull(dir);
-      if (dirStat === null || !dirStat.isDirectory()) return json(200, { path: dir, entries: [], truncated: false, error: 'not found' });
-      const dirents = await readdir(dir, { withFileTypes: true });
-      const entries = [];
-      for (const e of dirents) {
-        if (!e.isFile()) continue;
-        const s = await statOrNull(join(dir, e.name));
-        if (s === null) continue;
-        entries.push({ name: e.name, type: 'file', size: s.size, mtime: new Date(s.mtimeMs).toISOString() });
-      }
-      return json(200, { path: dir, entries, truncated: false });
-    }
-    if (p === '/api/fs/read') {
-      const abs = url.searchParams.get('path') ?? '';
-      const absStat = await statOrNull(abs);
-      if (absStat === null || !absStat.isFile()) return json(200, { kind: 'text', text: '', offset: 1, limit: 0, totalLines: 0, truncated: false, error: 'ENOENT' });
-      const offset = Number(url.searchParams.get('offset') ?? '1') || 1;
-      const limit = Number(url.searchParams.get('limit') ?? '2000') || 2000;
-      return json(200, { kind: 'text', ...(await readWindow(abs, offset, limit)) });
-    }
-
-    if (p === '/api/health') return json(200, { ok: true, name: 'w9329', model: 'w9329', base_url: 'http://127.0.0.1:' + PORT, bind: '127.0.0.1:' + PORT, capabilities: {} }, cors);
-    if (p === '/api/status') return json(200, { model: 'w9329', reasoning_effort: null, steps: 0, tokens_per_sec: 0, context_usage: { used: 0, window: 1000000, ratio: 0 }, usage: {}, session: 'w9329/main', busy: false }, cors);
-    if (p === '/api/sessions') return json(200, { sessions: [{ id: 'w9329/main', title: 'W9329 取证', kind: 'session', busy: false, active: true, events: 0, workspace: 'w9329' }], active_session: 'w9329/main' }, cors);
-    if (p === '/api/workspaces') return json(200, { workspaces: [{ name: 'w9329', path: REPO, sessions: 1 }], active_session: 'w9329/main' }, cors);
-    if (p === '/api/events') { res.writeHead(200, { ...cors, 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' }); return; }
-    for (const q of ['/api/config', '/api/providers', '/api/prompts', '/api/tools', '/api/plugins', '/api/permissions/presets', '/api/questions']) {
-      if (p === q) return json(200, { ok: true, model: 'w9329', available: { models: [], efforts: [] }, providers: [], prompts: [], tools: [], plugins: [], presets: [], questions: [], disabled: [], messages: [] }, cors);
-    }
-    if (p === '/auth/check') return json(200, { ok: true, username: 'w9329' }, cors);
-    if (p === '/api/usage/ledger') return json(200, { ok: true, entries: [] }, cors);
-    const mMsg = /^\/api\/sessions\/(.+)\/messages$/.exec(p);
-    if (mMsg) return json(200, { ok: true, session: decodeURIComponent(mMsg[1]), messages: [] }, cors);
-    const mCtx = /^\/api\/sessions\/(.+)\/context$/.exec(p);
-    if (mCtx) return json(200, { ok: true, context: [] }, cors);
-
-    if (p.startsWith('/src/') || p.startsWith('/@') || p.startsWith('/node_modules/')) {
-      try {
-        const up = await fetch(VITE + p + url.search, { headers: { origin: 'http://127.0.0.1:' + PORT } });
-        const body = Buffer.from(await up.arrayBuffer());
-        res.writeHead(up.status, { ...cors, 'content-type': up.headers.get('content-type') ?? 'text/javascript; charset=utf-8' });
-        return res.end(body);
-      } catch (err) { res.writeHead(502, cors); return res.end('vite proxy failed: ' + String(err)); }
-    }
-    const rel = p === '/' ? '/index.html' : p;
-    const full = join(WEB, normalize(rel).replace(/^([.][.][/\\])+/, ''));
-    const fullStat = await statOrNull(full);
-    if (fullStat !== null && fullStat.isFile()) {
-      res.writeHead(200, { ...cors, 'content-type': MIME[extname(full)] ?? 'application/octet-stream' });
-      return res.end(await readFile(full));
-    }
-    const indexHtml = join(WEB, 'index.html');
-    const indexStat = await statOrNull(indexHtml);
-    if (indexStat !== null && indexStat.isFile()) {
-      res.writeHead(200, { ...cors, 'content-type': MIME['.html'] });
-      return res.end(await readFile(indexHtml));
-    }
-    res.writeHead(404, cors); res.end('not found');
-  });
-  return new Promise((r) => server.listen(PORT, '127.0.0.1', () => r(server)));
-}
 
 /**
  * 页内探针：一次读回全部几何量。
@@ -215,11 +102,14 @@ const PROBE = `(function () {
   };
 })()`;
 
-/** 小工具：从探针结果里取出并判定一条后果。 */
-const verdict = (ok, detail) => ({ pass: ok === true, detail });
+// verdict 表 / 汇总 / 退出码都在 harness 里（判据、阈值、文案仍归本探针）。
+const P = createProbe({ title: 'W9329 真机取证', shots: SHOTS, pad: 22 });
+const verdict = P.verdict;
 
 const main = async () => {
-  await mkdir(TMP, { recursive: true });
+  const out = P.out;
+  out.stream = [];
+  await ensureDir(TMP);
   // 20 万行巨文件（分块追加必须跨越可观测的时间窗）
   await writeFile(HUGE, Array.from({ length: 200000 }, (_, i) => 'const v' + i + ' = "line ' + i + ' ' + 'x'.repeat(60) + '";').join('\n') + '\n', 'utf8');
   // 200 字符长行（窄容器放不下 ⇒ 折行可判）
@@ -227,14 +117,20 @@ const main = async () => {
   // 短行文件（任何宽度都放得下 ⇒ 换行**不该**有影响）
   await writeFile(SHORTLINES, Array.from({ length: 40 }, (_, i) => 'const a' + i + ' = ' + i + ';').join('\n') + '\n', 'utf8');
 
-  const server = await startFixture();
-  const chrome = await launchChrome({ port: CDP, width: 1440, height: 900, executablePath: process.env.W9111_CHROME });
-  const { page } = chrome;
-  const consoleErrors = [];
-  page.on('Runtime.consoleAPICalled', (p) => { if (p.type === 'error') consoleErrors.push((p.args ?? []).map((a) => a.value ?? a.description ?? a.type).join(' ')); });
-  page.on('Runtime.exceptionThrown', (p) => { consoleErrors.push('EXCEPTION ' + (p.exceptionDetails?.exception?.description ?? p.exceptionDetails?.text ?? '')); });
+  const fixture = await startFixture({
+    port: PORT,
+    label: 'w9329',
+    repo: REPO,
+    session: { title: 'W9329 取证' },
+    // 真文件系统的两个端点（工作台的文件面板靠它们）
+    routes: fsRoutes({ list: 'files' }),
+    spaFallback: true,
+  });
+  const browser = await launchProbeChrome({ port: CDP, width: 1440, height: 900 });
+  const { page } = browser;
+  const consoleErrors = browser.consoleErrors;
+  out.consoleErrors = consoleErrors;
   const ev = (s) => page.eval(s);
-  const out = { consequences: {}, raw: {}, stream: [], consoleErrors };
 
   /** 打开面板并载入一个文件（走真入口：面板 data + notifyPanels）。 */
   const openFile = async (abs) => {
@@ -333,8 +229,7 @@ const main = async () => {
         '长行折成 ' + longOn.firstLineHeight + 'px 高时，行号顶边与行顶边相差 ' + longOn.lineNoTopDelta + 'px（≈0 = 贴第一视觉行）',
       ),
     };
-    const shot = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-    await writeFile(join(SHOTS, 'wrap-on-narrow.png'), Buffer.from(shot.data, 'base64'));
+    await P.shots.save(page, 'wrap-on-narrow.png');
 
     // 3c 短行文件在**宽面板**下：开/关行高必须**相同**（换行不该有副作用）
     await setWidth(900);
@@ -379,8 +274,7 @@ const main = async () => {
       footMatch !== null && Number(footMatch[1]) === last.lineCount && last.lastLineNo === last.lineCount && Number(footMatch[2]) === 200000,
       '页脚「' + last.footText + '」；DOM 行数 ' + last.lineCount + '、末行号 ' + last.lastLineNo + '（三者必须一致 —— 漂移会让页脚比总数还大）',
     );
-    const shot2 = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-    await writeFile(join(SHOTS, 'wide-stream.png'), Buffer.from(shot2.data, 'base64'));
+    await P.shots.save(page, 'wide-stream.png');
 
     // =====================================================================
     // ⑤ 窄屏诚实降级：正文不被挤到 0 + 面板整块在视口内（原型在这里溢出 53px）
@@ -403,17 +297,14 @@ const main = async () => {
         '降级=' + narrow.overlay + '；#main ' + narrow.mainWidth + 'px（≥360 = 仍可读）；面板 x=' + (narrow.panelRect ? narrow.panelRect.x : '?') + ' right=' + (narrow.panelRect ? narrow.panelRect.right : '?') + ' / 视口 ' + narrow.viewport.w + '（整块在视口内）',
       ),
     };
-    const shot3 = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-    await writeFile(join(SHOTS, 'narrow-overlay.png'), Buffer.from(shot3.data, 'base64'));
+    await P.shots.save(page, 'narrow-overlay.png');
 
     out.consoleErrors = consoleErrors;
-    const failed = Object.entries(out.consequences).filter(([, v]) => !v.pass);
-    out.summary = { total: Object.keys(out.consequences).length, failed: failed.map(([k]) => k) };
-    console.log(JSON.stringify(out, null, 2));
-    if (failed.length > 0) process.exitCode = 3;
+    out.summary = P.summary();
+    await P.finish({ printJson: true, pad: 22, exitCodeOnFail: 3 });
   } finally {
-    await chrome.close();
-    await new Promise((r) => server.close(r));
+    await browser.close();
+    await fixture.close();
   }
 };
 main().catch((e) => { console.error('probe failed:', e); process.exit(1); });
