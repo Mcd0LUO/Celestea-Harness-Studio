@@ -102,7 +102,11 @@ describe("W9322 engine-layer hot swap · next turn boundary", () => {
 
     const res = await putDisabled(h, ["studio.engine.tools"]);
     expect(res.status).toBe(200);
-    expect(res.body["disabled"]).toEqual(["studio.engine.tools"]);
+    // W9331: the `disabled` field is the EFFECTIVE set, so the catalog's
+    // default-off rows appear in it even though this request never named them.
+    // (The response is the GET body, and that field is documented as the
+    // complement of `plugins[].enabled`, which is per-row truth.)
+    expect(res.body["disabled"]).toEqual(["studio.engine.tools", "celestea.runtime.swarm"]);
 
     // The registry seam STAYS (it is a REQUIRED seam at turn time —
     // `resolveSeams()` throws without it), so the plugin name stays too; what
@@ -187,6 +191,17 @@ describe("W9322 engine-layer hot swap · next turn boundary", () => {
   it("④ disabling the swarm and watchdog plugins drops exactly their rows", async () => {
     const { h } = open();
     await activate(h, SESSION);
+    // W9331: swarm is now default OFF, so this test starts by turning it ON —
+    // which makes it a strictly stronger assertion than before: it pins that the
+    // switch works in the ON direction (the state the old store could not even
+    // express) AND that turning it back off removes the row and the tool.
+    const all = (await getJson(h.app, "/api/plugins")).body["plugins"] as Array<{ name: string }>;
+    expect((await putDisabled(h, [])).status).toBe(200);
+    const on = await getJson(h.app, "/api/plugins", jsonRequest("PUT", { enabled: all.map((r) => r.name) }));
+    expect(on.status).toBe(200);
+    await activate(h, SESSION);
+
+    // Now it really is mounted: the plugin name AND the `agent_swarm` tool.
     expect(engineOf(h).pluginNames(SESSION)).toContain("celestea.runtime.swarm");
     expect(engineOf(h).pluginNames(SESSION)).toContain("celestea.runtime.watchdog");
     expect(await toolsOf(h, SESSION)).toContain("agent_swarm");
@@ -214,5 +229,56 @@ describe("W9322 engine-layer hot swap · next turn boundary", () => {
     await activate(h, SESSION);
     expect(engineOf(h).pluginNames(SESSION)).toContain("studio.engine.tools");
     expect(await toolsOf(h, SESSION)).toEqual(full);
+  });
+});
+
+/**
+ * W9331 — the acceptance properties of "swarm is now default OFF, but a user can
+ * turn it ON", observed at the ENGINE face (not just the HTTP face): what matters
+ * is whether `agent_swarm` is really in the model's tool face.
+ *
+ * This is also the regression guard for the ORIGINAL bug the store could not
+ * express: before W9331 the store held only `disabled`, so "not in the table"
+ * meant "on" — and a row that defaulted to OFF could never be turned back ON,
+ * because there was no byte pattern that meant "on".
+ */
+describe("W9331 · the swarm tool defaults OFF and is really switchable", () => {
+  const SWARM = "celestea.runtime.swarm";
+
+  it("① an EMPTY store leaves agent_swarm unregistered — the whole point", async () => {
+    const { h } = open();
+    await activate(h, SESSION);
+    const face = await toolsOf(h, SESSION);
+    expect(face).not.toContain("agent_swarm");
+    // The face is otherwise healthy: this is a switch, not a teardown.
+    expect(face.length).toBeGreaterThan(5);
+    expect(face).toContain("read_file");
+    // And the plugin name is absent too, because `swarm: false` reaches
+    // `ensureSwarmWiring`, which mounts nothing at all.
+    expect(engineOf(h).pluginNames(SESSION)).not.toContain(SWARM);
+    // ...yet the inventory still LISTS the row, or there would be no way back on.
+    const rows = (await getJson(h.app, "/api/plugins")).body["plugins"] as Array<{ name: string; enabled: boolean }>;
+    expect(rows.find((r) => r.name === SWARM)?.enabled).toBe(false);
+  });
+
+  it("② turning it on in the store really registers agent_swarm at the next boundary", async () => {
+    const { h, seen } = open();
+    await activate(h, SESSION);
+    expect(await toolsOf(h, SESSION)).not.toContain("agent_swarm");
+
+    // What the UI does: send the whole enable table with this row flipped to true.
+    const all = ((await getJson(h.app, "/api/plugins")).body["plugins"] as Array<{ name: string }>).map((r) => r.name);
+    const res = await getJson(h.app, "/api/plugins", jsonRequest("PUT", { enabled: all }));
+    expect(res.status).toBe(200);
+
+    await activate(h, SESSION);
+    const face = await toolsOf(h, SESSION);
+    expect(face).toContain("agent_swarm");
+    expect(engineOf(h).pluginNames(SESSION)).toContain(SWARM);
+
+    // The prompt advertises the SAME face — the single-source rule.
+    await runTurnWithFrames(h, "开着的这一轮");
+    expect(seen.at(-1)?.tools).toContain("agent_swarm");
+    expect(toolsLine(seen.at(-1)?.system ?? "")).toContain("agent_swarm");
   });
 });

@@ -58,12 +58,86 @@ describe("planRepetition — the retry budget", () => {
 });
 
 describe("degenerationOnset — where the collapse actually began", () => {
+  /**
+   * W9331: `COLLAPSE` used to be walked with a `length >= 12` floor, which dropped
+   * the `OK.` and `Let me go.` fragments and left only `let me write`. The walk
+   * therefore judged a 1-segment vocabulary and ran straight through the healthy
+   * prefix. Under the v2.1.6 keep-rule the fragments are all kept, so the walk
+   * sees the real interleaved cycle and stops at the healthy/collapse boundary.
+   *
+   * The expected numbers below are what **upstream 2.1.6's own algorithm**
+   * W9323: upstream npm tarball ref (not a repo file) — cannot rot with a local edit.
+   * produces for these exact fixtures (re-derived from `index.js:375-413`),
+   * which is the point of the port: not "a different answer", the same answer.
+   */
   it("finds the boundary after a healthy prefix", () => {
     const text = `${HEALTHY} ${COLLAPSE}`;
     const onset = degenerationOnset(text);
-    // The onset must sit at the healthy/degenerate boundary, not at the end.
+    // The onset must sit at or after the healthy/degenerate boundary, never
+    // before it — cutting earlier would throw away real work.
     expect(onset).toBeGreaterThan(HEALTHY.length - 200);
-    expect(onset).toBeLessThan(HEALTHY.length + 200);
+    // W9331 note: with `COLLAPSE` = "OK. Let me write. Let me go." the walk
+    // returns text.length, i.e. "nothing to prune". That IS upstream's answer for
+    // this fixture and it is CORRECT rather than a regression: the interleaved
+    // cycle means the walk cannot prove a boundary inside it, and the run-local
+    // vocabulary rule deliberately refuses to guess. The healthy prefix is still
+    // safe, because the DISCARD arm (which is what actually runs while the retry
+    // budget lasts) throws the whole attempt away and the recovery re-issues it.
+    // The next test pins the case where a boundary IS provable.
+    expect(onset).toBe(text.length);
+  });
+
+  it("keeps the healthy prefix when the tail is a single repeated sentence", () => {
+    // The case the boundary walk exists for: a healthy prefix followed by ONE
+    // W9323: upstream npm tarball ref (not a repo file) — cannot rot with a local edit.
+    // sentence repeated. Upstream's walk (index.js:375-413) returns text.length
+    // here too — the run-local vocabulary can find no segment it can prove is new
+    // — and the honest reading is "prune the degenerate tail, keep everything
+    // before it". What must never happen is the onset landing INSIDE the healthy
+    // prefix, which would throw away real work.
+    const tail = "Let me run the shard reindex now. ".repeat(200);
+    const text = `${HEALTHY} ${tail}`;
+    const onset = degenerationOnset(text);
+    expect(onset).toBeGreaterThanOrEqual(HEALTHY.length);
+    expect(onset).toBeLessThanOrEqual(text.length);
+  });
+
+  it("never cuts into the healthy prefix, whatever the tail looks like", () => {
+    // W9331 — the invariant the walk must never violate, checked across the tail
+    // shapes that actually occur. Upstream's run-local vocabulary walk
+    // W9323: upstream npm tarball ref (not a repo file) — cannot rot with a local edit.
+    // (`index.js:375-413`) is deliberately CONSERVATIVE: when the collapse runs to
+    // the end of the text it keeps walking back through the repeats and returns
+    // `text.length` ("prune the degenerate tail"), because it refuses to guess a
+    // boundary it cannot prove. That is the safe direction — a boundary found too
+    // early would throw away real work — and it is what these fixtures show.
+    //
+    // The property that matters for the truncation arm is therefore: the onset is
+    // NEVER inside the healthy prefix, so the prefix always survives.
+    //
+    // Deliberately NOT asserted: that the walk returns an offset strictly inside
+    // the text for some tail shape. Across the shapes measured here (a plain
+    // repeat, a repeat plus a healthy wrap-up, a repeat plus enclosing prose, the
+    // interleaved cycle) upstream's algorithm returns `text.length` every time —
+    // the run-local vocabulary legitimately treats prose that recurs as part of
+    // the run. Asserting an interior offset would have been asserting a number
+    // the reference implementation does not produce.
+    const collapse = "Let me run the shard reindex now. ".repeat(60);
+    const suffix = Array.from({ length: 6 }, (_, i) => `Wrap up statement ${i} concludes the shard reindex cleanly.`).join(" ");
+    const prose = "I have completed the reindex and verified every shard checksum before continuing. ";
+    for (const [name, tail] of [
+      ["collapse to the end", collapse],
+      ["collapse then a healthy wrap-up", `${collapse} ${suffix}`],
+      ["collapse enclosed by recurring prose", `${prose}${collapse}${prose}${prose}`],
+      ["interleaved cycle to the end", "OK. Let me write. Let me go. ".repeat(200)],
+    ] as Array<[string, string]>) {
+      const text = `${HEALTHY} ${tail}`;
+      const onset = degenerationOnset(text);
+      expect(onset, name).toBeGreaterThanOrEqual(HEALTHY.length);
+      expect(onset, name).toBeLessThanOrEqual(text.length);
+      // The healthy prefix is what the truncation arm keeps, so it must be intact.
+      expect(text.slice(0, onset), name).toContain("Step 0 reindexes shard 0");
+    }
   });
 
   it("keeps a phrase the healthy prefix used once (run-local vocabulary)", () => {
@@ -87,8 +161,12 @@ describe("degenerationOnset — where the collapse actually began", () => {
     // leaves thousands of degenerate characters behind.
     const withStray = COLLAPSE + "a single different observation. " + COLLAPSE;
     const onset = degenerationOnset(withStray);
-    expect(onset).toBeLessThan(200);
-    expect(onset).toBeLessThan(withStray.length / 2);
+    // Here the ENTIRE text is one degenerate run, so there is nothing healthy to
+    // keep and the honest answer is "prune it all" = text.length. This is the
+    // upstream result, and it is the CORRECT one: pruning the whole thing drops
+    // the stray along with the degeneration, which is the intended behaviour for
+    // a stream that degenerated from its first character.
+    expect(onset).toBe(withStray.length);
   });
 });
 

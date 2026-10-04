@@ -435,7 +435,11 @@ describe("GET /api/sessions/{id}/context over the real engine", () => {
     // W-swarm: 22 -> 23 — `agent_swarm`. It only became VISIBLE once session-compose
     // actually passed the wiring (before that the tool existed but was never mounted,
     // and the count stayed 22 — the live-engine test caught that, not this one).
-    expect(toolViews).toHaveLength(23);
+    // W9331: 23 -> 22 — `agent_swarm` is now OFF by default (the swarm plugin is
+    // mounted by `compose()`, but `swarm: false` reaches `ensureSwarmWiring`, which
+    // registers no tool). The face here is the DEFAULT one, so the tool is absent;
+    // `plugin-hotswap.test.ts` ④ turns it on and asserts it appears.
+    expect(toolViews).toHaveLength(22);
     expect(tools).toContain("ask_user_question");
     expect(tools).toContain("read_image");
     for (const view of toolViews) {

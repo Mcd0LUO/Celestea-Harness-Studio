@@ -16,6 +16,7 @@ import { compose } from "./compose.js";
 import { ComposeError } from "./errors.js";
 import { sanitizeConfigJson, sanitizeProfile } from "./sanitize.js";
 import { fakeLlm, fakeLoop, memoryLog, memorySessionPlugin, recordingRegistryPlugin, testProfile } from "./fakes.test-util.js";
+import { REPEAT_GUARD_PLUGIN_NAME } from "./repeat-guard-mount.js";
 import { WATCHDOG_PLUGIN_NAME } from "./watchdog-mount.js";
 
 /** A plugin that records its own mount and provides `value` under `token`. */
@@ -55,7 +56,9 @@ describe("compose", () => {
     });
     expect(order).toEqual(["p1", "p2"]);
     expect(runtime.ctx.get<string>("test.marker")).toBe("second");
-    expect(runtime.pluginNames).toEqual(["p1", "p1", "p2"]);
+    // W9331: the repetition guard mounts unconditionally (it is not part of the
+    // worker wiring), so it is named here even with `workers: false`.
+    expect(runtime.pluginNames).toEqual(["p1", "p1", "p2", REPEAT_GUARD_PLUGIN_NAME]);
   });
 
   it("mounts the default worker wiring last so its three tools land in the registry", () => {
@@ -66,10 +69,14 @@ describe("compose", () => {
       workers: { tsvPath: null },
     });
     // W740: the watchdog mounts LAST, after the workers plugin it adjudicates.
+    // W9331: the repetition guard sits between them — it is independent of the
+    // worker registry, and the watchdog stays last because it may only adjudicate
+    // rows a fully mounted registry already owns.
     expect(runtime.pluginNames).toEqual([
       "test.session",
       "test.tools",
       "celestea.runtime.workers",
+      REPEAT_GUARD_PLUGIN_NAME,
       WATCHDOG_PLUGIN_NAME,
     ]);
     for (const name of WORKER_NAMES) expect(tools.registered).toContain(name);

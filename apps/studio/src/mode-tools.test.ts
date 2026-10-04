@@ -28,9 +28,21 @@ import type { OfflineStep } from "./runtime/offline-llm.js";
 
 // W1533: 18 -> 19 (`update_tasks` joins both faces -- it is in the execution keep list).
 // W1900: 19 -> 22 -- the compression trio is in the keep list, so BOTH faces grow.
-const EXECUTION_FACE = ["agent_swarm", "browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"];
-const STANDARD_FACE = ["agent_swarm", "ask_user_question", "browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "list_dir", "load_skill", "process_control", "read_file", "read_image", "remember", "run_code", "run_shell", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status", "write_file"];
+//
+// W9331: `agent_swarm` is ABSENT from both, because the swarm plugin is default OFF
+// — NOT because the execution mode folds it. It is in the execution KEEP list
+// (`packages/tools/src/exposure.ts`), so the `W9331` case at the bottom of this file
+// turns the plugin on and asserts the tool then appears in BOTH faces. That is the
+// distinction worth keeping visible: the fold rule never changed, only the default
+// registration did, and a reader must not conclude from these two arrays that
+// execution mode folds `agent_swarm`.
+const DEFAULT_EXECUTION_FACE = ["browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"];
+const DEFAULT_STANDARD_FACE = ["ask_user_question", "browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "list_dir", "load_skill", "process_control", "read_file", "read_image", "remember", "run_code", "run_shell", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status", "write_file"];
 const EXECUTION_MARK = "Execution mode — prefer one program over many round trips";
+
+/** W9331: the swarm capability, named once so the case below cannot drift from it. */
+const SWARM_TOOL = "agent_swarm";
+const SWARM_PLUGIN = "celestea.runtime.swarm";
 
 const harnesses: StudioHarness[] = [];
 
@@ -72,18 +84,18 @@ describe("W791 P1 mode tool face (real engine)", () => {
     const h = engine();
     await activate(h, "sample-ws/std");
     await activate(h, "sample-ws/exec");
-    expect(await toolsOf(h, "sample-ws/std")).toEqual(STANDARD_FACE);
-    expect(await toolsOf(h, "sample-ws/exec")).toEqual(EXECUTION_FACE);
+    expect(await toolsOf(h, "sample-ws/std")).toEqual(DEFAULT_STANDARD_FACE);
+    expect(await toolsOf(h, "sample-ws/exec")).toEqual(DEFAULT_EXECUTION_FACE);
     // The COMPOSED INSTANCE — the registry the agent loop really dispatches
     // through — carries the same face. `?session=` is derived from the mode, so
     // this is the independent half of M7: the wiring itself folded.
     const faceOf = (id: string): string[] => h.runtime.sessionContext(id).tools.map((t) => t.name).sort();
-    expect(faceOf("sample-ws/std")).toEqual(STANDARD_FACE);
-    expect(faceOf("sample-ws/exec")).toEqual(EXECUTION_FACE);
+    expect(faceOf("sample-ws/std")).toEqual(DEFAULT_STANDARD_FACE);
+    expect(faceOf("sample-ws/exec")).toEqual(DEFAULT_EXECUTION_FACE);
     // A session with no declared mode reads as standard (K8).
     await activate(h, "sample-ws/plain");
-    expect(await toolsOf(h, "sample-ws/plain")).toEqual(STANDARD_FACE);
-    expect(faceOf("sample-ws/plain")).toEqual(STANDARD_FACE);
+    expect(await toolsOf(h, "sample-ws/plain")).toEqual(DEFAULT_STANDARD_FACE);
+    expect(faceOf("sample-ws/plain")).toEqual(DEFAULT_STANDARD_FACE);
   });
 
   it("M9: ?session= answers exactly the set the config prompt renders for that session", async () => {
@@ -97,15 +109,19 @@ describe("W791 P1 mode tool face (real engine)", () => {
     }
     // The FOCUSED session is the default reading: focus the execution one last.
     await activate(h, "sample-ws/exec");
-    expect(await toolsOf(h, null)).toEqual(EXECUTION_FACE);
-    expect(await renderedTools(h)).toEqual(EXECUTION_FACE);
+    expect(await toolsOf(h, null)).toEqual(DEFAULT_EXECUTION_FACE);
+    expect(await renderedTools(h)).toEqual(DEFAULT_EXECUTION_FACE);
   });
 
   it("M10: the switch rewrites session.json, recomposes at the NEXT turn and spares other sessions", async () => {
     const h = engine();
     await activate(h, "sample-ws/plain");
     await activate(h, "sample-ws/std");
-    expect((await getJson(h.app, "/api/tools?session=sample-ws%2Fplain")).body["tools"]).toHaveLength(23);
+    // W9331: 23 -> 22 -- `agent_swarm` is no longer registered by default, so the
+    // standard face is one name shorter. Asserted as a COUNT here on purpose: this
+    // line is what catches a tool appearing or vanishing while the SET assertions
+    // elsewhere still line up.
+    expect((await getJson(h.app, "/api/tools?session=sample-ws%2Fplain")).body["tools"]).toHaveLength(22);
 
     const res = await getJson(h.app, "/api/sessions/sample-ws%2Fplain/mode", jsonRequest("POST", { mode: "execution" }));
     expect(res.status).toBe(200);
@@ -116,19 +132,19 @@ describe("W791 P1 mode tool face (real engine)", () => {
     // the next observation/composition of an IDLE session adopts the new mode —
     // the other session never changed. A turn in flight is what the 409 guard
     // refuses outright, so no running turn can ever be re-pointed mid-flight.
-    expect(await toolsOf(h, "sample-ws/plain")).toEqual(EXECUTION_FACE);
-    expect(await toolsOf(h, "sample-ws/std")).toEqual(STANDARD_FACE);
+    expect(await toolsOf(h, "sample-ws/plain")).toEqual(DEFAULT_EXECUTION_FACE);
+    expect(await toolsOf(h, "sample-ws/std")).toEqual(DEFAULT_STANDARD_FACE);
 
     // Its prompt follows the mode too (one assembly, two readers: S1/S2).
     await activate(h, "sample-ws/plain");
     expect(String((await getJson(h.app, "/api/config")).body["system_prompt"])).toContain(EXECUTION_MARK);
-    expect(await renderedTools(h)).toEqual(EXECUTION_FACE);
+    expect(await renderedTools(h)).toEqual(DEFAULT_EXECUTION_FACE);
 
     // Switching BACK restores the whole face.
     const back = await getJson(h.app, "/api/sessions/sample-ws%2Fplain/mode", jsonRequest("POST", { mode: "standard" }));
     expect(back.body["mode"]).toBe("standard");
     await activate(h, "sample-ws/plain");
-    expect(await toolsOf(h, "sample-ws/plain")).toEqual(STANDARD_FACE);
+    expect(await toolsOf(h, "sample-ws/plain")).toEqual(DEFAULT_STANDARD_FACE);
   });
 
   it("M10: the switch keeps title/model/prompt and rejects an unknown mode or session", async () => {
@@ -175,10 +191,70 @@ describe("W791 P1 mode tool face (real engine)", () => {
     await waitIdle(h);
     // The folded tools are gone from the direct face but still registered (M8's
     // program path); the log therefore keeps naming them.
-    expect(await toolsOf(h, "sample-ws/exec")).toEqual(EXECUTION_FACE);
+    expect(await toolsOf(h, "sample-ws/exec")).toEqual(DEFAULT_EXECUTION_FACE);
     // What the provider was ACTUALLY sent — not a re-derivation of the face.
     const sent = requests.filter((r) => r.tools.some((t) => t.name === "run_code" || t.name === "read_file"));
     expect(sent.length).toBeGreaterThan(0);
-    expect(sent[0]?.tools.map((t) => t.name).sort()).toEqual(EXECUTION_FACE);
+    expect(sent[0]?.tools.map((t) => t.name).sort()).toEqual(DEFAULT_EXECUTION_FACE);
+  });
+});
+
+/**
+ * W9331 — the swarm capability's default, asserted as a CONSEQUENCE instead of being
+ * dropped from the frozen faces above.
+ *
+ * `agent_swarm` used to sit in BOTH arrays because the swarm plugin was on by
+ * default. It is now off by default, so both arrays describe the default state, and
+ * this case asserts what happens when the plugin is turned ON: the tool appears in
+ * the standard face **and survives the execution fold**, because it is in the
+ * execution KEEP list. That second half is the part worth pinning — it proves the
+ * fold rule is untouched and that the capability did not quietly become
+ * unreachable in execution mode.
+ */
+describe("W9331 · the swarm tool is default OFF, and the fold rule is unchanged", () => {
+  /** A harness whose PLUGIN store has the swarm plugin explicitly ON. */
+  function swarmEngine(): StudioHarness {
+    const h = makeEngineHarness({
+      sessions: { std: [], exec: [], plain: [] },
+      meta: { std: { mode: "standard" }, exec: { mode: "execution" } },
+      rawFiles: { "plugins.json": JSON.stringify({ version: 2, disabled: [], enabled: [SWARM_PLUGIN], updated_at: 0 }) },
+    });
+    harnesses.push(h);
+    return h;
+  }
+
+  it("by default NEITHER face offers agent_swarm (the plugin is default OFF)", async () => {
+    const h = engine();
+    await activate(h, "sample-ws/std");
+    await activate(h, "sample-ws/exec");
+    const std = await toolsOf(h, "sample-ws/std");
+    const exec = await toolsOf(h, "sample-ws/exec");
+    expect(std).not.toContain(SWARM_TOOL);
+    expect(exec).not.toContain(SWARM_TOOL);
+    // The whole sets match the frozen defaults, so this is a one-name statement and
+    // not a symptom of something bigger having drifted.
+    expect(std).toEqual([...DEFAULT_STANDARD_FACE].sort());
+    expect(exec).toEqual([...DEFAULT_EXECUTION_FACE].sort());
+  });
+
+  it("with the plugin ON it appears in BOTH faces — execution KEEPS it, it does not fold it", async () => {
+    const h = swarmEngine();
+    // Activated first, exactly like M7/M9: `?session=` derives the face from the
+    // session's own mode, and an unactivated session does not answer for it.
+    await activate(h, "sample-ws/std");
+    await activate(h, "sample-ws/exec");
+    const std = await toolsOf(h, "sample-ws/std");
+    const exec = await toolsOf(h, "sample-ws/exec");
+
+    expect(std).toContain(SWARM_TOOL);
+    expect(exec).toContain(SWARM_TOOL);
+    // Exactly the default faces plus the one tool: the fold removed nothing extra.
+    expect(std).toEqual([...DEFAULT_STANDARD_FACE, SWARM_TOOL].sort());
+    expect(exec).toEqual([...DEFAULT_EXECUTION_FACE, SWARM_TOOL].sort());
+
+    // The prompt renders the SAME set for the FOCUSED session — the single-source
+    // rule, checked in the state where the name is actually present.
+    await activate(h, "sample-ws/exec");
+    expect(await renderedTools(h)).toEqual([...DEFAULT_EXECUTION_FACE, SWARM_TOOL].sort());
   });
 });

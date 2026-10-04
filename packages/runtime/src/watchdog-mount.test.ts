@@ -15,6 +15,7 @@ import { definePlugin } from "@celestea/core";
 import { WORKER_REGISTRY_SERVICE, WorkerRegistry, utcNow } from "@celestea/workers";
 import { compose } from "./compose.js";
 import { memorySessionPlugin, testProfile } from "./fakes.test-util.js";
+import { REPEAT_GUARD_PLUGIN_NAME } from "./repeat-guard-mount.js";
 import {
   WATCHDOG_ENV,
   WATCHDOG_GRACE_ENV,
@@ -113,7 +114,9 @@ describe("composed watchdog", () => {
     writeFileSync(join(f.dir, "filler"), "", "utf8"); // results dir stays absent on purpose
     const runtime = composeWithWatchdog(f, { intervalMs: 1_000, graceMs: 0, maxRetries: 0 });
 
-    expect(runtime.pluginNames).toEqual(["test.session", "test.workers", WATCHDOG_PLUGIN_NAME]);
+    // W9331: the repetition guard is named too — it mounts independently of the
+    // worker registry, so switching the watchdog off does not affect it.
+    expect(runtime.pluginNames).toEqual(["test.session", "test.workers", REPEAT_GUARD_PLUGIN_NAME, WATCHDOG_PLUGIN_NAME]);
     expect(runtime.ctx.get(WORKER_REGISTRY_SERVICE)).toBe(f.registry);
     const watchdog = runtime.watchdog;
     expect(watchdog).not.toBeNull();
@@ -162,7 +165,9 @@ describe("composed watchdog", () => {
     expect(live.watchdog).not.toBeNull();
     expect(off.watchdog).toBeNull();
     expect(disabled.watchdog).toBeNull();
-    expect(disabled.pluginNames).toEqual(["test.session", "test.workers"]);
+    // The WATCHDOG is what is absent here; the repetition guard is a different
+    // plugin and is still named (W9331).
+    expect(disabled.pluginNames).toEqual(["test.session", "test.workers", REPEAT_GUARD_PLUGIN_NAME]);
     expect(disabled.ctx.get("celestea.workers.Watchdog")).toBeUndefined();
     // `workers: false` has no registry to sweep, so there is no watchdog either.
     const unwired = compose({ profile: testProfile(), plugins: [memorySessionPlugin()], workers: false });

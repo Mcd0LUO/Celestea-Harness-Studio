@@ -15,6 +15,7 @@ import { definePlugin } from "@celestea/core";
 import { WORKER_REGISTRY_SERVICE, WorkerRegistry } from "@celestea/workers";
 import { compose } from "./compose.js";
 import { memorySessionPlugin, testProfile } from "./fakes.test-util.js";
+import { REPEAT_GUARD_PLUGIN_NAME } from "./repeat-guard-mount.js";
 import { WATCHDOG_PLUGIN_NAME } from "./watchdog-mount.js";
 
 const roots: string[] = [];
@@ -41,7 +42,8 @@ describe("P2-1: autostart:false still mounts the watchdog", () => {
     });
     const watchdog = runtime.watchdog;
     expect(watchdog).not.toBeNull();
-    expect(runtime.pluginNames).toEqual(["test.session", "test.workers", WATCHDOG_PLUGIN_NAME]);
+    // W9331: the repetition guard is named as well (it mounts independently).
+    expect(runtime.pluginNames).toEqual(["test.session", "test.workers", REPEAT_GUARD_PLUGIN_NAME, WATCHDOG_PLUGIN_NAME]);
     expect(runtime.ctx.get("celestea.workers.Watchdog")).toBe(watchdog);
     expect(watchdog!.running).toBe(false);
     expect(vi.getTimerCount()).toBe(0);

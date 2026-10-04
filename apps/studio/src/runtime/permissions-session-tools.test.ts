@@ -30,9 +30,12 @@ import { engineOf, makeEngineHarness } from "./test-util.js";
  * 18 names; W1533: 19; W1900: 22 — the compression trio is in the keep list).
  * The SET is asserted (never "some substring is absent"): a tool that silently
  * disappears — or one that silently survives — fails here either way.
+ *
+ * W9331: `agent_swarm` left this face. The swarm plugin is default OFF now, so a
+ * default session is not offered the tool; `plugin-hotswap.test.ts` ④ asserts the
+ * ON direction instead. This is the DEFAULT face, which is what a fresh install has.
  */
 const STANDARD_FACE: readonly string[] = [
-  "agent_swarm",
   "ask_user_question",
   "browser_act",
   "browser_open",
@@ -60,8 +63,8 @@ const STANDARD_FACE: readonly string[] = [
 /** `read-only` (W9) = the standard face minus the preset's `toolDeny` (`write_file`). */
 const READ_ONLY_FACE: readonly string[] = STANDARD_FACE.filter((name) => name !== "write_file");
 
-/** The execution-mode face (W791 M7; W884 keeps load_skill; W1900 keeps the compression trio): the mode fold, before any permission. */
-const EXECUTION_FACE: readonly string[] = ["agent_swarm", "browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"].sort();
+/** The execution-mode face (W791 M7; W884 keeps load_skill; W1900 keeps the compression trio): the mode fold, before any permission. W9331: minus `agent_swarm` (default off). */
+const EXECUTION_FACE: readonly string[] = ["browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"].sort();
 
 const READ_ONLY_SESSION = "sample-ws/ro";
 const BYSTANDER_SESSION = "sample-ws/full";

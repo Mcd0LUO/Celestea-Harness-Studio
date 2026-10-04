@@ -63,8 +63,16 @@ import { doneEvent, toolCallEvent, toolResultEvent, turnEndEvent, type EventSink
 import { isPerturbable } from "./perturbation.js";
 import { releaseAfterStream } from "./repetition-cut.js";
 import { CollapseDriver } from "./repetition-driver.js";
-import { createRepetitionGuard, DEEPSEEK_REPETITION_THRESHOLDS, type RepetitionChannel, type RepetitionGuard, type RepetitionThresholds } from "./repetition.js";
+import { createRepetitionGuard, DEEPSEEK_REPETITION_THRESHOLDS, type RepetitionChannel, type RepetitionEvidence, type RepetitionGuard, type RepetitionThresholds } from "./repetition.js";
 import { planRepetition, type RepetitionDiagnostics } from "./repetition-recovery.js";
+import {
+  DEFAULT_GARBAGE_THRESHOLDS,
+  garbageEvidence,
+  isSevereGarbage,
+  sanitizeText,
+  type GarbageThresholds,
+  type SanitizeResult,
+} from "./repetition-sanitize.js";
 import { dispatchCall, resolveSeams, toToolInput, type Seams } from "./seams.js";
 import { absorbDone, emptyStreamOutcome, terminalFromStreamEvent, type GenerateResult, type StepResult, type StreamOutcome } from "./step.js";
 import { ThinkingBuffer } from "./thinking.js";
@@ -113,6 +121,27 @@ export interface AgentLoopBindings {
    * Absent = the line carries `null`, which is honest rather than invented.
    */
   sessionId?: string | null;
+  /**
+   * W9331: strip blacklisted code points (NUL / C0-C1 controls / U+FFFD / lone
+   * surrogates / zero-width filler) from every delta before it is forwarded, so
+   * they never reach the session log. `false` disables the layer entirely.
+   *
+   * This is the ONE layer of the guard that needs no statistical judgement: the
+   * blacklist is exact (see `repetition-sanitize.ts`). Default **on** — removing
+   * a code point that carries no meaning in model output is always safe, and
+   * leaving it off would put control bytes in a user's transcript.
+   *
+   * DENSITY is still judged, though: a delta whose garbage is dense is treated
+   * as a collapse (upstream 2.1.6's `severe` arm), which is the only statistical
+   * part and lives behind `garbageThresholds`.
+   */
+  sanitizeGarbage?: boolean;
+  /**
+   * W9331: density thresholds for the `severe` arm — an unbroken garbage run of
+   * `maxRun` code units, or a garbage share of `maxRatio` within one delta, means
+   * collapse. Absent = [DEFAULT_GARBAGE_THRESHOLDS] (upstream's 32 / 0.5).
+   */
+  garbageThresholds?: GarbageThresholds;
   /**
    * W1900 (Phase 2): the session's current water level, read at BUILD time
    * (not constructed per loop — the level moves every turn, so a snapshot taken
@@ -194,6 +223,21 @@ export function errorOutcomeFromThrown(
  */
 export const DEFAULT_REPETITION_RETRIES = 2;
 
+/**
+ * W9331: one delta as BOTH guard layers see it, bundled so `convicts` stays
+ * within the repo's 5-parameter ceiling and — more importantly — so the raw text
+ * and the garbage measurement can never be handed over out of step.
+ *
+ * `text` is deliberately the RAW delta: the statistical detector must judge what
+ * the provider actually emitted, not a pre-filtered version of it.
+ */
+interface JudgedDelta {
+  text: string;
+  channel: RepetitionChannel;
+  /** `null` when the strip arm is off — no measurement was taken. */
+  garbage: SanitizeResult | null;
+}
+
 export class DefaultAgentLoop implements AgentLoop {
   private readonly config: AgentConfig;
   private readonly signal: AbortSignal | undefined;
@@ -206,6 +250,10 @@ export class DefaultAgentLoop implements AgentLoop {
   private readonly repetitionRetries: number;
   /** W1510: sidecar copy + JSONL log of every conviction (absent = none). */
   private readonly diagnostics: RepetitionDiagnostics | null;
+  /** W9331: strip blacklisted code points from every delta (default: on). */
+  private readonly sanitizeGarbage: boolean;
+  /** W9331: density thresholds that turn garbage into a collapse verdict. */
+  private readonly garbageThresholds: GarbageThresholds;
   /**
    * W1510: the session id stamped on a conviction's log line, learned from the
    * bindings (the log row's own session) — the loop has no other way to name it.
@@ -225,6 +273,11 @@ export class DefaultAgentLoop implements AgentLoop {
     this.repetition = bindings.repetition === false ? null : (bindings.repetition ?? DEEPSEEK_REPETITION_THRESHOLDS);
     this.repetitionRetries = Math.max(0, bindings.repetitionRetries ?? DEFAULT_REPETITION_RETRIES);
     this.diagnostics = bindings.repetitionDiagnostics ?? null;
+    // W9331: the strip arm is ON by default. It is the one guard layer whose
+    // action is unconditional-safe: the blacklisted code points carry no meaning
+    // in model output, so removing them cannot lose content.
+    this.sanitizeGarbage = bindings.sanitizeGarbage !== false;
+    this.garbageThresholds = bindings.garbageThresholds ?? DEFAULT_GARBAGE_THRESHOLDS;
     this.sessionId = bindings.sessionId ?? null;
     this.contextUsage = bindings.contextUsage;
   }
@@ -431,8 +484,11 @@ export class DefaultAgentLoop implements AgentLoop {
     if (started.kind === "cancelled") return { kind: "cancelled" };
     if (started.kind === "failed") return { kind: "final", outcome: started.outcome };
 
-    const thinking = new ThinkingBuffer(seams.session, this.holdbackChars());
-    const stream = await this.consumeStream(started.stream, thinking, this.guardFor(), retries);
+    // W9331: the guard is resolved ONCE, because both the buffer's holdback and
+    // the stream consumer must agree on whether one exists (see holdbackChars).
+    const guard = this.guardFor();
+    const thinking = new ThinkingBuffer(seams.session, this.holdbackChars(guard));
+    const stream = await this.consumeStream(started.stream, thinking, guard, retries);
     // Stream-end release: trailing reasoning (providers stream it AFTER the
     // finish frame), a thinking-only stream and a mid-stream cancel all persist
     // here, ahead of the appends below. W1510 moved the POLICY into
@@ -449,9 +505,25 @@ export class DefaultAgentLoop implements AgentLoop {
    * W1510: how much text is held back so a truncation can land on the true
    * onset. Only the truncation arm uses it; while the retry budget lasts the
    * attempt is discarded whole and nothing needs holding.
+   *
+   * W9331: the default is no longer a hard-coded `0`. Upstream 2.1.6 ships
+   * `holdbackChars: 4096` precisely because the conviction point always lags the
+   * true onset (measured 3000-3600 chars on upstream's corpus), so without
+   * holdback the cut can only land at the provable point and that much degenerate
+   * text is already in hand. An explicit `repetitionDiagnostics.holdbackChars`
+   * still wins, so a caller that wants the old behaviour can still ask for it.
+   *
+   * **Gated on a guard actually existing**, and that gate is load-bearing rather
+   * than cosmetic. Holding back is only ever justified by a conviction that may
+   * follow; with no guard (an out-of-scope model, or `repetition: false`) the
+   * held text can never be cut precisely, so every stream would simply lose its
+   * last 4096 characters of reasoning to a mechanism that has no consumer. The
+   * guard is therefore resolved once and the buffer is built with the holdback
+   * it can actually use.
    */
-  private holdbackChars(): number {
-    return this.diagnostics?.holdbackChars ?? 0;
+  private holdbackChars(guard: RepetitionGuard | null): number {
+    if (guard === null) return 0;
+    return this.diagnostics?.holdbackChars ?? this.repetition?.holdbackChars ?? 0;
   }
 
   /** W1510: the guard for THIS step (null = model out of scope); rebuilt per step. */
@@ -498,23 +570,41 @@ export class DefaultAgentLoop implements AgentLoop {
       }
       if (next.value.done === true) break;
       const event = next.value.value;
-      if (event.kind === "text") {
-        thinking.flush();
-        out.streamedText += event.text;
-        this.emit({ kind: "text", delta: event.text });
-        if (this.convicts(guard, event.text, "text", iter, out)) break;
-      } else if (event.kind === "thinking") {
-        thinking.push(event.text);
-        out.reasoningText += event.text;
-        this.emit({ kind: "thinking", delta: event.text });
-        if (this.convicts(guard, event.text, "thinking", iter, out)) break;
+      if (event.kind === "text" || event.kind === "thinking") {
+        const channel: RepetitionChannel = event.kind === "text" ? "text" : "thinking";
+        // W9331: strip the garbage BEFORE it is forwarded, so a blacklisted code
+        // point can never reach the session log or the SSE stream. One pass, one
+        // result: the cleaned text is what the buffer/emitter see, and the SAME
+        // measurement answers the density question.
+        const garbage = this.sanitizeGarbage ? sanitizeText(event.text) : null;
+        const text = garbage === null ? event.text : garbage.text;
+        if (channel === "text") {
+          // W9331: a `text` event is a VISIBLE boundary, so the reasoning burst
+          // before it is genuinely finished. `releaseAll`, not `flush`: a plain
+          // flush would keep `holdbackChars` back "for a possible cut" that a
+          // boundary this definite will never need, and the held reasoning would
+          // be merged into the NEXT burst — which silently changes the log shape
+          // (one row per contiguous burst, `loop.test.ts`).
+          thinking.releaseAll();
+          out.streamedText += text;
+        } else {
+          thinking.push(text);
+          out.reasoningText += text;
+        }
+        this.emit({ kind: channel, delta: text });
+        // The statistical guard sees the RAW delta on purpose: garbage is not a
+        // repetition, and filtering it before the window would change what the
+        // judge measures.
+        if (this.convicts(guard, { text: event.text, channel, garbage }, iter, out)) break;
       } else if (event.kind === "usage") {
         this.usage?.record(event.usage);
       } else if (event.kind === "done") {
-        thinking.flush();
+        // Same reasoning as the `text` boundary: the provider declared the turn's
+        // text complete, so the burst is closed and must be persisted in full.
+        thinking.releaseAll();
         absorbDone(out, event.message);
       } else {
-        thinking.flush();
+        thinking.releaseAll();
         out.terminal = terminalFromStreamEvent(event);
         break;
       }
@@ -527,16 +617,33 @@ export class DefaultAgentLoop implements AgentLoop {
    * W1510: feed one delta to the guard and, on a conviction, abandon the stream
    * (the provider iterator is closed; nothing is appended). The plan is decided
    * here because it depends on the attempt's own retry budget.
+   *
+   * W9331 adds a SECOND, independent way to convict: dense garbage in the delta
+   * itself (upstream's `severe` arm). It is checked first because it is an exact
+   * predicate over one delta, whereas the repetition verdict needs a whole
+   * window. A stream can collapse into garbage WITHOUT ever repeating a phrase,
+   * so the statistical guard alone misses it.
    */
   private convicts(
     guard: RepetitionGuard | null,
-    delta: string,
-    channel: RepetitionChannel,
+    delta: JudgedDelta,
     iter: AsyncIterator<StreamEvent>,
     out: StreamOutcome,
   ): boolean {
-    const evidence = guard?.push(delta, channel) ?? null;
+    if (delta.garbage !== null && isSevereGarbage(delta.garbage, this.garbageThresholds)) {
+      return this.abandon(iter, out, garbageEvidence(delta.garbage, delta.channel));
+    }
+    const evidence = guard?.push(delta.text, delta.channel) ?? null;
     if (evidence === null) return false;
+    return this.abandon(iter, out, evidence);
+  }
+
+  /**
+   * Abandon a convicted attempt: close the iterator, spend a retry from the
+   * budget and record the evidence. Shared by both conviction arms so the retry
+   * accounting can never drift between them.
+   */
+  private abandon(iter: AsyncIterator<StreamEvent>, out: StreamOutcome, evidence: RepetitionEvidence): boolean {
     closeIterator(iter);
     const plan = planRepetition(out.retries, this.repetitionRetries);
     out.repetition = evidence;

@@ -83,9 +83,57 @@ describe("detectRepetition — degenerate shapes fire", () => {
 
   it("the conviction reports the phrase it saw, for the log line", () => {
     const evidence = detectRepetition([DEGENERATE_SHORT_PHRASE]);
-    expect(evidence?.kind).toBe("phrase");
-    expect(evidence?.topPhrase).toContain("let me write");
+    // W9331: `DEGENERATE_SHORT_PHRASE` is "OK. Let me write. Let me go." repeated,
+    // so under the v2.1.6 keep-rule the surviving segments INTERLEAVE (ok, let me
+    // write, let me go, ok, ...). `longestRun` is therefore honestly 1 — there is
+    // no two adjacent equal segments — and the conviction rides the
+    // `topPhraseCount` leg instead. The old length floor hid `ok` entirely and
+    // left a 82-long run, which is precisely the statistic the floor corrupted.
+    expect(evidence?.kind).toBe("low-information");
+    expect(evidence?.topPhrase).toBe("ok");
+    expect(evidence?.topPhraseCount).toBeGreaterThanOrEqual(DEEPSEEK_REPETITION_THRESHOLDS.phraseTopCount);
+  });
+});
+
+describe("W9331 — short-sentence collapses, the class 2.1.6 exists for", () => {
+  /**
+   * The shape the CHANGELOG names explicitly: the degenerate pattern migrated to
+   * SHORT sentences. `OK.` is 2 characters and `Let me run.` is 10 — both under the
+   * removed `minSegmentChars` floor of 12.
+   */
+  const SHORT_SENTENCE_COLLAPSE = "OK. Let me run. ".repeat(80);
+
+  it("convicts a collapse made only of sub-12-character sentences (old rule: 0 segments)", () => {
+    const evidence = detectRepetition([SHORT_SENTENCE_COLLAPSE]);
+    expect(evidence).not.toBeNull();
+    // The old floor dropped EVERY segment here, so the window never even reached
+    // `minSegments` and the collapse was invisible. This is the 0/146 bug.
+    expect(evidence?.segments).toBeGreaterThanOrEqual(DEEPSEEK_REPETITION_THRESHOLDS.minSegments);
+    expect(evidence?.duplicateShare).toBeGreaterThanOrEqual(DEEPSEEK_REPETITION_THRESHOLDS.lowInfoDupShare);
+  });
+
+  it("still convicts when the loop is ONE short sentence repeated", () => {
+    const evidence = detectRepetition(["Let me run. ".repeat(100)]);
+    expect(evidence).not.toBeNull();
+    expect(evidence?.topPhrase).toBe("let me run");
     expect(evidence?.longestRun).toBeGreaterThanOrEqual(DEEPSEEK_REPETITION_THRESHOLDS.phraseRun);
+  });
+
+  it("drops bare punctuation but keeps a fragment that carries one word", () => {
+    // The keep-rule is "carries a letter or digit", NOT a length floor: a 2-char
+    // `OK.` survives while punctuation-only noise does not.
+    //
+    // Both halves need a window long enough to judge (`minWindowChars` = 1200), so
+    // the fixtures are sized to clear it — that is the guard working, not the
+    // keep-rule failing.
+    const evidence = evaluateRepetitionWindow("OK. ".repeat(400));
+    expect(evidence).not.toBeNull();
+    expect(evidence?.topPhrase).toBe("ok");
+    expect(evidence?.segments).toBeGreaterThan(0);
+    // Punctuation-only fragments are the other half of the rule: a window of
+    // separators alone yields no segments, so `minSegments` is never reached and
+    // the window is not judged at all.
+    expect(evaluateRepetitionWindow(". . . ! ? ; ".repeat(200))).toBeNull();
   });
 });
 
@@ -336,13 +384,20 @@ describe("evaluateRepetitionWindow — pure, and each rule is load-bearing", () 
   });
 
   it("the window bound is load-bearing: shrinking it below the evidence acquits", () => {
-    const tiny: RepetitionThresholds = { ...DEEPSEEK_REPETITION_THRESHOLDS, windowChars: 400, minWindowChars: 400 };
-    expect(evaluateRepetitionWindow(DEGENERATE_SHORT_PHRASE, tiny)).toBeNull();
-    expect(evaluateRepetitionWindow(DEGENERATE_SHORT_PHRASE)).not.toBeNull();
+    // W9331: the bound is a bound on the RAW window, and the useful demonstration
+    // is one where the tiny window holds too FEW segments to judge. `minWindowChars`
+    // raised to 1200 does exactly that, and it is the real guard: an answer
+    // shorter than the evidence requirement must be acquitted, not guessed at.
+    const tiny: RepetitionThresholds = { ...DEEPSEEK_REPETITION_THRESHOLDS, windowChars: 400, minWindowChars: 1200 };
+    expect(evaluateRepetitionWindow(DEGENERATE_SENTENCE, tiny)).toBeNull();
+    expect(evaluateRepetitionWindow(DEGENERATE_SENTENCE)).not.toBeNull();
   });
 
   it("classifies an identical-run collapse as `phrase`", () => {
-    expect(evaluateRepetitionWindow(DEGENERATE_SHORT_PHRASE)?.kind).toBe("phrase");
+    // `phrase` requires `longestRun >= phraseRun`, i.e. ADJACENT identical
+    // segments. A single sentence repeated ("Let me run." x100) is that shape;
+    // an INTERLEAVED cycle is not, and is classified by the other leg instead.
+    expect(evaluateRepetitionWindow("Let me run. ".repeat(100))?.kind).toBe("phrase");
   });
 
   it("classifies a no-identical-sentence collapse as `low-information`", () => {

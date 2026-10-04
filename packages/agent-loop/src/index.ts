@@ -34,6 +34,8 @@ export * from "./usage.js";
 export * from "./events.js";
 export * from "./retention.js";
 export * from "./repetition.js";
+export * from "./repetition-sanitize.js";
+export * from "./repetition-cleanup.js";
 export * from "./repetition-recovery.js";
 export * from "./repetition-run.js";
 export * from "./perturbation.js";

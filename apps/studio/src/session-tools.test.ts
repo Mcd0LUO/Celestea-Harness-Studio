@@ -29,9 +29,19 @@ const S1_URL = "/api/sessions/" + encodeURIComponent(S1) + "/tools";
  */
 const ENV: NodeJS.ProcessEnv = { CELESTEA_PERMISSION_DEFAULT: "", CELESTEA_PERMISSION_MAX: "" };
 
-/** The frozen standard face of the production registry (W791/W804/W7/W884/F4/B2: 18; W1533: 19; W1900: 22). */
-const STANDARD_FACE: readonly string[] = [
-  "agent_swarm",
+/**
+ * The frozen standard face of the production registry at its DEFAULTS
+ * (W791/W804/W7/W884/F4/B2: 18; W1533: 19; W1900: 22).
+ *
+ * W9331: `agent_swarm` is **deliberately absent**, and the constant's name now says
+ * so. The swarm plugin is default OFF, so a default session is not offered its tool.
+ * The guarantee was not deleted — it MOVED, and the tests at the bottom assert it
+ * directly: `⑦` pins that the default face really has no `agent_swarm`, `⑦b` that
+ * turning the plugin on in the plugin store puts it back, and `⑦c` that the session
+ * switch still only SUBTRACTS from it. Naming the constant for the state it
+ * describes is what keeps a reader from thinking a capability vanished.
+ */
+const DEFAULT_STANDARD_FACE: readonly string[] = [
   "ask_user_question",
   "browser_act",
   "browser_open",
@@ -56,9 +66,16 @@ const STANDARD_FACE: readonly string[] = [
   "write_file",
 ].sort();
 
-/** The execution-mode face (W791 M7; W884 load_skill, B2 remember/forget kept; W1900 compress trio kept): the fold, before any deny. */
-const EXECUTION_FACE: readonly string[] = [
-  "agent_swarm",
+/**
+ * The execution-mode face at its DEFAULTS (W791 M7; W884 load_skill, B2
+ * remember/forget kept; W1900 compress trio kept): the fold, before any deny.
+ *
+ * W9331: `agent_swarm` is absent for the same reason as above, NOT because the mode
+ * folds it — it is in the execution KEEP list (`packages/tools/src/exposure.ts`), so
+ * `⑦b`'s enabled case asserts it survives the fold once the plugin is on. The fold
+ * rule did not change; only the default registration did.
+ */
+const DEFAULT_EXECUTION_FACE: readonly string[] = [
   "browser_act",
   "browser_open",
   "compress",
@@ -76,6 +93,23 @@ const EXECUTION_FACE: readonly string[] = [
   "update_tasks",
   "worker_status",
 ].sort();
+
+/**
+ * W9331: the swarm capability, named once so the three assertions below cannot drift
+ * from the plugin they are about.
+ */
+const SWARM_TOOL = "agent_swarm";
+const SWARM_PLUGIN = "celestea.runtime.swarm";
+
+/**
+ * The plugin store that turns the swarm plugin ON — the same bytes a user produces
+ * by flipping the row in the plugin panel, and the only representation that exists
+ * for "a default-off plugin is wanted on" (the disabled table cannot express it).
+ */
+function swarmOnStore(): string {
+  return JSON.stringify({ version: 2, disabled: [], enabled: [SWARM_PLUGIN], updated_at: 0 });
+}
+
 
 const harnesses: StudioHarness[] = [];
 
@@ -172,7 +206,7 @@ describe("W860 /api/sessions/{id}/tools", () => {
     if (FILE_MODES_MEANINGFUL) expect(statSync(path).mode & 0o777).toBe(0o600);
 
     // Composed instance = HTTP report = adapter seam, and all three dropped it.
-    const expected = STANDARD_FACE.filter((name) => name !== "write_file");
+    const expected = DEFAULT_STANDARD_FACE.filter((name) => name !== "write_file");
     expect(await agree(h, S1)).toEqual(expected);
     expect(await httpFace(h, S1)).not.toContain("write_file");
 
@@ -181,7 +215,7 @@ describe("W860 /api/sessions/{id}/tools", () => {
     expect(cleared.status).toBe(200);
     expect(cleared.body["disabled"]).toEqual([]);
     expect(cleared.body["effective"]).toEqual({ toolDeny: [] });
-    expect(await agree(h, S1)).toEqual(STANDARD_FACE);
+    expect(await agree(h, S1)).toEqual(DEFAULT_STANDARD_FACE);
   });
 
   it("③ unions the preset deny with the session deny, preset first", async () => {
@@ -197,7 +231,7 @@ describe("W860 /api/sessions/{id}/tools", () => {
     expect(get.body["disabled"]).toEqual(["http_request"]);
     expect(get.body["effective"]).toEqual({ toolDeny: ["write_file", "http_request"] });
 
-    const expected = STANDARD_FACE.filter((name) => name !== "write_file" && name !== "http_request");
+    const expected = DEFAULT_STANDARD_FACE.filter((name) => name !== "write_file" && name !== "http_request");
     expect(await agree(h, S1)).toEqual(expected);
   });
 
@@ -206,7 +240,7 @@ describe("W860 /api/sessions/{id}/tools", () => {
     writePermission(h, "exec", "read-only");
 
     // The execution face first (no tools.json).
-    expect(await agree(h, EXEC)).toEqual(EXECUTION_FACE);
+    expect(await agree(h, EXEC)).toEqual(DEFAULT_EXECUTION_FACE);
 
     // read_file is folded by the mode AND denied by the preset AND disabled by
     // the session: the intersection stays the execution face.
@@ -214,7 +248,7 @@ describe("W860 /api/sessions/{id}/tools", () => {
     expect(put.status).toBe(200);
     expect((put.body["effective"] as { toolDeny: string[] }).toolDeny).toContain("read_file");
     expect((put.body["effective"] as { toolDeny: string[] }).toolDeny).toContain("write_file");
-    expect(await agree(h, EXEC)).toEqual(EXECUTION_FACE);
+    expect(await agree(h, EXEC)).toEqual(DEFAULT_EXECUTION_FACE);
     expect(await httpFace(h, EXEC)).not.toContain("read_file");
     expect(await httpFace(h, EXEC)).not.toContain("write_file");
   });
@@ -229,7 +263,7 @@ describe("W860 /api/sessions/{id}/tools", () => {
     }
     // None of the rejected bodies wrote a file: the session still runs untouched.
     expect(await getJson(h.app, S1_URL)).toMatchObject({ body: { disabled: [] } });
-    expect(await agree(h, S1)).toEqual(STANDARD_FACE);
+    expect(await agree(h, S1)).toEqual(DEFAULT_STANDARD_FACE);
   });
 
   it("⑤ disables per session: a neighbour is unaffected", async () => {
@@ -238,8 +272,8 @@ describe("W860 /api/sessions/{id}/tools", () => {
 
     const neighbour = await getJson(h.app, "/api/sessions/" + encodeURIComponent(S2) + "/tools");
     expect(neighbour.body).toEqual({ ok: true, session: S2, disabled: [], effective: { toolDeny: [] } });
-    expect(await httpFace(h, S2)).toEqual(STANDARD_FACE);
-    expect(await httpFace(h, S1)).toEqual(STANDARD_FACE.filter((name) => name !== "write_file"));
+    expect(await httpFace(h, S2)).toEqual(DEFAULT_STANDARD_FACE);
+    expect(await httpFace(h, S1)).toEqual(DEFAULT_STANDARD_FACE.filter((name) => name !== "write_file"));
   });
 
   it("⑥ a void tools.json is fail-closed: 200, one warning, the session runs as if nothing were disabled", async () => {
@@ -262,12 +296,76 @@ describe("W860 /api/sessions/{id}/tools", () => {
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toContain("tools_unreadable");
       expect(warnings[0]).toContain("the session runs with no tools disabled");
-      expect(await agree(h, S1)).toEqual(STANDARD_FACE);
+      expect(await agree(h, S1)).toEqual(DEFAULT_STANDARD_FACE);
     }
     // A later PUT repairs the file by overwriting it.
     const put = await getJson(h.app, S1_URL, jsonRequest("PUT", { disabled: ["write_file"] }));
     expect(put.status).toBe(200);
-    expect(await httpFace(h, S1)).toEqual(STANDARD_FACE.filter((name) => name !== "write_file"));
+    expect(await httpFace(h, S1)).toEqual(DEFAULT_STANDARD_FACE.filter((name) => name !== "write_file"));
+  });
+});
+
+/**
+ * W9331 — the swarm capability's default, asserted as a CONSEQUENCE rather than
+ * removed from a list.
+ *
+ * Before W9331 `agent_swarm` sat in the frozen faces above because the swarm plugin
+ * was on by default. It is now default OFF, so the faces describe the default state
+ * and the capability's presence is asserted where it is now decided: the plugin
+ * store. These three tests are also what makes the old guarantee (the tool really is
+ * offered, and really is removable) survive the move.
+ */
+describe("W9331 · the swarm tool is default OFF and composes with the session switch", () => {
+  /** A harness whose PLUGIN store has the swarm plugin explicitly ON. */
+  function swarmEngine(): StudioHarness {
+    return track(makeEngineHarness({ sessions: { s1: [], s2: [] }, env: ENV, rawFiles: { "plugins.json": swarmOnStore() } }));
+  }
+
+  it("⑦ the default face does NOT offer agent_swarm (the plugin is default OFF)", async () => {
+    const h = engine();
+    const face = await agree(h, S1);
+    expect(face).not.toContain(SWARM_TOOL);
+    // The rest of the frozen face is intact: this is a switch, not a teardown, and
+    // asserting the WHOLE set is what keeps this from being a one-name check.
+    expect(face).toEqual(DEFAULT_STANDARD_FACE);
+  });
+
+  it("⑦b turning the plugin ON in the plugin store puts agent_swarm back on the offered face", async () => {
+    const h = swarmEngine();
+    const face = await agree(h, S1);
+    expect(face).toContain(SWARM_TOOL);
+    // Exactly the default face plus the one tool — nothing else moved.
+    expect(face).toEqual([...DEFAULT_STANDARD_FACE, SWARM_TOOL].sort());
+    // Both report faces and the composed instance agree (the `agree` helper asserts
+    // that), so the tool the model is offered is the tool GET reports.
+  });
+
+  it("⑦c with the plugin ON, the session switch still only SUBTRACTS", async () => {
+    const h = swarmEngine();
+    // The deny is written BEFORE S1 is ever composed, which is the same ordering
+    // cases ②-⑥ use.
+    const put = await getJson(h.app, S1_URL, jsonRequest("PUT", { disabled: [SWARM_TOOL] }));
+    expect(put.status).toBe(200);
+    expect(put.body["effective"]).toEqual({ toolDeny: [SWARM_TOOL] });
+
+    // The REPORTED face loses exactly one name and nothing else. This is the same
+    // face case ⑤'s neighbour assertion uses (`httpFace`), and the reason it is the
+    // right one here: it is derived from the stored deny on every read, so it does
+    // not depend on which generation happens to be cached.
+    expect(await httpFace(h, S1)).toEqual([...DEFAULT_STANDARD_FACE].sort());
+    expect(await httpFace(h, S1)).not.toContain(SWARM_TOOL);
+
+    // The neighbour is untouched — case ⑤'s intent, now checked in the state where
+    // the tool is actually PRESENT (asserting a neighbour while the tool is absent
+    // everywhere would prove nothing about per-session isolation).
+    const neighbour = await httpFace(h, S2);
+    expect(neighbour).toContain(SWARM_TOOL);
+    expect(neighbour).toEqual([...DEFAULT_STANDARD_FACE, SWARM_TOOL].sort());
+
+    // ...and clearing the session deny brings it back.
+    const cleared = await getJson(h.app, S1_URL, jsonRequest("PUT", { disabled: [] }));
+    expect(cleared.status).toBe(200);
+    expect(await httpFace(h, S1)).toEqual([...DEFAULT_STANDARD_FACE, SWARM_TOOL].sort());
   });
 });
 

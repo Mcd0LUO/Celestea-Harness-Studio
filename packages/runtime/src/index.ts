@@ -30,6 +30,8 @@
  *   session-registry.ts session id -> independent Runtime        (W513)
  *   worker-wiring.ts   worker driver seams + host receipt drain  (compose.rs:148-193)
  *   watchdog-mount.ts  W740: mount the liveness watchdog (workers/watchdog.ts)
+ *   repeat-guard-mount.ts W9331: mount the degenerate-repetition guard
+ *                      (upstream dsh-guard-repeat-output 2.1.6, MIT)
  *   runtime.ts         Runtime handles + lifecycle               (compose.rs:44-281)
  *   recovery.ts        boot recovery: close a turn a crash left open (E §1.3)
  *   gen.ts             Gen + GenerationHub (hot swap)            (studio/main.rs:340-420)
@@ -68,6 +70,8 @@ export * from "./session-registry.js";
 export * from "./recovery.js";
 export * from "./worker-wiring.js";
 export * from "./watchdog-mount.js";
+export * from "./repeat-guard-mount.js";
+export * from "./repetition-cleanup.js";
 export * from "./runtime.js";
 export * from "./gen.js";
 export * from "./autowake.js";

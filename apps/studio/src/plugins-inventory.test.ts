@@ -44,6 +44,8 @@ interface PluginRow {
   enabled: boolean;
   disable: string;
   reason?: string;
+  /** W9331: present only for the rows whose default is NOT "on". */
+  defaultEnabled?: boolean;
 }
 
 async function rowsOf(h: StudioHarness): Promise<PluginRow[]> {
@@ -93,14 +95,33 @@ describe("W9322 GET /api/plugins · engine layer", () => {
     await getJson(h.app, "/api/sessions/sample-ws%2Fs1/activate", jsonRequest("POST"));
 
     const mounted = engineOf(h).pluginNames("sample-ws/s1");
-    // `compose()` appends the workers plugin, the swarm plugin and the watchdog
-    // to the host's plugin list, in that order — so the mounted list IS the
-    // engine inventory. (W9322 had to fix `pluginNamesOf`: the swarm plugin was
-    // really mounted — `agent_swarm` is in the registry — but was never NAMED.)
-    expect(mounted).toEqual([...ENGINE_PLUGIN_NAMES]);
+    // `compose()` appends the workers plugin, the swarm plugin, the W9331
+    // repetition guard and the watchdog to the host's plugin list, in that order
+    // — so the mounted list IS the engine inventory. (W9322 had to fix
+    // `pluginNamesOf`: the swarm plugin was really mounted — `agent_swarm` is in
+    // the registry — but was never NAMED.)
+    //
+    // W9331 changes the EXPECTED side, and the reason is the whole point of the
+    // default-off feature: the mounted list is what `compose()` really mounted
+    // under the DEFAULT switches, and `celestea.runtime.swarm` is now default OFF
+    // — so `swarm: false` reaches `ensureSwarmWiring`, which mounts nothing and
+    // registers no `agent_swarm` tool. The catalog still carries the row (the
+    // panel must show it so the user can turn it ON), so the anti-drift assertion
+    // is "mounted === the catalog MINUS the default-off rows", which still goes
+    // red the day a name is added, removed or renamed on either side.
+    const expectedMounted = ENGINE_PLUGIN_NAMES.filter(
+      (name) => pluginCatalog([]).find((row) => row.name === name)?.defaultEnabled !== false,
+    );
+    expect(mounted).toEqual(expectedMounted);
+    // ...and the default-off row is genuinely the ONLY difference, asserted
+    // explicitly so this test cannot silently stop testing the default.
+    expect(ENGINE_PLUGIN_NAMES.filter((name) => !expectedMounted.includes(name))).toEqual(["celestea.runtime.swarm"]);
+    expect(mounted).not.toContain("celestea.runtime.swarm");
 
     const engineRows = (await rowsOf(h)).filter((row) => row.layer === "engine");
-    expect(engineRows.map((row) => row.name)).toEqual(mounted);
+    // The INVENTORY (what the panel lists) is the catalog, not the mount record:
+    // a switched-off plugin must keep its row, or there would be no way back on.
+    expect(engineRows.map((row) => row.name)).toEqual([...ENGINE_PLUGIN_NAMES]);
     // Order is semantics (ARCHITECTURE.md §3.2): the inventory must keep it.
     expect(engineRows.map((row) => row.name)).toEqual([
       "studio.engine.llm",
@@ -108,6 +129,7 @@ describe("W9322 GET /api/plugins · engine layer", () => {
       "studio.engine.tools",
       "celestea.runtime.workers",
       "celestea.runtime.swarm",
+      "celestea.runtime.repeat-guard",
       "celestea.runtime.watchdog",
     ]);
   });
@@ -115,15 +137,33 @@ describe("W9322 GET /api/plugins · engine layer", () => {
   it("carries the tools/workers/swarm/watchdog functionality the user can recognise", async () => {
     // The complaint that started W9322: the panel showed only service tokens, so
     // no row named a capability a user could recognise. These four are exactly
-    // those capabilities, and they are the four the user may switch OFF.
+    // those capabilities, and they are the four the user may switch OFF... and
+    // W9331 added the repetition guard as a fifth switchable row.
     const h = open();
     const rows = await rowsOf(h);
     const byName = new Map(rows.map((row) => [row.name, row]));
-    for (const name of ["studio.engine.tools", "celestea.runtime.workers", "celestea.runtime.swarm", "celestea.runtime.watchdog"]) {
+    for (const name of [
+      "studio.engine.tools",
+      "celestea.runtime.workers",
+      "celestea.runtime.swarm",
+      "celestea.runtime.repeat-guard",
+      "celestea.runtime.watchdog",
+    ]) {
       expect(byName.get(name)?.layer).toBe("engine");
       expect(byName.get(name)?.disable).toBe("optional");
-      expect(byName.get(name)?.enabled).toBe(true);
     }
+    // W9331: `enabled` is per-row TRUTH, and the default is no longer "on" for
+    // every row. `swarm` is default OFF (an orchestration capability nobody asked
+    // for); the repetition guard is default ON (it is a protection, and the
+    // upstream measurement is 146/146 live collapses caught).
+    expect(byName.get("celestea.runtime.swarm")?.enabled).toBe(false);
+    expect(byName.get("celestea.runtime.swarm")?.defaultEnabled).toBe(false);
+    expect(byName.get("celestea.runtime.repeat-guard")?.enabled).toBe(true);
+    // A row that omits `defaultEnabled` means "default on" (the field is only
+    // written for the rows that change it), which is what keeps the JSON shape of
+    // every pre-W9331 row byte-identical.
+    expect(byName.get("celestea.runtime.repeat-guard")?.defaultEnabled).toBeUndefined();
+    expect(byName.get("studio.engine.tools")?.enabled).toBe(true);
   });
 
   it("is a startup inventory: activating a session adds no row", async () => {
@@ -157,14 +197,22 @@ describe("W9322 GET /api/plugins · per-row honesty", () => {
     expect(rows.find((row) => row.name === "studio/runtime")?.disable).toBe("idle-only");
     expect(rows.find((row) => row.name === "studio/workspaces")?.disable).toBe("required");
     expect(rows.find((row) => row.name === "studio.engine.tools")?.disable).toBe("optional");
-    // `enabled` is the complement of the stored disabled list.
-    expect(rows.every((row) => row.enabled === true)).toBe(true);
+    // `enabled` is the complement of the stored disabled list — W9331 keeps that
+    // invariant, but the list now includes the catalog's default-off rows, so the
+    // complement is taken over the EFFECTIVE set rather than "everything".
+    const off = rows.filter((row) => !row.enabled).map((row) => row.name);
+    expect(off).toEqual(["celestea.runtime.swarm"]);
   });
 
   it("agrees with the catalog module row for row (one construction, two readers)", async () => {
     const h = open();
     const rows = await rowsOf(h);
     const catalog = pluginCatalog(h.studio.services.hostPluginNames);
-    expect(rows.map((row) => ({ ...row }))).toEqual(catalog.map((row) => ({ ...row, enabled: true })));
+    // W9331: `enabled` is no longer "true for every row" — it is the row's
+    // default, which is what an empty store means. Deriving the expectation from
+    // the catalog's own `defaultEnabled` keeps this a ONE-construction assertion
+    // rather than a second hand-written truth.
+    const expected = catalog.map((row) => ({ ...row, enabled: row.defaultEnabled !== false }));
+    expect(rows.map((row) => ({ ...row }))).toEqual(expected);
   });
 });

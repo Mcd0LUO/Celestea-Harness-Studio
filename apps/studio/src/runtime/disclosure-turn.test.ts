@@ -26,9 +26,14 @@ import { getJson, jsonRequest, type StudioHarness } from "../harness.test-util.j
 import { activate, makeEngineHarness, readSessionLog, waitIdle } from "./test-util.js";
 import type { OfflineStep } from "./offline-llm.js";
 
-/** The 22 contract tools of a standard-mode session (W884: load_skill; F4: browser; B2: remember/forget; W1533: update_tasks; W1900: the compression trio). */
+/**
+ * The contract tools of a standard-mode session (W884: load_skill; F4: browser;
+ * B2: remember/forget; W1533: update_tasks; W1900: the compression trio).
+ *
+ * W9331: `agent_swarm` is NO LONGER here — the swarm plugin is default OFF, so its
+ * tool is not registered for a default session. This is the default face.
+ */
 const STANDARD_FACE = [
-  "agent_swarm",
   "ask_user_question",
   "browser_act",
   "browser_open",

@@ -55,6 +55,19 @@ export interface PluginCatalogRow {
   disable: PluginDisable;
   /** `disable !== "optional"` 时，**必须**给出原因——拒绝必须说出来。 */
   reason?: string;
+  /**
+   * W9331：**这一行默认开不开**。缺省 `true`（与 W9322 的产品语义一致：清单里
+   * 新加的插件默认是开的）。
+   *
+   * 它存在的**唯一**理由是 `celestea.runtime.swarm`：停用表只存 disabled，所以
+   * 「不在表里」同时意味着「默认开」——一行改成默认关之后，「用户打开了它」就
+   * 在停用表里**没有表示法**（见 `store/plugins.ts` 的文件头）。这个字段加上
+   * store 的 `enabled` 数组，缺口才补上。
+   *
+   * **唯一真源就是这张目录**，不是散落在别处的常量：`PluginSwitch` 合成有效停用
+   * 集合时只读这里，所以一行默认开不开只需要改这一处。
+   */
+  defaultEnabled?: boolean;
 }
 
 /**
@@ -77,20 +90,24 @@ export interface PluginCatalogRow {
  * 因为只有它知道 session 的 workspace / grants / disclosure。两者的**工具面**是
  * 同一个 `assembleTools()`，所以「关掉工具插件」的语义完全相同。
  */
-export const ENGINE_PLUGIN_NAMES: readonly string[] = [
-  "studio.engine.llm",
-  "studio.engine.agent-loop",
-  "studio.engine.tools",
-  "celestea.runtime.workers",
-  "celestea.runtime.swarm",
-  WATCHDOG_PLUGIN_NAME,
-];
 
-/** 引擎层的名字常量（`enginePluginSwitchesOf` 用；导出以免调用点手抄字符串）。 */
+/** 引擎层的名字常量（`enginePluginSwitchesOf` 与 `ENGINE_PLUGIN_NAMES` 用）。 */
 export const ENGINE_TOOLS_PLUGIN = "studio.engine.tools";
 export const ENGINE_WORKERS_PLUGIN = "celestea.runtime.workers";
 export const ENGINE_SWARM_PLUGIN = "celestea.runtime.swarm";
+/** W9331: the degenerate-repetition guard, mounted by `compose()`. */
+export const ENGINE_REPEAT_GUARD_PLUGIN = "celestea.runtime.repeat-guard";
 export const ENGINE_WATCHDOG_PLUGIN = WATCHDOG_PLUGIN_NAME;
+
+export const ENGINE_PLUGIN_NAMES: readonly string[] = [
+  "studio.engine.llm",
+  "studio.engine.agent-loop",
+  ENGINE_TOOLS_PLUGIN,
+  ENGINE_WORKERS_PLUGIN,
+  ENGINE_SWARM_PLUGIN,
+  ENGINE_REPEAT_GUARD_PLUGIN,
+  ENGINE_WATCHDOG_PLUGIN,
+];
 
 /**
  * 引擎层的**装配开关**：`SessionComposerOptions.pluginSwitches` 的形状。
@@ -106,6 +123,8 @@ export interface EnginePluginSwitches {
   workers: boolean;
   /** `compose({ swarm: false })`。 */
   swarm: boolean;
+  /** `compose({ repeatGuard: false })` —— W9331 的重复崩塌守卫。 */
+  repeatGuard: boolean;
   /** `compose({ watchdog: false })`。 */
   watchdog: boolean;
 }
@@ -119,6 +138,7 @@ export interface EnginePluginSwitches {
  *                                    与提示词的 `{{tools}}` 同时变空；
  *   - `celestea.runtime.workers`  -> `workers: false`，三个 worker 工具不注册；
  *   - `celestea.runtime.swarm`    -> `swarm: false`，`agent_swarm` 不注册；
+ *   - `celestea.runtime.repeat-guard` -> `repeatGuard: false`，在线崩塌检测不装配；
  *   - `celestea.runtime.watchdog` -> `watchdog: false`，不 mount 存活巡检。
  *
  * `studio.engine.llm` / `studio.engine.agent-loop` 不在这里：它们是 `required`，
@@ -130,6 +150,7 @@ export function enginePluginSwitchesOf(disabled: readonly string[]): EnginePlugi
     tools: off.has(ENGINE_TOOLS_PLUGIN),
     workers: off.has(ENGINE_WORKERS_PLUGIN),
     swarm: off.has(ENGINE_SWARM_PLUGIN),
+    repeatGuard: off.has(ENGINE_REPEAT_GUARD_PLUGIN),
     watchdog: off.has(ENGINE_WATCHDOG_PLUGIN),
   };
 }
@@ -179,8 +200,14 @@ const HOST_POLICY: Readonly<Record<string, { disable: PluginDisable; reason?: st
   },
 };
 
-/** 引擎层：三个真的能关（工具 / worker / swarm / watchdog），两个 compose 必需。 */
-const ENGINE_POLICY: Readonly<Record<string, { disable: PluginDisable; reason?: string }>> = {
+/** 一行策略里除 `disable` 之外的附加位；`defaultEnabled` 见 `PluginCatalogRow`。 */
+interface RowPolicyExtra {
+  /** 见 `PluginCatalogRow.defaultEnabled`——**只有写 false 的行才改默认行为**。 */
+  defaultEnabled?: boolean;
+}
+
+/** 引擎层：三个真的能关（工具 / worker / swarm / repeat-guard / watchdog），两个 compose 必需。 */
+const ENGINE_POLICY: Readonly<Record<string, { disable: PluginDisable; reason?: string } & RowPolicyExtra>> = {
   "studio.engine.llm": {
     disable: "required",
     reason:
@@ -192,12 +219,23 @@ const ENGINE_POLICY: Readonly<Record<string, { disable: PluginDisable; reason?: 
   },
   [ENGINE_TOOLS_PLUGIN]: { disable: "optional" },
   [ENGINE_WORKERS_PLUGIN]: { disable: "optional" },
-  [ENGINE_SWARM_PLUGIN]: { disable: "optional" },
+  // W9331：swarm **默认关**。它是一个编排能力（批量子代理），不是保护；默认打开
+  // 会让每个新会话都带上一个用户从没要求过的委派面。`defaultEnabled: false` 是
+  // 「默认关」这件事的**唯一**表示——它必须住在这张目录里，因为停用表无法表达它
+  // （`store/plugins.ts` 的文件头解释了那个缺口）。
+  //
+  // 用户仍可打开：`disable: "optional"` 没变，打开它只需要往 `plugins.json` 的
+  // `enabled` 里写一行（`PluginSwitch.enabledDisabled` 合成）。
+  [ENGINE_SWARM_PLUGIN]: { disable: "optional", defaultEnabled: false },
+  // W9331：重复崩塌守卫**默认开**（它是保护，且在 DeepSeek 上被 146/146 的实测
+  // 支持）。它同样可以关，所以走同一条热插拔机制——只是默认方向相反，这正是
+  // `defaultEnabled` 存在的意义：两个方向共用一套表示。
+  [ENGINE_REPEAT_GUARD_PLUGIN]: { disable: "optional" },
   [ENGINE_WATCHDOG_PLUGIN]: { disable: "optional" },
 };
 
 /** 一行的策略；清单里没有的名字按 `required` 处理（fail-closed：未知 = 不许关）。 */
-function policyOf(name: string, layer: PluginLayer): { disable: PluginDisable; reason?: string } {
+function policyOf(name: string, layer: PluginLayer): { disable: PluginDisable; reason?: string } & RowPolicyExtra {
   const table = layer === "host" ? HOST_POLICY : ENGINE_POLICY;
   return (
     table[name] ?? {
@@ -217,6 +255,9 @@ function rowOf(name: string, layer: PluginLayer): PluginCatalogRow {
     hot: true,
     disable: policy.disable,
     ...(policy.reason === undefined ? {} : { reason: policy.reason }),
+    // W9331：只在**明确写 false** 时才带上这个键，所以「默认开」的行在 JSON 里
+    // 的形状与 W9322 逐字节相同（`defaultEnabled` 缺省 = true，见类型注释）。
+    ...(policy.defaultEnabled === false ? { defaultEnabled: false } : {}),
   };
 }
 

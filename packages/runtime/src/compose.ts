@@ -19,6 +19,9 @@
  *   4c. swarm wiring         mount the swarm plugin AFTER the tools plugin, so the
  *                            `agent_swarm` tool actually lands in the tool registry;
  *                            a host with no `loopFactory` mounts nothing (§5.3);
+ *   4d. repetition guard     W9331: mount the degenerate-repetition guard so a
+ *                            host cannot silently ship without it. Default ON, and
+ *                            still switchable through the hot-swap catalog;
  *   5. seam resolution       session (required) + llm / tools / agentLoop
  *                            (optional, and `null` when no plugin provides them);
  *   6. driver attach         hand Llm/ToolRegistry/AgentLoop to the worker
@@ -75,6 +78,7 @@ import { checkpointInboxSink } from "./inbox-checkpoint.js";
 import { ensureSwarmWiring, type SwarmHost, type SwarmWiring } from "./swarm-wiring.js";
 import { ensureWorkerWiring, type WorkerHost, type WorkerWiring } from "./worker-wiring.js";
 import { checkpointStoreOf } from "@celestea/session";
+import { REPEAT_GUARD_PLUGIN_NAME, mountRepeatGuard, type RepeatGuardOptions } from "./repeat-guard-mount.js";
 import {
   WATCHDOG_PLUGIN_NAME,
   celesteaWatchdogSettings,
@@ -138,6 +142,18 @@ export interface ComposeConfig {
    */
   swarm?: SwarmWiring | false;
   /**
+   * W9331: the degenerate-repetition guard (upstream `dsh-guard-repeat-output`
+   * 2.1.6, MIT). `false` never mounts it; a partial object overrides the resolved
+   * settings; omitted = the environment (`CELESTEA_REPEAT_GUARD=off` disables,
+   * otherwise the shipped thresholds mount).
+   *
+   * It is **default ON** and that is the point of the plugin: before W9331 the
+   * guard was a set of optional `AgentLoopBindings` a host had to know about, so a
+   * host that did not wire it got no protection at all. Mounting it here means the
+   * composition decides, and the hot-swap catalog can still switch it off.
+   */
+  repeatGuard?: RepeatGuardOptions | false;
+  /**
    * W740: the liveness watchdog over this generation's worker registry.
    * `false` never mounts it; a partial object overrides the resolved settings
    * (`autostart: false` mounts the sweep but leaves the cadence to the caller,
@@ -199,6 +215,12 @@ export function compose(config: ComposeConfig): Runtime {
 
   const workerHost = ensureWorkerWiring(ctx, emptyTools ? false : config.workers);
   const mounted = mountWatchdogOf(ctx, config, workerHost);
+  // W9331: the repetition guard mounts AFTER the watchdog and BEFORE seam
+  // resolution, so the loop factory (resolved below) can read the settings from
+  // the Context. It is independent of the tool face, so `emptyTools` does not
+  // suppress it: with no tools a model can still be driven into a collapse, and
+  // that is precisely when the guard matters.
+  const guardSettings = config.repeatGuard === false ? null : mountRepeatGuard(ctx, config.repeatGuard ?? {}, config.env ?? process.env);
   const session = requireSession(ctx);
   const sessionRef = { log: session };
   // W855: session-scoped tool-result retention (the loop reads this per turn).
@@ -297,7 +319,7 @@ export function compose(config: ComposeConfig): Runtime {
     llm,
     tools,
     agentLoop,
-    plugins: pluginNamesOf(plugins, workerHost, mounted, swarmHost),
+    plugins: pluginNamesOf(plugins, workerHost, mounted, swarmHost, guardSettings !== null),
     shutdownHooks: [...(config.shutdownHooks ?? []), stopWatchdog(mounted)],
     // W1900: the Runtime writes the single water-level reader here.
     usagePlane,
@@ -323,10 +345,12 @@ export function pluginNamesOf(
   workerHost: WorkerHost | null,
   mounted: MountedWatchdog | null = null,
   swarmHost: SwarmHost | null = null,
+  repeatGuardMounted: boolean = false,
 ): string[] {
   const names = pluginNames(plugins);
   if (workerHost !== null && workerHost.mountedPlugin !== null) names.push(workerHost.mountedPlugin);
   if (swarmHost !== null && swarmHost.mountedPlugin !== null) names.push(swarmHost.mountedPlugin);
+  if (repeatGuardMounted) names.push(REPEAT_GUARD_PLUGIN_NAME);
   if (workerHost !== null && mounted !== null) names.push(WATCHDOG_PLUGIN_NAME);
   return names;
 }

@@ -178,11 +178,21 @@ describe("repetition — budget exhausted, truncate at the onset", () => {
   it("keeps a healthy prefix instead of throwing the whole attempt away", async () => {
     // The prefix is real work: the truncation arm must persist it, which is what
     // separates this arm from the discard arm.
+    //
+    // W9331: the degenerate tail is ONE repeated sentence, not the interleaved
+    // "OK. Let me write. Let me go." cycle. The interleaved cycle is the case
+    // 2.1.6's onset walk deliberately refuses to cut (re-derived from
+    // W9323: upstream npm tarball ref (not a repo file) — cannot rot with a local edit.
+    // `index.js:375-413`: it returns text.length and prunes nothing), because no
+    // boundary inside it is provable. A single repeated sentence IS provable, and
+    // that is what this test is about — so it now uses the shape the arm exists
+    // for rather than the shape the arm honestly declines.
+    const collapse = "Let me run the shard reindex now. ".repeat(200);
     const prefix = Array.from({ length: 40 }, (_, i) => `Finding ${i} is distinct and verified.`).join(" ");
     const llm = new ScriptedTextLlm([
-      textStream(deltas(prefix + " " + COLLAPSE)),
-      textStream(deltas(prefix + " " + COLLAPSE)),
-      textStream(deltas(prefix + " " + COLLAPSE)),
+      textStream(deltas(prefix + " " + collapse)),
+      textStream(deltas(prefix + " " + collapse)),
+      textStream(deltas(prefix + " " + collapse)),
       textStream(deltas("Conclusion stated once.")),
     ]);
     const h = harness({ llm });
@@ -193,10 +203,8 @@ describe("repetition — budget exhausted, truncate at the onset", () => {
     expect(replies.length).toBeGreaterThan(0);
     const joined = replies.map((row) => row.text).join("\n");
     expect(joined).toContain("Finding 0 is distinct and verified.");
-    // The degeneration is dropped, measured by how much of it survived:
-    // asserting on a single substring is too weak here, because the repeated
-    // unit is the whole phrase and "Let me go. Let me go." never occurs in it.
-    const survivors = joined.split("Let me go.").length - 1;
+    // The degeneration is dropped, measured by how much of it survived.
+    const survivors = joined.split("Let me run the shard reindex now.").length - 1;
     expect(survivors).toBeLessThan(4);
     expect(joined.length).toBeLessThan(prefix.length + 400);
   });

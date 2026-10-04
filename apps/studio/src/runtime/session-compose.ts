@@ -30,6 +30,8 @@ import {
   createMemoryExtractionScheduler,
   llmSummarizer,
   memoryExtractionEnabled,
+  repeatGuardDisabled,
+  repeatGuardSettingsOf,
   SessionCapacityError,
   TurnCapacityError,
   type ExtractionCursor,
@@ -355,7 +357,7 @@ export class SessionComposer {
     // 当前的开关。`compose()` 是「一代」的构造点，所以「开关变更在下一 turn 边界
     // 生效」不需要任何额外机制——`invalidateAll()` 把实例标脏，下一次 `ensure()`
     // 走到这里，读到的就是新值。
-    const switches = this.opts.pluginSwitches?.() ?? { tools: false, workers: false, swarm: false, watchdog: false };
+    const switches = this.opts.pluginSwitches?.() ?? { tools: false, workers: false, swarm: false, watchdog: false, repeatGuard: false };
     // W804 (multimodal P0 section 5): the session's attachment store. It lives
     // INSIDE the session directory, so trash/archive/delete carry it along. The
     // DETACHED generation (dir === null, the face /api/tools and the default
@@ -439,6 +441,15 @@ export class SessionComposer {
     reader?.onComposed(sessionId, dir, read);
     const usage = createUsageTracker();
     const hooks = this.opts.sessionHooks?.(sessionId) ?? {};
+    // W9331: resolve the guard settings ONCE, here, and hand the same object to
+    // both the loop factory and `compose()`'s mount. Resolving twice would be two
+    // truths: a threshold edited between the two calls would mount a plugin
+    // advertising one budget and drive a loop with another.
+    const repeatGuard = switches.repeatGuard
+      ? null
+      : repeatGuardDisabled(this.opts.env ?? process.env)
+        ? null
+        : repeatGuardSettingsOf();
     const composed = compose({
       profile,
       plugins: engine.plugins,
@@ -468,11 +479,6 @@ export class SessionComposer {
         // discarded", repetition-recovery.ts) was never kept: a collapse dropped
         // the whole attempt with no `repetitions.jsonl` line and no copy.
         // `sessionId` rides along so the line names the session instead of null.
-        //
-        // `holdbackChars` is deliberately NOT set here — see the cross-grid note
-        // below. Its default 0 is the honest pre-holdback behaviour (the cut lands
-        // at the conviction point), and enabling it needs a fix in
-        // `packages/agent-loop` that is outside this file's writable scope.
         const diagnostics = this.repetitionDiagnosticsFor(dir);
         return new DefaultAgentLoop(bindings.config, {
           signal: bindings.signal,
@@ -481,6 +487,21 @@ export class SessionComposer {
           ...(bindings.injections === undefined ? {} : { injections: bindings.injections }),
           ...(diagnostics === null ? {} : { repetitionDiagnostics: diagnostics }),
           sessionId,
+          // W9331: the thresholds, retry budget and sanitize arm now come from
+          // the ONE settings object the engine-level guard plugin resolved. Before
+          // W9331 this loop took the package defaults implicitly, which meant the
+          // hot-swap catalog could switch the guard OFF (`repeatGuard: false` in
+          // `compose()`) and the loop would have carried on guarding anyway — the
+          // switch would have been a lie. `null` = the plugin was not mounted
+          // (switched off or not composed), and the guard is genuinely absent.
+          ...(repeatGuard === null
+            ? { repetition: false as const }
+            : {
+                repetition: repeatGuard.repetition,
+                repetitionRetries: repeatGuard.retries,
+                sanitizeGarbage: repeatGuard.sanitize,
+                garbageThresholds: repeatGuard.garbage,
+              }),
           // W1900: the nudge's water level. `compose()` already wired the same
           // reader into the turn runner; passing it through keeps the studio
           // loop byte-identical to the headless one instead of diverging into
@@ -498,6 +519,10 @@ export class SessionComposer {
       // without a loopFactory (a member turn cannot be built), so omitting this
       // line silently produced "unknown tool: agent_swarm" in production.
       swarm: switches.swarm ? false : this.swarmWiring(),
+      // W9331: `null` = the guard plugin is NOT mounted (the host switched it
+      // off, or the environment did), which is what makes `repeatGuard` in the
+      // loop factory above genuinely absent rather than defaulted-on.
+      ...(repeatGuard === null ? { repeatGuard: false as const } : { repeatGuard }),
       // W740: the watchdog settings come from the process environment; the
       // composition root reads them and registers the stop hook with the sweep.
       env: this.opts.env,

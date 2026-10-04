@@ -121,6 +121,12 @@ function makeLiveHost(opts: LiveHostOptions): LiveHost {
   writeFileSync(join(sessionDir, "cli-main.jsonl"), "");
   writeJson(join(root, "workspaces.json"), { workspaces: [{ path: workspace }], active_session: "ws/s1" });
   writeJson(join(root, "prompts.json"), {});
+  // W9331: `celestea.runtime.swarm` is default OFF, so this end-to-end suite — whose
+  // entire subject is `agent_swarm` — must turn it ON explicitly. That is exactly
+  // what a user does, and writing it as the `enabled` table (rather than as a
+  // code-level switch) means this suite exercises the REAL user path: the plugin
+  // hot-swap store → `PluginSwitch` → `enginePluginSwitchesOf` → `compose()`.
+  writeJson(join(root, "plugins.json"), { version: 2, disabled: [], enabled: ["celestea.runtime.swarm"], updated_at: 0 });
   writeJson(join(root, "providers.json"), {
     providers: [
       {

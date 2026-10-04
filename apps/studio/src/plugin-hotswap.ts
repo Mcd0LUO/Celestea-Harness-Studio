@@ -63,11 +63,22 @@ export interface PluginSwitchResult {
   changed?: boolean;
 }
 
-/** `PUT /api/plugins` 的请求体（两个字段都是可选的，缺省 = 保留原值）。 */
+/** `PUT /api/plugins` 的请求体（三个字段都是可选的，缺省 = 保留原值）。 */
 export interface PluginSwitchPatch {
   /** 替换整张停用表。 */
   disabled?: readonly string[];
-  /** 替换整张启用表（`disabled` 的补集；两个都给时以 `disabled` 为准）。 */
+  /**
+   * W9331：替换整张**显式启用**表（只对默认关的行有意义）。
+   *
+   * 这个字段在 W9322 就有，但当时的含义是「`disabled` 的补集」——客户端拿着整张
+   * 启用表回填。W9331 之后它多了一个**存储**含义：`celestea.runtime.swarm` 默认关，
+   * 「用户打开了它」只能靠这张表来表示（停用表表达不了，见 `store/plugins.ts`）。
+   *
+   * 两者不矛盾：仍然是「不在 `enabled` 表里的行 = 停用」，只是**默认关**的行现在
+   * 也参与这个补集运算了。所以旧客户端（发 `enabled` = 整张清单回填）得到的行为
+   * **完全不变**；而一个只想打开 swarm 的客户端发 `{ enabled: ["celestea.runtime.swarm"] }`
+   * 会得到 swarm 开、其余默认关的行也关。
+   */
   enabled?: readonly string[];
 }
 
@@ -111,16 +122,30 @@ export interface PluginSwitchOptions {
 }
 
 /**
- * 进程内唯一的插件开关。**内存里的 `disabled` 是权威**，磁盘只是它的持久化：
+ * 进程内唯一的插件开关。**内存里的两张表是权威**，磁盘只是它们的持久化：
  * `GET` 读内存，所以一个刚完成的 `PUT` 绝不会因为 tmp+rename 还没落盘而读回旧值。
+ *
+ * ## W9331：两张表 + 一个合成
+ *
+ * 内存里现在是 `disabled` 与 `enabled` **两张**表，因为停用表表达不了「一个默认关的
+ * 插件被用户打开了」。对外的 `disabled()` / `engineDisabled()` 一律返回**合成**之后的
+ * 停用集合：
+ *
+ *     有效停用 =（store 的 disabled）
+ *              ∪（目录里 defaultEnabled === false 且**不在** store 的 enabled 里）
+ *
+ * 换句话说，停用表的第一条纪律（「不在表里 = 默认开」）仍然是产品的默认语义，W9331
+ * 只是把「默认」这个值搬到了目录里，让它可以被**逐行**覆盖。
  */
 export class PluginSwitch {
   private readonly opts: PluginSwitchOptions;
   /** 专用队列：所有写入串行（两个并发 PUT 不丢更新）。 */
   private readonly writes = new SerialQueue();
   private readonly listeners: PluginSwitchListener[] = [];
-  /** 权威状态（构造时从磁盘载入）。 */
+  /** 权威状态（构造时从磁盘载入）：**原样**的停用表，不含任何默认行的合成。 */
   private current: string[];
+  /** W9331：显式启用的名字（只对默认关的行有意义，但对所有行都可存）。 */
+  private currentEnabled: string[];
   /** 载入时的降级警告（`GET` 会把它带给客户端）。 */
   readonly loadWarnings: string[];
 
@@ -128,17 +153,47 @@ export class PluginSwitch {
     this.opts = opts;
     const read = readPlugins(opts.dir);
     this.current = read.disabled;
+    this.currentEnabled = read.enabled;
     this.loadWarnings = read.warnings;
   }
 
-  /** 归一化后的停用表（内存权威）。 */
+  /**
+   * 归一化后的停用表（内存权威 + 合成）。
+   *
+   * 合成在这里发生、**只**在这里发生，所以 `rows()` / `engineDisabled()` /
+   * `notify()` 三个读者看到的是同一张表。`storeDisabled()` 暴露原表，处理器用它
+   * 回答 `GET /api/plugins` 的 `disabled` 字段（那是与 display-plugins 同形的「显式
+   * 停用」，而 `plugins[].enabled` 已经是合成后的**真值**）。
+   */
   disabled(): string[] {
+    return this.effectiveDisabled();
+  }
+
+  /** 磁盘上的原样停用表（**不含**默认行的合成）。 */
+  storeDisabled(): string[] {
     return [...this.current];
   }
 
-  /** 清单 + 当前启用状态（`GET` 的 body 来源）。 */
+  /** 磁盘上的原样显式启用表。 */
+  storeEnabled(): string[] {
+    return [...this.currentEnabled];
+  }
+
+  /**
+   * 有效停用集合 = store 的 disabled ∪（目录里默认关且不在 store 的 enabled 里）。
+   *
+   * 顺序：先 store 的（保序），再补上目录里默认关的行（清单顺序）。清单外的名字
+   * 会被 `engineDisabledOf` 那一层滤掉，所以这里不重复过滤——但**保留**它们能让
+   * `GET` 的 `disabled` 字段与磁盘上的字面一致，而 `plugins[].enabled` 用的是
+   * 集合语义，两者不必逐字相同。
+   */
+  private effectiveDisabled(): string[] {
+    return this.effectiveOf(this.current, this.currentEnabled);
+  }
+
+  /** 清单 + 当前启用状态（`GET` 的 body 来源）。`enabled` 是**合成后的真值**。 */
   rows(): PluginRow[] {
-    const off = new Set(this.current);
+    const off = new Set(this.effectiveDisabled());
     return pluginCatalog(this.opts.hostNames()).map((row) => ({ ...row, enabled: !off.has(row.name) }));
   }
 
@@ -147,9 +202,9 @@ export class PluginSwitch {
     return this.rows().filter((row) => row.layer === layer);
   }
 
-  /** 引擎层的停用集合（`required` 的行已被滤掉）。 */
+  /** 引擎层的停用集合（`required` 的行已被滤掉，默认关的行已被合成进去）。 */
   engineDisabled(): string[] {
-    return engineDisabledOf(this.current);
+    return engineDisabledOf(this.effectiveDisabled());
   }
 
   /** 引擎层的装配开关。 */
@@ -178,8 +233,13 @@ export class PluginSwitch {
     const requested = this.requestedOf(patch);
     if (!requested.ok) return { ok: false, error: requested.error };
 
-    const before = this.current;
-    const next = requested.disabled;
+    // The change decision runs on the **effective** set (the two tables plus the
+    // catalog defaults), not on the raw disabled list. Otherwise "the user opened
+    // the default-off swarm plugin" would read as no change at all: the raw list
+    // never moves, so no invalidation would be scheduled and the tool would stay
+    // missing until the next restart.
+    const before = this.effectiveDisabled();
+    const next = this.effectiveOf(requested.disabled, requested.enabled);
     // 差集（用于报告；也决定要不要通知引擎换代）。
     const beforeSet = new Set(before);
     const nextSet = new Set(next);
@@ -214,16 +274,17 @@ export class PluginSwitch {
     }
 
     if (!changed) {
-      return { ok: true, disabled: next, enabled: [], changed: false };
+      return { ok: true, disabled: requested.disabled, enabled: requested.enabled, changed: false };
     }
 
     try {
       // 串行：第二个 PUT 等第一个的 tmp+rename 落定。
       await this.writes.run(async () => {
-        writePlugins(this.opts.dir, next, this.opts.now());
+        writePlugins(this.opts.dir, requested.disabled, this.opts.now(), requested.enabled);
         // 内存权威在同一临界区内更新：`GET` 读内存，所以它永远不会看到
         // 「文件写完了但状态还没换」的中间态。
-        this.current = next;
+        this.current = requested.disabled;
+        this.currentEnabled = requested.enabled;
       });
     } catch (e) {
       return { ok: false, error: "cannot persist plugins: " + errText(e) };
@@ -231,11 +292,31 @@ export class PluginSwitch {
     // 换代通知在临界区**之外**：订阅者是引擎（它只标记实例，不做 IO），
     // 而且一个抛错的订阅者绝不能把已经落盘的写入变成一次失败。
     this.notify();
-    return { ok: true, disabled: next, enabled: nowEnabled, changed: true };
+    return { ok: true, disabled: requested.disabled, enabled: nowEnabled, changed: true };
   }
 
-  /** 把请求体解析成「下一张停用表」（向后兼容：两个字段都可以不发）。 */
-  private requestedOf(patch: PluginSwitchPatch): { ok: true; disabled: string[] } | { ok: false; error: string } {
+  /** 两张原表 -> 有效停用集合（与 [effectiveDisabled] 同一段合成规则）。 */
+  private effectiveOf(disabled: readonly string[], enabled: readonly string[]): string[] {
+    const off = new Set(disabled);
+    const explicitlyOn = new Set(enabled);
+    for (const row of pluginCatalog(this.opts.hostNames())) {
+      if (row.defaultEnabled !== false) continue;
+      if (off.has(row.name) || explicitlyOn.has(row.name)) continue;
+      off.add(row.name);
+    }
+    return [...off];
+  }
+
+  /**
+   * 把请求体解析成「下一对表」（向后兼容：两个字段都可以不发）。
+   *
+   * W9331 之后 `enabled` **不再只是** `disabled` 的补集：它同时是「显式启用表」的
+   * 写入路径（默认关的行只能靠它被打开）。两个字段都给时仍然是自相矛盾的请求，
+   * 仍然以 `disabled` 为准并**说出来**。
+   */
+  private requestedOf(
+    patch: PluginSwitchPatch,
+  ): { ok: true; disabled: string[]; enabled: string[] } | { ok: false; error: string } {
     const known = pluginCatalog(this.opts.hostNames()).map((row) => row.name);
     if (patch.disabled !== undefined && patch.enabled !== undefined) {
       // 两个都给 = 自相矛盾的请求。以 `disabled` 为准（它与磁盘上的形状一致），
@@ -246,17 +327,26 @@ export class PluginSwitch {
       if (contradiction !== undefined) {
         return { ok: false, error: `fields 'disabled' and 'enabled' contradict each other on '${contradiction}'` };
       }
-      return { ok: true, disabled };
+      return { ok: true, disabled, enabled };
     }
-    if (patch.disabled !== undefined) return { ok: true, disabled: this.normalize(patch.disabled, known) };
+    if (patch.disabled !== undefined) {
+      // W9331: `disabled` 单独给 = 替换停用表。显式启用表**保留原值**——只发
+      // `disabled` 的老客户端从来不知道这张表存在，替它清空会把用户刚打开的
+      // 默认关插件悄悄关回去。
+      return { ok: true, disabled: this.normalize(patch.disabled, known), enabled: [...this.currentEnabled] };
+    }
     if (patch.enabled !== undefined) {
       const enabled = new Set(this.normalize(patch.enabled, known));
       // `enabled` 是补集：清单里不在启用表里的行 = 停用。这是给「我手上有整张
       // 启用表」的客户端的形状（`GET` 的 `plugins[]` 直接回填即可）。
-      return { ok: true, disabled: known.filter((name) => !enabled.has(name)) };
+      //
+      // W9331: 这里**只**发 `enabled` 的客户端，语义与 W9322 逐字相同（它回填的
+      // 是整张清单，所以补集是全停用区）；但**它写的这一张表现在也存进磁盘**，
+      // 所以「打开一个默认关的插件」从此有了表示法。
+      return { ok: true, disabled: known.filter((name) => !enabled.has(name)), enabled: [...enabled] };
     }
     // 两个字段都没有 = 老客户端「只发它认识的东西」：保留原值（§5 的向后兼容）。
-    return { ok: true, disabled: [...this.current] };
+    return { ok: true, disabled: [...this.current], enabled: [...this.currentEnabled] };
   }
 
   /**

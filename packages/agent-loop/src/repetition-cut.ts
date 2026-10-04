@@ -71,7 +71,10 @@ export function releaseAfterStream(
 ): ReleaseResult {
   const evidence = stream.repetition;
   if (evidence === null) {
-    thinking.flush();
+    // W9331: the healthy path must release EVERYTHING. The buffer normally holds
+    // back `holdbackChars` for a possible precise cut, but no conviction is
+    // coming, so that text is not "held" — it would simply never be written.
+    thinking.releaseAll();
     return NOTHING_PRUNED;
   }
   const plan = stream.repetitionPlan;
@@ -108,7 +111,9 @@ function truncate(
   const onset = degenerationOnset(text, thresholds);
   const kept = text.slice(0, onset);
   if (kept !== "") session.append({ type: "assistant_message", text: kept });
-  thinking.flush();
+  // W9331: same reason as the healthy path — this is the end of the stream, so
+  // whatever the buffer still holds must be written, not left behind.
+  thinking.releaseAll();
   stream.onset = onset;
   return { prunedChars: text.length - onset, onset };
 }

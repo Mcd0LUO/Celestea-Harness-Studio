@@ -59,6 +59,27 @@ export class ThinkingBuffer {
   }
 
   /**
+   * W9331: release EVERYTHING still held, ignoring the holdback.
+   *
+   * The ordinary [flush] deliberately keeps the newest `holdbackChars` back,
+   * because a conviction may still arrive and would want to cut precisely. That
+   * reasoning stops being true at the END of a stream: there is no later
+   * conviction, so the held text is not "held for a possible cut", it is simply
+   * text that would otherwise never be written. `releaseAll` is the stream-end
+   * path (and the cancel path), so a healthy short reasoning burst is persisted
+   * in full even when it is smaller than the holdback window.
+   *
+   * Without this, `holdbackChars: 4096` silently dropped every reasoning burst
+   * under 4096 characters — a data-loss bug that no threshold test would have
+   * caught, because the burst was simply never written.
+   */
+  releaseAll(): void {
+    const text = this.queue.slice(this.head).join("");
+    this.dropHeld();
+    this.appendText(text);
+  }
+
+  /**
    * Release what is still held, keeping only its first `keepChars` characters —
    * i.e. drop the degeneration the guard convicted and keep the healthy prefix
    * before it. The cut may land in the middle of a delta, which is intended: the

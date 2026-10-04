@@ -1,5 +1,6 @@
 /**
  * W1510 — online detection of DEGENERATE REPETITION in a streaming reply.
+ * W9331 — realigned with upstream `dsh-guard-repeat-output` 2.1.6 (MIT).
  *
  * The failure mode is real and was observed in production: a DeepSeek-family
  * model generating a long answer collapses into emitting the same sentence
@@ -13,6 +14,13 @@
  * loop.ts owns the wiring, this file owns the judgement.
  *
  * ## Provenance: this is a PORT, not a reinvention
+ *
+ * Upstream package: **`dsh-guard-repeat-output` v2.1.6** (MIT, zero dependencies,
+ * published 2026-10-04; <https://www.npmjs.com/package/dsh-guard-repeat-output>).
+ * Upstream file: `index.js`, the "Pure detector" section. Licence requires the
+ * origin to be named, and the shape of this file — the absolute evaluation grid,
+ * the raw-text window, the two-legged verdict — is upstream's, carried over rather
+ * than re-derived.
  *
  * The detector is a port of the host-side plugin dsh-guard-repeat-output
  * (index.js, the "Pure detector" section), which has been running against real
@@ -32,6 +40,27 @@
  *      and silently make the newline in SEGMENT_BREAK dead — a reply repeating
  *      one unpunctuated line would collapse into a single enormous segment and
  *      never reach minSegments. Only the comparison keys are normalized.
+ *
+ * ## W9331: what the realignment changed, and why it was not a tuning nit
+ *
+ * This file previously carried a **pre-2.1.6** port whose segmentation dropped
+ * every segment shorter than `minSegmentChars` (12). Upstream removed that
+ * threshold in 2.1.6 because it stopped a whole class of collapses from being
+ * detected at all, and made the failure actively misleading rather than merely
+ * silent. Three concrete changes, all in [DEEPSEEK_REPETITION_THRESHOLDS] and
+ * [segmentsOf]:
+ *
+ *   - `minSegmentChars` is **gone**; a segment is kept whenever it carries a
+ *     letter or digit, however short, so only bare punctuation is dropped.
+ *   - `lowInfoDupShare` 0.85 -> 0.80 (0.85 was tuned against the OLD,
+ *     length-filtered statistic; with the corrected segmentation the share is
+ *     measured over the same segment set the phrase leg uses).
+ *   - `degenerationOnset` now uses the SAME keep-rule, so detection and pruning
+ *     judge one segment set.
+ *
+ * The measured upstream result of the fix: **62/62** frozen collapses,
+ * **146/146** live collapses, **0/1708** false positives on legitimate reasoning
+ * parts. The previous build caught **0/146** of those live collapses.
  *
  * ## Scope: DeepSeek only, explicitly
  *
@@ -128,8 +157,6 @@ export interface RepetitionThresholds {
   minWindowChars: number;
   /** Minimum number of usable segments in the window before the phrase rule runs. */
   minSegments: number;
-  /** Segments shorter than this are noise and are dropped before counting. */
-  minSegmentChars: number;
   /** A run of this many identical segments proves phrase repetition on its own. */
   phraseRun: number;
   /** Occurrences of one segment that prove phrase repetition on its own. */
@@ -148,21 +175,35 @@ export interface RepetitionThresholds {
    * stray unique segment, while still stopping before healthy prose.
    */
   onsetGapSegments: number;
+  /**
+   * W9331: characters of raw text held back from release so a cut lands on the
+   * true onset rather than at the (later) provable conviction point. `0` disables
+   * holdback.
+   *
+   * Present since W1510 as `RepetitionDiagnostics.holdbackChars`; W9331 moves the
+   * default from "0, the caller must opt in" to 4096, the value upstream ships.
+   */
+  holdbackChars: number;
 }
 
-/** The calibrated defaults (used for every DeepSeek model; overridable in tests). */
+/**
+ * The calibrated defaults (used for every DeepSeek model; overridable in tests).
+ *
+ * W9331 aligns this with upstream `dsh-guard-repeat-output` 2.1.6 — see
+ * `REPETITION_V2_CHANGES` at the bottom of this file for the item-by-item list.
+ */
 export const DEEPSEEK_REPETITION_THRESHOLDS: RepetitionThresholds = {
   windowChars: 2400,
   minWindowChars: 1200,
   minSegments: 24,
-  minSegmentChars: 12,
   phraseRun: 8,
   phraseTopCount: 10,
-  lowInfoDupShare: 0.85,
+  lowInfoDupShare: 0.8,
   maxUniqueGramRatio: 0.3,
   gramK: 5,
   evalEveryChars: 200,
   onsetGapSegments: 2,
+  holdbackChars: 4096,
 };
 
 /**
@@ -207,6 +248,9 @@ function normalize(text: string): string {
   return text.toLowerCase().replace(/\s+/g, " ");
 }
 
+/** Does a fragment carry at least one letter or digit (CJK included)? */
+const WORD_CHAR = /[0-9a-z\u4e00-\u9fff]/;
+
 /**
  * The trailing windowChars of the RAW text — the whole bounded state.
  *
@@ -218,16 +262,35 @@ function rawWindowOf(text: string, thresholds: RepetitionThresholds): string {
 }
 
 /**
- * Split a RAW window into usable segments, dropping sub-threshold noise.
+ * Split a RAW window into usable segments, dropping fragments with no word.
  *
  * Each segment is normalized AFTER splitting (not before), so segments that
  * differ only in case or internal spacing still compare equal.
+ *
+ * W9331 (upstream 2.1.6): a fragment is kept whenever it carries at least one
+ * letter or digit — a word, **however short**. The previous rule dropped every
+ * segment shorter than `minSegmentChars` (12) to discard punctuation noise, and
+ * that turned out to be worse than useless:
+ *
+ *   - the degenerate pattern migrated to exactly those short sentences — `OK.`
+ *     (2) and `Let me run.` (10) both fell under the floor, so **every** segment
+ *     of a collapse was discarded and it never reached `minSegments`;
+ *   - and the damage was worse than a MISS: `duplicateShare` is computed over
+ *     the segments that SURVIVE, so discarding the repeaters inflated the
+ *     apparent variety of what remained. Measured upstream on live traffic, a
+ *     real collapse looping `OK.` 44 times scored a duplicate share of 0.60 and
+ *     never convicted. Upstream's previous build caught 0/146 live collapses,
+ *     and 144 collapses in one production session were silently allowed through.
+ *
+ * Testing for a word character rejects punctuation noise directly, without the
+ * length floor. `degenerationOnset` uses the same test, so detection and pruning
+ * judge the same segments (upstream is explicit that they must agree).
  */
-function segmentsOf(rawWindow: string, thresholds: RepetitionThresholds): string[] {
+function segmentsOf(rawWindow: string): string[] {
   return rawWindow
     .split(SEGMENT_BREAK)
     .map((part) => normalize(part).trim())
-    .filter((part) => part.length >= thresholds.minSegmentChars);
+    .filter((part) => WORD_CHAR.test(part));
 }
 
 /** Longest run of consecutive identical segments. */
@@ -307,7 +370,7 @@ export function evaluateRepetitionWindow(
 ): RepetitionEvidence | null {
   const window = rawWindowOf(text, thresholds);
   if (window.length < thresholds.minWindowChars) return null;
-  const segments = segmentsOf(window, thresholds);
+  const segments = segmentsOf(window);
   if (segments.length < thresholds.minSegments) return null;
   const stats = segmentStats(segments);
   const unique = uniqueGramRatio(window, thresholds);
@@ -360,7 +423,11 @@ export function degenerationOnset(
   let match: RegExpExecArray | null;
   while ((match = scan.exec(text)) !== null) {
     const normalized = normalize(match[0]).trim();
-    if (normalized.length < thresholds.minSegmentChars) continue;
+    // W9331: the SAME keep-rule as `segmentsOf` (upstream 2.1.6 is explicit that
+    // "detection and pruning must agree"). With the old `minSegmentChars` floor
+    // the two disagreed, so a collapse made of short sentences was invisible to
+    // the detector yet still walked by the onset search.
+    if (!WORD_CHAR.test(normalized)) continue;
     segments.push({ start: match.index, text: normalized });
   }
   if (segments.length === 0) return text.length;
@@ -540,3 +607,37 @@ export function createRepetitionGuard(
 ): RepetitionGuard | null {
   return isDeepSeekModel(model) ? new RepetitionGuard(thresholds) : null;
 }
+
+/**
+ * W9331 — the item-by-item delta against upstream 2.1.6, kept in the file so the
+ * alignment can be re-checked without fetching the tarball.
+ *
+ * "already identical" means the value matched upstream `DEFAULTS`
+ * W9323: upstream npm tarball ref (not a repo file) — cannot rot with a local edit.
+ * (`dsh-guard-repeat-output` 2.1.6, `index.js:147-230`) before this change.
+ *
+ * | threshold / rule            | this repo before | 2.1.6 | this repo now |
+ * |-----------------------------|------------------|-------|---------------|
+ * | `windowChars`               | 2400             | 2400  | 2400          |
+ * | `minWindowChars`            | 1200             | 1200  | 1200          |
+ * | `minSegments`               | 24               | 24    | 24            |
+ * | `minSegmentChars`           | 12 (DROPPED...)  | GONE  | **removed**   |
+ * | `phraseRun`                 | 8                | 8     | 8             |
+ * | `phraseTopCount`            | 10               | 10    | 10            |
+ * | `lowInfoDupShare`           | 0.85             | 0.80  | **0.80**      |
+ * | `maxUniqueGramRatio`        | 0.30             | 0.3   | 0.30          |
+ * | `gramK`                     | 5                | 5     | 5             |
+ * | `evalEveryChars`            | 200              | 200   | 200           |
+ * | `onsetGapSegments`          | 2                | 2     | 2             |
+ * | `holdbackChars`             | absent (opt-in)  | 4096  | **4096**      |
+ * | keep-rule in `segmentsOf`   | `length >= 12`   | has a letter/digit | has a letter/digit |
+ * | keep-rule in `degenerationOnset` | `length >= 12` | same rule | same rule |
+ * | garbage sanitization        | absent           | `lib/sanitize.js` | `repetition-sanitize.ts` |
+ * | retroactive decontamination | absent           | `lib/cleanup.js` | `repetition-cleanup.ts` |
+ *
+ * The garbage and decontamination layers are separate modules on purpose: the
+ * garbage blacklist is an EXACT predicate (a code point is in the set or it is
+ * not) and needs no statistics, so mixing it into this file's statistical
+ * detector would have coupled two judgements that are correct for different
+ * reasons. See `repetition-sanitize.ts` and `repetition-cleanup.ts`.
+ */
