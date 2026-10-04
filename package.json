@@ -28,7 +28,7 @@
     "typecheck:web": "pnpm --dir apps/web run typecheck",
     "check:fast": "pnpm typecheck && pnpm typecheck:web && pnpm lint && pnpm lint:arch && pnpm check:tmpdir",
     "check:tmpdir": "node scripts/check-test-tmpdir.mjs",
-    "check:web": "pnpm --dir apps/web run build && node scripts/run-with-env.mjs CELESTEA_BUNDLE_STRICT=1 -- pnpm --dir apps/web run check",
+    "check:web": "node scripts/build-webdist.mjs && node scripts/run-with-env.mjs CELESTEA_BUNDLE_STRICT=1 -- pnpm --dir apps/web run check",
     "node:check": "node scripts/check-node.mjs",
     "version:sync": "node scripts/version.mjs --write",
     "deps:audit": "pnpm audit; pnpm outdated -r",

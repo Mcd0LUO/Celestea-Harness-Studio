@@ -13,6 +13,15 @@
  * property of the staging step itself, not of workspace ordering. Set
  * `CELESTEA_SKIP_WEB_BUILD=1` to stage an already-built dist (the
  * `release:check` gate still verifies freshness).
+ *
+ * ## Why `check:web` calls THIS (not `apps/web run build`) — 2026-10-04
+ *
+ * It used to call `apps/web run build`, which refreshes `apps/web/dist` but NOT the
+ * staged `apps/studio/webdist` the app actually serves (`defaultStaticRoot()` prefers
+ * it). So `pnpm check` was green while `npm start` served a frontend 13 commits behind
+ * — the SAME failure this header already records from the earlier audit. Routing the
+ * gate through here makes "gate green" imply "the served artifact is current", i.e. it
+ * closes a false-green channel rather than adding a check.
  */
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, rmSync } from "node:fs";
