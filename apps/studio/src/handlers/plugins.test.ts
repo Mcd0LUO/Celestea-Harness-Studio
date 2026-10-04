@@ -1,5 +1,6 @@
 /**
  * W9322 — `PUT /api/plugins`（`docs/feature-plugin-hotswap.md` §3/§5/§6）。
+ * W9331 — 加上「默认关 + 显式启用表」的语义（下称 DEFAULT_OFF）。
  *
  * 这里测的是 **HTTP 面的判定**，不是引擎换代（那在
  * `runtime/plugin-hotswap.test.ts`）：
@@ -12,6 +13,11 @@
  *   ⑤ 形状与 `GET/PUT /api/display-plugins` 对齐，但**清单外的名字被丢弃**——
  *      因为服务端知道自己 mount 了什么（display-plugins 那里它不知道）。
  *
+ * W9331 的 `disabled` 字段口径：它是 **有效停用集合**（= store 的 disabled ∪ 目录里
+ * 默认关且未被显式打开的行），因为契约把它定义成 `plugins[].enabled` 的**补集投影**，
+ * 而 `plugins[].enabled` 是逐行真值。所以空 store 的答复里 `disabled` = DEFAULT_OFF，
+ * 不是 `[]` —— 这正是「swarm 默认关」这句话的可观察形状。
+ *
  * 「有活跃会话」在本文件里是**真的**：脚本回合有 `stepDelayMs`，测试在它跑着的时候
  * 发 PUT，所以 409 不是靠桩函数假装的。
  */
@@ -19,9 +25,22 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { ENGINE_SWARM_PLUGIN } from "../plugin-catalog.js";
 import { createFakeRuntimeAdapter, type FakeRuntimeAdapter } from "../fake-runtime-adapter.js";
 import { getJson, jsonRequest, makeHarness, type StudioHarness } from "../harness.test-util.js";
 import { PLUGINS_FILE, readPlugins } from "../store/plugins.js";
+
+/**
+ * W9331: the catalog rows whose default is OFF, in catalog order. Today that is
+ * exactly one row, and naming it once here means the tests below assert the
+ * *shape of the rule* rather than sprinkling a literal through every expectation.
+ */
+const DEFAULT_OFF: readonly string[] = [ENGINE_SWARM_PLUGIN];
+
+/** The effective disabled set of an empty store: the default-off rows, nothing else. */
+function emptyStoreDisabled(): string[] {
+  return [...DEFAULT_OFF];
+}
 
 const harnesses: StudioHarness[] = [];
 
@@ -33,6 +52,23 @@ afterEach(() => {
 function open(stepDelayMs = 0): StudioHarness {
   const runtime = createFakeRuntimeAdapter({ profile: { model: "test-model" }, stepDelayMs });
   const h = makeHarness({ runtime: runtime as unknown as FakeRuntimeAdapter, session: { name: "s1", log: "" } });
+  harnesses.push(h);
+  return h;
+}
+
+/**
+ * 一个把**原始字节**先放到数据目录、再建 app 的 harness。
+ *
+ * W9331 用它验「旧格式文件仍然被正确解释」：`rawFiles` 在 `PluginSwitch` 构造**之前**
+ * 落盘，所以这是真的「重启读到旧字节」，而不是重读本进程刚写的文件。
+ */
+function openWith(planted: { rawFiles: Record<string, string> }): StudioHarness {
+  const runtime = createFakeRuntimeAdapter({ profile: { model: "test-model" } });
+  const h = makeHarness({
+    runtime: runtime as unknown as FakeRuntimeAdapter,
+    session: { name: "s1", log: "" },
+    rawFiles: planted.rawFiles,
+  });
   harnesses.push(h);
   return h;
 }
@@ -80,17 +116,23 @@ describe("W9322 PUT /api/plugins · required rows", () => {
       expect(String(res.body["error"]), name).toContain(`plugin '${name}' cannot be disabled`);
       expect(String(res.body["error"]).length, name).toBeGreaterThan(`plugin '${name}' cannot be disabled: `.length);
     }
-    // Nothing was persisted by any of the refusals.
-    expect((await rowsOf(h)).every((row) => row.enabled)).toBe(true);
-    expect((await getJson(h.app, "/api/plugins")).body["disabled"]).toEqual([]);
+    // Nothing was persisted by any of the refusals: the store still holds the
+    // empty table, so the effective set is exactly the catalog defaults.
+    expect((await rowsOf(h)).filter((row) => !row.enabled).map((row) => row.name)).toEqual([...DEFAULT_OFF]);
+    expect((await getJson(h.app, "/api/plugins")).body["disabled"]).toEqual(emptyStoreDisabled());
   });
 
   it("drops names outside the catalog instead of persisting a row that can never take effect", async () => {
     const h = open();
     const res = await put(h, { disabled: ["ghost/plugin", "studio.engine.tools"] });
     expect(res.status).toBe(200);
-    expect(res.body["disabled"]).toEqual(["studio.engine.tools"]);
+    // `ghost/plugin` is gone; `studio.engine.tools` was really disabled; the
+    // default-off row joins the effective set because nothing turned it on.
+    expect(res.body["disabled"]).toEqual(["studio.engine.tools", ...DEFAULT_OFF]);
     expect((await rowsOf(h)).find((row) => row.name === "studio.engine.tools")?.enabled).toBe(false);
+    // The file itself holds only what was asked for — the default-off row is a
+    // property of the CATALOG, not something the request wrote to disk.
+    expect(readPlugins(h.root).disabled).toEqual(["studio.engine.tools"]);
   });
 });
 
@@ -125,7 +167,7 @@ describe("W9322 PUT /api/plugins · idle-only rows (studio/bus, studio/runtime)"
 
     const res = await put(h, { disabled: ["studio/bus"] });
     expect(res.status).toBe(200);
-    expect(res.body["disabled"]).toEqual(["studio/bus"]);
+    expect(res.body["disabled"]).toEqual(["studio/bus", ...DEFAULT_OFF]);
     expect((await rowsOf(h)).find((row) => row.name === "studio/bus")?.enabled).toBe(false);
 
     // ...and a no-op PUT of the SAME state is never refused, even mid-turn: it
@@ -194,11 +236,16 @@ describe("W9322 PUT /api/plugins · back-compat and serialization", () => {
     // A client from before `disabled` existed posts some unrelated body.
     const res = await put(h, { something_else: true });
     expect(res.status).toBe(200);
-    expect(res.body["disabled"]).toEqual(["studio.engine.tools"]);
+    expect(res.body["disabled"]).toEqual(["studio.engine.tools", ...DEFAULT_OFF]);
     // ...and one that only knows `enabled` still gets its complement stored.
+    // W9331: this client round-trips the WHOLE row list, so it also states that the
+    // default-off row is wanted ON — and the complement store records exactly that.
     const back = await put(h, { enabled: (await rowsOf(h)).map((row) => row.name) });
     expect(back.status).toBe(200);
     expect(back.body["disabled"]).toEqual([]);
+    // The default-off row really was turned on by the round-trip, not merely
+    // omitted from a list — that distinction is what the `enabled` table records.
+    expect(readPlugins(h.root).enabled).toContain(ENGINE_SWARM_PLUGIN);
   });
 
   it("two concurrent PUTs do not lose an update", async () => {
@@ -227,5 +274,121 @@ describe("W9322 PUT /api/plugins · back-compat and serialization", () => {
     const raw = JSON.parse(readFileSync(join(h.root, PLUGINS_FILE), "utf8")) as Record<string, unknown>;
     expect(raw["disabled"]).toEqual(["studio.engine.tools"]);
     expect(readPlugins(h.root).disabled).toEqual(["studio.engine.tools"]);
+  });
+});
+
+/**
+ * W9331 — the four acceptance properties of "default OFF, but the user can turn
+ * it ON", asserted at the HTTP face that a client actually talks to.
+ *
+ * The interesting one is ②: before W9331 the store could not EXPRESS "on" for a
+ * row that is off by default, because "not in `disabled`" already meant "on".
+ * These tests are what pins the new representation down.
+ */
+describe("W9331 · default-off rows are switchable in BOTH directions", () => {
+  it("① an empty store reports the default-off row as disabled (the tool is not registered)", async () => {
+    const h = open();
+    const rows = await rowsOf(h);
+    expect(rows.find((row) => row.name === ENGINE_SWARM_PLUGIN)?.enabled).toBe(false);
+    // The catalog carries the row even though it is off — otherwise there would be
+    // no way for a user to see it, let alone turn it on.
+    expect(rows.some((row) => row.name === ENGINE_SWARM_PLUGIN)).toBe(true);
+  });
+
+  it("② a client can turn it ON by including it in the full `enabled` table", async () => {
+    const h = open();
+    // This is the shape a real client sends (`apps/web/src/ui/plugins/index.ts`):
+    // the NAME OF EVERY ROW THAT SHOULD BE ON, i.e. the whole enable table — not a
+    // patch. Sending `[swarm]` alone would mean "everything else is off", which
+    // includes `required` rows and is therefore refused (422); the assertion below
+    // pins that too, so the distinction cannot quietly change.
+    const all = (await rowsOf(h)).map((row) => row.name);
+    const res = await put(h, { enabled: all });
+    expect(res.status).toBe(200);
+    expect((res.body["plugins"] as PluginRow[]).find((row) => row.name === ENGINE_SWARM_PLUGIN)?.enabled).toBe(true);
+    expect(res.body["disabled"]).not.toContain(ENGINE_SWARM_PLUGIN);
+    // The ON state survived to disk in its OWN table, which is the whole reason the
+    // `enabled` table had to be added.
+    expect(readPlugins(h.root).enabled).toContain(ENGINE_SWARM_PLUGIN);
+    // A fresh GET (the answer the next boot would give) still says ON.
+    expect((await rowsOf(h)).find((row) => row.name === ENGINE_SWARM_PLUGIN)?.enabled).toBe(true);
+  });
+
+  it("②a `enabled` is a COMPLEMENT over the catalog, so a one-name list is refused, not misread", async () => {
+    const h = open();
+    const res = await put(h, { enabled: [ENGINE_SWARM_PLUGIN] });
+    // "Only swarm is on" — true but unsatisfiable, because the required rows would
+    // have to be off. Refusing with the row's own reason is the honest answer.
+    expect(res.status).toBe(422);
+    expect(String(res.body["error"])).toContain("cannot be disabled");
+  });
+
+  it("②b turning it back OFF works too: `disabled` wins over the catalog default", async () => {
+    const h = open();
+    // ON via the full table (what a client sends), then OFF via `disabled`.
+    await put(h, { enabled: (await rowsOf(h)).map((row) => row.name) });
+    const off = await put(h, { disabled: [ENGINE_SWARM_PLUGIN] });
+    expect(off.status).toBe(200);
+    expect((off.body["plugins"] as PluginRow[]).find((row) => row.name === ENGINE_SWARM_PLUGIN)?.enabled).toBe(false);
+    // `disabled` takes precedence over the `enabled` table when both name the row,
+    // which is the same rule the request parser applies to a contradictory body.
+    expect(readPlugins(h.root).disabled).toContain(ENGINE_SWARM_PLUGIN);
+  });
+
+  it("②c `disabled: []` does NOT turn a default-off row on (not-in-list is not a request)", async () => {
+    // The distinction the `enabled` table exists for: an explicit empty disabled
+    // table says "nothing is switched off BY ME", which is not the same statement
+    // as "switch on the things that default to off".
+    const h = open();
+    const res = await put(h, { disabled: [] });
+    expect(res.status).toBe(200);
+    expect((res.body["plugins"] as PluginRow[]).find((row) => row.name === ENGINE_SWARM_PLUGIN)?.enabled).toBe(false);
+    expect(res.body["disabled"]).toEqual([...DEFAULT_OFF]);
+  });
+
+  it("③ a LEGACY v1 plugins.json is still interpreted exactly as before", async () => {
+    // `rawFiles` are planted BEFORE the app (and therefore the PluginSwitch) is
+    // built, so this is a real "restart read the old bytes" — not a re-parse of a
+    // file the process just wrote.
+    const h = openWith({
+      rawFiles: {
+        [PLUGINS_FILE]: JSON.stringify({ version: 1, disabled: ["studio.engine.tools"], updated_at: 1_700_000_000 }),
+      },
+    });
+    // The v1 table is honoured verbatim (no migration, no lost data)...
+    const rows = await rowsOf(h);
+    expect(rows.find((row) => row.name === "studio.engine.tools")?.enabled).toBe(false);
+    // ...`enabled` was simply absent, so it reads as empty and the catalog default
+    // still applies to the default-off row.
+    expect(rows.find((row) => row.name === ENGINE_SWARM_PLUGIN)?.enabled).toBe(false);
+    expect((await getJson(h.app, "/api/plugins")).body["warnings"]).toBeUndefined();
+    expect(readPlugins(h.root)).toEqual({ disabled: ["studio.engine.tools"], enabled: [], warnings: [] });
+  });
+
+  it("③b a legacy file that turned a default-off row ON is honoured too (the `enabled` table)", async () => {
+    const h = openWith({
+      rawFiles: {
+        [PLUGINS_FILE]: JSON.stringify({
+          version: 2,
+          disabled: [],
+          enabled: [ENGINE_SWARM_PLUGIN],
+          updated_at: 1_700_000_000,
+        }),
+      },
+    });
+    expect((await rowsOf(h)).find((row) => row.name === ENGINE_SWARM_PLUGIN)?.enabled).toBe(true);
+  });
+
+  it("④ a corrupt file degrades to the catalog DEFAULTS, and says so (never a silent repair)", async () => {
+    const h = openWith({ rawFiles: { [PLUGINS_FILE]: "{ not json" } });
+    // The warning reaches the client, and the effective state is the defaults:
+    // nothing the user had switched off is silently switched back on, and the
+    // default-off row stays off.
+    const body = (await getJson(h.app, "/api/plugins")).body;
+    expect((body["warnings"] as string[])[0]).toContain("plugins_unreadable");
+    const rows = body["plugins"] as PluginRow[];
+    expect(rows.filter((row) => !row.enabled).map((row) => row.name)).toEqual([...DEFAULT_OFF]);
+    // And it was NOT repaired on disk by merely being read.
+    expect(readFileSync(join(h.root, PLUGINS_FILE), "utf8")).toBe("{ not json");
   });
 });
