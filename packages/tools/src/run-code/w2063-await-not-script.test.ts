@@ -48,19 +48,63 @@ const run = (tool: Tool, callId: string, args: unknown): Promise<ToolExecOutcome
   h.run(tool, callId, args) as Promise<ToolExecOutcome>;
 const shellTool = (): Tool => h.mount(h.shellRegistry());
 
+/**
+ * The stdout LOGS section of a `run_code` render, with the `[stderr]` block and
+ * every budget-warning tail after it removed.
+ *
+ * ## Why this exists (W9326)
+ *
+ * `composeRender` (broker.ts) is, by design, `stdout logs` + `[stderr]\n…` +
+ * budget warnings, joined with `\n`. The first version of the P2 case asserted
+ * on the WHOLE rendered blob — `expect(text).toContain('render="7"')` — which
+ * is only true while stderr is empty. It is not: on Windows the sandboxed
+ * child is Git Bash, whose `/etc/fstab` mounts `/tmp` as `usertemp` (i.e. from
+ * `%TEMP%`), and bash prints
+ *
+ *   bash.exe: warning: could not find /tmp, please create!
+ *
+ * on stderr whenever `%TEMP%` names a directory that does not exist. Under a
+ * full parallel `pnpm test` that happens for real: `vitest.setup.ts` (W1529)
+ * points `TEMP`/`TMP`/`TMPDIR` at ONE throwaway directory per test file and
+ * deletes it in `afterAll`, so any sandboxed run that starts after the reclaim
+ * gets the warning spliced in — turning `render="7"` into
+ * `render="7\n[stderr]\nbash.exe: warning: could not find /tmp, please create!\n"`.
+ * Measured: this file alone is 100% green, and the same file under load is red.
+ *
+ * The assertion that W2063 is ABOUT is "the program ran and printed 7". The
+ * shell's own environment noise is not part of that claim, so the assertion is
+ * made against the stdout section — the part of the render the PROGRAM produced
+ * — instead of the whole blob. Nothing is deleted or ignored: the stderr is
+ * still captured and still printed by `measure`; it is merely not the subject of
+ * the assertion, which is the same discipline `broker-ts.test.ts` applies when it
+ * asserts "no [stderr] render" for a specific, named cause.
+ */
+function stdoutSection(render: string | null): string | null {
+  if (render === null) return null;
+  const at = render.indexOf("\n[stderr]\n");
+  return at === -1 ? render : render.slice(0, at);
+}
+
 /** Run a program and return the RAW outcome (value, or the full failure text). */
-async function outcome(callId: string, args: unknown): Promise<{ ok: boolean; text: string }> {
+async function outcome(callId: string, args: unknown): Promise<{ ok: boolean; text: string; stdout: string | null }> {
   try {
     const out = await run(shellTool(), callId, args);
-    return { ok: true, text: "value=" + JSON.stringify(out.value) + " render=" + JSON.stringify(out.render) };
+    return {
+      ok: true,
+      text: "value=" + JSON.stringify(out.value) + " render=" + JSON.stringify(out.render),
+      stdout: stdoutSection(out.render),
+    };
   } catch (error) {
     const failure = error as Error & { kind?: unknown };
-    return { ok: false, text: "kind=" + String(failure.kind) + " message=" + failure.message };
+    return { ok: false, text: "kind=" + String(failure.kind) + " message=" + failure.message, stdout: null };
   }
 }
 
 /** Print the program and what the real engine did with it (the evidence). */
-async function measure(callId: string, code: string): Promise<{ ok: boolean; text: string; form: string }> {
+async function measure(
+  callId: string,
+  code: string,
+): Promise<{ ok: boolean; text: string; form: string; stdout: string | null }> {
   const form = programLayout(code, "typescript").form;
   const result = await outcome(callId, { code });
   console.log("\n### " + callId + "  form=" + form + "\n--- code ---\n" + code + "--- outcome ---\n" + result.text);
@@ -95,11 +139,17 @@ describe.skipIf(!h.nodeReady)("W2063 · real broker: a genuine top-level await n
   }, 60_000);
 
   it("★ P2: genuine TLA with no return ⇒ SUCCESS, and the program actually ran", async () => {
-    const { ok, text, form } = await measure("w2063-p2", P2);
+    const { ok, text, form, stdout } = await measure("w2063-p2", P2);
     expect(form).toBe("body");
     expect(ok, text).toBe(true);
     expect(text).toContain("value=null");
-    expect(text).toContain('render="7"'); // console.log(x) printed 7 — the await resolved
+    // console.log(x) printed 7 — the await resolved. Asserted on the program's
+    // OWN stdout section (see [stdoutSection]): the shell's own stderr (Git
+    // Bash's /tmp warning under W1529) is captured and printed but is not part
+    // of the claim "the program printed 7". The section is the render's raw
+    // text, so it is `7` — the `render="7"` form only appears in `text`, where
+    // JSON.stringify put the quotes there.
+    expect(stdout, text).toBe("7");
   }, 60_000);
 
   it("★ P2-unindented no longer reports the missing-entry-point error", async () => {
