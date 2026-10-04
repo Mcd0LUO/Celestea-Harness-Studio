@@ -28,6 +28,7 @@
 | P18 | 流式 usage 的 `prompt_tokens` 可能是 0 | 那是「**没测**」不是「没花」：账本记 `billed_unknown`，绝不替上游猜数（同一请求非流式给 10、流式给 0） |
 | P19 | adapter 声称协议却不拥有它的鉴权 | 探测必须**镜像引擎**，不能按协议规范「纠正」—— 否则它两个方向都会说谎 |
 | P20 | 旧结论的时效 | 复用前先核它在**当前 HEAD** 上还在不在；带基线的结论要连着基线引用 |
+| P21 | 探针取仓库根 | `new URL().pathname` 在 Windows 上给出 `/D:/…` ⇒ 页面 404 ⇒ **永远崩**；用 `fileURLToPath`。崩的探针 = 零证据 |
 
 ---
 
@@ -313,6 +314,23 @@ worker 连跑 44 次单跑 + 3 次全量并行（5188 用例）**复现 0 次**�
 
 **怎么验证**：复述旧结论时写清它的测点（commit / 日期 / 机器）；派工前跑一次针对性命令
 （这次只需 `npx vitest run <file>` ×5）。
+## P21 · 用 `new URL(...).pathname` 取仓库根 ⇒ 只在 Windows 上坏，而且**坏得像环境问题**
+
+**症状**：`scripts/a11y/` 三个 w2058 探针在本机（Windows）**每次都以**
+`getComputedStyle(null)` **崩掉**（跑三次三次崩）—— 看起来像"探针不稳"或"环境没起好"，
+于是没人去查；它们的证据也就一直没人用。
+
+**根因**：`new URL('../..', import.meta.url).pathname` 在 Windows 上给出 `/D:/tools/...`
+（**带前导斜杠**），`join()` 之后指向一个不存在的路径 ⇒ `apps/web/index.html` **永远 404** ⇒
+页面里没有 `#main` ⇒ 第一次取值就崩。**在 Linux/macOS 上完全正常**，所以它在 CI（ubuntu）里是绿的。
+
+**正确做法**：取仓库根用 `fileURLToPath`（`scripts/a11y/lib/harness.mjs` 的 `repoRoot()` 就是这么做的，
+新探针直接用 harness，别再自己算）。**更一般的教训**：探针**崩掉**时不要归因成"环境/不稳"，
+要当成**缺陷信号** —— 一个永远崩的探针和一个永远绿的探针一样，都是**零证据**。
+
+**代码位置**：`scripts/a11y/lib/harness.mjs`（`repoRoot()`）；固定它的用例见 7 支探针的迁移。
+
+**怎么验证**：`node scripts/a11y/w2058-scroll-probe.mjs` 在 Windows 上跑通（迁移前必崩）。
 ## 附：容易误记的几件事
 
 | 误记 | 事实 |
