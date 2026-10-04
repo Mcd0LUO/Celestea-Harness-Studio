@@ -1,54 +1,32 @@
 // ============================================================================
-// ui/sessions/icons.ts — 内联 SVG 图标（不引图标库；W748 从 ui/sessions.ts 拆出）。
+// ui/sessiontree/icons.ts — 会话树图标的**兼容出口**（几何真源已搬去 ./../icons.ts）。
+//
+// W9324：全仓图标合并进 ui/icons.ts（唯一 paths 真源 + iconSvg/iconNode 两个出口）。
+// 本文件保留 svgIcon/grantShieldIcon 两个函数名与 IconKind 别名，使 render.ts / live.ts
+// 的调用点与既有测试**一字不改** —— 合并真源不需要顺带改一堆调用点，那只是噪音。
+// 换言之：本文件现在只是 ui/icons.ts 的一层薄适配，几何零复制。
 // ============================================================================
+import { iconNode, type IconName } from '../icons';
 
+/** 会话树用到的图标名（= IconName 的子集；保留旧名以免调用点与测试全改）。 */
 export type IconKind = 'folder' | 'file' | 'search' | 'sort' | 'folder-plus' | 'plus';
 
+/** 旧名 → 新名（两套名字同形，只是收进了同一张表）。 */
+const KIND_ICON: Record<IconKind, IconName> = {
+  folder: 'folder',
+  file: 'file',
+  search: 'search',
+  sort: 'sort',
+  'folder-plus': 'folder-plus',
+  plus: 'plus',
+};
+
+/** 16 网格 · 13px · 描边 1.3（尺寸/线宽在 ui/icons.ts 的 DEFAULT_SIZE 里，逐字沿用原值）。 */
 export function svgIcon(kind: IconKind): SVGSVGElement {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 16 16');
-  svg.setAttribute('width', '13');
-  svg.setAttribute('height', '13');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', '1.3');
-  svg.setAttribute('stroke-linecap', 'round');
-  svg.setAttribute('stroke-linejoin', 'round');
-  const p = document.createElementNS(ns, 'path');
-  switch (kind) {
-    case 'folder':
-      p.setAttribute('d', 'M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z');
-      break;
-    case 'file':
-      p.setAttribute('d', 'M3 1.5h6l4 4v9h-10zM9 1.5v4h4');
-      break;
-    case 'search':
-      p.setAttribute('d', 'M6.5 11.5a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM14.5 14.5l-3.8-3.8');
-      break;
-    case 'sort':
-      p.setAttribute('d', 'M2 4h12M5 8h7M8 12h4');
-      break;
-    case 'folder-plus':
-      p.setAttribute('d', 'M1.5 3.5h4l1.5 2h7.5v4M1.5 3.5v8a1 1 0 0 0 1 1h5.5M11 9v5M8.5 11.5h5');
-      break;
-    case 'plus':
-      p.setAttribute('d', 'M8 3v10M3 8h10');
-      break;
-  }
-  svg.appendChild(p);
-  return svg;
+  return iconNode(KIND_ICON[kind]);
 }
+
 /** 侧栏用的小盾牌图标（实心；颜色由 .sess-leaf-grant 的 class 决定）。 */
 export function grantShieldIcon(): SVGSVGElement {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 16 16');
-  svg.setAttribute('width', '10');
-  svg.setAttribute('height', '10');
-  svg.setAttribute('aria-hidden', 'true');
-  const p = document.createElementNS(ns, 'path');
-  p.setAttribute('d', 'M8 1.6 13.2 3.4v4.2c0 3.1-2.1 5.6-5.2 6.8-3.1-1.2-5.2-3.7-5.2-6.8V3.4z');
-  svg.appendChild(p);
-  return svg;
+  return iconNode('grant-shield');
 }

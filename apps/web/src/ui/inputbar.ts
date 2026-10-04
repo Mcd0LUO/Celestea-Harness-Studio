@@ -38,6 +38,7 @@ import { mountCaretMirror, type CaretMirror } from './inputbar/caret-mirror'; //
 // W2016：输入框自增长的能力开关（field-sizing 支持时 autoGrow 是 no-op）。
 import { createAutoGrow, MAX_HEIGHT, type GrowFn } from './inputbar/grow';
 import { t } from '../i18n';
+import { iconSvg } from './icons'; // W9324：回形针的几何真源在 ui/icons.ts
 import { deviceCopy, onInputCapabilityChange } from './viewport'; // W2023：设备能力分流（唯一真源）
 import { paintModeButton, paintSendButton } from './inputbar/button-labels';
 // W2028：Enter 行为（触摸=换行 / 桌面=发送）+ enterkeyhint，唯一判定在 ./inputbar/newline.ts。
@@ -271,9 +272,7 @@ let attachBtn: HTMLButtonElement | null = null;
 let fileInput: HTMLInputElement | null = null;
 
 /** W847：内联回形针（常量字面量、无依赖、无 emoji；沿用仓库既有内联 SVG 做法）。 */
-const ATTACH_CLIP_SVG =
-  '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">' +
-  '<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
+const ATTACH_CLIP_SVG = iconSvg('attach-clip'); // W9324：几何真源在 ui/icons.ts（路径源自 lucide/paperclip）
 
 function barEl(): HTMLElement | null {
   return bar ?? document.getElementById('inputbar');

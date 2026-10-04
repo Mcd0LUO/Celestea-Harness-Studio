@@ -36,6 +36,7 @@ import { el, need } from '../../utils/dom';
 import { applyValues, buildConfigPanel, type PluginPanelState } from './config-panel';
 import { fetchHostPlugins, type HostPluginRow } from './host';
 import { t } from '../../i18n';
+import { iconNode } from '../icons'; // W9324：几何真源在 ui/icons.ts
 
 const HOST = '#settingsPlugins';
 
@@ -50,20 +51,9 @@ function section(title: string, note: string): HTMLElement {
 
 /** 展开控件的内联 chevron（方向由 CSS 按 aria-expanded 定，不靠字形）。 */
 function chevron(): SVGSVGElement {
-  const NS = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 12 12');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.setAttribute('focusable', 'false');
-  const path = document.createElementNS(NS, 'path');
-  path.setAttribute('d', 'M4 2.5 L8 6 L4 9.5');
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '1.6');
-  path.setAttribute('stroke-linecap', 'round');
-  path.setAttribute('stroke-linejoin', 'round');
-  svg.appendChild(path);
-  return svg;
+  // W9324：几何真源在 ui/icons.ts。迁移前这里不写 width/height（尺寸由 .plug-expand svg
+  // 的 CSS 给 12px）—— 保留该形态（size 0 = 不写尺寸），否则会盖过 CSS、改变现有视觉。
+  return iconNode('chevron-expand', { size: 0 });
 }
 
 /** 一行客户端插件（开关初值 = 此刻真实挂载状态）+ 内联配置面板。 */

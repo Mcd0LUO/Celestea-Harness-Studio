@@ -19,6 +19,7 @@
 //     深浅色主题各自可读。
 // ============================================================================
 import { MODEL_ICON_PATHS, type GeneratedIconKey } from './model-icons.generated';
+import { modelBrandSvg } from '../ui/icons'; // W9324：品牌图标的 SVG 包裹收进 ui/icons.ts（查表逻辑原地不动）
 
 /** 已识别家族（= 内置图标的键集合，由生成器决定）。 */
 export type ModelIconKey = GeneratedIconKey;
@@ -35,11 +36,9 @@ const svgCache = new Map<ModelIconKey, string>();
 function svgFor(key: ModelIconKey): string {
   const hit = svgCache.get(key);
   if (hit !== undefined) return hit;
-  const svg =
-    '<svg class="sl-micon-svg" viewBox="0 0 24 24" width="12" height="12" fill="currentColor" ' +
-    'aria-hidden="true" focusable="false">' +
-    MODEL_ICON_PATHS[key] +
-    '</svg>';
+  // W9324：**只把包裹搬进 ui/icons.ts**，按 id 查表的逻辑与生成器产物一字未动。
+  // 品牌标识不并入 ICONS —— 那是 UI chrome 的表，混在一起会让两类失去边界。
+  const svg = modelBrandSvg(MODEL_ICON_PATHS[key]);
   svgCache.set(key, svg);
   return svg;
 }

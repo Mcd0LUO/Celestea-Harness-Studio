@@ -16,6 +16,7 @@ import { t } from '../i18n';
 import { joinPath, rootOfPath, splitPath } from './fs-path'; // 平台路径（win32 盘符/UNC vs POSIX）
 import { isImeKey } from './ime'; // W2033：组合中的 Enter 是「确认候选词」，不是「跳到这个路径」
 import { bindRoving, consumeFocusAfterNav, focusFirstRow, markRowButton, resetStops } from './roving'; // W2053：目录行的键盘通道
+import { iconNode } from './icons'; // W9324：几何真源在 ui/icons.ts，这里只取节点
 
 /** 确认选目录时交给调用方的交互句柄。 */
 export interface FsBrowserUi {
@@ -45,20 +46,7 @@ export interface FsBrowserOpts {
 }
 
 function folderIcon(): SVGSVGElement {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 16 16');
-  svg.setAttribute('width', '13');
-  svg.setAttribute('height', '13');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', '1.3');
-  svg.setAttribute('stroke-linecap', 'round');
-  svg.setAttribute('stroke-linejoin', 'round');
-  const p = document.createElementNS(ns, 'path');
-  p.setAttribute('d', 'M1.5 3.5h4l1.5 2h7.5v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z');
-  svg.appendChild(p);
-  return svg;
+  return iconNode('folder');
 }
 
 /** 打开目录选择弹窗（顶部不含输入框，确认动作由调用方定义）。 */

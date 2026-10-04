@@ -20,6 +20,7 @@ import { el } from '../utils/dom';
 import { popOverlay, pushOverlay, type OverlayHandle } from '../utils/overlays';
 import { modeChoices, modeNotes, modeLabel } from '../ui/mode/copy';
 import { t } from '../i18n'; // i18n P1-a
+import { iconSvg } from '../ui/icons'; // W9324：两枚徽标的几何真源在 ui/icons.ts
 
 /** 能力位探测结果缓存时长（与 ui/contextview.ts 的能力位探测同款纪律）。 */
 const CAP_TTL_MS = 60000;
@@ -55,14 +56,8 @@ export async function modeSwitchSupported(force = false): Promise<boolean> {
  * 尺寸/线宽对齐既有图标族（16 视图 + stroke 1.4 + 圆头 + currentColor），
  * 因此颜色跟随 .sl-mode 的 color，两态只换图标、不换几何。
  */
-const MODE_ICON_STANDARD =
-  '<svg class="sl-mode-ico sl-mode-ico-standard" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">' +
-  '<path d="M2.4 4.2h.01M5.4 4.2h8.2M2.4 8h.01M5.4 8h8.2M2.4 11.8h.01M5.4 11.8h8.2" ' +
-  'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg>';
-const MODE_ICON_EXECUTION =
-  '<svg class="sl-mode-ico sl-mode-ico-exec" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">' +
-  '<path d="M3 4.6 6.4 8 3 11.4M8.6 11.6h4.4" ' +
-  'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
+const MODE_ICON_STANDARD = iconSvg('mode-standard', { className: 'sl-mode-ico sl-mode-ico-standard' });
+const MODE_ICON_EXECUTION = iconSvg('mode-execution', { className: 'sl-mode-ico sl-mode-ico-exec' });
 
 /**
  * 徽标渲染（只改 class / 文本 / 标题，不重建 DOM：铁律 1/2/5）。

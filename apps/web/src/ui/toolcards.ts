@@ -21,6 +21,7 @@ import { noteWorkerSpawn } from './worker-strip';
 import { detectFromTool, PREVIEW_CONTENT_TOOLS } from './preview/detect'; // F2：候选文件识别
 import { openPreview } from './preview/panel'; // F2：右侧覆盖式预览
 import { t } from '../i18n';
+import { iconSvg } from './icons'; // W9324：折叠 chevron 的几何真源在 ui/icons.ts
 
 export type { ToolCardRef };
 
@@ -31,10 +32,7 @@ export const DESC_MAX_CHARS = 60;
  *  16 网格、线宽 1.6、圆头圆角；方向不写死在标记里，由 data-fold 驱动 CSS 旋转）。 */
 export const TOOL_FOLD_COLLAPSED = 'collapsed';
 export const TOOL_FOLD_EXPANDED = 'expanded';
-const TOOL_CHEVRON_SVG =
-  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">' +
-  '<path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" ' +
-  'stroke-linecap="round" stroke-linejoin="round"></path></svg>';
+const TOOL_CHEVRON_SVG = iconSvg('chevron-fold'); // W9324：与 messages 共用同一枚 chevron 几何
 
 /**
  * W778：折叠行标签 —— 工具参数里的 `desc`（折叠空白、截断到 DESC_MAX_CHARS），

@@ -37,6 +37,7 @@ import {
 } from './messages/think-budget';
 import { resetMessages } from './messages/assistant';
 import { t } from '../i18n';
+import { iconSvg } from './icons'; // W9324：折叠 chevron 的几何真源在 ui/icons.ts
 // W1512：预算账本住在 ./messages/think-budget.ts，但公开面仍留在 messages.ts
 // （调用方与测试只认这个入口，与 W867 把 cadence 拆出去时同一取舍）。
 export { THINK_CONTAINER_LIMIT, thinkRetained } from './messages/think-budget';
@@ -152,10 +153,7 @@ function enforceThinkBudget(container: HTMLElement): void {
  *   collapsed（收起，等价旧字形 ▸）= chevron 指向右；expanded（等价旧字形 ▾）= 顺时针 90° 指向下。
  * 源码是常量字面量、无任何用户输入参与拼接，innerHTML 在这里没有注入面。
  */
-export const THINK_CHEVRON_SVG =
-  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">' +
-  '<path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" ' +
-  'stroke-linecap="round" stroke-linejoin="round"></path></svg>';
+export const THINK_CHEVRON_SVG = iconSvg('chevron-fold'); // W9324：几何真源在 ui/icons.ts
 /** 折叠态取值（data-fold）：与旧「实心三角 ▸」等价。 */
 export const THINK_FOLD_COLLAPSED = 'collapsed';
 /** 展开态取值（data-fold）：与旧「空心三角 ▾」等价。 */
