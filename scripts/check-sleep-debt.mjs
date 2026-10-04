@@ -40,8 +40,30 @@ const SLEEP_RE = /await new Promise\(\(r\) => setTimeout\(r, ([1-9][0-9]*)\)\)/;
 const ALLOW_MARKER = /W9225/;
 
 function files() {
-  const out = execFileSync("git", ["ls-files", "*.test.ts"], { encoding: "utf8" });
+  // W9325+：必须含**未跟踪**文件 —— 旧写法（只 ls-files）在脏树上看不见新增测试，
+  // 于是"提交前全绿、提交后红"（2026-10-04 实测：新测试文件逃过扫描，我据此误报 9/9 全绿）。
+  const out = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "*.test.ts"], { encoding: "utf8" });
   return out.split("\n").filter((l) => l.trim() !== "");
+}
+
+/** while 循环头（条件是状态，不是计数器）⇒ 视作轮询。 */
+function inPollingWhile(lines, i) {
+  /** 计数器条件：裸标识符与数字比较（`i < 60`）—— 那是赌次数，不是等状态。 */
+  const COUNTER = /^\s*[A-Za-z_$][\w$]*\s*(<=?|>=?|===?|!==?)\s*\d+\s*$/;
+  const isState = (cond) => {
+    const c = cond.trim();
+    return c !== "" && c !== "true" && c !== "1" && !COUNTER.test(c);
+  };
+  const own = /^\s*while\s*\((.+)\)\s*/.exec(lines[i]);
+  if (own !== null && isState(own[1])) return true;
+  // 向上找包裹它的 while 头：遇空行或块尾 `}` 即停（不跨块）。
+  for (let k = i - 1; k >= 0 && k >= i - 6; k -= 1) {
+    const prev = lines[k];
+    if (/^\s*$/.test(prev) || /^\s*\}/.test(prev)) return false;
+    const m = /^\s*while\s*\((.+)\)\s*\{?\s*$/.exec(prev);
+    if (m !== null) return isState(m[1]);
+  }
+  return false;
 }
 
 const failures = [];
@@ -64,6 +86,13 @@ for (const file of files()) {
       allowed += 1;
       continue;
     }
+    // 判据放宽（2026-10-04）：`while (条件) await sleep(...)` 是**轮询**，表达的是
+    // 「等条件」，正是本门禁想要的形态 —— 旧判据只看「sleep 行下一行是不是 expect」，
+    // 把它误判成赌时长。区分「等状态」与「赌次数」：
+    //   · while + **状态条件**（含属性/调用/比较对象）⇒ 轮询，放过
+    //   · while (true) / for（计数器）⇒ 仍是赌时长，照抓
+    // 已知未覆盖：把计数器写成 `while (i < 60)` 会漏（本仓真实事故用的是 for）。
+    if (inPollingWhile(lines, i)) continue;
     let j = i + 1;
     while (j < lines.length && /^\s*(\/\/|\*|\/\*|$)/.test(lines[j])) j += 1;
     const next = lines[j] ?? "";

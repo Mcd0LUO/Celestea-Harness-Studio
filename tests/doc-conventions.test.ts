@@ -42,7 +42,7 @@ const MAX_LINES = 700;
 // 本机文件与模板的名字都在 tests/lib/doc-visibility.ts 里（含豁免理由）。
 
 /** 状态类别是**闭集**：自由文本一律先归类再比较，比较的是类别而不是原文。 */
-type StatusClass = '当前' | '已实现' | '设计' | '历史参考' | '已废弃';
+type StatusClass = '当前' | '已实现' | '设计' | '决定' | '历史参考' | '已废弃';
 
 function classifyStatus(raw: string): StatusClass | null {
   const t = raw.replace(/[*`]/g, '');
@@ -53,6 +53,11 @@ function classifyStatus(raw: string): StatusClass | null {
   if (t.includes('已实现')) return '已实现';
   if (t.includes('设计')) return '设计';
   if (t.includes('当前')) return '当前';
+  // 2026-10-04 补：决策记录（「评估后暂缓」这类）此前无格可归，被迫标成「当前」，
+  // 而「当前」的图例是「与代码/生产同步」—— 那不是决策记录。闭集补一格，不是放宽。
+  // **必须是最后一档**：任何提到「决定」二字的普通状态（如「已实现（W9322）。决定：…」）
+  // 都该归它自己那一类，不能被这个词吞掉。
+  if (t.includes('决定')) return '决定';
   return null;
 }
 

@@ -19,7 +19,7 @@
 | 7 | 同一时间**只允许一个 builder**（构建 / 测试 / benchmark） | 并发会让时序敏感用例 flaky、让 benchmark 数字失真。**只读门禁不是 builder**：`check:fast`（两个 typecheck + lint + lint:arch，约 34s、零产物、确定性）任何时刻都可以跑，**worker 交付前必须跑** |
 | 8 | 不跑 `--no-verify`，不绕过任何门禁 | 门禁存在的唯一理由就是它不给人情 |
 | 9 | **npm 发布必须有人类显式授权**：没有授权绝不推 npm | 发布不可逆（版本不能再发、tarball 永久公开），不能是「走完发布清单」的副作用。机械实现：`pnpm run publish` 在 `CELESTEA_PUBLISH_AUTHORIZED=1` 缺失时 fail-closed |
-| 10 | 同一工作区**同一时间只允许一个 writer**（改文件算 writer，只读门禁不算）；且 worker **不许**对全仓门禁的红下「既有问题」的结论 | ① worker 的简报一旦投递**不可修改**（主会话 → worker 无通道，2026-10-04 实测三条路全断：非子代理 / `session_send_message` 未注册 / `send_message` 报 belongs to another parent）⇒ 重叠**只能在派工时避免**，事后只能重跑。② 并发编辑的丢失**不会让任何门禁变红**，只表现为「某 worker 说自己改了、但文件里没有」。③ worker 只能证明「不是我」（stash 自己的文件），**无法**排除另一个 worker 的在途编辑 —— 2026-10-04 实测：同一次全量测试里，一条 `terminal-pty.b4-01` flake 是**真既有**（基线 `f8c2c15` 1/6 复现），两条 `doc-conventions` 是**另一个 worker 的在途折行**，而 worker 对两者下了同一个「既有问题」的结论。**归因只能由派工者在安静工作区上做。** |
+| 10 | 同一工作区允许并行 writer，**但写范围必须互斥**（派工时每个 worker 声明自己的写 glob；**重叠即串行**，互斥才并行）；且 worker **不许**对全仓门禁的红下「既有问题」的结论 | ① worker 的简报一旦投递**不可修改**（主会话 → worker 无通道，2026-10-04 实测三条路全断：非子代理 / `session_send_message` 未注册 / `send_message` 报 belongs to another parent）⇒ 重叠**只能在派工时避免**，事后只能重跑。② 并发编辑的丢失**不会让任何门禁变红**，只表现为「某 worker 说自己改了、但文件里没有」。③ worker 只能证明「不是我」（stash 自己的文件），**无法**排除另一个 worker 的在途编辑 —— 2026-10-04 实测：同一次全量测试里，一条 `terminal-pty.b4-01` flake 是**真既有**（基线 `f8c2c15` 1/6 复现），两条 `doc-conventions` 是**另一个 worker 的在途折行**，而 worker 对两者下了同一个「既有问题」的结论。**归因只能由派工者在安静工作区上做。** ④ **为什么是「互斥」而不是「一个 writer」**：2026-10-04 实测三个 worker 的写范围只重叠一条缝，一刀切成串行是拿**永久吞吐**换**一次事故**；范围互斥时并行是安全的。 |
 
 ---
 
