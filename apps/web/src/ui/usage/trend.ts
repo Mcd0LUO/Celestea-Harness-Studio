@@ -25,8 +25,25 @@ const W = 720;
 const H = 220;
 /** 绘图区内边距：左右留出首尾日期文本的半宽，否则 SVG 会把它们裁掉。 */
 const PAD = { top: 10, right: 24, bottom: 26, left: 24 };
-/** 6 条序列的固定色（黑白主题下用不同灰阶 + 明度区分，不引色卡依赖）。 */
-const SERIES_COLORS = ['#1a1a1a', '#5a5a5a', '#8a8a8a', '#b0b0b0', '#3f6ea8', '#a85f3f'];
+/**
+ * W9346：第 i 条序列的颜色 = **CSS 变量引用**，不再是写死的色值。
+ *
+ * 为什么不再写死：旧实现是一组灰阶（`'#1a1a1a'` 起），注释写「黑白主题下用不同灰阶」。
+ * 灰阶在**深色主题**上就等于背景（深底 #131313 vs 第一条 #1a1a1a ≈ 1.05:1）
+ * ⇒ 折线与图例色块一起看不见（用户报障：趋势线太浅、图例第一条色块几乎不可见）。
+ * 写死值也不可能让多套主题各自可读。
+ *
+ * 落地：色值**只在** `styles/usage.css` 的 `--usage-series-1..6` 定义一次
+ * （:root 浅色基准 + 每个主题各自覆盖），本文件只写 `var(--usage-series-N)`
+ * ⇒ 图例色块与折线读**同一个** var，一处改两处一起改（要求 2）。
+ * 唯一真源是 CSS，主题切换即时生效、无需重渲。
+ */
+const SERIES_VAR_PREFIX = 'var(--usage-series-';
+
+/** 第 i 条序列（1-based）的颜色引用；越界回落到第 1 条（与旧实现的取模回退同语义）。 */
+function seriesColor(i: number): string {
+  return SERIES_VAR_PREFIX + String((i % 6) + 1) + ')';
+}
 
 function svg(tag: string): SVGElement {
   return document.createElementNS(NS, tag);
@@ -84,7 +101,10 @@ function legend(data: ChartData): HTMLElement {
     item.setAttribute('role', 'listitem');
     const swatch = document.createElement('span');
     swatch.className = 'usage-legend-swatch';
-    swatch.style.background = SERIES_COLORS[i % SERIES_COLORS.length] ?? '#1a1a1a';
+    // W9346：色块与折线**同源** —— 这里只挂下标，色值由 usage.css 的
+    // `.usage-legend-swatch[data-series="N"]` → `var(--usage-series-N)` 给。
+    // （不再 inline 写 background：inline 会盖过主题变量，切主题不改色。）
+    swatch.setAttribute('data-series', String((i % 6) + 1));
     const label = document.createElement('span');
     label.className = 'usage-legend-label';
     const name = s.modelId === UNKNOWN ? t('usage.trend.unknownModel') : s.modelId;
@@ -151,15 +171,13 @@ export function mountTrend(host: HTMLElement, points: DayModelPoint[]): boolean 
   // 同时画**数据点**：只有一天有用量时，一条 polyline 只有一个点 —— 画不出任何
   // 线段（真机实测：图例在、曲线看不见，读起来像图坏了）。点让稀疏数据可见。
   data.series.forEach((s, i) => {
-    const color = SERIES_COLORS[i % SERIES_COLORS.length] ?? '#1a1a1a';
+    const color = seriesColor(i);
     const line = svg('polyline');
     line.setAttribute('points', linePoints(s.values, data.maxTokens, innerW, innerH));
-    line.setAttribute('fill', 'none');
+    // W9346：几何/线宽搬进 CSS（.usage-trend-line），颜色写 `var(--usage-series-N)`
+    // ⇒ 深浅主题各自取自己的色值，JS 不再知道任何色值。
     line.setAttribute('stroke', color);
-    line.setAttribute('stroke-width', '1.6');
-    line.setAttribute('stroke-linejoin', 'round');
-    line.setAttribute('stroke-linecap', 'round');
-    line.setAttribute('vector-effect', 'non-scaling-stroke');
+    line.setAttribute('class', 'usage-trend-line');
     g.appendChild(line);
     s.values.forEach((value, idx) => {
       if (value <= 0) return; // 没有用量的日子不画点（0 不是观测值，是补位）

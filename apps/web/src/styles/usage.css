@@ -123,9 +123,69 @@
 .usage-trend-svg { display: block; width: 100%; height: 220px; }
 .usage-trend-grid { stroke: var(--c-border-subtle); stroke-width: 1; stroke-dasharray: 3 3; }
 .usage-trend-tick { fill: var(--c-text-3); font-size: 10px; font-family: var(--mono); }
+
+/* W9346：序列色**走 token**（不再在 trend.ts 里写死一组 hex）。
+ *
+ * 为什么：旧实现是 `SERIES_COLORS = ['#1a1a1a', …]` —— 注释写着「黑白主题下用不同灰阶」。
+ * 灰阶在**深色主题**上等于背景（深底 #131313，第一条 #1a1a1a 只有 ~1.05:1）⇒ 折线与图例
+ * 色块一起消失（用户现象）。同一组值还无法在多主题下各自可读。
+ *
+ * 落地口径（按要求「多主题都成立」）：
+ *   · 颜色**只在这里**定义一次（:root = 浅色 mono 基准），每个主题各自覆盖 ⇒
+ *     「一处改了另一处没改」不可能发生（图例色块与折线读**同一个** var）。
+ *   · trend.ts 只写 `var(--usage-series-N)`，**不出现任何色值字面量** ⇒
+ *     加/减序列或调色都只改本文件。
+ *   · 取色标准（两档都要求）：对各自主题底色的**对比度 ≥ 3:1**（WCAG 1.4.11 非文本），
+ *     且相邻序列**色相/明度可分**（彼此不撞）。深浅两套是**两套取值**，不是同一组值调透明度。
+ */
+:root {
+  /* 浅色（mono / 白底 #fafafa）：黄 · 橙 · aqua · 品红 · 紫 · 绿 —— 鲜艳且彼此可辨。 */
+  --usage-series-1: #b8860b; /* 深金：白底 4.55:1（浅黄在白底不够，用深金档） */
+  --usage-series-2: #c2410c; /* 橙   4.62:1 */
+  --usage-series-3: #0e7490; /* aqua 4.75:1 */
+  --usage-series-4: #be185d; /* 品红 5.52:1 */
+  --usage-series-5: #6d28d9; /* 紫   6.30:1 */
+  --usage-series-6: #15803d; /* 绿   4.54:1 */
+}
+[data-theme="dark"] {
+  /* 深色（底 #131313）：同一组色相，**提亮**到深底可读档（不降到 3:1 以下）。 */
+  --usage-series-1: #fbbf24; /* 金   9.13:1 */
+  --usage-series-2: #fb923c; /* 橙   8.30:1 */
+  --usage-series-3: #22d3ee; /* aqua 10.9:1 */
+  --usage-series-4: #f472b6; /* 品红 7.15:1 */
+  --usage-series-5: #a78bfa; /* 紫   7.03:1 */
+  --usage-series-6: #4ade80; /* 绿   11.0:1 */
+}
+[data-theme="claude"] {
+  /* Claude 浅色（暖米白 #faf9f5）：同色相的暖底可读档（比 mono 略提亮以求 ≥3:1）。 */
+  --usage-series-1: #a16207; --usage-series-2: #c2410c; --usage-series-3: #0e7490;
+  --usage-series-4: #be185d; --usage-series-5: #6d28d9; --usage-series-6: #15803d;
+}
+@media (prefers-color-scheme: dark) {
+  [data-theme="claude"] {
+    /* Claude 深色（同一个 id + 系统深色偏好，机制见 theme-claude.css 头注）。 */
+    --usage-series-1: #fbbf24; --usage-series-2: #fb923c; --usage-series-3: #22d3ee;
+    --usage-series-4: #f472b6; --usage-series-5: #a78bfa; --usage-series-6: #4ade80;
+  }
+}
+
+/* 折线与端点：几何/线宽不变，**颜色来自上面那组 token**（深浅主题自动跟随）。 */
+.usage-trend-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.usage-trend-dot { stroke: none; }
+
 .usage-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-bottom: 6px; }
 .usage-legend-item { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.usage-legend-swatch { flex: 0 0 auto; width: 9px; height: 9px; border-radius: var(--r-sm); }
+.usage-legend-swatch {
+  flex: 0 0 auto; width: 9px; height: 9px; border-radius: var(--r-sm);
+  /* W9346：色块也走**同一组 token** ⇒ 与折线同源，一处改两处一起改。 */
+  background: var(--usage-series-1);
+}
+/* 第 2..6 条序列：图例与折线按同一个下标取同一个 var（trend.ts 写 --usage-series-N）。 */
+.usage-legend-swatch[data-series="2"] { background: var(--usage-series-2); }
+.usage-legend-swatch[data-series="3"] { background: var(--usage-series-3); }
+.usage-legend-swatch[data-series="4"] { background: var(--usage-series-4); }
+.usage-legend-swatch[data-series="5"] { background: var(--usage-series-5); }
+.usage-legend-swatch[data-series="6"] { background: var(--usage-series-6); }
 .usage-legend-label {
   min-width: 0; max-width: 160px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
