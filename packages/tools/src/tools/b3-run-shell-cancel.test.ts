@@ -125,6 +125,15 @@ describe("B3-01: cancelling a foreground run_shell kills the process", () => {
     });
     // The call is not awaited: it is parked on the command, which is the point.
 
+    // Attach the outcome handler NOW — not after the wait below. `run` can reject
+    // while nothing is listening (measured: `Serialized Error: { kind:
+    // 'cpu_exceeded' }` on run 37180588035), and ONE unhandled rejection makes
+    // vitest exit 1 even with 187/187 files green, reported as `Errors 1 error`.
+    const settledPromise: Promise<{ kind: string }> = Promise.resolve(run).then(
+      () => ({ kind: "resolved" }),
+      () => ({ kind: "rejected" }),
+    );
+
     const pid = await pidIn(pidFile, 25_000);
     expect(pid, "the command never published its pid").not.toBeNull();
     expect(alive(pid), "the command should be running before we cancel").toBe(true);
@@ -139,10 +148,7 @@ describe("B3-01: cancelling a foreground run_shell kills the process", () => {
 
     // Only now bound the settle: the expensive part is known complete.
     const settled = await Promise.race([
-      Promise.resolve(run).then(
-        () => ({ kind: "resolved" }),
-        () => ({ kind: "rejected" }),
-      ),
+      settledPromise,
       new Promise<{ kind: string }>((r) => setTimeout(() => r({ kind: "STILL-PARKED" }), 30_000)),
     ]);
     // Without the abort kill the call stays parked until the 120s wall clock.

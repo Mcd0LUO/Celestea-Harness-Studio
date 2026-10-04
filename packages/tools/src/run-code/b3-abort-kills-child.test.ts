@@ -135,6 +135,15 @@ describe("B3-01: cancelling a run_code kills the program", () => {
       signal: controller.signal,
     });
 
+    // Attach the outcome handler NOW — not after the wait below. `run` can reject
+    // while nothing is listening (measured: `Serialized Error: { kind:
+    // 'cpu_exceeded' }` on run 37180588035), and ONE unhandled rejection makes
+    // vitest exit 1 even with 187/187 files green, reported as `Errors 1 error`.
+    const settledPromise: Promise<{ kind: string }> = Promise.resolve(run).then(
+      () => ({ kind: "resolved" }),
+      () => ({ kind: "rejected" }),
+    );
+
     // Wait for the child to actually exist, THEN cancel. Cancelling before the
     // spawn would prove nothing about a running child.
     const deadline = Date.now() + 10_000;
@@ -163,11 +172,8 @@ describe("B3-01: cancelling a run_code kills the program", () => {
     // when the expensive part is already known complete.
     await until(() => !alive(pid), "the cancelled program process to be gone", 60_000);
 
-    const settled: { kind: string } = await Promise.race([
-      Promise.resolve(run).then(
-        () => ({ kind: "resolved" }),
-        () => ({ kind: "rejected" }),
-      ),
+    const settled = await Promise.race([
+      settledPromise,
       new Promise<{ kind: string }>((r) => setTimeout(() => r({ kind: "STILL-PARKED" }), 30_000)),
     ]);
     expect(settled.kind, "the aborted call must settle, not stay parked").not.toBe("STILL-PARKED");
