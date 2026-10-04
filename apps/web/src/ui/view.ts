@@ -77,7 +77,6 @@ export interface ToolCardRef {
   col: HTMLElement;
   card: HTMLElement;
   label: HTMLElement;
-  resultPv: HTMLElement;
   body: HTMLElement;
   /** W866：该卡片的工具名（live 与历史恢复同源）——结果回填时据此识别 spawn_worker。 */
   toolName: string;

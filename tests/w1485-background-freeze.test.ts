@@ -268,7 +268,7 @@ describe('W1485 · E：工具结果的渲染上限', () => {
   it('超长工具结果只渲染前缀 + 提示行；展开后全文到位', async () => {
     const tools = (await import(/* @vite-ignore */ at('ui/toolcards.ts'))) as {
       buildToolCard(d: Record<string, unknown>): {
-        col: El; card: El; label: El; resultPv: El; body: El; subs: El; toolName: string;
+        col: El; card: El; label: El; body: El; subs: El; toolName: string;
       };
       setToolResult(ref: unknown, text: string, failed: boolean, value?: unknown): void;
     };

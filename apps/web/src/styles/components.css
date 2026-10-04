@@ -154,16 +154,6 @@
 .toolcard-fold[data-fold='expanded'] > svg { transform: rotate(90deg); }
 /* W778：参数/结果预览移进展开区（折叠态不再露出半截预览行）；
    body 内仍是一行省略号摘要 + 等宽全文。 */
-.toolcard-result-preview {
-  width: 100%;
-  padding: 8px 14px 0 0;
-  font-family: var(--mono); font-size: 11px; line-height: 16px; color: var(--c-text-3);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.toolcard-result-preview { padding-top: 6px; }
-.toolcard-result-preview { color: var(--c-text-2); }
-.toolcard.err .toolcard-result-preview { color: var(--c-err); }
-.toolcard.ok .toolcard-result-preview { color: var(--c-ok); }
 .toolcard-head .step-tag {
   font-family: var(--mono); font-size: 11px; color: var(--c-text-3);
   flex: 0 0 auto;
@@ -208,7 +198,6 @@
 }
 .tool-out { color: var(--c-text-1); }
 /* W778：结果预览在展开区内，和结果全文一起与参数区分隔 */
-.toolcard-result-preview.has { margin-top: 2px; }
 .tool-out.err-c { color: var(--c-err); }
 .toolcard-head::-webkit-scrollbar-thumb,
 .tool-args::-webkit-scrollbar-thumb,

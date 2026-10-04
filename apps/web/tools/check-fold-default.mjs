@@ -520,17 +520,26 @@ async function main() {
     'false',
     '工具卡：结果到达后 aria 仍为 false',
   );
-  eq(ref.resultPv.textContent, '结果：file body', '工具卡：结果预览照旧回填（元素没换）');
   truthy(ref.body.querySelector('.tool-out') !== null, '工具卡：结果全文进 body');
+  eq(
+    ref.body.querySelector('.tool-out').textContent,
+    'file body',
+    '工具卡 W9345：结果全文逐字保留（结果摘要删了，全文一个字不少）',
+  );
   // W778：折叠态单行 —— 预览必须在 body 里，summary 里一个都不许有
-  // W9345：参数摘要那一行**已删**（与完整参数块重复）⇒ body 里只剩结果摘要。
+  // W9345：参数摘要与结果摘要**两行都已删**（都与同卡里的全文块重复）。
   truthy(
     ref.body.querySelector('.toolcard-args-preview') === null,
     '工具卡 W9345：参数摘要行不再渲染（完整参数在 .tool-args 里，不再重复）',
   );
   truthy(
-    ref.body.querySelector('.toolcard-result-preview') !== null,
-    '工具卡 W778：结果预览仍在 .toolcard-body 内（仅展开可见；它不与结果全文重复）',
+    ref.body.querySelector('.toolcard-result-preview') === null,
+    '工具卡 W9345：结果摘要行不再渲染（完整结果在 .tool-out 里，不再重复）',
+  );
+  // W9345：删摘要没有把成败信息一起删掉 —— 走 .toolcard.ok/.err + 状态 pill。
+  truthy(
+    ref.card.classList.contains('ok') && ref.label.textContent === '完成',
+    '工具卡 W9345：删掉结果摘要后，成败仍由卡 class + 状态 pill 表达',
   );
   // W9345：完整参数仍在、且内容是**参数全文**（不是 desc —— 卡头那行才是 desc）。
   eq(

@@ -33,7 +33,7 @@ async function runRounds(rounds: number, perRound: number): Promise<string[]> {
       col.className = 'mcol';
       col.textContent = 'msg ' + round + '-' + i;
       pane.el.appendChild(col as never);
-      pane.ops.set('call_' + round + '_' + i, { card: col, label: col, body: col, resultPv: col });
+      pane.ops.set('call_' + round + '_' + i, { card: col, label: col, body: col });
     }
     domCap.prunePaneDom(pane, true);
     snap.push(pane.el.querySelectorAll('.mcol').length + '/' + pane.ops.size);

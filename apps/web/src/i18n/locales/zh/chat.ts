@@ -12,7 +12,6 @@ export const chat = {
   'chat.tool.previewHint': '侧边预览这个文件',
   'chat.tool.failed': '失败',
   'chat.tool.done': '完成',
-  'chat.tool.result': '结果：{text}',
   'chat.tool.denied': '拒绝',
   'chat.tool.ask': '待确认',
   'chat.rail.folded': '更早的 {n} 轮已折叠',

@@ -37,6 +37,8 @@ const CDP = Number(process.env.W9345_CDP_PORT ?? 9495);
 /** 主场景的参数：**长路径** ⇒ 摘要必然被截断 + 省略号（复现用户截图的形态）。 */
 const LONG_PATH = 'D:\\tools\\celestea-studio\\results\\audit4\\probe\\very-long-directory-name\\index.ts';
 const ARGS = JSON.stringify({ path: LONG_PATH, start: 1, limit: 2000 });
+/** 结果正文（短、且**不含省略号**）—— 用来证明「删了摘要行，结果全文一个字没少」。 */
+const RESULT_TEXT = 'export const a = 1;\nexport const b = 2;';
 
 /** 摆出主场景：真实模块造一个 read_file 工具块（参数长），并**展开**它。 */
 const SETUP = `(async function () {
@@ -49,7 +51,7 @@ const SETUP = `(async function () {
   var col = T.pushToolCard(pane, { id: 'r1', name: 'read_file', args: ${JSON.stringify(JSON.parse(ARGS))} });
   // ★ 结果里**不放省略号**：本探针判的是「带省略号的那一行」，
   //   夹具自己带省略号会让断言把结果行误判成参数摘要行（实测踩到：探针假红）。
-  T.applyToolResult(pane, { id: 'r1', ok: true, value: 'export const a = 1;' });
+  T.applyToolResult(pane, { id: 'r1', ok: true, value: ${JSON.stringify(RESULT_TEXT)} });
   // 展开：折叠态本来就看不到 body，重复只在展开时可见。
   var card = col.querySelector('.toolcard');
   card.open = true;
@@ -58,7 +60,7 @@ const SETUP = `(async function () {
   return { open: card.open === true, args: ${JSON.stringify(ARGS)} };
 })()`;
 
-/** 展开态的 body：可见文本行、参数出现次数、完整块是否还在。 */
+/** 展开态的 body：可见文本行、参数出现次数、完整块是否还在、两行摘要是否都没了。 */
 const BODY = `(function () {
   var body = document.querySelector('.toolcard-body');
   if (!body) return { missing: true };
@@ -85,7 +87,12 @@ const BODY = `(function () {
     fullArgsLen: preText === null ? 0 : preText.length,
     argsLen: args.length,
     preVisible: pre ? getComputedStyle(pre).display !== 'none' : false,
-    hasResultPreview: body.querySelector('.toolcard-result-preview') !== null,
+    // W9345 两行摘要都要没（参数 + 结果）。
+    argsPreview: body.querySelector('.toolcard-args-preview') !== null,
+    resultPreview: body.querySelector('.toolcard-result-preview') !== null,
+    // 结果全文仍在（删摘要没删内容）。
+    outText: (function () { var o = body.querySelector('.tool-out');
+      return o ? (o.innerText || o.textContent || '').trim() : null; })(),
     hasPreviewBtn: body.querySelector('.toolcard-preview') !== null,
   };
 })()`;
@@ -125,13 +132,18 @@ const main = async () => {
     const body = await ev(BODY);
     out.raw.body = body;
     P.record('noTruncatedDup', body.missing === false && body.visible === true &&
-      body.ellipsisLines.length === 0,
-      `展开后可见 ${body.lineCount} 行；带省略号的行 = ${JSON.stringify(body.ellipsisLines)}（用户截图里被点名删掉的那一行）`);
+      body.ellipsisLines.length === 0 && body.argsPreview === false && body.resultPreview === false,
+      `展开后可见 ${body.lineCount} 行；带省略号的行 = ${JSON.stringify(body.ellipsisLines)}` +
+      `（用户点名删的那一行）；参数摘要节点还在=${body.argsPreview}、结果摘要节点还在=${body.resultPreview}（都应为 false）`);
 
     // ---- ② 完整参数仍在，且**只印一次** ----
     P.record('fullArgsOnce', body.fullArgsPresent === true && body.argsOccurrences === 1 && body.preVisible === true,
       `完整参数块可见=${body.preVisible}、长度 ${body.fullArgsLen}（参数全文 ${body.argsLen}）；` +
       `参数全文在这张卡里出现 ${body.argsOccurrences} 次（=1 才算不重复）`);
+
+    // ---- ②' 删了结果摘要，结果**全文**一个字不少（不许把内容删没） ----
+    P.record('resultFullKept', typeof body.outText === 'string' && body.outText === RESULT_TEXT,
+      `结果全文 = ${JSON.stringify(body.outText)}（夹具 ${JSON.stringify(RESULT_TEXT)}，逐字相等 ⇒ 删摘要没删内容）`);
 
     // ---- ③ 复制语义不许变（chat.tool.copyHint：复制参数与结果 JSON） ----
     await input.click('.toolcard-copy', { hover: false });

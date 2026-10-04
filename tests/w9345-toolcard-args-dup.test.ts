@@ -1,23 +1,22 @@
 // ============================================================================
 // tests/w9345-toolcard-args-dup.test.ts — W9345：工具卡**参数重复**门禁。
 //
-// 用户报障（真机截图）：工具卡展开后，同一个参数出现**两遍** ——
+// 用户报障（真机截图）：工具卡展开后，同一个东西出现**两遍** ——
 //     参数：{"path": "D:\tools\...\results\audit4\prob…   ← 截断的一行（省略号）
 //     {"path": "D:\tools\...\results\audit4\probe\…"}   ← 完整参数块（.tool-args）
-//     结果：…                                              ← 结果摘要（不同步出现，见下）
+//     结果：…                                              ← 结果摘要（同样与全文重复）
 //     预览
 //
-// 本门禁守**后果**：展开后参数**只印一次**，且印的是**完整**那份。
-// 铁律 11：不钉具体 px、不钉 class 名的排版，只钉「重复消失 + 完整块仍在」这两件事。
+// 本门禁守**后果**：展开后参数与结果**各只印一次**，且印的是**完整**那份。
+// 铁律 11：不钉具体 px、不钉 class 名的排版，只钉「重复消失 + 全文仍在」这两件事。
 //
-// ★ 为什么**只删参数摘要、保留结果摘要**（.toolcard-result-preview）：
-//   结果全文在 `.tool-out`，是**结果到达后**（setToolResult）才有的；
-//   参数块则是**建卡即在**。两者不同步出现 ⇒ 结果摘要仍是「先说一声有结果了」的
-//   进度信息；删掉它会让运行中的卡在结果回填前完全看不出有结果。本轮只治用户指出的那一处。
+// ★ W9345 二次更正：先前只删了参数摘要、保留了结果摘要，理由写的是
+//   「结果摘要是未到达时的进度信息」。**那个理由是错的** —— `setToolResult` 在同一次
+//   调用里同时写摘要行与 .tool-out，不存在「有摘要、无全文」的窗口。现两行都删。
 //
-// ★ 复制语义不许因删 DOM 而变：复制按钮读的是**闭包里的 `d.argsText`**（不是那个
-//   被删的节点），所以 `chat.tool.copyHint`「复制参数与结果（JSON）」一字不变 —— 本文件
-//   的「复制不读被删节点」那条就是守这个的。
+// ★ 复制语义不许因删 DOM 而变：复制按钮读的是**闭包里的 `d.argsText`**（不是被删的
+//   节点），所以 `chat.tool.copyHint`「复制参数与结果（JSON）」一字不变 —— 本文件的
+//   「复制不读被删节点」那条就是守这个的。
 // ============================================================================
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -28,7 +27,7 @@ import { bundleFrontend, El, installDom, restoreDom } from "./lib/w1467-dom.js";
 
 interface ToolcardsMod {
   buildToolCard: (d: Record<string, unknown>) => {
-    col: El; card: El; body: El; resultPv: El;
+    col: El; card: El; body: El; label: El;
   };
   setToolResult: (ref: unknown, text: string, failed: boolean) => void;
 }
@@ -108,21 +107,27 @@ describe("W9345 · 工具卡参数不重复", () => {
     expect(occurrences, "参数全文在 body 里出现次数").toBe(1);
   });
 
-  it("④ 结果摘要保留（它不与结果全文重复：结果到达前先说一声）", () => {
+  it("④ 结果摘要也已删（结果全文那一行同样在重复）", () => {
     const ref = card();
-    const resultPv = child(ref.body, "toolcard-result-preview");
-    expect(resultPv, "结果摘要必须保留").not.toBeNull();
-    // 结果没到时是空的（不是「参数摘要」那种一上来就占一行）。
-    expect(resultPv!.textContent).toBe("");
+    expect(
+      child(ref.body, "toolcard-result-preview"),
+      "结果摘要（与 .tool-out 全文重复）那一行必须消失",
+    ).toBeNull();
   });
 
-  it("⑤ 结果回填照旧工作（删参数摘要没有碰结果那条路）", () => {
+  it("⑤ 结果回填照旧工作：全文逐字到位，成败由 class + 状态 pill 表达", () => {
     const ref = card();
     tc.setToolResult(ref, "file body", false);
-    const resultPv = child(ref.body, "toolcard-result-preview");
-    // 同 ②：避开长串 diff 格式化器（用布尔判定）。
-    expect(resultPv!.textContent.indexOf("file body") !== -1, "结果摘要照旧回填（元素没换）").toBe(true);
-    expect(child(ref.body, "tool-out"), "结果全文进 body").not.toBeNull();
+    // 删了摘要行，结果**内容**一个字都不能少。
+    const out = child(ref.body, "tool-out");
+    expect(out, "结果全文进 body").not.toBeNull();
+    expect(out!.textContent, "结果全文逐字").toBe("file body");
+    // 删摘要没有把「成功/失败」这个信息一起删掉。
+    const hasOk = ref.card.classList.contains("ok");
+    const hasRunning = ref.card.classList.contains("running");
+    expect(hasOk && !hasRunning, "成败仍由卡 class 表达（ok）").toBe(true);
+    const pill = child(ref.card.querySelector(".toolcard-state"), "ts-label");
+    expect(pill !== null && pill.textContent.length > 0, "状态 pill 仍有可见文案").toBe(true);
   });
 
   it("⑥ 复制不读被删的节点 ⇒ chat.tool.copyHint 语义不变（复制内容仍含参数全文）", () => {

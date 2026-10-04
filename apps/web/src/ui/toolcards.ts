@@ -25,7 +25,8 @@ import { iconSvg } from './icons'; // W9324：折叠 chevron 的几何真源在 
 
 export type { ToolCardRef };
 
-const SUMMARY_CHARS = 60; // 参数/结果摘要截断字数
+// W9345：原先这里的 SUMMARY_CHARS（摘要截断字数）已随两行摘要一起删除 ——
+// 那两行是「与全文重复」的重复项，不是「摘要」，所以没有"截断长度"可言了。
 /** W778：desc 标签展示上限（契约 ≤80，前端折叠空白后截到 60）。 */
 export const DESC_MAX_CHARS = 60;
 /** W778：折叠指示（内联 SVG chevron，形状与思考段 W765 的 chevron 同源：
@@ -92,12 +93,6 @@ function toJsonText(v: unknown): string {
   } catch {
     return String(v);
   }
-}
-
-function summaryOf(text: string): string {
-  const t = text.replace(/\s+/g, ' ').trim();
-  if (t.length <= SUMMARY_CHARS) return t;
-  return t.slice(0, SUMMARY_CHARS) + '…';
 }
 
 /** 工具卡构建数据（live 事件与历史恢复共用）。 */
@@ -200,23 +195,24 @@ export function buildToolCard(d: ToolCardData): ToolCardRef {
   card.appendChild(head);
   // W778：预览行与全文都进 body —— 折叠态看不到，展开才显示（铁律：不重建节点）。
   const body = el('div', 'toolcard-body');
-  // W9345：删掉**参数摘要那一行**（.toolcard-args-preview）。用户现象 —— 展开后同一个参数
-  // 出现两遍：先是 `参数：{"path": …prob…}`（summaryOf 截断到 60 字符 + 省略号），
-  // 紧跟着就是**完整**参数的 `.tool-args` 等宽块。截断那份不携带任何完整块没有的信息，
-  // 纯属重复。
+  // W9345：删掉**参数摘要与结果摘要那两行**（.toolcard-args-preview /
+  // .toolcard-result-preview）。用户现象 —— 展开后同一个东西出现两遍：先是
+  // `参数：{"path": …prob…}`（summaryOf 截断到 60 字符 + 省略号），紧跟着就是**完整**
+  // 参数的 `.tool-args` 等宽块；结果同理（`结果：…` 紧跟着 `.tool-out` 全文）。
   //
-  // ★ 为什么只删参数、**保留结果摘要**（.toolcard-result-preview）：结果全文在 `.tool-out`，
-  //   但它是**结果到达后**才有的（`setToolResult` 回填），而参数块是建卡即在；
-  //   两者不同步出现 ⇒ 结果摘要那一行仍是「未到达时先说一声结果」的进度信息，
-  //   删掉它会让运行中的卡在结果回填前**完全看不出有结果**。本轮只治用户指出的那一处。
-  // ★ 为什么删除是安全的（两处都不依赖它）：
-  //   ① 复制按钮读的是**闭包里的 `d.argsText`**（见上），不是这个 DOM 节点
+  // ★ 更正本轮先前的错误保留理由（记在这里，免得又被"恢复"回去）：曾写过
+  //   「结果摘要是未到达时的进度信息，删掉会让运行中的卡看不出有结果」。**那是错的** ——
+  //   `setToolResult` 在**同一次调用**里同时写 resultPv 与 .tool-out（见下），不存在
+  //   「有摘要、无结果全文」的窗口；`.tool-out` 缺失时本次调用就会把它建出来。
+  //   真正的「结果没到」由卡头的状态 pill（运行中）表达，与这两行无关。
+  // ★ 为什么删除是安全的：
+  //   ① 复制按钮读的是**闭包里的 `d.argsText`**（见上），不是这两个 DOM 节点
   //      ⇒ `chat.tool.copyHint`「复制参数与结果（JSON）」的语义一字不变；
-  //   ② 结果预览回填走 `ref.resultPv`（另一个元素），不受影响。
+  //   ② 结果**全文**（.tool-out）、预览按钮、折叠、状态 pill 一律保留。
+  //   ③ status pill 的成败上色原挂在 `.toolcard.ok/.err .toolcard-result-preview` 上 ——
+  //      那条 CSS 随本元素一起失效，故把上色**搬到状态 pill 本身**（见 components.css 既有
+  //      `.toolcard.ok .toolcard-state` 规则，这里只补一条兜底），避免「删一行丢信息」。
   body.appendChild(el('pre', 'tool-args', d.argsText)); // W764：等宽 pre（不换行 + 横向滚动）
-  const resultPv = el('div', 'toolcard-result-preview');
-  resultPv.textContent = '';
-  body.appendChild(resultPv);
   // F2：read_file 类结果 → 侧边预览。按钮放在**展开区**（折叠态几何与折叠逻辑一字不动）。
   const candidate = detectFromTool(d.name, d.argsText);
   if (candidate !== null && PREVIEW_CONTENT_TOOLS.has(d.name)) {
@@ -250,7 +246,6 @@ export function buildToolCard(d: ToolCardData): ToolCardRef {
     col,
     card,
     label: state.querySelector<HTMLElement>('.ts-label') ?? state,
-    resultPv,
     body,
     subs,
   };
@@ -296,9 +291,10 @@ export function setToolResult(ref: ToolCardRef, resultText: string, failed: bool
   ref.card.classList.remove('running');
   ref.card.classList.add(failed ? 'err' : 'ok');
   ref.label.textContent = failed ? t('chat.tool.failed') : t('chat.tool.done');
-  const r = summaryOf(resultText);
-  ref.resultPv.textContent = r ? t('chat.tool.result', { text: r }) : '';
-  if (r) ref.resultPv.classList.add('has');
+  // W9345：结果摘要行已删（与 .tool-out 全文重复）。**没有丢掉任何信息** ——
+  // 成败由上面的 class（`.toolcard.ok` / `.err`）+ 状态 pill 表达，
+  // 结果**内容**由下面的 .tool-out 全文表达；原先挂在摘要行上的成败上色
+  // 由 components.css 的 `.toolcard.ok .toolcard-state` / `.err .toolcard-state` 承担。
   // W1485：结果正文的渲染上限。真实日志里最大单条工具结果 196187 字符 —— 整段进
   // <pre> 会让一次布局/绘制吃掉几十毫秒，刷新时同步渲染 200 条就卡死。这里只渲染
   // 前缀，其余折成一行提示 + 展开按钮（原文没丢：展开时按全文重建这个 <pre>）。
