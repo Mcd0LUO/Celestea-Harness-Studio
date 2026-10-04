@@ -41,6 +41,7 @@ import './styles/usage.css'; // W9103 设置页「使用统计」（摘要条 / 
 import './styles/field-sizing.css';
 import './styles/pending.css'; // W9333 会话内「等待反馈」占位（脉冲星芒 / 阶段标签 / 用时）
 import './styles/turn-edits.css'; // W9334「本轮编辑」卡片（显示组件 display.turnEdits）
+import './styles/jump.css'; // W9336「回到底部」浮标（会话流右下角圆形按钮 + 新消息数）
 
 import { api } from './api';
 import { connectSse, initChat } from './chat';
@@ -53,6 +54,7 @@ import { initWorkerStrip } from './ui/worker-strip'; // W866 会话页左上角 
 import { initGrants } from './ui/grants'; // W701 提权通道（能力位未就绪时入口隐藏）
 import { restoreActiveHistory } from './ui/restore';
 import { flushVisible } from './ui/messages'; // W1485：后台切回时一次性对齐正文
+import { initJumpBottom } from './ui/messages/jump'; // W9336：「回到底部」浮标
 import { initRail } from './ui/rail';
 import { initEnhancers } from './ui/enhance'; // W895 渲染后增强缝（P0）
 import { initHints } from './ui/hint'; // W790 悬浮提示注册缝（item 4）
@@ -96,6 +98,10 @@ function init(): void {
   // 3) W514：多会话视图容器（LOCAL 容器先立起来 → 永不空白）+ 聚焦会话条
   initViewCtx();
   initSessionBar();
+
+  // 3.0) W9336：「回到底部」浮标（挂 #messages 右下角，镜像当前聚焦容器的滚动位；
+  //      必须在 initViewCtx 之后 —— 它要 activePane() 已经存在）
+  initJumpBottom();
 
   // 3.1) W895：渲染后增强缝（内置 hljs + math；必须先于客户端插件装配）
   initEnhancers();

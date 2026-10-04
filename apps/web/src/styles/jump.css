@@ -1,0 +1,61 @@
+/* ============================================================================
+   W9336「回到底部」浮标 —— 会话流右下角的圆形按钮（+ 新消息数徽标）。
+   ----------------------------------------------------------------------------
+   为什么单独一个文件：新增能力各带一个 CSS（W1524/W1529 起本仓的规矩），共享样式
+   文件谁都不改。显隐由 JS 切全局 `.hidden`（base.css：`display:none !important`），
+   因此隐藏时它也**同时被摘出 Tab 序** —— 看不见的控件不该被键盘 Tab 到。
+   组件层零硬编码颜色、圆角一律走 --r-* token（与 styles/usage.css、pending.css 同纪律）。
+   动效只有一条 transition；`prefers-reduced-motion: reduce` 由 tokens.css 的全局块
+   关停（JS 侧的逐帧滚动另走 ui/viewport.ts 的 prefersReducedMotion）。 */
+.jump-bottom {
+  /* #messages 是 position:relative ⇒ 浮标贴它的右下角（正文列之外，不占流内空间）。 */
+  position: absolute;
+  right: var(--sp-flow);
+  bottom: var(--sp-flow);
+  width: 36px;
+  height: 36px; /* ≥24px：满足 WCAG 2.2 SC 2.5.8 的触摸目标 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: var(--hairline) solid var(--border-l1);
+  border-radius: var(--r-pill);
+  background: var(--composer-bg);
+  color: var(--c-text-2);
+  box-shadow: var(--shadow-panel);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.jump-bottom:hover {
+  color: var(--c-text-1);
+  border-color: var(--c-border-strong);
+}
+.jump-bottom:focus-visible {
+  outline: 2px solid var(--c-focus-ring);
+  outline-offset: 2px;
+}
+
+/* chevron-fold 的几何是「指向右」；朝下靠 CSS 旋转（与 ui/turn-edits 同一手法：
+   方向不进 ui/icons.ts 的 paths，那张表只有一份几何）。 */
+.jump-bottom-ico {
+  transform: rotate(90deg);
+}
+
+/* 新消息数：按钮右上角的胶囊徽标。0 条时 JS 加 .hidden ⇒ 不显示数字（只留箭头）。 */
+.jump-bottom-count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-pill);
+  background: var(--c-accent);
+  color: var(--c-accent-fg);
+  font-size: 10px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}

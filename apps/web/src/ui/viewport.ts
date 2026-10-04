@@ -62,6 +62,30 @@ export function isTouchInput(): boolean {
   }
 }
 
+/** 动效偏好（系统「减少动态效果」开关）。 */
+export const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+
+/**
+ * 用户是否要求**减少动态效果**（W9336）。
+ *
+ * 为什么住在 viewport.ts 而不是调用点自己 matchMedia：本模块是「媒体查询判定的唯一
+ * 真源」（文件头），而这条判定天然会有第二个消费者（任何要动起来的控件）。CSS 侧的
+ * 对应物是 tokens.css 的全局 `@media (prefers-reduced-motion: reduce)` 块 —— 它只能
+ * 关掉**声明式**动画（transition / animation），关不掉 JS 驱动的逐帧滚动，所以需要这
+ * 个口子让调用方自己换一条路径（当前唯一消费者：ui/messages/jump.ts 的「回到底部」）。
+ *
+ * 取不到能力位（老引擎没有 matchMedia）时返回 false = 允许动效：与「媒体查询缺省不
+ * 匹配」同向。这里**刻意不**保守地返回 true —— 那会让所有老引擎上的滚动都硬跳，
+ * 而 reduce 的语义是「按用户要求」而不是「按我们的猜测」。
+ */
+export function prefersReducedMotion(): boolean {
+  try {
+    return window.matchMedia(REDUCED_MOTION_QUERY).matches;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 按设备能力在「桌面文案 / 触摸文案」之间取词 —— **本仓唯一的分流点**。
  *

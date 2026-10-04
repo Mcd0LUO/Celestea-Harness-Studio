@@ -395,3 +395,9 @@ export const chat = {
   'chat.turnEdits.moreActions': '更多操作',
   'chat.turnEdits.otherCalls': '另有 {n} 个调用可能改动了文件',
 } as const;
+  'chat.turnEdits.otherCalls': '另有 {n} 个调用可能改动了文件',
+  // W9336：「回到底部」浮标。label = 按钮名（title / 无新消息时的可访问名）；
+  // new 带上条数 —— 读屏用户不该只听到「回到底部」而不知道有新消息。
+  'chat.jump.label': '回到底部',
+  'chat.jump.new': '回到底部 · {n} 条新消息',
+} as const;
