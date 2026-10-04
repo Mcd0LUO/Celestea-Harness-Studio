@@ -14,6 +14,8 @@
 | [`pitfalls.md`](./pitfalls.md) | 当前 | **踩坑档案**：症状 → 根因 → 正确做法 → 代码位置 → 怎么验证（每条来自真实修复）；前端渲染与数据文件类条目仍适用 | 本文 |
 | [`feature-multimodal-attachments/`](./feature-multimodal-attachments/README.md) | 设计（已实现 P0） | **多模态附件**设计（分册）：图片/文本附件的三入口、能力位探测、降级提示、objectURL 生命周期 | [`README.md`](./feature-multimodal-attachments/README.md)；`apps/web/src/ui/attachments.ts` |
 | [`feature-display-components.md`](./feature-display-components.md) | 设计（**P0 已实现**，W895） | **可选显示组件**：把「渲染后增强」与「markdown 扩展」变成可注册的缝，显示能力做成可开关组件（构建期装配，不做运行时下载） | 本文；缝的现有先例见 `apps/web/src/ui/hint/registry.ts` 的取舍注释 |
+| [`feature-desktop-packaging.md`](./feature-desktop-packaging.md) | 当前（2026-10-04 决定：暂缓） | **桌面端打包**：评估外部 PR #5（已关闭）后暂缓——实测数据、4 条理由、替代方案代价、将来要做的三件前置工作，含未验证部分的诚实声明 | 本文 |
+| [`feature-plugin-hotswap.md`](./feature-plugin-hotswap.md) | 设计（待实现） | **插件热插拔**：把引擎层插件补进 `GET /api/plugins` 并让三层都可换代——turn 边界生效、bus/runtime 仅无活跃会话时、换代而非卸载（含"registry 与 prompt 必须原子同步"的硬约束） | 本文 |
 | [`feature-dynamic-tool-disclosure.md`](./feature-dynamic-tool-disclosure.md) | 设计（只调研与设计，W802） | **动态工具披露**的调研与设计：工具面随任务收窄的方案与取舍；本文不落地代码 | 本文 |
 | [`feature-sandbox-time-semantics.md`](./feature-sandbox-time-semantics.md) | 已实现（P0，W1516） | **沙箱时间语义**：把固定的 20s `RLIMIT_CPU` 改成「跟随该次调用墙钟」的推导值，模型仍可用参数覆盖且被部署方上限夹紧；含 `run_code` 子进程与可配硬顶的补齐 | 本文；落点 `packages/tools/src/sandbox/limits.ts` |
 | [`feature-permission-entry-merge.md`](./feature-permission-entry-merge.md) | 已实现 | **权限入口合并**：状态栏右端只留一个盾牌入口（用已有图标），面板内同时给出会话档位与精细授权；窄屏不再挤掉停止键 | 本文；落点 `apps/web/src/statusline/permission.ts`、`apps/web/src/ui/grants/` |
