@@ -138,7 +138,12 @@ describe("W9322 engine-layer hot swap · next turn boundary", () => {
 
     const running = runTurnWithFrames(h, "跑着的时候被关掉");
     // Wait until the running turn really reached its model step.
-    while (seen.length === 0) await new Promise((r) => setTimeout(r, 2));
+    // 有界轮询：等**条件**，不等时间 —— 超时即抛带原因的错，绝不赌时长（W9225）。
+    const deadline = Date.now() + 5_000;
+    while (seen.length === 0) {
+      if (Date.now() > deadline) throw new Error("the running turn never reached its model step");
+      await new Promise((r) => setTimeout(r, 2));
+    }
     expect(seen).toHaveLength(1);
     expect(h.runtime.isBusy(SESSION)).toBe(true);
 
