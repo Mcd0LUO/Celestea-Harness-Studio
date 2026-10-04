@@ -154,7 +154,6 @@
 .toolcard-fold[data-fold='expanded'] > svg { transform: rotate(90deg); }
 /* W778：参数/结果预览移进展开区（折叠态不再露出半截预览行）；
    body 内仍是一行省略号摘要 + 等宽全文。 */
-.toolcard-args-preview,
 .toolcard-result-preview {
   width: 100%;
   padding: 8px 14px 0 0;

@@ -523,10 +523,20 @@ async function main() {
   eq(ref.resultPv.textContent, '结果：file body', '工具卡：结果预览照旧回填（元素没换）');
   truthy(ref.body.querySelector('.tool-out') !== null, '工具卡：结果全文进 body');
   // W778：折叠态单行 —— 预览必须在 body 里，summary 里一个都不许有
+  // W9345：参数摘要那一行**已删**（与完整参数块重复）⇒ body 里只剩结果摘要。
   truthy(
-    ref.body.querySelector('.toolcard-args-preview') !== null &&
-      ref.body.querySelector('.toolcard-result-preview') !== null,
-    '工具卡 W778：参数/结果预览都在 .toolcard-body 内（仅展开可见）',
+    ref.body.querySelector('.toolcard-args-preview') === null,
+    '工具卡 W9345：参数摘要行不再渲染（完整参数在 .tool-args 里，不再重复）',
+  );
+  truthy(
+    ref.body.querySelector('.toolcard-result-preview') !== null,
+    '工具卡 W778：结果预览仍在 .toolcard-body 内（仅展开可见；它不与结果全文重复）',
+  );
+  // W9345：完整参数仍在、且内容是**参数全文**（不是 desc —— 卡头那行才是 desc）。
+  eq(
+    ref.body.querySelector('.tool-args').textContent,
+    '{"path":"a.ts"}',
+    '工具卡 W9345：完整参数块保留（参数全文逐字，不是 desc）',
   );
   const refHead = ref.card.querySelector('.toolcard-head');
   truthy(

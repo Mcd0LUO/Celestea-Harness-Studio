@@ -8,8 +8,6 @@ export const chat = {
   'chat.tool.running': 'Running',
   'chat.tool.copy': 'Copy',
   'chat.tool.copyHint': 'Copy the arguments and result (JSON)',
-  'chat.tool.args': 'Arguments: {text}',
-  'chat.tool.argsNone': 'Arguments: —',
   'chat.tool.preview': 'Preview',
   'chat.tool.previewHint': 'Preview this file in the side panel',
   'chat.tool.failed': 'Failed',

@@ -200,10 +200,19 @@ export function buildToolCard(d: ToolCardData): ToolCardRef {
   card.appendChild(head);
   // W778：预览行与全文都进 body —— 折叠态看不到，展开才显示（铁律：不重建节点）。
   const body = el('div', 'toolcard-body');
-  const argsPv = el('div', 'toolcard-args-preview');
-  const a = summaryOf(d.argsText);
-  argsPv.textContent = a ? t('chat.tool.args', { text: a }) : t('chat.tool.argsNone');
-  body.appendChild(argsPv);
+  // W9345：删掉**参数摘要那一行**（.toolcard-args-preview）。用户现象 —— 展开后同一个参数
+  // 出现两遍：先是 `参数：{"path": …prob…}`（summaryOf 截断到 60 字符 + 省略号），
+  // 紧跟着就是**完整**参数的 `.tool-args` 等宽块。截断那份不携带任何完整块没有的信息，
+  // 纯属重复。
+  //
+  // ★ 为什么只删参数、**保留结果摘要**（.toolcard-result-preview）：结果全文在 `.tool-out`，
+  //   但它是**结果到达后**才有的（`setToolResult` 回填），而参数块是建卡即在；
+  //   两者不同步出现 ⇒ 结果摘要那一行仍是「未到达时先说一声结果」的进度信息，
+  //   删掉它会让运行中的卡在结果回填前**完全看不出有结果**。本轮只治用户指出的那一处。
+  // ★ 为什么删除是安全的（两处都不依赖它）：
+  //   ① 复制按钮读的是**闭包里的 `d.argsText`**（见上），不是这个 DOM 节点
+  //      ⇒ `chat.tool.copyHint`「复制参数与结果（JSON）」的语义一字不变；
+  //   ② 结果预览回填走 `ref.resultPv`（另一个元素），不受影响。
   body.appendChild(el('pre', 'tool-args', d.argsText)); // W764：等宽 pre（不换行 + 横向滚动）
   const resultPv = el('div', 'toolcard-result-preview');
   resultPv.textContent = '';

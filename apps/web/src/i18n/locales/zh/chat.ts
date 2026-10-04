@@ -8,8 +8,6 @@ export const chat = {
   'chat.tool.running': '运行中',
   'chat.tool.copy': '复制',
   'chat.tool.copyHint': '复制参数与结果（JSON）',
-  'chat.tool.args': '参数：{text}',
-  'chat.tool.argsNone': '参数：—',
   'chat.tool.preview': '预览',
   'chat.tool.previewHint': '侧边预览这个文件',
   'chat.tool.failed': '失败',
