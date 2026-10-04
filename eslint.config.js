@@ -255,6 +255,12 @@ export default tseslint.config(
       // worker's in-progress code and duplicate every finding.
       ".worktrees/**",
       "reports/**",
+      // 2026-10-04：tmp/ 与 results/ 是 **gitignored 的草稿/产物树**（见 .gitignore）。
+      // 多 worker 同树时它们会被并发增删，而 `eslint .` 扫到「刚被删掉的文件」会
+      // ENOENT 崩成 exit 2 ⇒ **假红**（实测：另一 worker 删 tmp/ 下的脚本时 eslint 正扫到它）。
+      // lint 本来也不该扫它们 —— 它们不是本仓源码。
+      "tmp/**",
+      "results/**",
       "fixtures/**",
       "contracts/**",
       "**/*.json",

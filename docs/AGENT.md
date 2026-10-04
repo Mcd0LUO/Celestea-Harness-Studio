@@ -28,11 +28,16 @@
 
 1. **聚焦测试**：新行为有测试；纯函数优先，DOM 用 jsdom，跨平台用可注入 seam。
 2. **变异负控制**：把实现改坏一次，确认测试**真的**变红（不是「我觉得会红」）。
-3. **全量 `pnpm check` 绿**：`typecheck → lint → lint:arch → check:sleep → check:sync-in-callback →
-   check:comment-refs → test → check:web`。
-   **派工场景**：worker 交付前**必须**跑 `pnpm check:fast`（`typecheck` + `typecheck:web` +
-   `lint` + `lint:arch`，约 34s、只读、可与别的 builder 并发）；全量 `pnpm check` 由**派工者**
-   在收口时统一跑（铁律 7 只约束 builder）。
+3. **全量 `pnpm check` 绿（10 道）**：`typecheck → lint → lint:arch → check:tmpdir → check:sleep →
+   check:sync-in-callback → check:comment-refs → check:json-dup-keys → test → check:web`。
+   **派工场景**：worker 交付前**必须**跑 `pnpm check:fast`（= 上面除 `test` / `check:web` 之外的
+   **8 道**，约 40s、只读、可与别的 builder 并发）；全量 `pnpm check` 由**派工者**在收口时统一跑
+   （铁律 7 只约束 builder）。
+   **2026-10-04：把三道扫描器与重复键门禁并入 `check:fast`。** 它们都只读、各约 0.3s。
+   并入的理由是实测：`check:fast` 原来只覆盖 9 道里的 5 道 ⇒ **worker 的检查面是门禁的
+   严格子集**，而同一形状这一轮咬了三次（W9331 的 `check:comment-refs` 7 处、
+   W9329/W9333 的 `check:sync-in-callback` 12 处），每次都要一个往返才发现。
+   **这不是新增门禁，是让预检面完整。**
    ⚠️ **`typecheck:web` 不能省**：根 `tsc` 的 `include` **不含** `apps/web/**`（前端有自己的
    `apps/web/tsconfig.json`），所以只跑根 `typecheck` 会漏掉全部前端类型错误 —— 这正是
    W1485 那 3 个错误的藏身处。

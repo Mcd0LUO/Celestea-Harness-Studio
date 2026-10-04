@@ -110,6 +110,12 @@ const GATES = [
     cmd: "node scripts/check-comment-refs.mjs",
   },
   {
+    // 重复的 JSON 键是**静默**的：JSON.parse 不报错、取最后一条，被遮蔽的那条不会
+    // 有任何门禁变红（W9329 在 bundle-size-baseline.json 里撞出两条 note36 时手工发现的）。
+    name: "check:json-dup-keys",
+    cmd: "node scripts/check-json-dup-keys.mjs",
+  },
+  {
     name: "test",
     cmd: "pnpm exec vitest run",
   },
