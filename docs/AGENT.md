@@ -1,8 +1,34 @@
-# AGENT.md — 开发与提交规范（本仓 AI agent 的工作协议）
+# AGENT.md — 工作协议（本仓 AI agent）
 
 > 状态：**当前**。本文是「怎么在本仓干活」的操作协议，不是架构说明（那在 `ARCHITECTURE.md`）。
 > 对象：在本仓工作的 AI agent（含被派工的 worker）与人类协作者。
 > 每条规则都来自真实踩过的坑；括号里写的是**为什么**，不是风格偏好。
+
+---
+
+## 0. 一张图：一次改动的全流程
+
+```
+          ┌──────────────────────────────────────────────────────────────┐
+          │  不变量：11 条铁律 · 全量门禁 10 道 · 一个 builder（铁律 7）  │
+          └──────────────────────────────────────────────────────────────┘
+
+  ① 派工            ② 实现              ③ 收口            ④ 提交          ⑤ 发布
+  ───────           ───────             ───────           ───────         ───────
+  写什么：           写什么：             写什么：           写什么：         写什么：
+  任务特有简报       代码 + 测试 + 探针   全量门禁 + 归属   四段式消息       §4 七步
+  + brief/impl.md    + 变异负控制         + 只 add 本次     + 文件传消息      + release.md
+
+  判据：             判据：               判据：             判据：           判据：
+  写 glob 互斥       check:fast 绿        解析得出「门禁     `git status`     这个 tag 上
+  契约文件独占       探针打在主场景       汇总」行           干净             的 CI 绿
+                     报告 ≤ 1 屏                                              + 人类授权
+
+  谁做：派工者       谁做：worker         谁做：派工者       谁做：派工者     谁做：人类授权
+```
+
+**一句话**：改一处 → 跑全量 → 变异验证 → 真机确认 → 提交写清为什么 → 需要发布时先 tag 再 build。
+**任何一条门禁挡了你，先假设门禁是对的** —— 本仓历史上每一次「门禁误报」最后都查出了一个真问题。
 
 ---
 
@@ -13,10 +39,10 @@
 | 1 | 改完必须跑**全量** `pnpm check`，绿了才算完成 | 单跑子集必漏：类型 / lint / 架构 / 测试 / 前端 5 类门禁在 5 个地方 |
 | 2 | 每条新断言配一个**变异负控制**（改坏 → 必须红 → 还原 → 绿） | 断言经常是空转的。本仓真实案例：`bin` 断言永远为真（npm 无条件带上），改坏也不红 |
 | 3 | UI 改动必须**真机**验证（headless shell + CDP），断言要有**非零几何 + 可见性 + 截图**；**而且探针按「主场景」定价** —— 先写清这个功能的主场景是哪 1-2 个，探针**只承诺覆盖它们**，其余场景不做；**断言条数不是指标** | 「只数 DOM 节点」曾让一个面板不可见的 bug 全绿通过；A/B 实测：某臂 **13 条真机断言全 PASS**，而缺陷正在主场景里（「消息还在下面继续来」时点回到底部，停在中途） |
-| 4 | 不许相信 worker 的自述报告；关键结论**自己重跑** | 真实案例：worker 报 `CHECK_EXIT=0`，但用的是不重建的入口，量的是旧产物 |
+| 4 | 不许相信 worker 的**自述**；结论只认**机械输出**（门禁原始输出 / 探针复跑 / `git` 事实）。**但不要求派工者逐条人工复算** | 真实案例：worker 报 `CHECK_EXIT=0`，用的是不重建的入口，量的是旧产物。反面的浪费同样真实 —— 逐条重跑曾是派工者最大的一块开销（本会话 885 次 tool 调用） |
 | 5 | 契约数字**三处一致**：`API_ENDPOINT_COUNT` == `contracts/endpoints.json` == `FROZEN_COUNTS` | 只改一处会静默漂移 |
 | 6 | 不许提交派生产物（`dist/`、`apps/studio/webdist/`、`packages/core/contracts/`） | 它们是构建产物，已 gitignore，并由 release 门禁机械兜底 |
-| 7 | 同一时间**只允许一个 builder**（构建 / 测试 / benchmark） | 并发会让时序敏感用例 flaky、让 benchmark 数字失真。**只读门禁不是 builder**：`check:fast`（两个 typecheck + lint + lint:arch，约 34s、零产物、确定性）任何时刻都可以跑，**worker 交付前必须跑** |
+| 7 | 同一时间**只允许一个 builder**（构建 / 测试 / benchmark） | 并发会让时序敏感用例 flaky、让 benchmark 数字失真。**只读门禁不是 builder**：`check:fast`（8 道门禁 / 9 条命令，含两个 typecheck；零产物、确定性、约 40s）任何时刻都可以跑，**worker 交付前必须跑**。⚠️ 反过来说：**全量 `pnpm check` 里的 `test` 门在别的 builder 在跑时不可信**（本轮 4 次现形，每次都靠单独重跑 `vitest run` 证伪）—— 红了先重跑再判定，不要急着改代码 |
 | 8 | 不跑 `--no-verify`，不绕过任何门禁 | 门禁存在的唯一理由就是它不给人情 |
 | 9 | **npm 发布必须有人类显式授权**：没有授权绝不推 npm | 发布不可逆（版本不能再发、tarball 永久公开），不能是「走完发布清单」的副作用。机械实现：`pnpm run publish` 在 `CELESTEA_PUBLISH_AUTHORIZED=1` 缺失时 fail-closed |
 | 10 | 同一工作区允许并行 writer，**但写范围必须互斥**（派工时每个 worker 声明自己的写 glob；**重叠即串行**，互斥才并行）；且 worker **不许**对全仓门禁的红下「既有问题」的结论 | ① 并发编辑的丢失**不会让任何门禁变红**，只表现为「某 worker 说自己改了、但文件里没有」。② worker 只能证明「不是我」（stash 自己的文件），**无法**排除另一个 worker 的在途编辑 —— 2026-10-04 实测：同一次全量测试里，一条 `terminal-pty.b4-01` flake 是**真既有**（基线 `f8c2c15` 1/6 复现），两条 `doc-conventions` 是**另一个 worker 的在途折行**，而 worker 对两者下了同一个「既有问题」的结论。**归因只能由派工者在安静工作区上做。** ④ **事后有通道，但不该拿它当补救**：`session_send_message`（按**会话地址**投递）实测可用（2026-10-04：`delivery.via:"steer"`、`live:true`，目标会话当新一轮用户消息处理）—— **本条最初的 ① 曾断言「主会话 → worker 无通道」，那是错的**，起因是一次失败的探针（把「不是 a function」当成了结论）被写成了约束。**教训：负结论必须复核，否则它会变成一条假规则**（同 §6「命中数只能当下界用」）。即便如此，**已经写坏的文件不会自己回来**，所以仍要在**派工时**把范围切开。⑤ **为什么是「互斥」而不是「一个 writer」**：2026-10-04 实测三个 worker 的写范围只重叠一条缝，一刀切成串行是拿**永久吞吐**换**一次事故**；范围互斥时并行是安全的。 |
@@ -24,35 +50,75 @@
 
 ---
 
-## 2. 完成定义（Definition of Done）
+## 2. 节点 A · 派工（派工者）
 
-1. **聚焦测试**：新行为有测试；纯函数优先，DOM 用 jsdom，跨平台用可注入 seam。
-2. **变异负控制**：把实现改坏一次，确认测试**真的**变红（不是「我觉得会红」）。
-3. **全量 `pnpm check` 绿（10 道）**：`typecheck → lint → lint:arch → check:tmpdir → check:sleep →
-   check:sync-in-callback → check:comment-refs → check:json-dup-keys → test → check:web`。
-   **派工场景**：worker 交付前**必须**跑 `pnpm check:fast`（= 上面除 `test` / `check:web` 之外的
-   **8 道**，约 40s、只读、可与别的 builder 并发）；全量 `pnpm check` 由**派工者**在收口时统一跑
-   （铁律 7 只约束 builder）。
-   **2026-10-04：把三道扫描器与重复键门禁并入 `check:fast`。** 它们都只读、各约 0.3s。
-   并入的理由是实测：`check:fast` 原来只覆盖 9 道里的 5 道 ⇒ **worker 的检查面是门禁的
-   严格子集**，而同一形状这一轮咬了三次（W9331 的 `check:comment-refs` 7 处、
-   W9329/W9333 的 `check:sync-in-callback` 12 处），每次都要一个往返才发现。
-   **这不是新增门禁，是让预检面完整。**
-   ⚠️ **`typecheck:web` 不能省**：根 `tsc` 的 `include` **不含** `apps/web/**`（前端有自己的
-   `apps/web/tsconfig.json`），所以只跑根 `typecheck` 会漏掉全部前端类型错误 —— 这正是
-   W1485 那 3 个错误的藏身处。
-   **为什么单独有这一条**：本仓真实事故 —— 派工简报只写了「不要跑全量 `pnpm check`」，
-   worker 于是只跑了自己的目标文件；结果一个交付带 3 个 `tsc` 错误、另一个引入 3 处循环
-   依赖，两者都自述「全绿」。这 3 道门禁只读、零产物、约 28s，跑它们不违反「一个 builder」。
-4. **棘轮按真实测量调整**：模块体积只按实测上调，并在文件里**写明增量构成**。
-5. **文档同步**：新增文档必须登记进 `docs/README.md` 的文档地图。
-6. **归属干净**：`find . -user root -type f`（排除 `node_modules`/`.git`/`dist`）应为空。
+| 要做的 | 判据 |
+|---|---|
+| **写死文件边界**（每个 worker 一个 glob），重叠即串行 | 铁律 10 |
+| **契约文件独占**：`contracts/endpoints.json` + `routes.ts` 同一时刻只有一个 owner | 谁写谁独占 |
+| **简报 = 任务特有 + 常规条款**：常规条款从 `scripts/brief/<阶段>.md` 取，不手写 | 手挑条款漏过三次（漏了扫描器、漏了 `tests/` 与 `docs/`），每次一个往返 |
+| **简报里点名主场景**：这个功能的主场景是哪 1-2 个 | 铁律 3 |
+
+- **一个 builder**：同一时刻只有一个 worker 在构建/测试/跑 benchmark（见铁律 7）。
+- **文件边界要写死**：例如「你只动 `apps/web/**`，不要碰 `apps/studio/**` 与 `packages/**`」。
+- **契约文件独占**：同一时刻只有一个 worker 拥有 `contracts/endpoints.json` + `routes.ts`。
+- **收尾自查归属**：`find apps/web -user root -type f`（DSH 的 write/edit 会落地成 root:root，必须 chown，否则别人连变异都写不进去）。
 
 ---
 
-## 3. 提交规范
+## 3. 节点 B · 实现（worker）
 
-### 3.1 消息格式
+**交付前必须跑 `pnpm check:fast`（8 道门禁 / 9 条命令，约 40s、只读、可与别的 builder 并发）**；
+全量 `pnpm check` 是**派工者**的活（铁律 7 只约束 builder）。
+
+- **聚焦测试**：新行为有测试；纯函数优先，DOM 用 jsdom，跨平台用可注入 seam。
+- **变异负控制**：把实现改坏一次，确认测试**真的**变红（不是「我觉得会红」）。
+- **探针按「主场景」定价**（铁律 3）：先写清这个功能的主场景是哪 1-2 个，只承诺覆盖它们；**断言条数不是指标**。
+- **报告 ≤ 1 屏（≈40 行）**：改了哪些文件（含行号）/ 逐条审计结论（没问题也要写「查了 X，因为 Y 安全」）/
+  测试 / 变异负控制红绿 / 真机证据（**原始输出 + 截图路径，不要贴大段正文**）/ **刻意没做什么**。
+  **不要**逐条复述规格。依据：实测报告 1.1–1.6 万字，而派工者读的时候**只看标题**。
+- **不碰 git**：worker 不做任何 git 写操作（`add`/`commit`/`stash`/`checkout`/`restore`/`clean`）；
+  不跑 `pnpm install`；不改门禁脚本；**负结论只当下界**。
+- **常规条款从 `scripts/brief/impl.md` 取**（派工者拼进简报），不要手挑。
+
+### 门禁面
+
+全量 **10 道**：`typecheck → lint → lint:arch → check:tmpdir → check:sleep → check:sync-in-callback →
+check:comment-refs → check:json-dup-keys → test → check:web`。
+`check:fast` = 除 `test` / `check:web` 之外的 **8 道**（**9 条命令**，因为 typecheck 有根 + 前端两发）。
+
+⚠️ **`typecheck:web` 不能省**：根 `tsc` 的 `include` **不含** `apps/web/**`（前端有自己的
+`apps/web/tsconfig.json`）⇒ 只跑根 `typecheck` 会漏掉全部前端类型错误（W1485 那 3 个错误的藏身处）。
+**为什么这几道扫描器也进了预检**：2026-10-04 实测 —— 它们原来不在 `check:fast` 里，而同一形状这一轮
+咬了三次（W9331 的 `check:comment-refs` 7 处、W9329/W9333 的 `check:sync-in-callback` 12 处），
+每次都要一个往返才发现。**这不是新增门禁，是让预检面完整。**
+**为什么单独写这一节**：曾有简报只写「不要跑全量 `pnpm check`」，worker 于是只跑了自己的目标文件 ⇒
+一个交付带 3 个 `tsc` 错误、另一个引入 3 处循环依赖，两者都自述「全绿」。
+
+---
+
+## 4. 节点 C · 收口（派工者）
+
+| 要做的 | 判据 |
+|---|---|
+| 跑**全量** `pnpm check`。**清掉** `HTTP_PROXY` / `HTTPS_PROXY` / `NODE_USE_ENV_PROXY`（对 `git push` 必需、对 `vitest` 是毒药）| 10/10 |
+| **解析不出「门禁汇总」行 ⇒ 当成失败** | 不许报一个自己没看到的绿 |
+| `test` 门红了先**单独重跑** `vitest run` 再判定 | 别的 builder 在跑时它会假红（铁律 7）|
+| 与**机械输出**对账（门禁输出 / 探针复跑 / `git` 事实），**不逐条人工复算** | 铁律 4 |
+| **只 `add` 本次涉及的文件**：按 `git status` 逐条确认，**绝不** `git add -A` | 历史不许撒谎 |
+| 派工产出由**派工者**提交（worker 不做任何 git 写操作）| §5 / §5.2 |
+
+- **模块体积棘轮只许降**：`src` 下单文件默认上限 **450 行**；例外表按登记时的**真实 `wc -l`** 记为上限，
+  文件变小要**收紧**（门禁会提示「可收紧到 N」）。
+  **为什么不再有「按实测上调」那套**：2026-10-04 主人裁定删掉 `bundle-size` 产物体积棘轮 ——
+  它是最近 40 笔提交里被改了 **35 次**的一道，而每次都是「按真实测量上调 + 附归因」，**没拦住过回归**。
+  模块体积不同：它在**向下收敛**（例外表已清空过）且几乎零维护。
+- **文档同步**：新增文档必须登记进 `docs/README.md` 的文档地图（见 §7）。
+- **归属干净**：`find . -user root -type f`（排除 `node_modules` / `.git` / `dist`）应为空。
+
+## 5. 节点 D · 提交
+
+### 5.1 消息格式
 
 ```
 <type>(<scope>): <祈使句，说清改了什么>
@@ -70,19 +136,19 @@
 - 正文写**为什么**，不要复述 diff（diff 自己会说改了什么）。
 - 破例要在正文里说明（例如「本文与禁止项字面冲突，按任务要求改了护栏 A 的逻辑」）。
 
-### 3.2 粒度与边界
+### 5.2 粒度与边界
 
 - **一次提交 = 一个逻辑变更**。跨子系统的机械改动（如全仓改名）单独一条。
 - 按**文件**分组提交，不按 hunk 混提。
 - 派工产出由**派工者**提交（worker 不做任何 git 写操作：`add` / `commit` / `stash` / `checkout` / `restore` / `clean`）。
 
-### 3.3 身份与签名
+### 5.3 身份与签名
 
 - **提交身份（作者/提交者）是本机事实，不是仓库规则**：用什么名字/邮箱由这台机器决定，写在 `docs/AGENT.local.md`（不入库）。
   仓库只要求两条：**不要混用身份**（一条历史里出现多个人格会让 `git log` 失真）、**提交消息用文件传入**（`git commit -F <file>`）。
   **为什么用文件**：消息里的反引号会被 shell 当命令替换 —— 本仓真实事故：一次提交消息里写了 `pnpm run build`，shell 真的执行了全量构建，还把构建日志嵌进了提交消息。
 
-### 3.4 提交与推送的授权边界
+### 5.4 提交与推送的授权边界
 
 - **提交（`commit`）：默认就该做，不需要逐次征求授权。** 一个逻辑变更做完、门禁绿了，就**提交**它 ——
   把改动长期留在工作树里才是风险：下一个人（或下一个 worker）分不清哪些是本次的、哪些是在途 WIP，
@@ -97,7 +163,7 @@
 - **提交前自查**：`find . -user root -type f` 为空（铁律 6 的归属干净）、无派生产物、无凭据、
   `pnpm check` 绿。提交后 `git status` 应干净。
 
-### 3.5 不许进仓的东西
+### 5.5 不许进仓的东西
 
 - 构建产物（见铁律 6）、`.env`、任何凭据、`node_modules`。
 - 真实会话数据 / 附件 / 私人对话（`fixtures/sessions/*` 已默认忽略，合成 fixture 用 `!fixtures/sessions/test-*` 例外）。
@@ -105,7 +171,7 @@
 
 ---
 
-## 4. 发布流程（顺序不能错）
+## 6. 节点 E · 发布（顺序不能错）
 
 ```bash
 # 1) 干净树 + 全量门禁绿
@@ -143,46 +209,6 @@ tag 一推就有自己的 CI 结论；**等它绿了再 `publish`** 才是完整
 
 ---
 
-## 5. 派工协议（worker）
-
-- **一个 builder**：同一时刻只有一个 worker 在构建/测试/跑 benchmark（见铁律 7）。
-- **文件边界要写死**：例如「你只动 `apps/web/**`，不要碰 `apps/studio/**` 与 `packages/**`」。
-- **契约文件独占**：同一时刻只有一个 worker 拥有 `contracts/endpoints.json` + `routes.ts`。
-- **收尾自查归属**：`find apps/web -user root -type f`（DSH 的 write/edit 会落地成 root:root，必须 chown，否则别人连变异都写不进去）。
-- **报告要求（≤ 1 屏，≈40 行）**：改了哪些文件（含行号）/ 逐条审计结论（没问题也要写「查了 X，因为 Y 安全」）/ 测试 / 变异负控制红绿 / 真机证据（**原始输出 + 截图路径，不要贴大段正文**）/ 刻意没做什么。
-  **不要**逐条复述规格。依据：实测报告 1.1–1.6 万字，而派工者读的时候**只看标题**。
-- **常规条款不要每次手写**：按阶段从 `scripts/brief/<阶段>.md` 取（`impl` / `collect` / `release`），派工者只写**任务特有**的部分。手挑条款漏过三次（漏了扫描器、漏了 `tests/` 与 `docs/`），而每次漏都要一个往返才发现 —— 落成文件至少是**可 diff** 的。
-
----
-
-## 6. 工具链与验证的坑（跟仓库走，不随机器变）
-
-> **本机特有的事实**（路径 / 账号 / 凭据位置 / 端口 / 这台机器装了什么）**不写在这里**：
-> 本文要提交进仓库，写死一台机器的信息只会误导别人。请复制模板填你自己的机器，
-> 它已被 `.gitignore` 忽略、永不入库：
->
-> ```bash
-> cp docs/AGENT.local.md.example docs/AGENT.local.md
-> ```
-
-| 坑 | 现象 | 正确做法 |
-|---|---|---|
-| 工具写入的文件可能不属于你（例如 DSH 的 write/edit 会落地 `root:root`） | 后续写入 `EACCES`，**别人连变异都写不进去** | 写完立刻把归属改回**你自己**（`sudo chown "$(id -un):$(id -gn)" <files>`）+ `chmod 644`；收尾自查 `find . -user root -type f` |
-| `pnpm --dir apps/web run check` **不重建** | 量的是旧 dist，版本门禁量错 | 量产物必须走会重建的入口：`pnpm check` 或 `pnpm run build` |
-| **源码直跑**依赖 `tsconfig` 的 `paths` | `pnpm --dir apps/studio start`（= `tsx src/main.ts`，cwd 在 `apps/studio`）就近读该目录的 tsconfig；它若只继承 `tsconfig.base.json`（无 `paths`），`@celestea/*` 就落到 gitignored 的 `packages/*/dist/` —— 你以为在跑源码，其实在跑**上一次构建的产物**，全新检出直接 `ERR_MODULE_NOT_FOUND` | 跑源码的入口配置必须继承**根** `tsconfig.json`；`tsconfig.build.json` 反过来**不带** `paths`（构建要按依赖顺序解析各自 dist）。机械兜底：`tests/tsconfig-paths.test.ts` |
-| `RLIMIT_AS` 与 Chromium 不兼容 | 浏览器进程 SIGTRAP（133） | 浏览器调用走 `noAddressSpaceLimit` 豁免 |
-| benchmark 跨运行噪声 | 同一提交两次跑 p50 2.6% / p90 12.6%（**本仓开发机实测；换机器请自测，量级可能不同**） | 别信单次对比的 <10% 变动；认真对比用 `--repeat 3` |
-| 停服务：`pnpm --dir apps/studio start` 是**两层父子**（pnpm → tsx(node) → node），真正监听端口的是**孙进程** | 对着包装层发信号（或被 job-kill）**不保证**传到孙进程；传不到时端口仍被占、`/api/health` 照旧 200，而 `main.ts` 的 SIGTERM 优雅收尾根本没跑（W9261 实测到一次幸存者；本会话随后两次尝试均未能复现 —— 是**间歇/平台相关**，不是必然） | 停服务**按端口**停，不要按「我起的那个进程」：`pnpm run stop`（`scripts/studio-stop.mjs`：找到占用端口的 pid，Windows `taskkill /PID <pid> /T /F` / POSIX SIGTERM，然后复检端口）。手工等价：Windows `netstat -ano | findstr :3777` → `taskkill /PID <pid> /T /F`；POSIX `kill -TERM -<pgid>` |
-| 时序敏感用例 | 并发构建时 flaky（本仓真实发生过 2 条） | 静默条件下重跑；不要用「flaky」搪塞，要定位 |
-| **下界断言写成了定时器预算本身**（setTimeout(40) 之后断言 elapsed >= 40） | 在 CI 偶发红：Node 的定时器**允许提前约 1 ms** 触发（文档明确不保证精确），而 Date.now() 只有 1 ms 粒度 ⇒ ubuntu 4 核并发分片下实测到 **39**（W9263 实证，apps/studio/src/w2029-shutdown-honesty.test.ts ③） | 用**单调时钟** performance.now()，并留**明确余量**（例：40 ms 预算断 >= 35），在注释里写清「余量仍能区分『走满预算』与『立刻返回（~0）』」—— 这不是给轮询加预算，是去掉一个**按规范就不成立**的断言。已有同类正确写法可参考：packages/llm/src/timeout.test.ts（300 ms 预算断 >= 250）、packages/tools/src/run-code/w833-broker-limits.test.ts（1 s 预算断 >= 900） |
-| **CI 的 Windows runner 只有 4 核**，而 vitest 会为每个测试文件 spawn 一个 worker（日志自己会写 `Isolate N workers spawned`） | 轮询型用例（如 `tests/w795-optimistic-grants.test.ts`）在**本机 28 核怎么跑都绿**、在 CI 偶发 `Error: timed out waiting for ...`；且常出现在**纯文档提交**上（证明与改动无关） | 先按「负载 flake」判：本机重跑 + `taskset -c 0-3` 限核重跑，都绿即可判非回归；**不要**为了绿去加大轮询预算（那是掩盖）。根治方向是降并行度：W9220 已把主池换成 **`vmThreads`**（VM 上下文隔离，见 `docs/ARCHITECTURE.md` §6.4.7）—— 本机实测墙钟 **34 s → 20 s（−41%）**、进程 133 → 6（−95%），且**不需要白名单**（每个文件一个独立 VM，全局不跨文件泄漏）。★ 顶层不得有 `execArgv`：worker 线程拒绝 `--expose-gc`，整个池会起不来（`ERR_WORKER_INVALID_EXEC_ARGV`） |
-| **同步阻塞调用出现在事件回调里**：`execFileSync` / `spawnSync` / `sleepSync` / `readFileSync` … 落在 `on(` / `once(` / `addEventListener(` / `setTimeout(` / 路由注册体内 | 用户的一次交互被**同步冻结**到 syscall 返回：W9321 实证 —— abort 监听器里的 `execFileSync`×3（各 5s 超时）+ `sleepSync` 退避让「按 Stop」同步卡死约 15s，而 typecheck / lint / 架构 / 测试**全绿** | 门禁 `check:sync-in-callback`（`scripts/check-sync-in-callback.mjs`，接进 `pnpm check`）。改用异步 API（`execFile` / `spawn` / `fs.promises`），或把工作移出回调（预热 / 走队列）。确属刻意且无法异步化：在**违规行或其紧邻上一行**加 `W9323` 注释说明理由（豁免口径同 `check:sleep`）。既有违规登记在 `scripts/baselines/sync-in-callback.json` 棘轮里，**只许下调** |
-| **注释里的 `file.ts:NN` 行号引用会静默腐烂** | 源码一改行号就漂，而没有任何门禁会报：W9321 自己改完 `child.ts` 之后，两处测试注释里指向 `taskkillTree` 的行号就已经失真了，注释在那里悄悄说了一句假话 | 门禁 `check:comment-refs`（`scripts/check-comment-refs.mjs`，接进 `pnpm check`）。改用**符号引用** `[taskkillTree]`（本仓既有约定，见 `packages/tools/src/sandbox/child.ts`）或不含行号的文字描述。确需行号（机械门禁的示例、出处溯源）：在**违规行或其紧邻上一行**加 `W9323` 注释说明 |
-| **一个「修行号漂移」的修复自己造成了行号漂移**：把注释里的 `file.ts:NN` 改成符号引用时**顺手折了行**，把别的文件里的文档锚点推到了空行上 | `doc-conventions` ③b/③c 变红，而**修复者看不见**（它的范围是注释不是文档）、**其它并发 worker 也看不见**（只能排除自己） | 改注释时**不要顺手动折行**；若必须折行，在**同 commit 内**跑全量 `pnpm check` 并修掉被推走的锚点。归因由派工者在安静工作区上做（铁律 10） |
-| **把注释里的 `W####` 当杂物清理** | 它是跨「代码注释 / 测试文件名 / 测试标题 / `docs/` 反向引用」的**活引用索引** —— 删掉一处注释引用，会让 `docs/` 与测试标题**指向一个不存在的东西**。W9330 实测：`packages/**` 2068 处命中里，测试标题 322 / 字符串 75 / 标识符 2 / `.md` 48 **一格不能动**；注释内 1620 处里 **~1607 处必须保留**，可删的只有 **6 处纯变更叙述** | **不要**把 `W####` 当杂物清（2026-10-04 已决策：**继续用 W 号作主题索引键**）。真正能清的只有三类：① 纯变更叙述（"W887 之后我们改成了…" —— 历史属于 git）；② **「就地冻结的数字 + 手工增量史」**（`// W870: 60 -> 61` 那一串）—— 本仓**最高危的注释漂移源**：git 保不住、自相矛盾、**无门禁可校验**，可以无限期腐烂而全仓绿（实证：`W895-C1: 64 -> 66` 描述的端点与今天 `contracts/endpoints.json` 的任何一行都无法对账）；清它时**留下不变量与当前清单**，只删不可核对的增量史；③ 真正的散文漂移（注释说的函数/参数/返回值已不存在）。**机器读的豁免标记（`W9225` / `W9323`）绝不可动** —— `check:sleep` / `check:sync-in-callback` / `check:comment-refs` 的 `ALLOW_MARKER` 就是它们 |
-
----
-
 ## 7. 文档规范
 
 **一个事实一个家**：规则写在它的家里，别处只链接。
@@ -217,7 +243,35 @@ tag 一推就有自己的 CI 结论；**等它绿了再 `publish`** 才是完整
 
 ---
 
-## 8. 写代码的取向
+## 8. 工具链与验证的坑（跟仓库走，不随机器变）
+
+> **本机特有的事实**（路径 / 账号 / 凭据位置 / 端口 / 这台机器装了什么）**不写在这里**：
+> 本文要提交进仓库，写死一台机器的信息只会误导别人。请复制模板填你自己的机器，
+> 它已被 `.gitignore` 忽略、永不入库：
+>
+> ```bash
+> cp docs/AGENT.local.md.example docs/AGENT.local.md
+> ```
+
+| 坑 | 现象 | 正确做法 |
+|---|---|---|
+| 工具写入的文件可能不属于你（例如 DSH 的 write/edit 会落地 `root:root`） | 后续写入 `EACCES`，**别人连变异都写不进去** | 写完立刻把归属改回**你自己**（`sudo chown "$(id -un):$(id -gn)" <files>`）+ `chmod 644`；收尾自查 `find . -user root -type f` |
+| `pnpm --dir apps/web run check` **不重建** | 量的是旧 dist，版本门禁量错 | 量产物必须走会重建的入口：`pnpm check` 或 `pnpm run build` |
+| **源码直跑**依赖 `tsconfig` 的 `paths` | `pnpm --dir apps/studio start`（= `tsx src/main.ts`，cwd 在 `apps/studio`）就近读该目录的 tsconfig；它若只继承 `tsconfig.base.json`（无 `paths`），`@celestea/*` 就落到 gitignored 的 `packages/*/dist/` —— 你以为在跑源码，其实在跑**上一次构建的产物**，全新检出直接 `ERR_MODULE_NOT_FOUND` | 跑源码的入口配置必须继承**根** `tsconfig.json`；`tsconfig.build.json` 反过来**不带** `paths`（构建要按依赖顺序解析各自 dist）。机械兜底：`tests/tsconfig-paths.test.ts` |
+| `RLIMIT_AS` 与 Chromium 不兼容 | 浏览器进程 SIGTRAP（133） | 浏览器调用走 `noAddressSpaceLimit` 豁免 |
+| benchmark 跨运行噪声 | 同一提交两次跑 p50 2.6% / p90 12.6%（**本仓开发机实测；换机器请自测，量级可能不同**） | 别信单次对比的 <10% 变动；认真对比用 `--repeat 3` |
+| 停服务：`pnpm --dir apps/studio start` 是**两层父子**（pnpm → tsx(node) → node），真正监听端口的是**孙进程** | 对着包装层发信号（或被 job-kill）**不保证**传到孙进程；传不到时端口仍被占、`/api/health` 照旧 200，而 `main.ts` 的 SIGTERM 优雅收尾根本没跑（W9261 实测到一次幸存者；本会话随后两次尝试均未能复现 —— 是**间歇/平台相关**，不是必然） | 停服务**按端口**停，不要按「我起的那个进程」：`pnpm run stop`（`scripts/studio-stop.mjs`：找到占用端口的 pid，Windows `taskkill /PID <pid> /T /F` / POSIX SIGTERM，然后复检端口）。手工等价：Windows `netstat -ano | findstr :3777` → `taskkill /PID <pid> /T /F`；POSIX `kill -TERM -<pgid>` |
+| 时序敏感用例 | 并发构建时 flaky（本仓真实发生过 2 条） | 静默条件下重跑；不要用「flaky」搪塞，要定位 |
+| **下界断言写成了定时器预算本身**（setTimeout(40) 之后断言 elapsed >= 40） | 在 CI 偶发红：Node 的定时器**允许提前约 1 ms** 触发（文档明确不保证精确），而 Date.now() 只有 1 ms 粒度 ⇒ ubuntu 4 核并发分片下实测到 **39**（W9263 实证，apps/studio/src/w2029-shutdown-honesty.test.ts ③） | 用**单调时钟** performance.now()，并留**明确余量**（例：40 ms 预算断 >= 35），在注释里写清「余量仍能区分『走满预算』与『立刻返回（~0）』」—— 这不是给轮询加预算，是去掉一个**按规范就不成立**的断言。已有同类正确写法可参考：packages/llm/src/timeout.test.ts（300 ms 预算断 >= 250）、packages/tools/src/run-code/w833-broker-limits.test.ts（1 s 预算断 >= 900） |
+| **CI 的 Windows runner 只有 4 核**，而 vitest 会为每个测试文件 spawn 一个 worker（日志自己会写 `Isolate N workers spawned`） | 轮询型用例（如 `tests/w795-optimistic-grants.test.ts`）在**本机 28 核怎么跑都绿**、在 CI 偶发 `Error: timed out waiting for ...`；且常出现在**纯文档提交**上（证明与改动无关） | 先按「负载 flake」判：本机重跑 + `taskset -c 0-3` 限核重跑，都绿即可判非回归；**不要**为了绿去加大轮询预算（那是掩盖）。根治方向是降并行度：W9220 已把主池换成 **`vmThreads`**（VM 上下文隔离，见 `docs/ARCHITECTURE.md` §6.4.7）—— 本机实测墙钟 **34 s → 20 s（−41%）**、进程 133 → 6（−95%），且**不需要白名单**（每个文件一个独立 VM，全局不跨文件泄漏）。★ 顶层不得有 `execArgv`：worker 线程拒绝 `--expose-gc`，整个池会起不来（`ERR_WORKER_INVALID_EXEC_ARGV`） |
+| **同步阻塞调用出现在事件回调里**：`execFileSync` / `spawnSync` / `sleepSync` / `readFileSync` … 落在 `on(` / `once(` / `addEventListener(` / `setTimeout(` / 路由注册体内 | 用户的一次交互被**同步冻结**到 syscall 返回：W9321 实证 —— abort 监听器里的 `execFileSync`×3（各 5s 超时）+ `sleepSync` 退避让「按 Stop」同步卡死约 15s，而 typecheck / lint / 架构 / 测试**全绿** | 门禁 `check:sync-in-callback`（`scripts/check-sync-in-callback.mjs`，接进 `pnpm check`）。改用异步 API（`execFile` / `spawn` / `fs.promises`），或把工作移出回调（预热 / 走队列）。确属刻意且无法异步化：在**违规行或其紧邻上一行**加 `W9323` 注释说明理由（豁免口径同 `check:sleep`）。既有违规登记在 `scripts/baselines/sync-in-callback.json` 棘轮里，**只许下调** |
+| **注释里的 `file.ts:NN` 行号引用会静默腐烂** | 源码一改行号就漂，而没有任何门禁会报：W9321 自己改完 `child.ts` 之后，两处测试注释里指向 `taskkillTree` 的行号就已经失真了，注释在那里悄悄说了一句假话 | 门禁 `check:comment-refs`（`scripts/check-comment-refs.mjs`，接进 `pnpm check`）。改用**符号引用** `[taskkillTree]`（本仓既有约定，见 `packages/tools/src/sandbox/child.ts`）或不含行号的文字描述。确需行号（机械门禁的示例、出处溯源）：在**违规行或其紧邻上一行**加 `W9323` 注释说明 |
+| **一个「修行号漂移」的修复自己造成了行号漂移**：把注释里的 `file.ts:NN` 改成符号引用时**顺手折了行**，把别的文件里的文档锚点推到了空行上 | `doc-conventions` ③b/③c 变红，而**修复者看不见**（它的范围是注释不是文档）、**其它并发 worker 也看不见**（只能排除自己） | 改注释时**不要顺手动折行**；若必须折行，在**同 commit 内**跑全量 `pnpm check` 并修掉被推走的锚点。归因由派工者在安静工作区上做（铁律 10） |
+| **把注释里的 `W####` 当杂物清理** | 它是跨「代码注释 / 测试文件名 / 测试标题 / `docs/` 反向引用」的**活引用索引** —— 删掉一处注释引用，会让 `docs/` 与测试标题**指向一个不存在的东西**。W9330 实测：`packages/**` 2068 处命中里，测试标题 322 / 字符串 75 / 标识符 2 / `.md` 48 **一格不能动**；注释内 1620 处里 **~1607 处必须保留**，可删的只有 **6 处纯变更叙述** | **不要**把 `W####` 当杂物清（2026-10-04 已决策：**继续用 W 号作主题索引键**）。真正能清的只有三类：① 纯变更叙述（"W887 之后我们改成了…" —— 历史属于 git）；② **「就地冻结的数字 + 手工增量史」**（`// W870: 60 -> 61` 那一串）—— 本仓**最高危的注释漂移源**：git 保不住、自相矛盾、**无门禁可校验**，可以无限期腐烂而全仓绿（实证：`W895-C1: 64 -> 66` 描述的端点与今天 `contracts/endpoints.json` 的任何一行都无法对账）；清它时**留下不变量与当前清单**，只删不可核对的增量史；③ 真正的散文漂移（注释说的函数/参数/返回值已不存在）。**机器读的豁免标记（`W9225` / `W9323`）绝不可动** —— `check:sleep` / `check:sync-in-callback` / `check:comment-refs` 的 `ALLOW_MARKER` 就是它们 |
+
+---
+
+## 9. 写代码的取向
 
 - **机械门禁优先于人的记性**：任何「别忘了」都应该变成一条断言。本仓已有：文案门禁、契约计数、体积棘轮、发布门禁、README 硬数字、文档规范、源码直跑解析。
 - **「本机能跑」不等于「干净机器能跑」**：本机常年有 `dist/`、缓存、`node_modules`，于是「依赖上一次构建」「依赖本机工具」的坑只在别人的机器上现形。CI（`.github/workflows/ci.yml`，ubuntu + windows）就是那个干净机器；加它第一天就抓出一个全新检出起不来的真 bug。
@@ -229,7 +283,7 @@ tag 一推就有自己的 CI 结论；**等它绿了再 `publish`** 才是完整
 
 ---
 
-## 9. 一句话总结
+## 10. 一句话总结
 
 > 改一处 → 跑全量 → 变异验证 → 真机确认 → 提交写清为什么 → 需要发布时先 tag 再 build。
 
