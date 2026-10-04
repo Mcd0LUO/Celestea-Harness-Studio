@@ -53,8 +53,8 @@
   （`updater.ts` / `single-instance.ts` / `tray.ts` / `app-menu.ts` + `main.ts` 一部分）；
   其余约 1200 行（i18n / log / notify / paths / window-state / open-target / studio-api / self-test）与平台无关。
   其 `main.ts` 头注释即声明「the desktop shell **owns nothing of the product**」。
-- 若要收，先做三件事：① 边界写进 [`DEPENDENCY-POLICY.md`](./DEPENDENCY-POLICY.md)；② 给 `desktop/` 补门禁
-  （至少 `deno check` + 「不得出现非 `node:` 导入」的断言）；③ 在 [`README.md`](./README.md) 文档地图登记。
+- 若要收，先做三件事：① 边界写进 [`DEPENDENCY-POLICY.md`](../DEPENDENCY-POLICY.md)；② 给 `desktop/` 补门禁
+  （至少 `deno check` + 「不得出现非 `node:` 导入」的断言）；③ 在 [`README.md`](../README.md) 文档地图登记。
 
 ## 6. 诚实声明（未验证的部分）
 
