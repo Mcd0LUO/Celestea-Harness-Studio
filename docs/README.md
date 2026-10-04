@@ -15,18 +15,9 @@
 | [`pitfalls.md`](./pitfalls.md) | 当前 | **踩坑档案**：症状 → 根因 → 正确做法 → 代码位置 → 怎么验证（每条来自真实修复）；前端渲染与数据文件类条目仍适用 | 本文 |
 | [`feature-multimodal-attachments/`](./feature-multimodal-attachments/README.md) | 设计（已实现 P0） | **多模态附件**设计（分册）：图片/文本附件的三入口、能力位探测、降级提示、objectURL 生命周期 | [`README.md`](./feature-multimodal-attachments/README.md)；`apps/web/src/ui/attachments.ts` |
 | [`feature-display-components.md`](./feature-display-components.md) | 设计（**P0 已实现**，W895） | **可选显示组件**：把「渲染后增强」与「markdown 扩展」变成可注册的缝，显示能力做成可开关组件（构建期装配，不做运行时下载） | 本文；缝的现有先例见 `apps/web/src/ui/hint/registry.ts` 的取舍注释 |
+| [`baseline-phase0a.md`](./baseline-phase0a.md) | 当前 | **Phase 0a 实测基线**：前缀缓存命中率（第三方网关 B 渠道，综合 91.4%）、常驻上下文堆积曲线、trim 触发点（一次性测量记录） | 本文 |
 | [`feature-desktop-packaging.md`](./feature-desktop-packaging.md) | 决定（2026-10-04：暂缓） | **桌面端打包**：评估外部 PR #5（已关闭）后暂缓——实测数据、4 条理由、替代方案代价、将来要做的三件前置工作，含未验证部分的诚实声明 | 本文 |
-| [`feature-plugin-hotswap.md`](./feature-plugin-hotswap.md) | 设计（**已实现**，W9322） | **插件热插拔**：把引擎层插件补进 `GET /api/plugins` 并让三层都可换代——turn 边界生效、bus/runtime 仅无活跃会话时、换代而非卸载（含"registry 与 prompt 必须原子同步"的硬约束） | 本文 |
-| [`feature-dynamic-tool-disclosure.md`](./feature-dynamic-tool-disclosure.md) | 设计（只调研与设计，W802） | **动态工具披露**的调研与设计：工具面随任务收窄的方案与取舍；本文不落地代码 | 本文 |
-| [`feature-sandbox-time-semantics.md`](./feature-sandbox-time-semantics.md) | 已实现（P0，W1516） | **沙箱时间语义**：把固定的 20s `RLIMIT_CPU` 改成「跟随该次调用墙钟」的推导值，模型仍可用参数覆盖且被部署方上限夹紧；含 `run_code` 子进程与可配硬顶的补齐 | 本文；落点 `packages/tools/src/sandbox/limits.ts` |
-| [`feature-permission-entry-merge.md`](./feature-permission-entry-merge.md) | 已实现 | **权限入口合并**：状态栏右端只留一个盾牌入口（用已有图标），面板内同时给出会话档位与精细授权；窄屏不再挤掉停止键 | 本文；落点 `apps/web/src/statusline/permission.ts`、`apps/web/src/ui/grants/` |
-| [`feature-usage-stats.md`](./feature-usage-stats.md) | 已实现 | **使用统计页与设置入口下移**：设置页的用量统计（摘要条 + 52 周热力图 + 按模型每日趋势），顶栏「配置」挪到左侧栏左下角成「图标 + 设置 + 用户名」；含为它补的账本 `day_model` 维度与每行时间跨度 | 本文；落点 `apps/web/src/ui/usage/`、`packages/runtime/src/ledger-query.ts` |
-| [`feature-sandbox-comparison.md`](./feature-sandbox-comparison.md) | 设计（只调研与设计） | **沙箱机制横向评估**：实读 DSH / Claude Code / ZCode 三家沙箱，按机制对比并指出本仓的缺口与可抄点；含「当前部署走 userspace 降级 ⇒ 缺口全部不设防」的审计含义 | 本文；本仓落点 `packages/tools/src/sandbox/`、`packages/tools/src/guard/path-guard.ts` |
-| [`feature-memory-extraction.md`](./feature-memory-extraction.md) | 设计（P0–P2 已实现） | **记忆提炼与长对话成本**的路线设计：移植 ZCode 记忆系统的评估结论（只拿「后台自动提炼」）、与既有反模式决策的冲突、Phase 0-2 分期，以及 Phase 1 必须现在定的三个接缝 | 本文；前作见 [`archive/research/memory-store.md`](./archive/research/memory-store.md) |
-| [`baseline-phase0a.md`](./baseline-phase0a.md) | 当前 | **Phase 0a 实测基线**：前缀缓存命中率（第三方网关 B 渠道，综合 91.4%）、常驻上下文堆积曲线、trim 触发外推；含 CONTEXT_WINDOW 元数据化修复与流式 tool_call name 累加 bug 两条附带发现 | 回答 [`feature-memory-extraction.md`](./feature-memory-extraction.md) §4 的三问 |
 | [`iteration-e/`](./iteration-e/README.md) | 设计 | 迭代方向 E（能力深水区，分册）：断点恢复 / 可恢复多 agent / 成本账本 / 模型降级的目标契约、分期与验收标准 | [`README.md`](./iteration-e/README.md)；落地后回写 [`ARCHITECTURE.md`](./ARCHITECTURE.md) |
-| [`feature-agent-swarm.md`](./feature-agent-swarm.md) | 已实现 | **批量并行子代理**（`agent_swarm` 工具）：N 个同形子任务一次展开为并行轻量 turn，自适应限流调度 + XML 汇总；含与 worker 的分工、上游陷阱规避表与 P0–P2 分期 | 本文（顶部「落地后的三处偏离」记录实现与设计的差异）；包表见 [`ARCHITECTURE.md`](./ARCHITECTURE.md) |
-| [`modes-standard-vs-execution.md`](./modes-standard-vs-execution.md) | 设计（**P0 已实现，W729**） | 特性设计：**会话双模式**（标准模式 / 执行模式，即 DSH PTC 对应物）的目标契约、分期与可机械检验的验收标准；§10 是 P0 落地回填 | 本文；PTC 语义来源见归档的 DSH 评估（W253/W254，已于 W881 清理出公开仓） |
 | [`deployment.md`](./deployment.md) | 当前 | **部署与安全模型**：生产 systemd + nginx、隧道访问、安全模型（含 Windows 差异表） | 本文；登录门见 [`archive/decisions/feature-studio-auth.md`](./archive/decisions/feature-studio-auth.md) |
 | [`configuration.md`](./configuration.md) | 当前 | **配置**：`CELESTEA_HOME` 解析顺序与目录布局、环境变量全表、模型接入、权限档位 | 本文；数据文件 schema 见 [`data-files.md`](./data-files.md) |
 | [`AGENT.md`](./AGENT.md) | 当前 | **开发与提交规范**：完成定义（Definition of Done）、提交消息格式与粒度、发布流程（先 tag 再 build）、派工协议、文档规范、写代码取向 | 本文；门禁清单见根 `package.json` 的 `check` |
@@ -49,7 +40,7 @@
 | 文件 | 状态 | 一句话 |
 | --- | --- | --- |
 | [`archive/research/`](./archive/research/) | 历史参考 | 调研报告：memory-store / selection-and-preview / computer-use 等 |
-| [`archive/decisions/`](./archive/decisions/) | 历史参考 | **已实现决策与已执行完的过程记录**（11 篇：特性设计 + 迭代方向的决策依据与验收标准；现行口径见 `contracts/` 与 `ARCHITECTURE.md`） |
+| [`archive/decisions/`](./archive/decisions/) | 历史参考 | **已实现决策与已执行完的过程记录**（20 篇：特性设计 + 迭代方向的决策依据与验收标准；现行口径见 `contracts/` 与 `ARCHITECTURE.md`） |
 | [`archive/migration/`](./archive/migration/) | 历史参考 | 迁移留痕：W781 两仓合并对照表 |
 
 > **W1518 清理**：原先归档在 `archive/DEVELOPMENT.md`（旧 Rust 后端的开发者入口）与

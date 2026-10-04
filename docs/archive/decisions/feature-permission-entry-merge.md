@@ -1,11 +1,18 @@
 # 特性设计 · 权限入口合并（档位 + 精细授权 → 一个盾牌）
 
-> 状态：**已实现**（W1517，2026-09-25）。落地：唯一入口 = `#slGrant`（沿用 W701 的盾牌路径），
+> 📦 **历史文档**。本文件是**已决策的归档记录**（当时的依据与验收标准），
+> 2026-10-04 从 `docs/` 移入 `docs/archive/decisions/`。它**不是**现行口径：
+> 当前行为看 `contracts/`、[`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md)、以及各功能对应的现行文档。
+> 归档**不删除正文** —— 决策的理由仍然可查。
+
+> 状态：**历史参考**（已实现）。本文是当时的决策记录，**不再随代码更新**。
+
+> **归档时的落地情况**：**已实现**（W1517，2026-09-25）。落地：唯一入口 = `#slGrant`（沿用 W701 的盾牌路径），
 > 面板 = `ui/grants/panel/body.ts` 的 §1 会话档位（`statusline/permission/tier.ts`）+ §2 精细授权；
 > 档位徽标并入 `.sl-grant-tier`（与授权计数同处一格）。验收 B1–B6 的逐条证据（含真机 CDP 几何与截图、
 > 变异负控制红绿对照）见 `results/W1517-权限入口合并.md`。
-> 依赖：[ARCHITECTURE.md](./ARCHITECTURE.md) §6.5.2（`apps/web/src` 的测试一律放 `tests/`）、
-> 归档决策 [feature-session-grants.md](./archive/decisions/feature-session-grants.md)（一次性授权语义）。
+> 依赖：[ARCHITECTURE.md](../../ARCHITECTURE.md) §6.5.2（`apps/web/src` 的测试一律放 `tests/`）、
+> 归档决策 [feature-session-grants.md](./feature-session-grants.md)（一次性授权语义）。
 
 ## 1. 一句话目标
 
@@ -20,7 +27,7 @@
 | 盾牌 SVG（`M8 1.6 13.2 3.4v4.2c0 3.1-2.1 5.6-5.2 6.8-3.1-1.2-5.2-3.7-5.2-6.8V3.4z`） | `apps/web/index.html:101` |
 | 档位入口的显隐/徽标/弹层自持；文件头**已改为合并后的口径**（旧「入口分列、互不合并」被本轮用户指令取代，见 `:11-12`） | `apps/web/src/statusline/permission.ts:9`、`:52,150-151` |
 | 盾牌入口的三态渲染与徽标 | `apps/web/src/ui/grants.ts:188-189`、`apps/web/src/ui/grants/panel/shield.ts:2,29-32` |
-| 已存在的历史压力：`.sl-end` 集群在窄屏溢出，停止键被裁 | `apps/web/index.html:88-95` 的 W847 注释（会话接续手册已于 W1518 移出 `docs/`，见 [`README.md`](./README.md) 维护约定） |
+| 已存在的历史压力：`.sl-end` 集群在窄屏溢出，停止键被裁 | `apps/web/index.html:88-95` 的 W847 注释（会话接续手册已于 W1518 移出 `docs/`，见 [`README.md`](../../README.md) 维护约定） |
 
 ## 3. 目标交互
 

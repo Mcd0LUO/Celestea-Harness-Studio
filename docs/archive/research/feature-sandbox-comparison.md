@@ -1,8 +1,15 @@
 # 特性设计 · 沙箱机制横向评估（DSH / ZCode / Claude Code → 本仓）
 
-> 状态：**设计**（只调研与设计，不落地代码）。
+> 📦 **历史文档**。本文件是**已决策的归档记录**（当时的依据与验收标准），
+> 2026-10-04 从 `docs/` 移入 `docs/archive/research/`。它**不是**现行口径：
+> 当前行为看 `contracts/`、[`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md)、以及各功能对应的现行文档。
+> 归档**不删除正文** —— 决策的理由仍然可查。
+
+> 状态：**历史参考**（**纯调研，未落地任何代码**）。本文是当时的决策记录，**不再随代码更新**。
+
+> **归档时的落地情况**：**设计**（只调研与设计，不落地代码）。
 > ⚠️ 状态行只出现一个类别词（`classifyStatus` 先命中先归类，见 `AGENT.md` §7 第 2 条）。
-> 依赖：[ARCHITECTURE.md](./ARCHITECTURE.md) 的分层与 seam 纪律、[deployment.md](./deployment.md) §4 的安全模型、[configuration.md](./configuration.md) 的环境变量表。
+> 依赖：[ARCHITECTURE.md](../../ARCHITECTURE.md) 的分层与 seam 纪律、[deployment.md](../../deployment.md) §4 的安全模型、[configuration.md](../../configuration.md) 的环境变量表。
 
 ## 1. 一句话目标
 

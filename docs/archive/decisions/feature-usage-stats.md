@@ -1,10 +1,17 @@
 # 特性设计 · 使用统计页与设置入口下移（W9103）
 
-> 状态：**已实现**。落点 `apps/web/src/ui/usage/`（7 个模块）、`apps/web/src/styles/usage.css`、
+> 📦 **历史文档**。本文件是**已决策的归档记录**（当时的依据与验收标准），
+> 2026-10-04 从 `docs/` 移入 `docs/archive/decisions/`。它**不是**现行口径：
+> 当前行为看 `contracts/`、[`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md)、以及各功能对应的现行文档。
+> 归档**不删除正文** —— 决策的理由仍然可查。
+
+> 状态：**历史参考**（已实现）。本文是当时的决策记录，**不再随代码更新**。
+
+> **归档时的落地情况**：**已实现**。落点 `apps/web/src/ui/usage/`（7 个模块）、`apps/web/src/styles/usage.css`、
 > `apps/web/index.html` 的 `#btnSettingsEntry`；后端补的 `day_model` 维度与 `first_ts`/`last_ts`
 > 在 `packages/runtime/src/ledger-query.ts`。验收证据见 `results/W-usage-stats.md`（仓外/已 gitignore）。
-> 依赖：[ARCHITECTURE.md](./ARCHITECTURE.md) §6.5.2（`apps/web/src` 的测试一律放 `tests/`）、
-> [data-files.md](./data-files.md)（账本口径）、[iteration-e/03-cost-ledger.md](./iteration-e/03-cost-ledger.md)（账本的设计依据）。
+> 依赖：[ARCHITECTURE.md](../../ARCHITECTURE.md) §6.5.2（`apps/web/src` 的测试一律放 `tests/`）、
+> [data-files.md](../../data-files.md)（账本口径）、[iteration-e/03-cost-ledger.md](../../iteration-e/03-cost-ledger.md)（账本的设计依据）。
 
 ## 1. 一句话目标
 

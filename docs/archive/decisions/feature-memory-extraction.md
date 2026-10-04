@@ -1,6 +1,13 @@
 # 记忆提炼与长对话成本 · 路线设计
 
-> 状态：**设计（P0–P2 已实现）**。本文只定**路线与已闭合决策**，不跟踪进度 —— 按 [`README.md`](./README.md) 的维护约定，
+> 📦 **历史文档**。本文件是**已决策的归档记录**（当时的依据与验收标准），
+> 2026-10-04 从 `docs/` 移入 `docs/archive/decisions/`。它**不是**现行口径：
+> 当前行为看 `contracts/`、[`docs/ARCHITECTURE.md`](../../ARCHITECTURE.md)、以及各功能对应的现行文档。
+> 归档**不删除正文** —— 决策的理由仍然可查。
+
+> 状态：**历史参考**（P0–P2 已实现；其余为「可延后」或「不做」）。本文是当时的决策记录，**不再随代码更新**。
+
+> **归档时的落地情况**：**设计（P0–P2 已实现）**。本文只定**路线与已闭合决策**，不跟踪进度 —— 按 [`README.md`](../../README.md) 的维护约定，
 > 「每完成一个可提交单元就更新」的接续手册不入 `docs/`。落地后若仍有未完成分期，改状态为「设计（P0 已实现）」，不要整篇归档。
 
 **范围**：把「后台自动提炼」引入本仓既有的记忆系统，以及与之**耦合**的长对话成本改造。
@@ -33,8 +40,8 @@
 | **后台自动提炼** | ❌ **无**（只有模型显式调 `remember`） | ❌ **ZCode 独有** |
 
 **前作**（已归档，仍是「为什么这样定」的依据）：
-[`archive/decisions/feature-workspace-memory.md`](./archive/decisions/feature-workspace-memory.md)（P0/P1 决策与验收）、
-[`archive/research/memory-store.md`](./archive/research/memory-store.md)（开源调研与选型，含反模式清单）。
+[`archive/decisions/feature-workspace-memory.md`](./feature-workspace-memory.md)（P0/P1 决策与验收）、
+[`archive/research/memory-store.md`](../research/memory-store.md)（开源调研与选型，含反模式清单）。
 
 ---
 
@@ -42,7 +49,7 @@
 
 **这是本文最重要的一节，不裁决就不能进 Phase 1。**
 
-[`archive/research/memory-store.md`](./archive/research/memory-store.md) §3 反模式第 1 条，原文：
+[`archive/research/memory-store.md`](../research/memory-store.md) §3 反模式第 1 条，原文：
 
 > **自动采集 + LLM 摘要，无人在环**（claude-mem 的 5 个 lifecycle hook；mem0 插件 hook + 后台 flush；Memori 后台 capture）。
 > 错误会被固化成「每轮都出现的事实」，且不可审计。→ 我们：P0 人写文件、P1 显式 `remember`。
@@ -55,7 +62,7 @@
 
 | # | 化解 | 落点 |
 |---|---|---|
-| 1 | **可审计**：`MemoryEntryLine` 增加 `source: { session, turn }` | [`archive/research/memory-store.md`](./archive/research/memory-store.md) §2.3 架构 B 的线格式里**本来就有这个字段**（`:80`，`{v,id,ts,op,...,source:{session,turn},hash}`），落地时丢了。补上后每条记忆可追溯到来源会话与轮次 |
+| 1 | **可审计**：`MemoryEntryLine` 增加 `source: { session, turn }` | [`archive/research/memory-store.md`](../research/memory-store.md) §2.3 架构 B 的线格式里**本来就有这个字段**（`:80`，`{v,id,ts,op,...,source:{session,turn},hash}`），落地时丢了。补上后每条记忆可追溯到来源会话与轮次 |
 | 2 | **人在环**：提炼产物走既有 `entries.jsonl` → 用户在 `MEMORY.md` 看得到、可用 `forget` 撤回；且**项目层只读不被污染**（提炼只写 global 层） | 复用既有工具与层契约，不新增写路径 |
 | 3 | **不每轮都跑**：两道跳过门 + cursor（照 ZCode） | 避免「每轮写一点」把 prompt 缓存尾部持续打碎，也避免噪声固化 |
 
@@ -439,8 +446,8 @@ Phase 2 定调为**视图叠层**（§4）后，原三条接缝只剩一条硬�
 
 | 文档 | 用途 |
 |---|---|
-| [`archive/decisions/feature-workspace-memory.md`](./archive/decisions/feature-workspace-memory.md) | P0/P1 的决策依据与验收标准 |
-| [`archive/research/memory-store.md`](./archive/research/memory-store.md) | 开源调研与选型；**§3 反模式清单（本文 §2 的冲突来源）**；§2.3 架构 B 线格式（`source:{session,turn}` 字段出处） |
+| [`archive/decisions/feature-workspace-memory.md`](./feature-workspace-memory.md) | P0/P1 的决策依据与验收标准 |
+| [`archive/research/memory-store.md`](../research/memory-store.md) | 开源调研与选型；**§3 反模式清单（本文 §2 的冲突来源）**；§2.3 架构 B 线格式（`source:{session,turn}` 字段出处） |
 
 **外部参照**（不进仓，仅行为参照）
 
@@ -457,4 +464,4 @@ Phase 2 定调为**视图叠层**（§4）后，原三条接缝只剩一条硬�
 2. **Phase 0a 先行**，它零风险且决定 Phase 2 是否启动；可并行做 billion-context 挂载实验（§4 Phase 2「验证手段」）。
 3. **§5 只剩一条硬约束**（提炼挂 `turn_end`）；若 Phase 2 回退到 log 重写方案，先回 §5 复活接缝 2/3 —— 回退场景下 cursor 悬空是**必然**踩到的。
 4. **Phase 2 动手前重读 §4 的自研清单**：瞬时哲学（绝不进 `turnContext`/log）、消息引用号、hide-consumed 卫生、轮次上限优雅完成 —— 都来自 billion-context 的事故录，不是品味问题。
-5. 改动落 `packages/` 前先读 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §0 红线与 §1 分层；改完跑**全量** `pnpm check`。
+5. 改动落 `packages/` 前先读 [`ARCHITECTURE.md`](../../ARCHITECTURE.md) §0 红线与 §1 分层；改完跑**全量** `pnpm check`。
