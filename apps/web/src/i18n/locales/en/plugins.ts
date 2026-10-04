@@ -23,4 +23,11 @@ export const plugins = {
   // Adjustable settings of the code block extras.
   'plugins.config.codeExtras.foldLines.label': 'Fold above lines',
   'plugins.config.codeExtras.foldLines.hint': 'Code blocks longer than this start folded; you can always expand them.',
+  // W9334: the "this turn's edits" display component and its one setting.
+  'plugins.desc.turnEdits.label': 'Turn edits',
+  'plugins.desc.turnEdits.hint':
+    'Adds a card listing the files this turn changed at the end of the turn; when off, the card never appears.',
+  'plugins.config.turnEdits.threshold.label': 'Fold threshold',
+  'plugins.config.turnEdits.threshold.hint':
+    'List only the first few files when more than this many changed, folding the rest into "N more files…"; 0 lists all.',
 } satisfies Partial<Record<Key, string>>;

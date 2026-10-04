@@ -26,6 +26,9 @@ import { HLJS_ENHANCER_ID, MATH_ENHANCER_ID, hljsEnhancer, mathEnhancer } from '
 import type { Enhancer } from '../ui/enhance/registry';
 import { readNumber, type PluginConfigSpec, type PluginConfigValues } from './config';
 import { t } from '../i18n';
+// W9334：「本轮编辑」显示组件（本体是增强遍；阈值是它的插件配置，默认 5）。
+import { setTurnEditsThreshold, TURN_EDITS_DEFAULT_THRESHOLD, TURN_EDITS_ID, TURN_EDITS_THRESHOLD_KEY } from '../ui/turn-edits/model';
+import { turnEditsEnhancer } from '../ui/turn-edits/card';
 
 /** W895：客户端插件挂到哪条缝上。 */
 export type ClientPluginKind = 'hint' | 'enhancer';
@@ -179,6 +182,40 @@ export function clientPlugins(): readonly ClientPluginDescriptor[] {
       kind: 'enhancer',
       category: 'interaction',
       create: () => fileLinkEnhancer(),
+    },
+    // W9334：「本轮编辑」——每轮结束时给一张「本轮改动 N 个文件」的卡。
+    //   · 数据源是**本轮的工具调用**（方案 A，诚实收窄）：只看得见 write_file，
+    //     看不见 run_shell / run_code 改的文件 —— 卡片页脚如实附一行说明，且标题
+    //     不声称是全集（见 ui/turn-edits/model.ts 的文件头）；
+    //   · 折叠阈值是**配置项**（默认 5），不是常量：不同屏幕/不同习惯的人答案不同，
+    //     与 code-extras 的 foldLines 同一判断；
+    //   · category 选 interaction：它不改内容怎么读，而是给一个动作面
+    //     （打开 / 在文件管理器中显示 / 复制路径）。
+    {
+      id: TURN_EDITS_ID,
+      label: t('plugins.desc.turnEdits.label'),
+      hint: t('plugins.desc.turnEdits.hint'),
+      hot: true,
+      kind: 'enhancer',
+      category: 'interaction',
+      config: {
+        items: [
+          {
+            kind: 'number',
+            key: TURN_EDITS_THRESHOLD_KEY,
+            labelKey: 'plugins.config.turnEdits.threshold.label',
+            hintKey: 'plugins.config.turnEdits.threshold.hint',
+            def: TURN_EDITS_DEFAULT_THRESHOLD,
+            min: 0,
+            max: 200,
+            step: 1,
+          },
+        ],
+      },
+      // 把生效值推给实现（模块镜像）——按 key 取值，不认识控件类型。
+      onConfig: (values) =>
+        setTurnEditsThreshold(readNumber(values, TURN_EDITS_THRESHOLD_KEY, TURN_EDITS_DEFAULT_THRESHOLD)),
+      create: () => turnEditsEnhancer(),
     },
   ];
 }

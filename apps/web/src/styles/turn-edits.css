@@ -1,0 +1,372 @@
+/* ============================================================================
+   styles/turn-edits.css — W9334：「本轮编辑」卡片（显示组件 display.turnEdits）
+   ----------------------------------------------------------------------------
+   形态规格：apps/web/prototype/turn-edits.html（联调定稿的 11 条）。本文件只管
+   **形态**，判定全在 ui/turn-edits/model.ts。
+
+   三条纪律：
+     · **零硬编码颜色**：只用 token（`--c-*` / `--interactive-*` / `--shadow-panel`）
+       —— 本仓明令（grants.css 的头注），换主题自动跟着走；
+     · 胶囊**视觉缩小但命中区 ≥ `--tap-hit`**：用 `::after` 扩命中，不把按钮做大；
+     · 长路径**从头部截断、保住文件名**：`direction: rtl` + `<bdi>` 把省略号推到左边。
+
+   为什么单独成文件：与 pending.css / tooltree.css 同一取向 —— 新能力各自新增文件，
+   不动共享 CSS（多 worker 共用一个工作树时合并零冲突）。main.ts 的 CSS 块末尾 import。
+   ========================================================================== */
+
+/* 卡片列：与消息列同构（.mcol 的几何由 components.css 给）。空列不占位 —— 插件被
+   关掉时列会留在 DOM 里（内容清空），`:empty` 保证它不留下一条空白。 */
+.turn-edits-col:empty {
+  display: none;
+}
+
+.te {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-subtle);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-panel);
+  overflow: visible; /* 行内菜单要越出卡片边界 */
+}
+
+/* ---- 表头：图标 + 标题 + 副标题 + 聚合 + 折叠按钮 ---- */
+.te-head {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 15px;
+}
+
+.te-icon {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-md);
+  background: var(--interactive-accent-soft);
+  color: var(--interactive-accent);
+}
+
+/* 空态图标 = **静音同形**：同一个文档轮廓，降到 --c-text-3 + 中性底色。 */
+.te-icon.is-empty {
+  background: var(--c-code-bg);
+  color: var(--c-text-3);
+}
+
+.te-text {
+  min-width: 0;
+}
+
+.te-title {
+  font-weight: 600;
+  color: var(--c-text-1);
+}
+
+.te-title.is-empty {
+  font-weight: 500;
+  color: var(--c-text-2);
+}
+
+.te-sub {
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+
+.te-spacer {
+  flex: 1 1 auto;
+}
+
+.te-sum {
+  display: flex;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* 聚合数字与每行数字同色（新增用 --c-ok、删除用 --c-err）。 */
+.te-add {
+  color: var(--c-ok);
+  font-weight: 600;
+}
+
+.te-del {
+  color: var(--c-err);
+  font-weight: 600;
+}
+
+/* 折叠按钮：视觉小、命中区不缩（::after 扩到 --tap-hit）。 */
+.te-fold {
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--c-border-subtle);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-text-3);
+  cursor: pointer;
+}
+
+.te-fold:hover {
+  background: var(--interactive-bg-hover);
+  color: var(--c-text-1);
+}
+
+.te-fold::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+}
+
+/* ---- 折叠箭头：几何真源在 ui/icons.ts，方向只由 transform 决定 ---- */
+.te-chev {
+  display: block;
+  transition: transform 0.15s ease;
+}
+
+.te-chev.is-down {
+  transform: rotate(90deg);
+}
+
+.te-chev.is-right {
+  transform: rotate(0deg);
+}
+
+.te-chev.is-up {
+  transform: rotate(-90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .te-chev {
+    transition: none;
+  }
+}
+
+/* ---- 文件行列表 ---- */
+.te-list {
+  margin: 0;
+  padding: 0 7px 7px;
+  list-style: none;
+  border-top: 1px solid var(--c-border-subtle);
+}
+
+.te[data-folded="true"] .te-list,
+.te[data-folded="true"] .te-foot {
+  display: none;
+}
+
+.te-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--r-md);
+}
+
+.te-row:hover {
+  background: var(--interactive-bg-hover);
+}
+
+/* 字母标记：18px 方块，颜色与底色都走 token。 */
+.te-kind {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.te-kind[data-k="write"],
+.te-kind[data-k="edit"] {
+  color: var(--c-text-2);
+  background: var(--c-code-bg);
+}
+
+.te-kind[data-k="add"] {
+  color: var(--c-ok);
+  background: var(--c-ok-dim);
+}
+
+.te-kind[data-k="delete"] {
+  color: var(--c-err);
+  background: var(--c-err-dim);
+}
+
+/* ★ 长路径：**从头部截断、保住文件名**。
+   `direction: rtl` 让省略号出现在**行首**（吃掉的只会是目录那一段），
+   `<bdi>`（HTML 里就是 bdi 元素）把路径内容重新按 ltr 排 —— 否则目录里的 `/`
+   与文件名会被当成双向文本重排（真机上会看到 `a/b/c.d` 变成 `c.d/a/b`）。 */
+.te-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.te-path bdi {
+  direction: ltr;
+}
+
+.te-dir {
+  color: var(--c-text-3);
+}
+
+.te-file {
+  color: var(--c-text-1);
+}
+
+/* 删除的文件用删除线（与 diff UI 的惯例一致），色降一档。 */
+.te-row[data-k="delete"] .te-file {
+  text-decoration: line-through;
+  color: var(--c-text-3);
+}
+
+.te-diff {
+  flex: none;
+  display: flex;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* ---- 行动作：主按钮 + 下拉箭头（常驻可见；靠 hover 才出会失焦） ---- */
+.te-acts {
+  position: relative;
+  flex: none;
+  display: flex;
+}
+
+.te-acts button {
+  position: relative;
+  border: 1px solid var(--c-border-subtle);
+  background: var(--c-surface-raised);
+  color: var(--c-text-2);
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 1.5;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+
+/* 视觉缩小、命中区不缩（--tap-hit 是合规下限；44px 那个是触控档，两回事）。 */
+.te-acts button::after {
+  content: "";
+  position: absolute;
+  inset: -3px -2px;
+}
+
+.te-acts button:hover {
+  background: var(--interactive-bg-hover);
+  color: var(--c-text-1);
+}
+
+.te-open {
+  border-radius: var(--r-sm) 0 0 var(--r-sm);
+}
+
+.te-caret {
+  border-left: 0;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  padding: 1px 4px;
+}
+
+.te-row.is-menu-open .te-caret .te-chev {
+  transform: rotate(-90deg);
+}
+
+.te-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  /* 刻意**不写** z-index：它是 **positioned** 元素，按 CSS 绘制顺序本来就在后面那些
+     非定位行（含 hover 底色）之上；写一个裸魔数会撞 W2007 的层级棘轮
+     （裸 z-index 只减不增，新的一律走 tokens.css 的 --z-*）。 */
+  display: none;
+  min-width: 172px;
+  padding: 4px;
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border-subtle);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-panel);
+}
+
+.te-row.is-menu-open .te-menu {
+  display: block;
+}
+
+.te-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-text-1);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.te-menu-item:hover,
+.te-menu-item:focus-visible {
+  background: var(--interactive-bg-hover);
+}
+
+/* ---- 页脚：还有 N 个 / 收起 / 覆盖边界附注 / 提示 ---- */
+.te-foot {
+  padding: 0 15px 12px;
+}
+
+.te-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.te-more:hover {
+  color: var(--c-text-1);
+  text-decoration: underline;
+}
+
+/* 覆盖边界附注（「另有 N 个调用可能改动了文件」）：它是**信息**，不是错误 —— 
+   用次级文字色，不加背景，免得被读成告警。 */
+.te-note {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--c-text-3);
+}
+
+.te-toast {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--c-ok);
+}
+
+/* 「复制失败」/「无法定位」：失败就按失败上色（成功色印失败是撒谎）。 */
+.te-toast.is-err {
+  color: var(--c-err);
+}

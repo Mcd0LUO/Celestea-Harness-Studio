@@ -20,4 +20,10 @@ export const plugins = {
   // 代码块增强的可调项。
   'plugins.config.codeExtras.foldLines.label': '超长折叠行数',
   'plugins.config.codeExtras.foldLines.hint': '代码块超过这个行数时默认折叠；随时可以展开。',
+  // W9334：「本轮编辑」显示组件与它唯一的可调项（折叠阈值）。
+  'plugins.desc.turnEdits.label': '本轮编辑',
+  'plugins.desc.turnEdits.hint': '每轮结束时在会话流末尾给一张本轮改动文件的卡片；关闭后这张卡整体不出现。',
+  'plugins.config.turnEdits.threshold.label': '折叠阈值',
+  'plugins.config.turnEdits.threshold.hint':
+    '改动文件数超过这个值时只列前几个，其余折成「还有 N 个文件…」；0 = 全部展开。',
 } as const;

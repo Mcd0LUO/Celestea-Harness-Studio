@@ -40,6 +40,7 @@ import './styles/usage.css'; // W9103 设置页「使用统计」（摘要条 / 
 // W2016：输入框自增长（#input 的 field-sizing 守卫；不支持时由 ui/inputbar/grow.ts 回落）。
 import './styles/field-sizing.css';
 import './styles/pending.css'; // W9333 会话内「等待反馈」占位（脉冲星芒 / 阶段标签 / 用时）
+import './styles/turn-edits.css'; // W9334「本轮编辑」卡片（显示组件 display.turnEdits）
 
 import { api } from './api';
 import { connectSse, initChat } from './chat';

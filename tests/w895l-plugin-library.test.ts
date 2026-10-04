@@ -85,7 +85,8 @@ describe("W895-L 插件库视图", () => {
 
   it("计数与「全部开启/关闭」按钮就位", async () => {
     await openPlugins();
-    expect(q("#settingsPlugins .plug-count")?.textContent).toBe("9/9 已开启");
+    // W9334：登记表新增「本轮编辑」（display.turnEdits）⇒ 9 → 10。
+    expect(q("#settingsPlugins .plug-count")?.textContent).toBe("10/10 已开启");
     expect(qa("#settingsPlugins .plug-bulk").length).toBe(2);
   });
 
@@ -98,9 +99,9 @@ describe("W895-L 插件库视图", () => {
     expect(server.puts[0]!.sort()).toEqual([
       "builtin.fileLink", "builtin.hljs", "builtin.math",
       "display.codeCopy", "display.codeExtras", "display.csvTable", "display.imageZoom",
-      "hint-text-card", "rail-preview",
+      "display.turnEdits", "hint-text-card", "rail-preview",
     ]);
-    expect(q("#settingsPlugins .plug-count")?.textContent).toBe("0/9 已开启");
+    expect(q("#settingsPlugins .plug-count")?.textContent).toBe("0/10 已开启");
     for (const i of qa("#settingsPlugins .plug-switch-input") as InputLike[]) expect(i.checked).toBe(false);
   });
 
@@ -109,7 +110,7 @@ describe("W895-L 插件库视图", () => {
     server.failPut = true;
     qa("#settingsPlugins .plug-bulk")[1]!.dispatchEvent(new Ev("click"));
     await flush();
-    expect(q("#settingsPlugins .plug-count")?.textContent).toBe("9/9 已开启");
+    expect(q("#settingsPlugins .plug-count")?.textContent).toBe("10/10 已开启");
     for (const i of qa("#settingsPlugins .plug-switch-input") as InputLike[]) expect(i.checked).toBe(true);
     expect(q("#settingsPlugins .plug-status")?.textContent ?? "").not.toBe("");
   });

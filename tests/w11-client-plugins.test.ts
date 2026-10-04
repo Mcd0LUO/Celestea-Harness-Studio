@@ -48,11 +48,11 @@ interface LsLike {
   clear(): void;
 }
 
-/** W9108：全部客户端插件（2 内置增强 + 2 提示 + 4 可选增强）。W2013：+1 正文文件链接。 */
+/** W9108：全部客户端插件（2 内置增强 + 2 提示 + 4 可选增强）。W2013：+1 正文文件链接。W9334：+1 本轮编辑。 */
 const ALL_IDS = [
   'builtin.hljs', 'builtin.math',
   'display.codeCopy', 'display.codeExtras', 'display.csvTable', 'display.imageZoom',
-  'hint-text-card', 'rail-preview', 'builtin.fileLink',
+  'hint-text-card', 'rail-preview', 'builtin.fileLink', 'display.turnEdits',
 ];
 
 const STYLES = join(WEB, 'src', 'styles');
@@ -159,6 +159,7 @@ describe('W859 设置页「插件」· 客户端插件真实热开关', () => {
       '图片灯箱',
       '数学公式',
       '正文文件链接',
+      '本轮编辑',
       '预览卡片',
       '文字卡片',
       '表格视图',

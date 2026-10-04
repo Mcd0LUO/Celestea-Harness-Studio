@@ -24,6 +24,9 @@ import { onCompact } from './compact';
 import { registerQuestionSse } from './question';
 import { createFrameBudget } from './messages/frame-budget';
 import { isActivePane, type SessionPane } from './viewctx';
+// W9334：「本轮编辑」显示组件的账本 —— 工具调用/结果两条帧各喂一次，轮次边界由
+// 运行态（busy）自己驱动，见 ui/turn-edits/wire.ts 的文件头。
+import { initTurnEdits, noteTurnToolCall, noteTurnToolResult } from './turn-edits/wire';
 import { t } from '../i18n';
 import type {
   DonePayload,
@@ -194,10 +197,18 @@ export function connectWiredSse(h: WireHandlers): SseClient {  const sse = new S
     paced('SSE thinking', () => h.onThinking(h.ctxFor(p), p));
   });
   sse.on('tool', (p) => {
-    paced('SSE tool', () => h.onTool(h.ctxFor(p), p));
+    paced('SSE tool', () => {
+      const ctx = h.ctxFor(p);
+      noteTurnToolCall(ctx, p); // W9334：本轮账本（工具卡渲染之前先记事实）
+      h.onTool(ctx, p);
+    });
   });
   sse.on('tool_result', (p) => {
-    paced('SSE tool_result', () => h.onToolResult(h.ctxFor(p), p));
+    paced('SSE tool_result', () => {
+      const ctx = h.ctxFor(p);
+      noteTurnToolResult(ctx, p); // W9334：成败回填（失败/被拒不算改动了文件）
+      h.onToolResult(ctx, p);
+    });
   });
   sse.on('done', (p) => {
     paced('SSE done', () => {
@@ -214,6 +225,8 @@ export function connectWiredSse(h: WireHandlers): SseClient {  const sse = new S
   });
   // W784：提问帧 → 卡片；重连 → 用未决列表补齐（都在模块内，chat.ts 只留这一行）
   registerQuestionSse(sse, h.ctxFor);
+  // W9334：「本轮编辑」装配（幂等）—— 订阅运行态当轮次边界 + 插件开关变化。
+  initTurnEdits();
   sse.connect();
   return sse;
 }
