@@ -17,7 +17,7 @@
  *     不让「带颜色的图标」混进浅深两套主题；
  *   · 前端门禁跑在 node 里，本脚本只用 node 内置模块（globalThis.fetch）。
  *
- * 用法（frontend/ 目录下）：node tools/fetch-model-icons.mjs
+ * 用法（apps/web/ 目录下）：node tools/fetch-model-icons.mjs
  */
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';

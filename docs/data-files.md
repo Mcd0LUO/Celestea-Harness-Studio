@@ -42,7 +42,7 @@
 `[.1, .2, …, 当前段]` 顺序**跨段**拼接，因此投影与从未轮转**逐字节等价**。
 `compact` 的 `.precompact` 备份与轮转**无关**（前者是压缩备份，后者是容量分段）。
 
-`.gitignore` 排除：`providers.json`、`workspaces.json`、`sessions/`、`frontend/dist/`、`target/`、`*.log`、`.env`。
+`.gitignore` 排除：`providers.json`、`workspaces.json`、`sessions/`、`apps/web/dist/`、`target/`、`*.log`、`.env`。
 
 ---
 

@@ -1,6 +1,8 @@
 # Celestea Studio · 前端渲染铁律（FRONTEND-RULES）
 
-> 本文件为 Celestea-Studio 前端（`frontend/`，TypeScript + Vite）的**验收硬性标准**。
+> 本文件为 Celestea-Studio 前端（**`apps/web/`**，TypeScript + Vite）的**验收硬性标准**。
+> ⚠️ **本文件的「铁律 N」与 `docs/AGENT.md` 的铁律是两套独立编号**（内容毫不相关：那边 1 号是「跑全量门禁」，
+> 这边 1 号是「禁止先清空后加载」）。在别处引用时请写清是**前端铁律 N**。
 > 所有后续前端 worker 必须遵守；违反以下任一铁律 = 验收不过。
 
 ## 铁律
@@ -43,6 +45,9 @@
 
 - 人工/自动化验收时逐项核对上述铁律；出现「空白帧」「整树闪动」「旧结果覆盖新状态」
   任一现象即视为违反。
-- `pnpm build`（`tsc --noEmit` 严格模式 + `vite build`）必须通过。
+- **前端自己的构建必须过**：`pnpm --dir apps/web run build`（`tsc --noEmit` 严格模式 + `vite build`）。
+  ⚠️ **不要用根 `pnpm build` 来"验证前端"** —— 它是 `pnpm -r --filter "!celestea-studio-frontend" build`，
+  **显式排除前端**，跑了等于没验证。（2026-10-04 更正：本文原先点名的就是这条命令。）
+  全量门禁里的前端那一道是 `pnpm check:web`（= `scripts/build-webdist.mjs` + `pnpm --dir apps/web run check`）。
 - 后端契约未就绪时允许优雅降级，但不允许以「加载中…」占位整区替换作为常规路径
   （首次空容器除外，且完成后必须单次替换）。

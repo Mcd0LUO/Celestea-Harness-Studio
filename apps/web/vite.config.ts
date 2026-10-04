@@ -3,8 +3,8 @@ import { computeVersion } from '../../scripts/version.mjs';
 
 /**
  * Celestea Studio frontend build.
- * Output: frontend/dist/{index.html, assets/*.js, assets/*.css, build-meta.json}
- * The backend serves frontend/dist/ as its static root (shared contract).
+ * Output: apps/web/dist/{index.html, assets/*.js, assets/*.css, build-meta.json}
+ * The backend serves apps/web/dist/ as its static root (shared contract).
  *
  * W887 修正（构建可复现）：构建元数据不再经 define 进 JS bundle —— 墙钟
  * buildTime 进 JS 会让**同一提交**的两次构建字节不同（文件名哈希都变），把
