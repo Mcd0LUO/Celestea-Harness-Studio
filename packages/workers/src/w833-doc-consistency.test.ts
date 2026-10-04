@@ -40,9 +40,10 @@ describe("W833 B9: worker table is on-disk by default", () => {
   it("docs carry no unqualified tsvPath:null memory claim", () => {
     // W890: 该设计文档按章节拆进了 docs/iteration-e/（单篇 ≤ 700 行）；读整个目录，
     // 这样以后再拆分册也不会让这条断言变成空转。
-    const docs = readdirSync(join(ROOT, "docs/iteration-e"))
+    // W9341: 迭代方向 E 整体退役 → 目录已归档到 docs/archive/decisions/iteration-e/。
+    const docs = readdirSync(join(ROOT, "docs/archive/decisions/iteration-e"))
       .filter((f) => f.endsWith(".md"))
-      .map((f) => read("docs/iteration-e/" + f))
+      .map((f) => read("docs/archive/decisions/iteration-e/" + f))
       .join("\n");
     expect(docs).not.toMatch(/studio 侧(显式 )?\x60tsvPath: null\x60（纯内存）/);
     expect(docs).toContain("worker-registry.tsv");

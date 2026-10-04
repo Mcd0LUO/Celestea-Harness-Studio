@@ -1,6 +1,10 @@
 # 迭代方向 E · 可恢复多 agent（§2）
 
-> 状态：**设计（未实现）** ｜ 本册是 [`README.md`](./README.md) 的分册：worker 表落盘、认领与重派的目标契约。
+> 状态：**历史参考**。本文原为「设计（未实现）」，随迭代方向 E 整体退役，归档到 `docs/archive/decisions/iteration-e/`；现行口径见 [`docs/README.md`](../../../README.md)。
+> 📦 **历史文档**。
+> **退役时的落地事实**：**能力 2（可恢复多 agent）整体未落地 —— P0/P1/P2 全部随本文档一并退役**，它们不是待办计划；
+> 现行 worker 表与回执口径见 `contracts/data-files/registry-tsv.schema.json` 与 [`docs/ARCHITECTURE.md`](../../../ARCHITECTURE.md)。
+> 本册是 [`README.md`](./README.md) 的分册：worker 表落盘、认领与重派的目标契约。
 > 章节编号沿用原文；总览与跨能力结论见索引。
 
 ---

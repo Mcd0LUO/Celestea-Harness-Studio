@@ -1,6 +1,10 @@
 # 迭代方向 E · 成本与用量账本（§3）
 
-> 状态：**设计（未实现）** ｜ 本册是 [`README.md`](./README.md) 的分册：usage-ledger / pricing 的目标契约与聚合视图。
+> 状态：**历史参考**。本文原为「设计（未实现）」，随迭代方向 E 整体退役，归档到 `docs/archive/decisions/iteration-e/`；现行口径见 [`docs/README.md`](../../../README.md)。
+> 📦 **历史文档**。
+> **退役时的落地事实**：能力 3 的 **P0 已实现**（W728：append-only `usage-ledger.jsonl` + `pricing.json` + `unpriced` 显式标记）；
+> 能力 3 的 **P1/P2 未落地，随本文档一并退役** —— 不要再把本文的分期当作「还在路上」的计划。
+> 本册是 [`README.md`](./README.md) 的分册：usage-ledger / pricing 的目标契约与聚合视图。
 > 章节编号沿用原文；总览与跨能力结论见索引。
 
 ---

@@ -11,7 +11,7 @@
 > `apps/web/index.html` 的 `#btnSettingsEntry`；后端补的 `day_model` 维度与 `first_ts`/`last_ts`
 > 在 `packages/runtime/src/ledger-query.ts`。验收证据见 `results/W-usage-stats.md`（仓外/已 gitignore）。
 > 依赖：[ARCHITECTURE.md](../../ARCHITECTURE.md) §6.5.2（`apps/web/src` 的测试一律放 `tests/`）、
-> [data-files.md](../../data-files.md)（账本口径）、[iteration-e/03-cost-ledger.md](../../iteration-e/03-cost-ledger.md)（账本的设计依据）。
+> [data-files.md](../../data-files.md)（账本口径）、[iteration-e/03-cost-ledger.md](./iteration-e/03-cost-ledger.md)（账本的设计依据；该分册已随迭代方向 E 归档）。
 
 ## 1. 一句话目标
 

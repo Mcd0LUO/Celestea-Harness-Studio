@@ -1,6 +1,10 @@
 # 迭代方向 E · 断点恢复（§1）
 
-> 状态：**设计（未实现）** ｜ 本册是 [`README.md`](./README.md) 的分册：checkpoint / resume 的目标契约、分期与验收。
+> 状态：**历史参考**。本文原为「设计（未实现）」，随迭代方向 E 整体退役，归档到 `docs/archive/decisions/iteration-e/`；现行口径见 [`docs/README.md`](../../../README.md)。
+> 📦 **历史文档**。
+> **退役时的落地事实**：能力 1 的 **P0 已实现**（W730：`checkpoint.json` sidecar + boot 幂等合成 `turn_end: interrupted` + `turnNo` 从日志恢复）；
+> 能力 1 的 **P1/P2 未落地，随本文档一并退役** —— 不要再把本文的分期当作「还在路上」的计划。
+> 本册是 [`README.md`](./README.md) 的分册：checkpoint / resume 的目标契约、分期与验收。
 > 章节编号沿用原文；总览与跨能力结论见索引。
 
 ---

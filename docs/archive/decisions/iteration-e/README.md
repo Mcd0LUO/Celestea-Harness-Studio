@@ -1,10 +1,15 @@
 # 迭代方向 E · 能力深水区（断点恢复 / 可恢复多 agent / 成本账本 / 模型降级）
 
-> 状态：**设计（未实现）**。本文只描述目标契约、分期与验收标准，**不改任何代码、配置或服务**。
-> **落地进度（回填）**：能力 4 P0（W723：`LlmError.httpStatus/retryable`，`packages/llm/src/errors.ts`）、
+> 状态：**历史参考**。本文原为「设计（未实现）」；整个 `docs/iteration-e/` 已判定陈旧，随迭代方向 E 整体退役，归档到 `docs/archive/decisions/iteration-e/`；现行口径见 [`docs/README.md`](../../../README.md)。
+> 📦 **历史文档**。
+> **退役时的落地事实（别再把本文当待办清单）**：
+> 能力 4 P0（W723：`LlmError.httpStatus/retryable`，`packages/llm/src/errors.ts`）、
 > 能力 3 P0（W728：append-only `usage-ledger.jsonl` + `pricing.json` + `unpriced` 显式标记，§3.7）与
 > 能力 1 P0（W730：`checkpoint.json` sidecar + boot 幂等合成 `turn_end: interrupted` + `turnNo` 从日志恢复，§1.7）
-> **已实现**；能力 2 与各自 P1/P2 仍为设计。
+> **已实现**。
+> **能力 2（可恢复多 agent）与四项能力各项 P1/P2 的未落地分期，随本文档一并退役** ——
+> 它们**不是**「在路上」的计划，不要再按本文的排期去实现或宣称即将落地。
+> 已实现部分的行为口径以 `contracts/`（线格式）与 [`docs/ARCHITECTURE.md`](../../../ARCHITECTURE.md)（架构规则）为准。
 > 范围：`packages/session`、`packages/runtime`、`packages/workers`、`packages/llm`、`apps/studio/src/runtime`、
 > `apps/studio/src/store`、`contracts/`；与仓库外 `celes-worker-spawn` 插件（`/srv/dsh/plugins/celes-worker-spawn`）的协同边界。
 > 前置：`docs/ARCHITECTURE.md`（分层与 seam 纪律）、`docs/archive/decisions/feature-session-independence.md`（W513，已实现）、

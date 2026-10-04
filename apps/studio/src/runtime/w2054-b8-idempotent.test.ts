@@ -1,5 +1,5 @@
 /**
- * W2054 — the B8 gate (E §2.4, docs/iteration-e/02-multi-agent.md): replaying the
+ * W2054 — the B8 gate (E §2.4, docs/archive/decisions/iteration-e/02-multi-agent.md): replaying the
  * boot recovery over the SAME wid must be a NO-OP — no new row, no new receipt,
  * zero action audit lines.
  *
