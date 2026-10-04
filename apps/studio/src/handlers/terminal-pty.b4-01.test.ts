@@ -253,13 +253,25 @@ describe(`B4-01 P0 · shutdown drains the pty table and kills the process groups
 
 describe(`B4-01 P0 · the idle reaper finally has a caller`, () => {
   it(`a pty past the ceiling is reaped; a fresh one is left running`, async () => {
-    const table = newTable({ idleMs: 0 });
+    // W9325: this case used to read `idleMs: 0` as "no idle reaping here", but
+    // 0 is also the reaper's CEILING, so `idleSince` became "age > 0" and the
+    // "fresh" entry became stale the instant the wall clock ticked past the ms it
+    // was stamped with (`touchedAt = Date.now()` at stamp time vs a second
+    // `Date.now()` inside sweep). Whether it read 1 or 2 depended on where the two
+    // live clock reads landed on the millisecond grid -- a ~1/6 coin flip, not a bug
+    // in the reaper. Fix: drive BOTH sides from one injected clock (the pattern the
+    // standalone reaper case below already uses). The fresh entry is stamped at
+    // exactly `now`, so its age is 0 and can never satisfy the strict `> idleMs`,
+    // and the stale one is stamped a full ceiling + 1 past -- both independent of
+    // how much real time elapsed between the two `addLive` spawns.
+    const now = { t: 1_000_000 };
+    const table = newTable({ idleMs: TERMINAL_IDLE_MS, now: () => now.t });
     const reapedPid = addLive(table);
     const keptPid = addLive(table);
     const entries = table.registry.all();
     // entries are in insertion order: mark the FIRST long-idle, leave the second fresh.
-    entries[0]!.touchedAt = Date.now() - TERMINAL_IDLE_MS - 60_000;
-    entries[1]!.touchedAt = Date.now();
+    entries[0]!.touchedAt = now.t - TERMINAL_IDLE_MS - 1;
+    entries[1]!.touchedAt = now.t;
 
     const report = table.reaper.sweep();
 
