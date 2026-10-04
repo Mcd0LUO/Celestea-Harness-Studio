@@ -1,6 +1,10 @@
 # Phase 0a 基线报告（2026-09-30）
 
-> 状态：**当前**。Phase 0a 三问的实测基线（一次性测量记录，不重测时无需更新）。
+> 状态：**历史参考**。本文件是 Phase 0a（W7xx 记忆抽取前）的**一次性实测记录**，2026-10-04 归档到 `docs/archive/`；
+> 现行口径见 [`docs/README.md`](../../README.md)。
+> 📦 **历史文档**。
+> 当时为什么归档：它自述"不重测时无需更新"，且引用了探针工作区 `D:\celestea-probe\ws-baseline` ——
+> **本机事实不该提交进仓**。它配套的设计文档也早已归档（`docs/archive/decisions/feature-memory-extraction.md`）。
 
 > 配套设计文档：docs/feature-memory-extraction.md（§4 Phase 0a 三问的回答）。
 > 测量工件：探针工作区 D:\celestea-probe\ws-baseline；驱动/分析脚本 .probe/drive.mjs、.probe/analyze.mjs（一次性，不入仓维护）。

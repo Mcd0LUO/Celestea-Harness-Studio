@@ -20,6 +20,9 @@
  *   ⑧ 例外表：`ARCHITECTURE.md` §5 与 `eslint.config.js` 的 `ARCH_EXCEPTIONS` 逐条一致；
  *   ⑨ 路径：**当前**文档里作为事实写下的仓内路径必须存在（设计文档可写未来文件）；
  *   ⑩ 计数：`ARCHITECTURE.md` §6.5.5 的 `console.warn`/`console.log` 计数由 `apps/web/src` 派生。
+ *   ⑪ 索引：`pitfalls.md` 的索引表与正文条目一一对应。
+ *
+ * 上面这张清单**要与 `it(...)` 的数量对得上**（2026-10-04 加 ⑪ 时发现清单只列到 ⑩）。
  */
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
