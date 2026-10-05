@@ -26,10 +26,28 @@
 export interface HintHandle {
   /** 卡片内容；返回 null = 只登记提示文本、不弹卡（如纯原生 title 场景）。 */
   build(): HTMLElement | null;
+  /**
+   * W9345：**就地更新已有卡片**（可选）—— 把 box 改成当前目标的内容，不换节点。
+   * 缺省 = 提供者不承诺同源复用，引擎每次换目标都重新 build（+ 原子替换，见 card.ts）。
+   *
+   * 契约：update 必须在**它自己 build 出来的那种** box 上正确工作（可以也必须假设
+   * box 是本提供者上一张卡的节点）。引擎只在「当前卡与新 handle 出自**同一个**提供者」
+   * 时才调它（来源 = handle.providerId，即注册缝给的身份，见下），因此提供者永远
+   * 只需要认识自己的卡：不同提供者之间不会互相塞内容（纯文本卡的内容不会进 rail 富卡）。
+   * 实现形状见 ui/rail-card.ts：骨架建一次，更新只改文本/显隐/class。
+   */
+  update?(box: HTMLElement, anchor: HTMLElement): void;
   /** 自定义落位（缺省 = 锚点右下 12px，贴边回退）。 */
   position?(card: HTMLElement, anchor: HTMLElement): void;
   /** W9106：本目标的悬停停留阈值（ms）；缺省 = 提供者级 → 引擎缺省。 */
   delayMs?: number;
+  /**
+   * W9345：**由 resolveHint 填的**提供者身份（判据的唯一来源，ui/hint/card.ts 据它决定
+   * 能不能复用上一张卡）。提供者**不要**自己写这个字段 —— 引擎用注册表里的 id 覆盖，
+   * 免得同一提供者认领的两条路径被写成两个身份、或有人拿 className 冒充身份。
+   * 认领结果是可选值；引擎读它时按「undefined = 不可复用」处理。
+   */
+  providerId?: string;
 }
 
 /** 一个提示提供者（= 内置插件）。 */
@@ -70,6 +88,13 @@ export function hintPlugins(): readonly HintPlugin[] {
  * 首个认领该目标的提供者（null = 无人认领 → 调用方退回原生 title）。
  * W9106：认领结果带上**生效的停留阈值**（handle 级 > provider 级 > 引擎缺省），
  * 于是引擎只需读一个字段，提供者不必知道引擎的缺省值是多少。
+ *
+ * W9345：同时把 **providerId = 提供者的 id** 盖在返回的 handle 上（**注册缝给的
+ * 身份**，不是提供者自报的）。这是引擎决定「能不能在原节点上就地换内容」时唯一的
+ * 判据来源 —— 由此杜绝两件事：① 用 className / querySelector 嗅探谁画的卡（换一套
+ * 样式名就失灵）；② 提供者把自己的身份写在 handle 上（能被随手冒充）。
+ * 补字段只在**真的缺**时发生（少一次对象拷贝，也让「认领结果与 handle 同一对象」
+ * 这条既有性质在 provider 无缺省值时保持不变）。
  */
 export function resolveHint(target: HTMLElement, text: string): HintHandle | null {
   for (const p of plugins) {
@@ -78,7 +103,10 @@ export function resolveHint(target: HTMLElement, text: string): HintHandle | nul
     // steps aside, the rest keeps working). Reported WITH the id.
     try {
       const h = p.claim(target, text);
-      if (h) return p.delayMs === undefined || h.delayMs !== undefined ? h : { ...h, delayMs: p.delayMs };
+      if (!h) continue;
+      const noDelay = p.delayMs === undefined || h.delayMs !== undefined;
+      if (noDelay && h.providerId === p.id) return h;
+      return { ...h, delayMs: noDelay ? h.delayMs : p.delayMs, providerId: p.id };
     } catch (err) {
       console.warn('[hint] provider "' + p.id + '" threw', err);
     }

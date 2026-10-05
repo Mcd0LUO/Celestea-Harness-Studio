@@ -134,6 +134,10 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* W9345：骨架固定建一次，换条只切显隐（见 ui/rail-card.ts 的 render）。这两行是
+   `display: flex` 的覆盖 —— 缺了它们 hidden 会被 display 规则压回去（hidden 的
+   UA 样式是 `display: none`，同权重下被后声明的 display 覆盖）。*/
+.railv3-card-q[hidden], .railv3-card-a[hidden], .railv3-card-sep[hidden] { display: none; }
 .railv3-card-a { color: var(--c-text-2); }
 .railv3-card-noa { color: var(--c-text-3); font-style: italic; }
 .railv3-card-tag {

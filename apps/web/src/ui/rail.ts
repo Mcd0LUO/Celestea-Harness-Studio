@@ -19,12 +19,14 @@
 //   的悬停停留 = **0**（railHintPlugin.delayMs），与全站密集控件的 150ms 缺省分开；
 //   条带内换条由提示引擎就地换内容（不撤卡、不重新计时）。见 ui/hint/registry.ts 的
 //   delayMs 注释（那里是本口径的唯一真源）。
+// ★ W9345（用户：「快速切换时会感到些微卡顿，应该改用对象复用的方式，让这个框框随位置缓动」）：
+//   claim 追加 update —— 换条时在**同一张卡节点**上换内容（骨架见 ./rail-card.ts），
+//   位置缓动由提示引擎加（ui/hint/card.ts）。落位算式与 z-index 一字未动。
 // ★ W9204（P1-1 / P1-2）：
 //   · 布局改为**增量**：一次 layout 只把「真的变了」的条写进 DOM，并带整帧早退。
 //     原实现对**全部**条无条件写 display/top/--barh，而 layout 又被每次 railAdd 同步
-//     调用一次 —— 于是每次调用都要为 O(N) 个脏元素付一次强制同步重排，总代价 O(N²)
-//     （W9111 实测 1 200 列 21.9s、3 000 列 92.5s）。现在建列走 queueSync（rAF 合并），
-//     单次 layout 的脏集只有真正变化的那些条。
+//     调用一次 ⇒ 每次调用都要为 O(N) 个脏元素付一次强制同步重排，总代价 O(N²)（W9111
+//     实测 1 200 列 21.9s、3 000 列 92.5s）。现在建列走 queueSync（rAF 合并）。
 //   · 摘高亮覆盖**整轨**：clearHover 原先只遍历 st.items，而**折叠条不在 st.items 里**
 //     （它在 st.foldItem，只有 allItems 才含它）⇒ 折叠条的高亮永远摘不掉、一直留在
 //     「吸附」态。窗口外的条本来就在 st.items 里（窗口只影响 display），所以那一条是
@@ -65,14 +67,13 @@ let moveQueued = false;
 let moveX = -1;
 let moveY = -1;
 
-
 function curState(): ReturnType<typeof stateOf> | null {
   return cur ? stateOf(cur) : null;
 }
 // W9106：中间判定的**呈现**搬到 ./rail-center-view.ts（纯搬家，见该文件头注释）
 // W9204（P1-1）：paintCenter 现在只由 ./rail-layout.ts 调（中间判定的几何在那里）。
 import { resetCenter } from './rail-center-view';
-import { buildRailCard } from './rail-card';
+import { buildRailCard, updateRailCard } from './rail-card';
 // W1485：长条记账搬到 ./rail-state.ts（模块体积棘轮；纯搬家 + 一个摘除手术）
 import { allItems, bindItem, dropColsInState, itemOf, stateOf, stateOfOnly, type RailItem } from './rail-state';
 // W867：命中半径（hover 命中与点击命中共用同一口径；测试直接断言这个纯函数）。
@@ -115,8 +116,6 @@ function layout(): void {
   layoutRail(LAYOUT_HOST);
 }
 
-
-
 // ---- 预览卡片 = 提示注册缝的一个提供者（W790；W872 只把「取内容」搬到 ./rail-card.ts） ----
 
 /** 落位：贴长条右侧、纵向夹在轨道内（W871：算式见 ./rail-geom.ts 的 railCardPlacement）。 */
@@ -140,10 +139,16 @@ export function railHintPlugin(): HintPlugin {
      * 只覆盖本提供者认领的目标（rail 长条）；内置纯文本卡的 150ms 手感不变。
      */
     delayMs: 0,
+    // W9345：update = 同源复用的把手 —— 换条时引擎在**上一张卡节点**上换内容
+    // （骨架建一次，见 ./rail-card.ts）；落位前引擎先加 ease 类 ⇒ 框滑过去，不瞬跳。
     claim(target: HTMLElement): HintHandle | null {
       const it = itemOf(target);
       if (!it) return null;
-      return { build: () => buildRailCard(it), position: (box) => positionCard(box, target) };
+      return {
+        build: () => buildRailCard(it),
+        update: (box) => updateRailCard(box, it),
+        position: (box) => positionCard(box, target),
+      };
     },
   };
 }

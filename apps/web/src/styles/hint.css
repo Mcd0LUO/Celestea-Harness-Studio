@@ -38,6 +38,20 @@
 .hint-card.hint-card-instant {
   animation: none;
 }
+/* W9345 · 位置缓动（换条时「滑过去」而不是瞬跳）。
+   ★ 为什么是这个类、而不是给 .hint-card 直接加 transition：
+     CSS 过渡规范的 before-change style 要求「transition 必须在这次坐标变化**之前**
+     就已在计算样式里」，否则浏览器把它当瞬变。所以引擎**首次落位之后**才给卡加这个类
+     （见 ui/hint/card.ts 的 show()：同源复用那一支先 add 再 place）⇒ 第二次落位起才缓动，
+     而**首次出现绝不带**（新卡不会从别处滑进来）。
+   ★ 缓动的是 left/top（卡片是 position:fixed 的出流元素，代价低；不需要 transform，
+     也就不会与 railv3-pop 入场动画的 translateY 抢同一个属性）。
+   ★ prefers-reduced-motion：不在这里自己 matchMedia —— styles/tokens.css 的全局
+     块用 `transition-duration: .001ms !important` 覆盖声明式过渡（前端铁律 10 的唯一
+     真源，见 ./viewport.ts）。这里只确认那条覆盖真的落在本声明上。 */
+.hint-card.hint-card-move {
+  transition: left 140ms ease-out, top 140ms ease-out;
+}
 .hint-card-text {
   display: flex; align-items: baseline; gap: 6px;
 }

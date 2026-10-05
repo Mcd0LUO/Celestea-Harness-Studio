@@ -31,6 +31,13 @@ const GAP = 12;
 // 故 style.left/top 与 getBoundingClientRect() 同坐标系 = 视口坐标。
 let host: HTMLElement | null = null;
 let card: HTMLElement | null = null;
+/**
+ * W9345：当前这张卡是**哪个提供者**画的（= resolveHint 填的 handle.providerId，
+ * 来自注册缝里的提供者身份）。同源 + 新 handle 带 update ⇒ 在原节点上就地换内容
+ * （对象复用 + 位置缓动）；否则维持「重新 build + 原子替换」。
+ * 换/撤卡时一律与 `card` 同步更新 —— 它是「这张节点归谁」的记账，不是一张独立缓存。
+ */
+let cardOwner: string | null = null;
 let timer: number | null = null;
 let hovered: HTMLElement | null = null;
 let mounted = false;
@@ -109,6 +116,7 @@ function cancel(): void {
     card.remove();
     card = null;
   }
+  cardOwner = null;
 }
 
 /** 当前卡片（诊断/测试用：null = 没弹）。 */
@@ -116,19 +124,45 @@ export function hintCardEl(): HTMLElement | null {
   return card;
 }
 
+/**
+ * W9345：这张卡节点能不能**就地**换成新目标的内容？
+ *
+ * 判据只来自注册缝（handle.providerId，= 提供者的 id）+ handle.update 是否存在 ——
+ * **不**嗅探 className / querySelector（换一套样式名就会失灵，而且那是机制不是后果）。
+ * 不同提供者之间一律不复用：纯文本卡的内容不能被塞进 rail 富卡里（也不反过来）。
+ */
+function reusableBy(box: HTMLElement, handle: HintHandle): boolean {
+  return box === card && cardOwner !== null && handle.providerId === cardOwner && typeof handle.update === 'function';
+}
+
 function show(target: HTMLElement): void {
   if (target !== hovered) return; // 迟到：指针已移开
   const handle = resolveHint(target, target.getAttribute(HINT_ATTR) ?? '');
   if (!handle) return;
+  const prev = card;
+  // W9345：**同源就地更新**（条带内从 A 条滑到 B 条）。先在旧节点上改内容 ——
+  // 内容与节点身份在同一次同步调用里换完 ⇒ 任何一帧都看得到「一张卡、且是这一条的内容」，
+  // 没有「卡已摘、新卡未挂」的空窗，也没有整棵子树的重建（rail 侧只改文本/显隐/class）。
+  if (prev && reusableBy(prev, handle)) {
+    clearTimer();
+    hovered = target;
+    handle.update!(prev, target);
+    // 位置缓动：第二次落位起才带 ease 类（CSS 过渡要求 transition 已在**变化之前**
+    // 的计算样式里；首次出现绝不带，否则新卡会从别处滑进来）。class 先落，再写坐标。
+    prev.classList.add('hint-card-move');
+    place(prev, target, handle);
+    return;
+  }
   const built = handle.build();
   if (!built) return;
-  // W9106：**就地换内容**（条带内从 A 条滑到 B 条，或同一锚点的文案变了）—— 旧卡节点
-  // 被新节点原子替换（一次 replaceWith），中间没有「卡已摘、新卡未挂」的空窗；撤卡再建
-  // 会让卡片闪一下、把落位从上一帧甩到新位置，用户看到的就不是「就地更新」。
+  // W9106：换目标时旧卡节点被新节点**原子替换**（一次 replaceWith），中间没有
+  // 「卡已摘、新卡未挂」的空窗；撤卡再建会让卡片闪一下、把落位从上一帧甩到新位置。
+  // W9345：这条分支现在只走「**不同来源**」（跨提供者、或新 handle 没有 update）
+  // —— 同提供者换条在上面就地更新，不再落到这里。
   clearTimer(); // 卡已经画出来了：不再需要任何停留计时
-  const prev = card;
   hovered = target;
   card = built;
+  cardOwner = handle.providerId ?? null;
   card.classList.add('hint-card');
   card.setAttribute('role', 'tooltip');
   // W871：宿主 = document.body + 卡片 position: fixed（见 place() 的坐标口径）。
