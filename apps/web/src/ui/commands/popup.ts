@@ -38,6 +38,41 @@ let provider: PopupProvider | null = null;
 let seq = 0;
 let onPick: ((item: PopupItem) => void) | null = null;
 
+/**
+ * W9349：已消费过的按键事件（**按事件对象身份**记，不按 key）。
+ *
+ * 症状：`/` 补全弹出后按一次 ↓，选中项**跳两个**（`/run` → 跳过 `/goal` → `/model`）。
+ *
+ * 根因（两处都消费了同一次按键，互相不知情）：
+ *   ① `ui/inputbar/newline.ts` 的 `bindEnterKey` —— 第 144 行 `interceptCommandKey(e)`；
+ *   ② `ui/commands/index.ts` 的 `installCommands` —— 第 167 行自注册的 `completionKey(e)`。
+ *   两者都挂在**同一个 `#input` 元素**上（`main.ts` 先 `initInputBar` 后 `installCommands`
+ *   ⇒ 后者排在后面），DOM 事件按注册顺序依次触发 ⇒ 一次按键调两次 `completionKey`
+ *   ⇒ `active` 递增两次。
+ *   各自的 `e.preventDefault()` **拦不住这件事**：它只阻止浏览器的**默认动作**
+ *   （输入框光标移动），不影响**同一元素上后续监听器**。
+ *
+ * ★ 为什么记账落在**引擎层**（本函数）而不是任何一个调用方：
+ *   上面的头注早就写了「守卫放在本函数，改在调用方只会修一半」—— 那条说的是 IME 守卫，
+ *   这次是同一个道理的第二半：**"这次按键已经有人消费了吗"只有引擎知道**
+ *   （它才有 items/active/可见性状态）。在调用方去重就得让两个调用方共享一份状态并约定
+ *   谁先谁后 —— 那是把引擎的状态外泄成协议，下次再加第三个入口（比如快捷键、软键盘）
+ *   就会漏。本函数是**两条路的唯一汇合点**，在这里判一次就够，且天然覆盖将来任何新入口。
+ *
+ * ★ 为什么按**事件对象**记、不按 `e.key` 记：按 key 记需要自己判断"是不是同一次事件"
+ *   （时间戳/是否已过帧），而 Web 的事件对象**每次按键就是一个新实例**、两次调用拿到的是
+ *   **同一个实例** ⇒ 直接用对象身份，零歧义。记一个就够：两个监听器是**同一次派发**里
+ *   紧接着跑的（同步），不跨帧、不跨事件循环。
+ */
+const consumedEvents = new WeakSet<CompletionKeyLike>();
+
+/** 这次按键是否已被消费（是 ⇒ 同一个事件不许被第二个入口再处理）。 */
+function alreadyConsumed(e: CompletionKeyLike): boolean {
+  if (consumedEvents.has(e)) return true;
+  consumedEvents.add(e);
+  return false;
+}
+
 function renderList(): void {
   if (!box) return;
   const off = document.createElement('div');
@@ -139,6 +174,10 @@ export interface CompletionKeyLike extends ImeKeyLike {
  * （ui/commands/index.ts 里 installCommands 自注册的 keydown 监听、以及 interceptKey），
  * 且 installCommands 在 main.ts 里**晚于** initInputBar 装配 ⇒ 它的监听器排在
  * newline.ts 的 bindEnterKey **之后**，两条路都会走到这里。改在调用方只会修一半。
+ *
+ * ★ W9349：正因**有两条路**，同一个按键事件会被这两个调用方各递一次 ——
+ *   「同一次按键只消费一次」因此也在**本函数**内记账（见 consumedEvents 的头注）。
+ *   本函数是两条路的唯一汇合点，也是唯一知道 items/active 的地方。
  */
 export function completionKey(e: CompletionKeyLike): boolean {
   // ★ W2036：组合会话里 isComposing 对**所有**按键都为 true（IME 正在处理这次按键），
@@ -149,8 +188,14 @@ export function completionKey(e: CompletionKeyLike): boolean {
   // keyCode 229 正是它的补集。★ 别在这里退回「只看 isComposing」。
   // 位置在 completionVisible() **之前**：组合中的按键连「补全框可不可见」都不该问 ——
   // 它根本不是给这个 UI 的（也顺带保证本函数对组合按键**零副作用**）。
+  //
+  // ★ W9349：IME 守卫的**位置不能动**（它必须在最前，保证组合键一个都不抢），
+  //   新的「已消费」记账放在它**之后** —— 否则组合键会被写进账本，
+  //   紧接着真正该被补全框消费的那次调用反而被当成"已消费"跳过。
   if (isImeKey(e)) return false;
   if (!completionVisible()) return false;
+  // ★ W9349：同一次按键只被消费一次（两处入口共用本函数 ⇒ 在这里判是唯一收口）。
+  if (alreadyConsumed(e)) return false;
   if (e.key === 'Escape') {
     e.preventDefault();
     hideCompletion();

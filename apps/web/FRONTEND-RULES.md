@@ -64,6 +64,12 @@
 - **前端自己的构建必须过**：`pnpm --dir apps/web run build`（`tsc --noEmit` 严格模式 + `vite build`）。
   ⚠️ **不要用根 `pnpm build` 来"验证前端"** —— 它是 `pnpm -r --filter "!celestea-studio-frontend" build`，
   **显式排除前端**，跑了等于没验证。（2026-10-04 更正：本文原先点名的就是这条命令。）
-  全量门禁里的前端那一道是 `pnpm check:web`（= `scripts/build-webdist.mjs` + `pnpm --dir apps/web run check`）。
+  ⚠️ **被服务的那份 `apps/studio/webdist` 不是 `pnpm check` 刷新的**：`pnpm check` 里的 `check:web` 只把前端
+build 到 `apps/web/dist`（`scripts/check-parallel.mjs` 内联了 build + 7 关，**不含** staging）—— 只有
+`pnpm check:web`（= `scripts/build-webdist.mjs` + `pnpm --dir apps/web run check`）或显式
+`node scripts/build-webdist.mjs` 才会 staging。⇒ **宣布任何 UI 改动之前必须跑一次
+`node scripts/build-webdist.mjs`**，否则用户刷新看到的是旧包。
+> 真机实测（2026-10-05）：`pnpm check` **10/10 绿的同一棵树**，`apps/studio/webdist` 还是 11 小时前的产物
+> （`apps/web/dist` 已是新的）—— 而「我怎么看不到之前做的那个」正是用户上一次报障的形状。
 - 后端契约未就绪时允许优雅降级，但不允许以「加载中…」占位整区替换作为常规路径
   （首次空容器除外，且完成后必须单次替换）。
