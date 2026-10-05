@@ -1,5 +1,6 @@
 /** 
- * `POST /api/sessions/{id}/goal` — the session's PERSISTENT GOAL (A3, W9209).
+ * `GET|POST /api/sessions/{id}/goal` — the session's PERSISTENT GOAL
+ * (POST A3/W9209, GET W9348).
  *
  * The frontend half shipped long ago (ui/commands/builtin.ts registers `/goal`,
  * ui/commands/goal.ts calls `api.setGoal`, statusline/goal.ts renders the badge,
@@ -38,6 +39,16 @@
  * `apps/web` is outside this change's file boundary. On disk they are epoch SECONDS,
  * like every other `updated_at` in this repo. `paused` is ALWAYS present (false
  * while active) so a client never has to tell "absent" from "false".
+ *
+ * ## W9348 — the READ side, and why it had to exist
+ *
+ * Until W9348 the goal was knowable ONLY from a POST's echo: `/goal` answered
+ * 「已设定」, the badge lit up from the response, and a page refresh then left the
+ * goal sitting on disk with NOTHING on screen — the state was real but
+ * unreachable. `GET` closes that, and the contract makes it LITERALLY the POST
+ * echo: same `goalView`, one shared body builder, so the two sides cannot drift.
+ * It is a pure read — no write, no notice, no `pending` consumption, no
+ * invalidation. See [registerGetSessionGoal].
  *
  * ## W9346 — the goal became MODEL-visible, through TWO artifacts
  *
@@ -276,7 +287,7 @@ function goalView(record: GoalRecord | null): Record<string, unknown> | null {
  * W9346 · POST /api/sessions/{id}/goal — set/edit (`text` non-empty), clear
  * (`text: ""`) and pause/resume (`paused`). At least one of the two must be given.
  */
-export function registerGoal(app: Hono, deps: Deps, table: RouteTable): string[] {
+export function registerPostSessionGoal(app: Hono, deps: Deps, table: RouteTable): string {
   const route = table.get("post_session_goal");
   app.on(route.method, route.honoPath, async (c) => {
     // `require` (not `resolve`): a goal needs a real session directory to live in,
@@ -304,18 +315,82 @@ export function registerGoal(app: Hono, deps: Deps, table: RouteTable): string[]
     try {
       const outcome = await writes.run(async (): Promise<GoalState> => applyChange(resolved.value.dir, session, text, pausedField === true ? true : pausedField === false ? false : null, now));
       if (outcome.warning === NO_GOOD_TO_PAUSE) return failJson(c, 422, NO_GOOD_TO_PAUSE);
-      const warnings = outcome.warning === undefined ? [] : [outcome.warning];
-      return c.json({
-        ok: true,
-        session,
-        goal: goalView(outcome.goal),
-        ...(warnings.length === 0 ? {} : { warnings }),
-      });
+      return c.json(goalEcho(session, outcome));
     } catch (e) {
       return failJson(c, 500, "cannot persist goal: " + errText(e));
     }
   });
-  return [route.id];
+  return route.id;
+}
+
+/**
+ * W9348 · GET /api/sessions/{id}/goal — the goal AS IT STANDS, so a page refresh
+ * (or any second client) can render the capsule and the statusline badge.
+ *
+ * ## Why it is a PURE READ, and why that is load-bearing
+ *
+ * The goal was previously knowable only from a POST's echo: `/goal` set the text,
+ * the badge lit up from the response, and then a refresh left the goal on disk
+ * with nothing on screen — the state was real but unreachable. This endpoint is
+ * the missing read side, and it is deliberately the DUMBEST possible reader:
+ *
+ *   · it never writes (no `writeGoal`, no `clearGoal`) — so `goal.json`'s bytes
+ *     and mtime are untouched, and a GET can never race a POST's write;
+ *   · it never touches `pending` — the undelivered notice is a fact about the
+ *     NEXT turn and only `consumePending` may clear it. A GET that consumed it
+ *     would silently swallow `[目标] 已删除（原目标：X）` before the model ever saw
+ *     it, and a GET that REWROTE the file to strip it would do the same while
+ *     also mutating mtime;
+ *   · it produces no notice — reading a goal is not a change;
+ *   · it invalidates nothing — a read cannot alter what a running turn sees.
+ *
+ * ## `goal: null` while a delete notice is UNDELIVERED
+ *
+ * This is the case the contract has to say out loud, because the file EXISTS
+ * then. `readGoalState` already reports it as `goal: null` (the notice quotes the
+ * text being deleted, so between the delete and the delivery the goal genuinely
+ * does not exist), and the POST echo said `goal: null` throughout. The GET answers
+ * the same thing — a `pending` is a notice, not a goal, and reading the goal must
+ * not promote it into one.
+ *
+ * ## Same refusal, same body
+ *
+ * `deps.sessions.require` (not `resolve`): a goal lives in a real session
+ * directory, so an unknown id — and a `worker:<sid>` id, which has no directory by
+ * construction — is the shared 404. The handler adds NO semantics of its own.
+ */
+export function registerGetSessionGoal(app: Hono, deps: Deps, table: RouteTable): string {
+  const route = table.get("get_session_goal");
+  app.on(route.method, route.honoPath, (c) => {
+    const resolved = deps.sessions.require(c.req.param("id") ?? "");
+    if (!resolved.ok) return storeFail(c, resolved);
+    // `readGoalState` NEVER throws and never writes: a missing file and a void one
+    // both answer "no goal", the difference being only the warning line.
+    return c.json(goalEcho(resolved.value.id, readGoalState(resolved.value.dir, resolved.value.id)));
+  });
+  return route.id;
+}
+
+/**
+ * W9348: the ONE body builder, shared by both sides of the route.
+ *
+ * The contract's promise is that the GET is LITERALLY the POST's echo — same
+ * keys, same `paused`-always-present rule, same `goal: null` + exactly one
+ * `warnings[]` line for a structurally unusable file. Two constructions would be
+ * two chances to drift, so the shape is written once and both handlers call it.
+ */
+function goalEcho(session: string, state: GoalState): Record<string, unknown> {
+  const warnings = state.warning === undefined ? [] : [state.warning];
+  return {
+    ok: true,
+    session,
+    goal: goalView(state.goal),
+    ...(warnings.length === 0 ? {} : { warnings }),
+  };
+}
+
+export function registerGoal(app: Hono, deps: Deps, table: RouteTable): string[] {
+  return [registerGetSessionGoal(app, deps, table), registerPostSessionGoal(app, deps, table)];
 }
 
 /**

@@ -184,9 +184,10 @@ export const FROZEN_COUNTS = {
   // model switch, the Win-style file-manager listing/read, immediate shell
   // execution without the model, the server-side display-component switches, the
   // workbench terminal's real-PTY face (open/input/close), the persistent session
-  // goal, and the plugin hot-swap enabled table (docs/archive/decisions/feature-plugin-hotswap.md;
+  // goal (its POST, and since W9348 the GET that reads it back), and the plugin
+  // hot-swap enabled table (docs/archive/decisions/feature-plugin-hotswap.md;
   // its GET side already existed before that switch was added).
-  endpoints: 71,
+  endpoints: 72,
   // `sseEvents` covers the frame vocabulary: `question` is the first event that is
   // neither a turn event nor a host status frame, and `terminal` is the raw pty
   // byte channel (opaque output, produced by the terminal handler).

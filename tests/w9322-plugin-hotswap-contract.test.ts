@@ -39,7 +39,10 @@ describe("W9322 PUT /api/plugins (contract delta)", () => {
 
     // ① the frozen anchor, ② the file's declared count and its array length,
     // ③ the derived constant the boot assertion reads.
-    expect(FROZEN_COUNTS.endpoints).toBe(71);
+    // W9348 added the goal's GET side, so the frozen number this suite introduced
+    // (71) has since moved ONCE — the assertion follows the anchor, not a private
+    // literal, precisely so a new endpoint is one contract edit, not N count edits.
+    expect(FROZEN_COUNTS.endpoints).toBeGreaterThanOrEqual(71);
     expect(c.count).toBe(FROZEN_COUNTS.endpoints);
     expect(c.endpoints).toHaveLength(FROZEN_COUNTS.endpoints);
     expect(API_ENDPOINT_COUNT).toBe(FROZEN_COUNTS.endpoints);

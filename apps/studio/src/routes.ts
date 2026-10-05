@@ -24,7 +24,10 @@
  * W1528 added `POST /api/terminal`, `POST /api/terminal/{id}/input` and
  * `POST /api/terminal/{id}/close` (66 -> 69; the workbench terminal's real-PTY
  * face — open / keystrokes / close). W9209 added `POST /api/sessions/{id}/goal`
- * (69 -> 70; the persistent session goal the `/goal` command calls). All of
+ * (69 -> 70; the persistent session goal the `/goal` command calls). W9322 added
+ * `PUT /api/plugins` (70 -> 71). W9348 added `GET /api/sessions/{id}/goal`
+ * (71 -> 72; the READ side of that goal — a pure read, so a page refresh can
+ * show the goal without perturbing the model-visible notice). All of
  * them have NO counterpart in the legacy backend:
  * `contracts/route-table.snapshot.json` keeps the frozen extraction intact and
  * lists the TypeScript-only additions separately.

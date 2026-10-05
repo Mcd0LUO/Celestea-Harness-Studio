@@ -35,9 +35,9 @@ describe("contracts/endpoints.json", () => {
   // W9: 51 -> 57 (the six permission endpoints); W860: 57 -> 60 (session tool
   // switches + the host plugin inventory); W870: 60 -> 61 (the session-level
   // model switch `PUT /api/sessions/{id}/model`); G5: 61 -> 62 (`GET /api/fs/list`).
-  // W1528: 66 -> 69 (the workbench terminal's real-PTY face: open / input / close).
-  // W9209: 69 -> 70 (POST /api/sessions/{id}/goal, the persistent session goal).
-  it("holds exactly the frozen number of endpoints (W725 context, W767 cookie gate, W783 questions, W785 ledger, W791 mode, W9 permissions, W860 tools/plugins, W870 session model, G5 fs list, W895 display plugins, W1528 terminal, W9209 goal)", () => {
+  // W1528: 66 -> 69 (the workbench terminal's real-PTY face: open / input / close); W9209: 69 -> 70 (POST /api/sessions/{id}/goal, the persistent session goal),
+  // W9322: 70 -> 71 (PUT /api/plugins, the plugin hot-swap enabled table); W9348: 71 -> 72 (GET /api/sessions/{id}/goal, the goal's READ side).
+  it("holds exactly the frozen number of endpoints (W725 context, W767 cookie gate, W783 questions, W785 ledger, W791 mode, W9 permissions, W860 tools/plugins, W870 session model, G5 fs list, W895 display plugins, W1528 terminal, W9209/W9348 goal, W9322 plugins)", () => {
     expect(c.count).toBe(ENDPOINT_COUNT);
     expect(c.endpoints).toHaveLength(ENDPOINT_COUNT);
   });
@@ -80,7 +80,7 @@ describe("contracts/endpoints.json", () => {
     // permission endpoints); W860: 18 -> 21 (tool switches + plugin inventory);
     // W870: 21 -> 22 (PUT /api/sessions/{id}/model); G5: 22 -> 23 (GET /api/fs/list).
     // W1528: 23 -> 26 (the terminal's open / input / close).
-    // W9209: 26 -> 27 (POST /api/sessions/{id}/goal, the persistent session goal).
+    // W9209: 26 -> 27 (POST /api/sessions/{id}/goal, the persistent session goal); W9322: 27 -> 28 (PUT /api/plugins); W9348: 28 -> 29 (GET /api/sessions/{id}/goal, the goal's READ side).
     // W9213: both numbers are DERIVED -- the delta is "contract minus the frozen
     // 39 API routes", and the snapshot's own declared counts are checked against
     // the contract by checkRouteSnapshot (which the store runs on every read).
@@ -94,7 +94,7 @@ describe("contracts/endpoints.json", () => {
     expect([...fromContract].sort()).toEqual([...fromSnapshot].sort());
   });
 
-  // W9213: the contract's own TITLE repeats the count ("... (70 endpoints)"). It is
+  // W9213: the contract's own TITLE repeats the count ("... (72 endpoints)"). It is
   // prose, so it cannot be derived -- but it CAN be checked, which is the point:
   // before this assertion the title was a hand-maintained copy with no gate at all.
   it("states the endpoint count in its title consistently with endpoints[]", () => {

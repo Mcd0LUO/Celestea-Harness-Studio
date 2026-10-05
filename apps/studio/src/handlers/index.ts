@@ -39,7 +39,9 @@
  *   permissions.ts   W9: /api/permissions/presets (+{id}) | /api/sessions/{id}/permission
  *   session-tools.ts W860: GET+PUT /api/sessions/{id}/tools (the session's disabled list)
  *   session-model.ts W870: PUT /api/sessions/{id}/model (the session-level model switch)
- *   session-goal.ts  W9209: POST /api/sessions/{id}/goal (the persistent session goal)
+ *   session-goal.ts  W9209/W9348: GET+POST /api/sessions/{id}/goal (the
+ *                    persistent session goal; the GET reads it back for a
+ *                    refresh)
  *   plugins.ts       W860: GET /api/plugins (the host startup plugin inventory)
  *   display-plugins.ts W895-C1: GET+PUT /api/display-plugins (the server-side
  *                    source of truth for the client display-component switches)
@@ -114,6 +116,8 @@ export function registerHandlers(app: Hono, deps: Deps, table: RouteTable): stri
     // W9209: the persistent session goal. The /goal command and the
     // statusline badge have always called this; until now the endpoint did not
     // exist and every call fell through to the /api/* 404 fallback.
+    // W9348 adds the GET half: the goal used to be knowable ONLY from a POST
+    // echo, so a page refresh showed nothing for a goal that was still on disk.
     ...registerGoal(app, deps, table),
   ];
 }
