@@ -16,8 +16,8 @@ import { renderInfoBlock } from '../messages';
 import { listMentions } from './files';
 import { t } from '../../i18n';
 
-export { onGoalChange, goalOf, renderGoalBar } from './goal';
-import { renderGoalBar as refreshGoalBar, onGoalChange } from './goal';
+export { onGoalChange, goalOf, renderGoalBar, syncGoalOnActivate } from './goal';
+import { renderGoalBar as refreshGoalBar, onGoalChange, syncGoalOnActivate } from './goal';
 export { listCommands, filterCommands, completionPrefix } from './registry';
 export { workspacePath } from './files';
 
@@ -155,7 +155,12 @@ export function installCommands(): void {
   registerBuiltinCommands();
   const input = inputEl();
   if (!input) return;
-  onPaneChange(() => refreshGoalBar());
+  onPaneChange((pane) => {
+    refreshGoalBar();
+    // W9349：会话被激活时读回**已存在**的目标（刷新/切换后胶囊不消失的那一半）。
+    // 与胶囊同一个 onPaneChange 入口；回声落地后由 onGoalChange 走同一条渲染路径重画。
+    syncGoalOnActivate(pane);
+  });
   onGoalChange(() => refreshGoalBar());
   setProvider(null);
   initCompletion(input, (item) => {

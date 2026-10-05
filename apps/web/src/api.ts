@@ -322,6 +322,16 @@ export const api = {
   exec: (req: ExecReq) => postJson<ExecResp>('/api/exec', req), // A3：不经模型；404/501 需可读提示
   setGoal: (id: string, req: GoalReq) => // W9347：text 空=清除；paused 切暂停；200 回 goal（null=无）
     postJson<GoalResp>('/api/sessions/' + encodeURIComponent(id) + '/goal', req),
+  /**
+   * W9349：读回该会话**已存在**的目标（`GET /api/sessions/{id}/goal`）。
+   *   为什么必须有它：缓存只由 POST 的回声填充 ⇒ 目标明明在服务端，刷新一下
+   *   胶囊就消失（目标还在盘上，界面什么都不显示）。读一次就把它补回缓存。
+   *   200 = `{ ok, session, goal: {text,paused,createdAt,updatedAt} | null }`，
+   *   与 POST 回声**逐字同形**（`paused` 恒在）⇒ 归一化只有一条路径。
+   *   404/405（老服务没这个端点）与网络错都变成 ApiError ⇒ 调用方保持现状不清缓存。
+   */
+  getGoal: (id: string) =>
+    requestJson<GoalResp>('/api/sessions/' + encodeURIComponent(id) + '/goal'),
   /** 目录浏览（W237）：GET /api/fs/browse?path=（只显示目录）。 */
   fsBrowse: (path?: string) =>
     requestJson<FsBrowseResp>('/api/fs/browse' + (path ? '?path=' + encodeURIComponent(path) : '')),

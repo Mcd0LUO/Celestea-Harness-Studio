@@ -2,22 +2,29 @@
 // ============================================================================
 // scripts/a11y/w9347-goal-capsule-probe.mjs — W9347「目标浮动胶囊」的真机取证
 // ----------------------------------------------------------------------------
-// ★ 主场景（探针**只承诺覆盖它**，其余不做）——
+// ★ ★ 主场景（W9349 之后改成这一条）——
+//   **刷新一个「已经有目标」的会话，页面加载后不做任何 POST，胶囊就该出现**。
+//   这就是缺陷本体的形状：缓存只由 POST 的回声填充 ⇒ 目标在盘上，界面却空着。
+//   探针把 fetch 桩预置一个已存在的目标并**在导航前装上**，页面一起来的那次
+//   `GET /api/sessions/{id}/goal` 就被接住；此后全程不 POST 直到显式交互。
+//   判定里的 `readbackOnPageLoad` 量的是「零 POST ⇒ 胶囊在」这条因果。
+//
+// ★ 次主场景（几何与交互，原 W9347 的主场景，量的是**设目标之后**的胶囊）——
 //   **设一个长目标之后**（主人原话：「在聊天栏的上方展示一个独立浮动胶囊显示这个 goal，
 //   胶囊只占一行，大约 2 个汉字宽，过长文字可截断，右侧是 编辑/暂停/删除」）：
 //     ① 胶囊**恰好一行**、**不占布局**（消息区的几何一个像素都没被推走）；
 //     ② 文字区**≈2 个汉字宽**且**确实截断**（scrollWidth > clientWidth）；
 //     ③ 三个图标都可见、命中区 ≥24×24（WCAG 2.5.8）；
 //     ④ 点笔能改成新目标；点暂停进暂停态；点删除胶囊消失。
-//   为什么要「长目标」当主场景：短目标压根不会触发截断 —— ① ② 只在有溢出时
+//   为什么要「长目标」：短目标压根不会触发截断 —— ① ② 只在有溢出时
 //   才量得到（实测教训：静态摆拍量布局，量不到主场景里的 bug）。
 //
-// ★ ★ fetch 桩（必读）：后端 `POST /api/sessions/{id}/goal` 的 paused 扩展由**另一个
-//   worker 同时在写**（W9347 契约 v1 的 B 段）。本探针在**页面里**用
-//   `Fetch.enable` 拦下 `/api/sessions/*/goal` 并按契约 v1 应答（等价写不产生
-//   通知、paused 恒在、无目标时 422）—— 也就是**这一段是桩**：证明的是
-//   「**前端发对了请求 ⇒ UI 后果正确**」，不是「后端真会那样回」。
-//   判定里的 `requestShape*` 几条就是在量「前端发出去的请求体对不对」，
+// ★ ★ fetch 桩（必读）：后端 `GET/POST /api/sessions/{id}/goal` 由**另一个
+//   worker 同时在写**（W9347 契约 v1 / W9346 读回契约）。本探针在**页面里**用
+//   `Fetch.enable` 拦下 `/api/sessions/*/goal` 并按契约应答（等价写不产生
+//   通知、paused 恒在、无目标时 422、GET 与 POST 回声**逐字同形**）—— 也就是
+//   **这一段是桩**：证明的是「**前端发对了请求 ⇒ UI 后果正确**」，不是「后端真会
+//   那样回」。判定里的 `requestShape*` 几条量的是前端发出去的请求体对不对，
 //   那部分不是桩的产物（桩只在**应答**侧参与）。除此之外全部是真渲染、真几何。
 //
 // 用法（前置：Vite dev server 起着；Chrome 由 perf/lib/chrome.mjs 自行查找）：
@@ -26,7 +33,7 @@
 // 产物：tmp/w9347-probe/probe.json + 若干 PNG。
 //
 // ★ 刻意不进 `pnpm check`（与 w9344 / w9336 同一取向）：它需要 Vite + Chrome。
-//   确定性断言在 tests/w9347-goal-capsule-dom.test.ts。
+//   确定性断言在 tests/w9347-goal-capsule-dom.test.ts 与 tests/w9349-goal-readback.test.ts。
 // ============================================================================
 import { join } from 'node:path';
 import {
@@ -186,11 +193,30 @@ const STATE = `(function () {
 const P = createProbe({ title: 'W9347 真机取证', shots: SHOTS, pad: 24 });
 const round = (n) => Math.round(n * 10) / 10;
 
-/** 页内 fetch 桩：按冻结契约 v1 应答 goal 端点（见文件头 ★★）。 */
-async function installGoalStub(page, sessionId) {
+/**
+ * 页内 fetch 桩：按冻结契约应答 goal 端点（见文件头 ★★）。
+ *
+ * W9349：GET（读回）**必须也**被桩接住，且**预置一个已存在的目标** ——
+ *   这才是主场景「刷新后不 POST，胶囊自己出来」的那一半（桩里 store 的初值）。
+ *   只接 POST 的老版本探针永远量不到它：页面刷新后没有任何 POST，只有一次 GET。
+ */
+async function installGoalStub(page, sessionId, initialGoal = null) {
   await page.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/sessions/*/goal*' }] });
-  let store = null;
+  let store = initialGoal;
   page.on('Fetch.requestPaused', async (ev) => {
+    // GET = 读回（W9349）：应答与 POST 回声**逐字同形**（paused 恒在）。
+    if (ev.request.method === 'GET') {
+      const goal = store === null
+        ? null
+        : { text: store.text, paused: store.paused, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
+      await page.send('Fetch.fulfillRequest', {
+        requestId: ev.requestId,
+        responseCode: 200,
+        responseHeaders: [{ name: 'content-type', value: 'application/json; charset=utf-8' }],
+        body: Buffer.from(JSON.stringify({ ok: true, session: sessionId, goal }), 'utf8').toString('base64'),
+      });
+      return;
+    }
     const body = JSON.parse(ev.request.postData || '{}');
     const hasText = Object.prototype.hasOwnProperty.call(body, 'text');
     const hasPaused = Object.prototype.hasOwnProperty.call(body, 'paused');
@@ -241,6 +267,9 @@ const main = async () => {
   };
 
   try {
+    // ★ 桩必须在**导航之前**装上：W9349 的主场景就是「页面加载时那一次读回」，
+    //   页面一起来就发 GET —— 导航后才装的话，这一次请求会打到真后端（404）而不是桩。
+    await installGoalStub(page, 'w9347/main', { text: LONG_GOAL, paused: false });
     await page.navigate('http://127.0.0.1:' + PORT + '/');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
     await sleep(2400);
@@ -249,8 +278,30 @@ const main = async () => {
     //   页面里存在两个模块实例（各自的模块级状态），胶囊会在 #messages 里出现两个。
     //   重载让 app 与探针都从「无 ?t= 的那一份」起，模块实例重新合一。
     await page.send('Page.reload', { ignoreCache: false });
-    await sleep(2600);
-    await installGoalStub(page, 'w9347/main');
+    await sleep(3000);
+
+    // ══════ ★ 主场景（W9349）：**一次 POST 都不发**，页面加载就把目标读回并画出胶囊 ══════
+    // 用户视角 = 刷新一个「已经有目标」的会话。POST 一次都没发 ⇒ 界面上出现的胶囊
+    // 只可能来自 GET 读回（而不是老实现的 POST 回声）。
+    await P.shots.save(page, 'goal-capsule-readback-onload.png');
+    const onLoad = await ev(`(function () {
+      var cap = document.querySelector('.goal-capsule');
+      if (!cap) return { missing: true };
+      var text = cap.querySelector('.goal-capsule-text');
+      var r = text ? text.getBoundingClientRect() : null;
+      return { missing: false, hidden: cap.classList.contains('hidden'),
+               text: text ? text.textContent : '',
+               paused: cap.classList.contains('goal-capsule-paused'),
+               w: r ? Math.round(r.width) : 0, h: r ? Math.round(r.height) : 0,
+               count: document.querySelectorAll('.goal-capsule').length };
+    })()`);
+    out.raw.onLoad = onLoad;
+    P.record('readbackOnPageLoad', onLoad.missing === false && onLoad.hidden === false &&
+      String(onLoad.text).includes('W9347') && onLoad.count === 1,
+      `★ 主场景：**页面加载后零次 POST**（桩只答了一次 GET），胶囊就出现了：` +
+      `hidden=${onLoad.hidden}、count=${onLoad.count}（页面里只有一个胶囊）、` +
+      `文字「${String(onLoad.text).slice(0, 20)}…」、几何 ${onLoad.w}×${onLoad.h}px、` +
+      `paused=${onLoad.paused}。这正是「用户刷新一下胶囊就没了」那个缺陷的修好形态`);
 
     // ---- 基准：还没有目标时，消息区几何（用来判「不占布局」） ----
     const before = await ev(`(function () {
@@ -453,12 +504,14 @@ const main = async () => {
 
     out.consoleErrors = consoleErrors;
     await P.finish({
-      heading: 'W9347 真机取证（主场景：设一个长目标之后的浮动胶囊）',
+      heading: 'W9347/W9349 真机取证（主场景：刷新一个已有目标的会话，零 POST 胶囊就出来）',
       pad: 24,
       jsonPath: join(SHOTS, 'probe.json'),
       trailer: [
-        '★ 桩说明：/api/sessions/{id}/goal 的**应答侧**是页内 fetch 桩（后端 paused 扩展由',
-        '  另一个 worker 同时在写）。requestShape 类断言量的是前端**真的发出去的请求体**（非桩产物）。',
+        '★ 主场景（W9349）：页面加载后**一次 POST 都不发**，GET 读回的回声就画出胶囊 ——',
+        '  这就是「刷新一下目标胶囊就消失」那个缺陷的修好形态。',
+        '★ 桩说明：/api/sessions/{id}/goal 的**应答侧**是页内 fetch 桩（后端由另一个 worker',
+        '  同时在写）。requestShape 类断言量的是前端**真的发出去的请求体**（非桩产物）。',
         '产物：' + SHOTS,
       ],
       exitCodeOnFail: 1,

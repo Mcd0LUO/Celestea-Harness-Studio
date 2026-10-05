@@ -131,6 +131,51 @@ export function currentGoalText(ctx: SessionPane): string {
   return g ? g.text : '';
 }
 
+// ---- W9349：会话被激活时把**已存在**的目标读回来（刷新后胶囊不消失的那一半） --------
+
+/**
+ * 竞态守卫（前端铁律 3）：切换会话是**异步**的 —— 晚到的旧会话回声不得覆盖当前会话。
+ *
+ * 为什么代号自增就够：结果只写**它自己那个会话的**缓存（`setLocal(asked, …)`），
+ * 旧会话的回声落进旧会话的格子、当前会话的胶囊本来就不读它；而「同一会话的两次
+ * 在途请求」（A→B→A，或 20s 轮询式的重入）只有代号能分辨，后到的**旧**那条会
+ * 按更旧的快照覆盖掉新状态。代号自增后，在途请求一律作废。
+ *
+ * 先例：statusline/permission.ts 的 permSeq（本仓同一口径）、archive/panel.ts、
+ * commands/popup.ts 的 seq。
+ */
+let readSeq = 0;
+
+/**
+ * 读一次该会话的目标并填进缓存 + 广播（胶囊/徽标按**既有**渲染路径自己出来，
+ * 这里不为「刷新读回」新增任何渲染分支）。
+ *
+ * **失败不清缓存**：网络错 / 非 200 一律保持现状 —— 把「没读到」当成「没有目标」
+ * 会让一次网络抖动把界面上真实存在的目标抹掉。只有明确读到 `goal: null` 才清。
+ */
+export async function readGoal(session: string): Promise<void> {
+  // LOCAL 空容器（id === ''）没有服务端会话可问：发出去必然 404，白白制造失败。
+  if (session === '') return;
+  const asked = session;
+  const seq = ++readSeq;
+  try {
+    const r = await api.getGoal(asked);
+    if (seq !== readSeq) return; // 晚到的旧回声：丢弃，不覆盖当前会话
+    setLocal(asked, normalize(r.goal));
+  } catch {
+    // 保持现状：不清缓存、不广播。下次激活 / 下次刷新会再读一次。
+  }
+}
+
+/**
+ * 会话被激活时读回目标。与 statusline / 胶囊的既有接线**同一个入口**
+ * （ui/commands/index.ts 的 onPaneChange）—— 不另开一条装配路径。
+ */
+export function syncGoalOnActivate(pane: SessionPane | null): void {
+  if (pane === null) return;
+  void readGoal(pane.id);
+}
+
 // ---- 界面可见：聊天区上方的浮动胶囊 -------------------------------------------------
 let capsuleEl: HTMLElement | null = null;
 /** 展开编辑态（null = 收起）。只记归属的 pane —— 输入框的内容由它自己持有。 */

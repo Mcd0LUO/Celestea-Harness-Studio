@@ -26,7 +26,13 @@ export interface GoalReq {
   paused?: boolean;
 }
 
-/** POST /api/sessions/{id}/goal 响应；goal=null 表示当前无目标。 */
+/**
+ * `POST` 回声 / `GET /api/sessions/{id}/goal` 响应（**逐字同形**，归一化只有一条路径）；
+ * `goal: null`（或缺省）表示当前无目标。
+ *
+ * W9349：GET 存在的理由是「刷新后读回」—— 客户端缓存只由 POST 的回声填充，
+ * 于是目标在服务端还在、界面却什么都不显示。
+ */
 export interface GoalResp {
   ok?: boolean;
   goal?: GoalInfo | null;
