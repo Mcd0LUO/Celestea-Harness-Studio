@@ -63,10 +63,18 @@ export interface UserMessageEvent {
   origin?: SessionEventOrigin;
 }
 
-/** W888: the closed set of `user_message` origins. */
-export type SessionEventOrigin = "user" | "skill" | "memory" | "receipt" | "steering" | "compact";
+/**
+ * W888: the closed set of `user_message` origins.
+ *
+ * W9347: `goal` joined the set. The persistent session goal (POST
+ * /api/sessions/{id}/goal) became MODEL-visible: its resident line and its
+ * one-shot change notice are both appended as `origin: "goal"` user rows, so
+ * the transcript can label them as system injections instead of showing them
+ * as something the human typed.
+ */
+export type SessionEventOrigin = "user" | "skill" | "memory" | "receipt" | "steering" | "compact" | "goal";
 
-export const SESSION_EVENT_ORIGINS: readonly string[] = ["user", "skill", "memory", "receipt", "steering", "compact"];
+export const SESSION_EVENT_ORIGINS: readonly string[] = ["user", "skill", "memory", "receipt", "steering", "compact", "goal"];
 export interface AssistantMessageEvent {
   type: "assistant_message";
   text: string;

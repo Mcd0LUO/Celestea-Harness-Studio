@@ -32,6 +32,7 @@ import {
   type SessionLog,
   type TurnOutcome,
 } from "@celestea/core";
+import type { AfterInputRow } from "@celestea/agent-loop";
 import { selectTurnContextRows } from "./turn-context-dedup.js";
 import { ComposeError, RuntimeReleasedError, TurnBusyError } from "./errors.js";
 import type { FrameMapper, LoopEventSink, TurnFrame } from "./frames.js";
@@ -47,10 +48,15 @@ export type FrameSink = (frame: TurnFrame) => void;
 /**
  * W888: one engine-owned turn-context row. The origin is what the transcript
  * uses to label the injected block instead of showing it as a user bubble.
+ *
+ * W9346: `goal` joined the set. The persistent session goal is resident turn
+ * context like the skill catalog and the memory block, and it passes the SAME
+ * three-state dedup (turn-context-dedup.ts) so an unchanged goal is not appended
+ * once per turn.
  */
 export interface TurnContextRow {
   readonly text: string;
-  readonly origin: "skill" | "memory";
+  readonly origin: "skill" | "memory" | "goal";
 }
 
 export interface TurnOptions {
@@ -81,6 +87,13 @@ export interface LoopBindings {
    * byte-for-byte the pre-Phase-2 request.
    */
   contextUsage?: () => ContextUsageFacts | null;
+  /**
+   * W9346: the one-shot row the loop appends RIGHT AFTER the turn's user input
+   * (the session goal's change notice). The loop owns the position because the
+   * input row is written there and nowhere else; the runner only carries the
+   * source down. Absent = a loop with no notice channel at all.
+   */
+  afterInput?: () => AfterInputRow | null | undefined;
 }
 
 /** Builds the per-turn `AgentLoop`; the host injects its concrete loop here. */
@@ -141,6 +154,21 @@ export interface TurnRunnerDeps {
    * `context_status` tool and `/api/status` can never disagree.
    */
   contextUsage?: () => ContextUsageFacts | null;
+  /**
+   * W9346: the after-input notice SOURCE (the session goal's pending change).
+   *
+   * It is a callback, not a value, for the same reason `turnContext` is: the
+   * notice is produced by an HTTP POST that can land at any moment, and a value
+   * captured at compose time would deliver it once and never again (or not at
+   * all).
+   *
+   * The runner PEEKS it once per turn at the start of `drive`, because the
+   * suppression rule needs to know whether a notice is coming BEFORE the resident
+   * rows are selected — and the loop then reads it again to build the row (with
+   * the real `delivered` acknowledgement). The peek is side-effect free by
+   * contract: a source that mutated on a peek would deliver the notice twice.
+   */
+  afterInput?: () => AfterInputRow | null | undefined;
 }
 
 export class TurnRunner {
@@ -223,9 +251,16 @@ export class TurnRunner {
     const sink = this.makeSink(opts.sink);
     const scope = this.turnScope(signal, sink);
     const log = this.deps.session();
+    // W9346: is a change notice waiting? The PEEK exists for one reason — the
+    // suppression rule below: a turn that delivers `[目标] 已更新：…` must not
+    // ALSO append the resident `[目标] …` line, because the same change would then
+    // be said twice in one turn. The row itself is appended by the loop after the
+    // input, and the host clears its slot only once that append happened, so a
+    // turn that dies earlier leaves the notice for the next one.
+    const noticeComing = this.peekAfterInput();
     // W884: the skill catalog is standing context, so it lands BEFORE the
     // receipts (which are addressed messages and belong nearest the input).
-    this.injectTurnContext(log);
+    this.injectTurnContext(log, noticeComing);
     this.injectReceipts(log);
     const start = log.events().length;
     const loop = this.resolveLoop(signal, sink);
@@ -289,6 +324,7 @@ export class TurnRunner {
     const factory = this.deps.loopFactory;
     if (factory !== undefined) {
       const injections = this.deps.injections;
+      const afterInput = this.deps.afterInput;
       return factory({
         config: this.deps.agentConfig,
         signal,
@@ -296,6 +332,10 @@ export class TurnRunner {
         usage: this.deps.usage,
         ...(injections === undefined ? {} : { injections }),
         ...(this.deps.contextUsage === undefined ? {} : { contextUsage: this.deps.contextUsage }),
+        // W9346: the SAME source the suppression peek used, handed to the loop so
+        // it can read it again at the input row — the peek returned a boolean and
+        // consumed nothing, so the notice is still waiting when the loop asks.
+        ...(afterInput === undefined ? {} : { afterInput }),
       });
     }
     const loop = this.deps.ctx.get<AgentLoop>(AGENT_LOOP_SERVICE);
@@ -311,12 +351,37 @@ export class TurnRunner {
    *
    * Phase 0b: rows pass the three-state dedup first — an unchanged row that is
    * still model-visible is NOT appended again (turn-context-dedup.ts).
+   *
+   * W9346: `suppressResident` is the notice rule. When this turn will deliver a
+   * goal change notice, the GOAL row is dropped for this turn only: the notice
+   * itself carries the new text ("[目标] 已更新：X"), so adding the resident line
+   * too would say the same thing twice in one turn. The suppression is scoped to
+   * the `goal` origin — a skill catalog is a different fact and stays.
    */
-  private injectTurnContext(log: SessionLog): void {
-    const rows = selectTurnContextRows(log, this.deps.turnContext?.() ?? [], this.deps.agentConfig);
-    for (const row of rows) {
+  private injectTurnContext(log: SessionLog, noticeComing: boolean): void {
+    const offered = this.deps.turnContext?.() ?? [];
+    const rows = noticeComing ? offered.filter((row) => row.origin !== "goal") : offered;
+    const selected = selectTurnContextRows(log, rows, this.deps.agentConfig);
+    for (const row of selected) {
       // W888: the origin travels with the row so the projection can label it.
       log.append({ type: "user_message", text: row.text, origin: row.origin });
+    }
+  }
+
+  /**
+   * W9346: is a change notice waiting for this turn? A throwing source answers
+   * "no" (a broken notice channel must not stop the turn the human asked for);
+   * it is the same containment the loop applies when it asks again.
+   */
+  private peekAfterInput(): boolean {
+    const afterInput = this.deps.afterInput;
+    if (afterInput === undefined) return false;
+    try {
+      const row = afterInput();
+      return row !== null && row !== undefined && row.text !== "";
+    } catch (e) {
+      process.stderr.write(`[celestea-runtime] afterInput source failed: ${String(e)}\n`);
+      return false;
     }
   }
 

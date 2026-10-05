@@ -138,7 +138,7 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 2048;
 /** Tool names that count as a deliberate direct memory write (skip gate 1). */
 const DIRECT_WRITE_TOOLS: ReadonlySet<string> = new Set(["remember", "forget"]);
 /** user_message origins that are NOT real user prose. */
-const INJECTED_ORIGINS: ReadonlySet<string> = new Set(["skill", "memory", "receipt", "steering", "compact"]);
+const INJECTED_ORIGINS: ReadonlySet<string> = new Set(["skill", "memory", "receipt", "steering", "compact", "goal"]);
 
 /**
  * Env switch: `CELESTEA_MEMORY_EXTRACTION=on` (or 1/true/yes) ENABLES extraction.

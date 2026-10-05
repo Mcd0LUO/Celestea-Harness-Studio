@@ -181,6 +181,19 @@
                 "$ref": "#/$defs/AttachmentRef"
               },
               "description": "W804: optional image references; omitted entirely when there are none (a legacy row is byte-identical)"
+            },
+            "origin": {
+              "type": "string",
+              "enum": [
+                "user",
+                "skill",
+                "memory",
+                "receipt",
+                "steering",
+                "compact",
+                "goal"
+              ],
+              "description": "W888: the CLOSED origin whitelist, mirrored byte for byte from SESSION_EVENT_ORIGINS in packages/core/src/types.ts. Omitted when it is 'user' (the default), so a pre-W888 row keeps its exact bytes; an unknown value is a hard error, never a silent fallback to 'user'. W9346 added 'goal': the persistent session goal's resident line and its one-shot change notice."
             }
           },
           "additionalProperties": true

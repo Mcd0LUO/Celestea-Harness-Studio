@@ -57,7 +57,7 @@ import {
   type ToolRegistry,
 } from "@celestea/core";
 import type { WorkerDrivers } from "@celestea/workers";
-import { RETENTION_SERVICE, type ToolResultRetention } from "@celestea/agent-loop";
+import { RETENTION_SERVICE, type AfterInputRow, type ToolResultRetention } from "@celestea/agent-loop";
 import { agentConfigFromProfile } from "./agent-config.js";
 import { createToolResultRetention, retentionSettingsFromEnv } from "./retention.js";
 import { ComposeError } from "./errors.js";
@@ -179,6 +179,17 @@ export interface ComposeConfig {
    * because only the host knows the session's workspace (W768).
    */
   turnContext?: () => readonly TurnContextRow[];
+  /**
+   * W9346: the session goal's one-shot change notice. Called TWICE per turn on
+   * purpose: once as a side-effect-free PEEK (so the turn runner can suppress the
+   * duplicate resident row when a notice is coming) and once inside the loop, at
+   * the turn's input row, to produce the notice itself — appended AFTER the human's
+   * message, and acknowledged (`delivered`) only once the row is in the log.
+   *
+   * The provider is the HOST's because only the host owns the session directory
+   * the notice is stored in (studio: `<session-dir>/goal.json`).
+   */
+  afterInput?: () => AfterInputRow | null | undefined;
   /** Host teardown hooks (process kills) — run once, in order, by `shutdown`. */
   shutdownHooks?: readonly ShutdownHook[];
   /** Injectable clock (status tracker rate window). */
@@ -286,6 +297,7 @@ export function compose(config: ComposeConfig): Runtime {
     ...(config.extraction === undefined ? {} : { extraction: config.extraction }),
     ...(config.loopFactory === undefined ? {} : { loopFactory: config.loopFactory }),
     ...(config.turnContext === undefined ? {} : { turnContext: config.turnContext }),
+    ...(config.afterInput === undefined ? {} : { afterInput: config.afterInput }),
     // W1900: ONE water-level plane. The nudge reads exactly what /api/status
     // reports, because the Runtime fills that holder with its OWN
     // `statusView()` reader — the turn runner is built before the Runtime

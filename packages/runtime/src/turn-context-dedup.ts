@@ -33,8 +33,8 @@
  *     recent surviving copy; identical copies are interchangeable, so if any
  *     copy is visible the row counts as resident.
  *
- * The filter only sees rows whose origin is "skill" | "memory" — the closed
- * `TurnContextRow` set. Receipts and human input never pass through here.
+ * The filter only sees rows whose origin is "skill" | "memory" | "goal" — the
+ * closed `TurnContextRow` set. Receipts and human input never pass through here.
  */
 
 import {
@@ -42,6 +42,7 @@ import {
   type AgentConfig,
   type Message,
   type SessionEvent,
+  type SessionEventOrigin,
   type SessionLog,
 } from "@celestea/core";
 import { estimateTokens, trimContext } from "@celestea/agent-loop";
@@ -49,7 +50,7 @@ import { estimateTokens, trimContext } from "@celestea/agent-loop";
 /** The row shape this filter needs (structural twin of turn-runner's TurnContextRow). */
 export interface ResidentContextRow {
   readonly text: string;
-  readonly origin: "skill" | "memory";
+  readonly origin: Extract<SessionEventOrigin, "skill" | "memory" | "goal">;
 }
 
 /**
@@ -78,7 +79,7 @@ export function selectTurnContextRows(
 }
 
 /** The last injected text of one origin, or undefined when never injected. */
-function lastInjectedText(events: readonly SessionEvent[], origin: "skill" | "memory"): string | undefined {
+function lastInjectedText(events: readonly SessionEvent[], origin: ResidentContextRow["origin"]): string | undefined {
   for (let i = events.length - 1; i >= 0; i--) {
     const ev = events[i];
     if (ev !== undefined && ev.type === "user_message" && ev.origin === origin) return ev.text;

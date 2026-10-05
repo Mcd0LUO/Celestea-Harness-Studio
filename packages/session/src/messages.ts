@@ -24,6 +24,10 @@ const ORIGIN_LABEL: Record<Exclude<SessionEventOrigin, "user">, string> = {
   receipt: "回执",
   steering: "插话",
   compact: "压缩摘要",
+  // W9346: the persistent goal's resident line / change notice. The label
+  // matches the shipped i18n key the frontend already renders for `goal`
+  // (apps/web/src/i18n/locales/*/chat.ts `chat.inbox.goal`).
+  goal: "目标",
 };
 
 /** The label of a non-user origin ('user' never reaches here). */

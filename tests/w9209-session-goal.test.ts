@@ -45,14 +45,24 @@ describe("W9209 · POST /api/sessions/{id}/goal", () => {
     expect(res.body["session"]).toBe("sample-ws/s1");
     const goal = res.body["goal"] as Record<string, unknown>;
     expect(goal["text"]).toBe("把 F2 做完");
+    // W9346: `paused` is ALWAYS present (false while active), so a client never
+    // has to tell "absent" from "false".
+    expect(goal["paused"]).toBe(false);
     // The shipped frontend reads these two camelCase keys (`ui/commands/goal.ts normalize`).
     expect(typeof goal["createdAt"]).toBe("string");
     expect(typeof goal["updatedAt"]).toBe("string");
     expect(Number.isNaN(Date.parse(String(goal["createdAt"])))).toBe(false);
-    // …and the sidecar really exists, with the documented shape.
+    // …and the sidecar really exists, with the documented shape. W9346 adds ONE
+    // optional field, `pending` (the model-visible change notice a fresh set
+    // earns). `paused` is absent while active — the optional field is omitted
+    // rather than written as `false`, so a never-paused goal is byte-shaped like
+    // a pre-W9346 file.
     expect(existsSync(goalFile(harness))).toBe(true);
     const onDisk = JSON.parse(readFileSync(goalFile(harness), "utf8")) as Record<string, unknown>;
-    expect(Object.keys(onDisk).sort()).toEqual(["created_at", "session", "text", "updated_at", "version"]);
+    expect(Object.keys(onDisk).sort()).toEqual(["created_at", "pending", "session", "text", "updated_at", "version"]);
+    expect(onDisk["paused"]).toBeUndefined();
+    // The notice is the model-facing half of the set, and it names the goal.
+    expect(onDisk["pending"]).toMatchObject({ kind: "set", text: "[目标] 已设定：把 F2 做完" });
     expect(onDisk["version"]).toBe(1);
     expect(onDisk["session"]).toBe("sample-ws/s1");
     expect(onDisk["text"]).toBe("把 F2 做完");
@@ -75,7 +85,7 @@ describe("W9209 · POST /api/sessions/{id}/goal", () => {
     expect(Date.parse(String((second.body["goal"] as Record<string, unknown>)["createdAt"]))).toBe(firstDisk);
   });
 
-  it('clears with text="": DELETES the sidecar and answers goal:null (absence is the only "no goal")', async () => {
+  it('clears with text="": answers goal:null, and DELETES the sidecar once its notice is delivered', async () => {
     const harness = h();
     await getJson(harness.app, URL_GOAL, jsonRequest("POST", { text: "临时目标" }));
     expect(existsSync(goalFile(harness))).toBe(true);
@@ -83,13 +93,19 @@ describe("W9209 · POST /api/sessions/{id}/goal", () => {
     expect(cleared.status).toBe(200);
     expect(cleared.body["ok"]).toBe(true);
     expect(cleared.body["goal"]).toBeNull();
-    expect(existsSync(goalFile(harness))).toBe(false);
+    // W9346: the file survives ONLY as the carrier of the undelivered delete
+    // notice (its text is the deleted text). The delivery — the next turn — is
+    // what removes it for real; see w9346-goal-model-visible.test.ts.
+    const afterClear = JSON.parse(readFileSync(goalFile(harness), "utf8")) as { pending: { kind: string; text: string } };
+    expect(afterClear.pending.kind).toBe("delete");
+    expect(afterClear.pending.text).toContain("临时目标");
     // A whitespace-only body is the SAME clear, not a goal made of spaces.
     await getJson(harness.app, URL_GOAL, jsonRequest("POST", { text: "目标" }));
     const blank = await getJson(harness.app, URL_GOAL, jsonRequest("POST", { text: "   " }));
     expect(blank.body["goal"]).toBeNull();
-    expect(existsSync(goalFile(harness))).toBe(false);
-    // Clearing an already-clear session is idempotent, not an error.
+    expect((JSON.parse(readFileSync(goalFile(harness), "utf8")) as { pending: { kind: string } }).pending.kind).toBe("delete");
+    // Clearing an already-clear session is idempotent and NOT an error, and it
+    // produces no second notice (there is nothing to announce).
     const again = await getJson(harness.app, URL_GOAL, jsonRequest("POST", { text: "" }));
     expect(again.status).toBe(200);
     expect(again.body["goal"]).toBeNull();
@@ -133,10 +149,11 @@ describe("W9209 · POST /api/sessions/{id}/goal", () => {
     const harness = h();
     const { writeFileSync } = await import("node:fs");
     writeFileSync(goalFile(harness), JSON.stringify({ version: 1, session: "sample-ws/other", text: "别人的目标" }));
-    // A POST that only CLEARS must not be able to be fooled by a foreign file:
-    // it deletes it and answers goal:null.
+    // A POST that only CLEARS must not be able to be fooled by a foreign file: it
+    // is VOID, so there is no goal to announce and nothing is written — the
+    // foreign file is left exactly as it was for the operator to look at.
     const cleared = await getJson(harness.app, URL_GOAL, jsonRequest("POST", { text: "" }));
     expect(cleared.body["goal"]).toBeNull();
-    expect(existsSync(goalFile(harness))).toBe(false);
+    expect((JSON.parse(readFileSync(goalFile(harness), "utf8")) as { session: string }).session).toBe("sample-ws/other");
   });
 });

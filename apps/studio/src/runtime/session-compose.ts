@@ -13,8 +13,8 @@
  */
 
 import { createUsageTracker, DefaultAgentLoop, withRepetitionPerturbation, type RepetitionDiagnostics } from "@celestea/agent-loop";
-import { listSkills, memoryContextOf, readLayers, renderSkillCatalog, type CompressionHost, type Llm, type PendingInjection, type Sandbox, type SessionEvent, type SessionLog, type Tool, type ToolGuard } from "@celestea/core";
-import { createSessionInbox, type SessionInbox, type TurnContextRow } from "@celestea/runtime";
+import { type CompressionHost, type Llm, type PendingInjection, type Sandbox, type SessionEvent, type SessionLog, type Tool, type ToolGuard } from "@celestea/core";
+import { createSessionInbox, type SessionInbox } from "@celestea/runtime";
 import {
   createLedgerLlm,
   createUsageLedger,
@@ -72,6 +72,7 @@ import {
 } from "@celestea/tools";
 import { createImageDowngradeLlm, resolveLlmMode, type ImageDowngradeInfo, type Llm as ProviderLlm } from "@celestea/llm";
 import { withAttachments } from "./attachments-llm.js";
+import { goalNotice, goalTurnContext, turnContextFor } from "./goal-wiring.js";
 
 /** W510 resource caps (overridable through the adapter options or the env). */
 export const MAX_LIVE_SESSIONS = 4;
@@ -293,26 +294,6 @@ export class SessionComposer {
   constructor(private readonly opts: SessionComposerOptions) {}
 
   /**
-   * W884 + F3: the engine-owned TURN CONTEXT. The skill catalog (name +
-   * description ONLY) and the workspace MEMORY.md are re-read at EVERY turn
-   * start from the SAME workspace the sandbox/guard use (W768) and injected as
-   * durable user-role history. Neither is ever put in the system prompt. A
-   * workspace with neither produces NO rows at all (zero cost), and a detached
-   * generation (no workspace) never attaches the provider at all.
-   */
-  private turnContextFor(workspacePath: string | null): (() => readonly TurnContextRow[]) | undefined {
-    if (workspacePath === null) return undefined;
-    return (): readonly TurnContextRow[] => {
-      const rows: TurnContextRow[] = [];
-      const catalog = renderSkillCatalog(listSkills(readLayers(workspacePath, { env: this.opts.env })));
-      if (catalog !== null) rows.push({ text: catalog, origin: "skill" });
-      const memory = memoryContextOf(workspacePath, { env: this.opts.env });
-      if (memory !== null) rows.push({ text: memory, origin: "memory" });
-      return rows;
-    };
-  }
-
-  /**
    * W1900: the compression host of THIS generation, plus the holder that
    * carries the late-bound runtime — kept out of `compose()` so that method
    * stays inside its line budget while this keeps its reasoning.
@@ -375,8 +356,12 @@ export class SessionComposer {
     // system prompt renders (the host's `resolveSession` hook). A session with no
     // resolvable workspace keeps the process env posture — never a failure.
     const workspace = sessionId === null ? null : (this.opts.resolveSession?.(sessionId)?.workspace ?? null);
-    const turnContext = this.turnContextFor(workspace === null ? null : workspace.path);
-    const reader = this.opts.grants;
+    // W9346 + W884: the goal's two halves and the skill/memory context, both
+    // rebuilt at every turn start (goal-wiring.ts holds the reasoning — the
+    // composer sits exactly at its 450-line cap). A detached generation has no
+    // session directory and no workspace, so it contributes nothing.
+    const notice = goalNotice(sessionId, dir);
+    const turnContext = turnContextFor(workspace === null ? null : workspace.path, goalTurnContext(sessionId, dir), this.opts.env);    const reader = this.opts.grants;
     const read = reader?.read(sessionId, dir) ?? { grants: EMPTY_GRANTS, warnings: [] };
     // W728: the ledger must exist before the Llm wrapper (every step books).
     const ledger = this.usageLedger(sessionId, dir);
@@ -468,6 +453,10 @@ export class SessionComposer {
       inbox: hooks.inbox ?? createSessionInbox(),
       ...(hooks.onInjected === undefined ? {} : { onInjected: hooks.onInjected }),
       ...(turnContext === undefined ? {} : { turnContext }),
+      // W9346: the change notice reaches the model AFTER the turn's input row,
+      // which is inside the loop — so it is a compose-level option, not a loop
+      // binding this factory sets by hand.
+      ...(notice === undefined ? {} : { afterInput: notice }),
       ...(extraction === undefined ? {} : { extraction }),
       loopFactory: (bindings) => {
         // W806: the turn boundary is the ONLY place the disclosed set may move.
@@ -506,7 +495,11 @@ export class SessionComposer {
           // reader into the turn runner; passing it through keeps the studio
           // loop byte-identical to the headless one instead of diverging into
           // a second estimate. `undefined` is a valid loop binding (no nudge).
+          // W9346: `afterInput` (the goal's change notice) rides down the same
+          // way — the runner holds the source for its suppression peek, and the
+          // loop writes the row because the position after the input is its own.
           ...(bindings.contextUsage === undefined ? {} : { contextUsage: bindings.contextUsage }),
+          ...(bindings.afterInput === undefined ? {} : { afterInput: bindings.afterInput }),
         });
       },
       // 插件热插拔（§3.2）：三个开关各自对应一个真实的装配点。`false` 与
