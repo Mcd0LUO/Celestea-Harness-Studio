@@ -172,6 +172,15 @@ const GEO = `(function () {
     scrollWidth: pre.scrollWidth,
     clientWidth: pre.clientWidth,
     canScrollX: pre.scrollWidth > pre.clientWidth,
+    // ★ W9347：工具条**在块内**（块的外壳现在是 .code-wrap，不是 pre）—— 量
+    //   「工具条的矩形是否落在 wrap 的矩形之内」。这是"从块外一行收进块内右上角"的
+    //   **后果**，不钉任何 px 常量。
+    headInsideWrap: headR.x >= wrapR.x - 1 && headR.right <= wrapR.right + 1 &&
+      headR.y >= wrapR.y - 1 && headR.bottom <= wrapR.bottom + 1,
+    // ★ 首行没被压：工具条底 ≤ 首行文本框顶（短块场景的关键不变量）。
+    headBottom: headR.bottom,
+    wrapH: Math.round(wrapR.h),
+    preH: Math.round(preR.h),
   };
 })()`;
 
@@ -329,6 +338,16 @@ const main = async () => {
     P.record('noTextOverlap', !geo.missing && geo.headOverPre === false &&
       geo.copyOverText === false && geo.badgeOverText === false,
       `工具条与正文块相交=${geo.headOverPre}；复制图标压文字=${geo.copyOverText}；json 压文字=${geo.badgeOverText}`);
+
+    // ---- ③' W9347：工具条在**块内**右上角，且首行**一点都没被压** ----
+    P.record('headInsideBlock', !geo.missing && geo.headInsideWrap === true,
+      `工具条矩形 @(${geo.head?.x},${geo.head?.y},${geo.head?.w}×${geo.head?.h}) 完全落在块 ` +
+      `.code-wrap @(${geo.wrap?.x},${geo.wrap?.y},${geo.wrap?.w}×${geo.wrap?.h}) 之内 = ${geo.headInsideWrap}` +
+      `（块总高 ${geo.wrapH}px，其中正文 pre 占 ${geo.preH}px）`);
+
+    P.record('firstLineClear', !geo.missing && geo.text !== null &&
+      geo.headBottom <= geo.text.y + 1,
+      `工具条底 ${geo.headBottom} ≤ 首行文本框顶 ${geo.text?.y}（首行一个像素都没被压）`);
 
     // ---- ④ 长行横向滚动：控件不盖文字、也不跟着滑走 ----
     const scrolled = await ev(SCROLL_X);

@@ -128,6 +128,25 @@ function nameElOf(row: El): El | null { return child(row1Of(row), "toolcard-name
 /** 该行自己的 step 标记。 */
 function stepTagOf(row: El): El | null { return child(row1Of(row), "step-tag"); }
 
+/**
+ * 该行参数正文块的文本（`.tool-args`），空白归一化。
+ * ★ W9348 起它在 `.tool-block` 宿主里（宿主首子节点是标签），故**递归**找后代 ——
+ *   垫片的 `matches` 不做祖先链匹配，直接 `childNodes.find` 只会找到空数组。
+ */
+function argsTextOf(row: El): string {
+  const find = (n: El | null): El | null => {
+    if (n === null) return null;
+    for (const c of n.childNodes) {
+      if (c.classList.contains("tool-args")) return c;
+      const hit = find(c);
+      if (hit !== null) return hit;
+    }
+    return null;
+  };
+  const pre = find(cardOf(row));
+  return pre === null ? "" : String(pre.textContent ?? "").replace(/\s+/g, "");
+}
+
 /** 一个容器下**直接**挂的工具行（顶层 = pane.el 的直接 .mcol；子行 = subs 的直接 .mcol）。 */
 function rowsUnder(host: El): El[] {
   return host.childNodes.filter((c) => c.classList.contains("mcol") && cardOf(c) !== null);
@@ -313,9 +332,9 @@ describe("W1542 · 工具卡行内重复（同一个工具名印两遍）", () =
     const readFile = rows.filter((r) => toolNameOf(r) === "read_file");
     expect(readFile, "夹具里 4 次 read_file 必须一张不少").toHaveLength(4);
     // 其中两次的 args **逐字相同**（{path:/x}）、call_id 不同 —— 真机那 2 组就是这一类。
-    const sameArgs = readFile.filter((r) => child(cardOf(r), "toolcard-body") !== null
-      && r !== null && String((child(cardOf(r), "toolcard-body")!.childNodes
-        .find((c) => c.classList.contains("tool-args"))?.textContent ?? "")).replace(/\s+/g, "") === '{"path":"/x"}');
+    // ★ W9348 起 `.tool-args` 住进 `.tool-block` 宿主（标签是它的首子节点），
+    //   所以要在 body 的**后代**里找，不是直接子节点。
+    const sameArgs = readFile.filter((r) => argsTextOf(r) === '{"path":"/x"}');
     expect(sameArgs, "同 args 不同 call_id 的两次调用都必须留下").toHaveLength(2);
     // 子调用行仍是三条（c1/c2/c3）—— 没有被「合并」掉。
     const subTags = rows.filter(isSubRow).map((r) => stepTagOf(r)!.textContent).sort();

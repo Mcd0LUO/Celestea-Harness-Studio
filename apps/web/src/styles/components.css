@@ -190,7 +190,13 @@
 /* 参数 / 结果正文：等宽 pre、不换行、横向滚动（TerminalBlock .output）；
    滚动条浮在圆角外侧：transparent 2px border + padding-box */
 .tool-args, .tool-out {
-  margin: 0; padding: 2px 0 2px calc(var(--lead-box) + var(--lead-gap));
+  /* W9348：上内边距从 2px 提到 18px —— 这条带是**标签的落脚点**（见下方 .tool-block-label），
+     不是"给控件留的经验性空白"：标签是 position:absolute 贴在本块左上角，
+     而正文第一行从这条带的**下沿**才开始 ⇒ 标签与首行是上下相邻的两条带，
+     **几何上不可能相交**。这是 W1526「相邻两块 ⇒ 不可能重叠」那条论证的同一形状，
+     只是这次的"上一块"是标签、不是浮层。
+     ★ 与代码块工具条（W9347 顶带）是同一个权衡，故也是同一个解法。 */
+  margin: 0; padding: 18px 0 2px calc(var(--lead-box) + var(--lead-gap));
   color: var(--c-text-2); background: none;
   font-family: var(--mono); font-size: 12px; line-height: var(--code-lh);
   white-space: pre; overflow-x: auto; overflow-y: auto;
@@ -199,6 +205,22 @@
 .tool-out { color: var(--c-text-1); }
 /* W778：结果预览在展开区内，和结果全文一起与参数区分隔 */
 .tool-out.err-c { color: var(--c-err); }
+
+/* W9348：「参数」/「结果」标签 —— 贴在块自己的上内边距带里，**不占额外一行**。
+   ★ 为什么是 absolute 而不是块外面一个普通行：普通行会给每块多出一整行高度
+     （主人明确要求「别占大量空白」）。absolute + 上面预留的 padding 带 ⇒ 零额外行高。
+   ★ 标签在 `<pre>` **外面**（.tool-block 的首子节点）而不是里面：块的 textContent
+     是真数据（复制、clamp 比较、展开换全文都读它），塞进去会被
+     `textContent = …` 抹掉。可访问名由 pre 的 aria-labelledby 指回这里。 */
+.tool-block { position: relative; }
+.tool-block-label {
+  position: absolute; top: 2px; left: calc(var(--lead-box) + var(--lead-gap));
+  font-family: var(--mono); font-size: 10px; line-height: 14px;
+  color: var(--c-text-3);
+  /* 标签不该被拖进选中（复制读的是 pre 的 textContent，本来也不含它） */
+  user-select: none; -webkit-user-select: none;
+  pointer-events: none; /* 纯装饰性标签，不该挡住下面的文字选中 */
+}
 .toolcard-head::-webkit-scrollbar-thumb,
 .tool-args::-webkit-scrollbar-thumb,
 .tool-out::-webkit-scrollbar-thumb {

@@ -95,6 +95,52 @@ function toJsonText(v: unknown): string {
   }
 }
 
+/**
+ * W9348：给一个正文块配**标签**（「参数」/「结果」），返回可直接 append 的宿主。
+ *
+ * ★ 为什么标签是块的**前一个兄弟**（不是子节点）：
+ *   块的 `textContent` 是**真数据**——复制按钮、预览、`W1485` 的 clamp 比较
+ *   （`out.textContent !== clamp.text`）、展开换全文，全都以它为准。
+ *   若把标签塞进 `pre` 里，那条 `textContent = clamp.text` 会**连带抹掉标签**，
+ *   且比较永远不相等（标签也算进 textContent）⇒ 重放路径会反复重写块。
+ *   ⇒ 标签留在 `pre` **外面**，视觉上靠 CSS 压到块的上内边距带里。
+ *
+ * ★ 为什么不给它多占一行（主人明确要求「别占大量空白」）：
+ *   宿主 `.tool-block` 用 `position:relative`，标签 `position:absolute` 贴左上角，
+ *   而 `pre` 自己的 `padding-top`（components.css）留出那条带 ⇒
+ *     · 标签**不产生任何额外行高**；
+ *     · 标签与首行是**上下相邻**的两条带 ⇒ **不可能压住首行**（同 W9347 顶带的论证）。
+ *
+ * ★ 可访问性：标签是**真元素 + 全文档唯一 id**，`pre` 用 `aria-labelledby` 指过去
+ *   ⇒ 读屏念这个 pre 时先报「参数 / 结果」。视觉与语义是**同一个**节点。
+ *   ★ id 必须**逐块唯一**（一张消息里可能有几十张卡）：`aria-labelledby` 按文档树解析，
+ *   重复 id 会让每一块都指向文档里第一个同 id 标签。故用单调计数。
+ *
+ * ★ 不留「有标签没块」/「有块没标签」：宿主与块在**同一个调用点**成对创建；
+ *   结果那条路径在 `setToolResult` 里 —— 结果没到就没有块，也就没有标签
+ *   （运行中的卡不该先挂一个空的结果标签）。
+ *
+ * @param block  正文块（.tool-args / .tool-out）
+ * @param prefix 块类型（id 前缀）
+ * @param text   标签文案（只写标签本身，正文在块里）
+ */
+let labelSeq = 0;
+function blockWithLabel(block: HTMLElement, prefix: string, text: string): HTMLElement {
+  labelSeq += 1;
+  const id = prefix + '-' + String(labelSeq);
+  const host = el('div', 'tool-block');
+  const label = el('span', 'tool-block-label', text);
+  label.id = id;
+  // ★ 同时写成**属性**：真 DOM 里 `el.id = x` 会自动反映成 `id` 属性，但本仓的测试垫片
+  //   （tests/lib/w1467-dom.ts）只认属性表 —— 不写两遍，单测就量不到「aria-labelledby
+  //   指向了一个真实存在的标签」。真机与垫片两条路都对。
+  label.setAttribute('id', id);
+  block.setAttribute('aria-labelledby', id);
+  host.appendChild(label);
+  host.appendChild(block);
+  return host;
+}
+
 /** 工具卡构建数据（live 事件与历史恢复共用）。 */
 export interface ToolCardData {
   step: number;
@@ -212,7 +258,11 @@ export function buildToolCard(d: ToolCardData): ToolCardRef {
   //   ③ status pill 的成败上色原挂在 `.toolcard.ok/.err .toolcard-result-preview` 上 ——
   //      那条 CSS 随本元素一起失效，故把上色**搬到状态 pill 本身**（见 components.css 既有
   //      `.toolcard.ok .toolcard-state` 规则，这里只补一条兜底），避免「删一行丢信息」。
-  body.appendChild(el('pre', 'tool-args', d.argsText)); // W764：等宽 pre（不换行 + 横向滚动）
+  // W9348：截断行保持删除，但**标签补回来** —— 主人原话「我只让去除 `参数：xxx...`
+  // 这种**截断渲染**」。标签与截断正文原先长在同一个元素上，删行把标签一起带走了，
+  // 块就成了「光秃秃的两块」。⇒ 标签由 `blockWithLabel` 配在块**前面**（宿主 .tool-block），
+  // 视觉上落在块自己的上内边距带里：不额外占一行高度，也永远不压首行。
+  body.appendChild(blockWithLabel(el('pre', 'tool-args', d.argsText), 'tc-args', t('chat.tool.argsLabel')));
   // F2：read_file 类结果 → 侧边预览。按钮放在**展开区**（折叠态几何与折叠逻辑一字不动）。
   const candidate = detectFromTool(d.name, d.argsText);
   if (candidate !== null && PREVIEW_CONTENT_TOOLS.has(d.name)) {
@@ -301,9 +351,13 @@ export function setToolResult(ref: ToolCardRef, resultText: string, failed: bool
   const clamp = clampForRender(resultText, TOOL_RESULT_RENDER_LIMIT);
   const out = ref.body.querySelector('.tool-out');
   if (!out) {
-    ref.body.appendChild(el('pre', 'tool-out' + (failed ? ' err-c' : ''), clamp.text));
+    // W9348：标签与块**同一个调用点**成对创建 ⇒ 运行中的卡不会先挂一个空的结果标签
+    // （「有标签没块」/「有块没标签」两种状态都不会出现）。
+    ref.body.appendChild(
+      blockWithLabel(el('pre', 'tool-out' + (failed ? ' err-c' : ''), clamp.text), 'tc-out', t('chat.tool.resultLabel')),
+    );
   } else if (out.textContent !== clamp.text) {
-    out.textContent = clamp.text; // 结果被后续帧覆盖（同一 tool_call_id 重放）
+    out.textContent = clamp.text; // 结果被后续帧覆盖（同一 tool_call_id 重放；标签在 pre 之外，不受影响）
   }
   if (clamp.omitted > 0) {
     appendOmittedNote(ref.body, clamp.omitted, () => {

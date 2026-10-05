@@ -37,63 +37,117 @@ const CDP = Number(process.env.W9345_CDP_PORT ?? 9495);
 /** 主场景的参数：**长路径** ⇒ 摘要必然被截断 + 省略号（复现用户截图的形态）。 */
 const LONG_PATH = 'D:\\tools\\celestea-studio\\results\\audit4\\probe\\very-long-directory-name\\index.ts';
 const ARGS = JSON.stringify({ path: LONG_PATH, start: 1, limit: 2000 });
-/** 结果正文（短、且**不含省略号**）—— 用来证明「删了摘要行，结果全文一个字没少」。 */
+/** 结果正文（短、且**不含省略号**）—— 用来证明「删了摘要行/补了标签，内容一个字没少」。 */
 const RESULT_TEXT = 'export const a = 1;\nexport const b = 2;';
 
-/** 摆出主场景：真实模块造一个 read_file 工具块（参数长），并**展开**它。 */
+/**
+ * ★ 主场景（W9348）：**一张已完成的 run_shell 卡** —— 完整参数块带「参数」标签、
+ *   完整结果块带「结果」标签，两块内容与夹具**逐字相等**；
+ *   外加**一张运行中的卡**：**没有**「结果」标签，也没有空的结果块。
+ */
 const SETUP = `(async function () {
   var V = await import('/src/ui/viewctx.ts');
   var M = await import('/src/ui/messages.ts');
   var T = await import('/src/ui/toolcards.ts');
   var pane = V.ensurePane('w9345/main', 'session', 'W9345 取证');
   V.activatePane('w9345/main', 'session', 'W9345 取证');
-  M.addUserMessage(pane, '读一下那个文件');
-  var col = T.pushToolCard(pane, { id: 'r1', name: 'read_file', args: ${JSON.stringify(JSON.parse(ARGS))} });
-  // ★ 结果里**不放省略号**：本探针判的是「带省略号的那一行」，
-  //   夹具自己带省略号会让断言把结果行误判成参数摘要行（实测踩到：探针假红）。
-  T.applyToolResult(pane, { id: 'r1', ok: true, value: ${JSON.stringify(RESULT_TEXT)} });
-  // 展开：折叠态本来就看不到 body，重复只在展开时可见。
-  var card = col.querySelector('.toolcard');
-  card.open = true;
-  window.__w9345 = { V: V, T: T, pane: pane, card: card };
+  M.addUserMessage(pane, '跑一下命令');
+
+  // ① 已完成卡（run_shell）：有参数块 + 结果块
+  T.pushToolCard(pane, { id: 's1', name: 'run_shell', args: { command: 'echo hi' } });
+  T.applyToolResult(pane, { id: 's1', ok: true, value: ${JSON.stringify(RESULT_TEXT)} });
+  // ② 运行中卡：只有参数块，**没有**结果块
+  T.pushToolCard(pane, { id: 's2', name: 'run_shell', args: { command: 'sleep 100' } });
+
+  // 展开两张（折叠态本来看不到 body）。
+  var cards = Array.from(document.querySelectorAll('.toolcard'));
+  for (var c of cards) c.open = true;
+  var done = cards[0];
+  window.__w9345 = { V: V, T: T, pane: pane, card: done };
   await new Promise(function (r) { setTimeout(r, 200); });
-  return { open: card.open === true, args: ${JSON.stringify(ARGS)} };
+  return { open: done.open === true, cards: cards.length };
 })()`;
 
-/** 展开态的 body：可见文本行、参数出现次数、完整块是否还在、两行摘要是否都没了。 */
+/**
+ * 量一张卡：标签是否可见、是否与块关联（aria-labelledby 指向真实标签节点）、
+ * 块内容是否逐字等于夹具。**不钉字号/颜色/坐标**（铁律 11）——
+ * 只钉「标签看得见」+「标签与块绑定」+「内容逐字」三个后果。
+ */
+const CARD = (idx) => `(function () {
+  var cards = Array.from(document.querySelectorAll('.toolcard'));
+  var card = cards[${idx}];
+  if (!card) return { missing: true };
+  var body = card.querySelector('.toolcard-body');
+  if (!body) return { missing: true, noBody: true };
+  var read = function (blockCls) {
+    var block = body.querySelector('.' + blockCls);
+    if (!block) return { present: false };
+    var by = block.getAttribute('aria-labelledby');
+    var label = by ? card.ownerDocument.getElementById(by) : null;
+    var lr = label ? label.getBoundingClientRect() : null;
+    var br = block.getBoundingClientRect();
+    // ★ 标签可能**不存在**（变异：标签被抽掉）—— 那时按「不可见」如实记，不要崩：
+    //   getComputedStyle(null) 会抛，探针一崩就看不到别的断言结果了。
+    var cs = label ? getComputedStyle(label) : null;
+    // ★ 「不压首行」要量的是**首行**（正文第一行的行盒），不是块的 border box ——
+    //   标签**本来就该**落在块的上内边距带里（那是不额外占一行的代价），
+    //   拿标签底 vs 块顶去比，量的是「标签在不在块里」而不是「有没有压住字」。
+    //   ★ 首行怎么取：工具卡的 pre 里是**纯文本**（没有 .cl 行元素、也没有 code 子节点）
+    //   ⇒ 用 Range 框住第一段文本拿它的真实行盒（实测踩过：querySelector 落空时
+    //   量到的是 pre 自己，padTop 恒为 0，断言假红）。
+    var firstLine = function (blk) {
+      var walker = document.createTreeWalker(blk, NodeFilter.SHOW_TEXT);
+      var n = walker.nextNode();
+      if (!n || (n.nodeValue || '') === '') return blk.getBoundingClientRect();
+      var r = document.createRange();
+      r.setStart(n, 0);
+      r.setEnd(n, Math.min(1, n.nodeValue.length)); // 第一行的第一个字符足够框出该行
+      return r.getBoundingClientRect();
+    };
+    var fr = firstLine(block);
+    // 块的上内边距带高度 = 正文起点 - 块顶（标签落脚的地方）
+    var padTop = Math.round(fr.top - br.top);
+    return {
+      present: true,
+      labelText: label ? label.textContent : null,
+      labelVisible: lr !== null && lr.width > 0 && lr.height > 0 &&
+        cs !== null && cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity || '1') > 0,
+      labelW: lr ? Math.round(lr.width) : 0, labelH: lr ? Math.round(lr.height) : 0,
+      labelledBy: by, labelFound: label !== null,
+      labelBottom: lr ? Math.round(lr.bottom) : null,
+      blockTop: Math.round(br.top),
+      firstLineTop: Math.round(fr.top),
+      padTop: padTop,
+      // 标签带**完全在首行上方**（= 不压首行；标签底 ≤ 首行顶）
+      labelAboveFirstLine: lr !== null && lr.bottom <= fr.top + 1,
+      // 标签**不产生额外行高**：块的上内边距带高度必须容得下标签（否则就是压字了）
+      bandFitsLabel: lr !== null && padTop >= Math.round(lr.height) - 1,
+      text: (block.innerText || block.textContent || '').trim(),
+    };
+  };
+  return { missing: false, args: read('tool-args'), out: read('tool-out'),
+           running: card.classList.contains('running'),
+           state: (card.querySelector('.ts-label') || {}).textContent || '' };
+})()`;
+
+/**
+ * 一张卡的 body：截断行**都**没了 + 两行摘要行都不在（截断行不许复活）。
+ * 与 CARD 分开：CARD 量「标签 + 关联 + 内容」，这里量「不该有的东西确实没了」。
+ */
 const BODY = `(function () {
   var body = document.querySelector('.toolcard-body');
   if (!body) return { missing: true };
   var cs = getComputedStyle(body);
-  // **可见**（body 在折叠态被 display:none 藏起来）—— 量的是用户真的看得见的。
   var visible = cs.display !== 'none' && body.getBoundingClientRect().height > 0;
   var text = body.innerText || body.textContent || '';
   var lines = text.split('\\n').map(function (s) { return s.trim(); })
                     .filter(function (s) { return s.length > 0; });
-  // 参数全文在这张卡的**整张 DOM 文本**里出现几次（用户能看到的范围）。
-  var cardText = (document.querySelector('.toolcard').innerText || '');
-  var args = ${JSON.stringify(ARGS)};
-  var occurrences = cardText.split(args).length - 1;
-  var pre = body.querySelector('pre');
-  var preText = pre ? (pre.innerText || pre.textContent || '').trim() : null;
   return {
     missing: false, visible: visible,
     lineCount: lines.length,
-    lines: lines.slice(0, 6),
-    // 带省略号的那一行（用户截图里被点名要删的那行）
     ellipsisLines: lines.filter(function (s) { return s.indexOf('…') !== -1; }),
-    argsOccurrences: occurrences,
-    fullArgsPresent: preText !== null && preText.indexOf(args) !== -1,
-    fullArgsLen: preText === null ? 0 : preText.length,
-    argsLen: args.length,
-    preVisible: pre ? getComputedStyle(pre).display !== 'none' : false,
-    // W9345 两行摘要都要没（参数 + 结果）。
     argsPreview: body.querySelector('.toolcard-args-preview') !== null,
     resultPreview: body.querySelector('.toolcard-result-preview') !== null,
-    // 结果全文仍在（删摘要没删内容）。
-    outText: (function () { var o = body.querySelector('.tool-out');
-      return o ? (o.innerText || o.textContent || '').trim() : null; })(),
-    hasPreviewBtn: body.querySelector('.toolcard-preview') !== null,
   };
 })()`;
 
@@ -126,33 +180,62 @@ const main = async () => {
     await page.send('Browser.grantPermissions', { origin: 'http://127.0.0.1:' + PORT, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
     const setup = await ev(SETUP);
     out.raw.setup = setup;
-    P.record('scenarioReady', setup.open === true, `read_file 工具块已建并展开（open=${setup.open}），参数长度 ${setup.args.length} 字符`);
+    P.record('scenarioReady', setup.open === true && setup.cards === 2,
+      `主场景就位：${setup.cards} 张 run_shell 卡（① 已完成 ② 运行中），均已展开`);
 
-    // ---- ① 用户报障的那一行（截断+省略号）不再出现 ----
+    // ---- ① 截断行保持删除（W9345 的诉求不许被这一轮改回去） ----
     const body = await ev(BODY);
     out.raw.body = body;
-    P.record('noTruncatedDup', body.missing === false && body.visible === true &&
+    P.record('truncationStillGone', body.missing === false && body.visible === true &&
       body.ellipsisLines.length === 0 && body.argsPreview === false && body.resultPreview === false,
-      `展开后可见 ${body.lineCount} 行；带省略号的行 = ${JSON.stringify(body.ellipsisLines)}` +
-      `（用户点名删的那一行）；参数摘要节点还在=${body.argsPreview}、结果摘要节点还在=${body.resultPreview}（都应为 false）`);
+      `展开后可见 ${body.lineCount} 行；带省略号的行 = ${JSON.stringify(body.ellipsisLines)}；` +
+      `参数摘要节点还在=${body.argsPreview}、结果摘要节点还在=${body.resultPreview}（截断渲染必须仍然删除）`);
 
-    // ---- ② 完整参数仍在，且**只印一次** ----
-    P.record('fullArgsOnce', body.fullArgsPresent === true && body.argsOccurrences === 1 && body.preVisible === true,
-      `完整参数块可见=${body.preVisible}、长度 ${body.fullArgsLen}（参数全文 ${body.argsLen}）；` +
-      `参数全文在这张卡里出现 ${body.argsOccurrences} 次（=1 才算不重复）`);
+    // ---- ② W9348 主场景：已完成的卡，两个块各带一个**可见且关联**的标签 ----
+    const done = await ev(CARD(0));
+    out.raw.doneCard = done;
+    P.record('labelsVisible', done.missing === false &&
+      done.args.present === true && done.out.present === true &&
+      done.args.labelVisible === true && done.out.labelVisible === true,
+      `参数标签=「${done.args.labelText}」可见=${done.args.labelVisible}（${done.args.labelW}×${done.args.labelH}px）；` +
+      `结果标签=「${done.out.labelText}」可见=${done.out.labelVisible}（${done.out.labelW}×${done.out.labelH}px）`);
 
-    // ---- ②' 删了结果摘要，结果**全文**一个字不少（不许把内容删没） ----
-    P.record('resultFullKept', typeof body.outText === 'string' && body.outText === RESULT_TEXT,
-      `结果全文 = ${JSON.stringify(body.outText)}（夹具 ${JSON.stringify(RESULT_TEXT)}，逐字相等 ⇒ 删摘要没删内容）`);
+    P.record('labelsAssociated', done.args.labelFound === true && done.out.labelFound === true &&
+      typeof done.args.labelledBy === 'string' && done.args.labelledBy.length > 0 &&
+      typeof done.out.labelledBy === 'string' && done.out.labelledBy.length > 0 &&
+      done.args.labelledBy !== done.out.labelledBy,
+      `aria-labelledby：参数块→${JSON.stringify(done.args.labelledBy)}（标签存在=${done.args.labelFound}）、` +
+      `结果块→${JSON.stringify(done.out.labelledBy)}（标签存在=${done.out.labelFound}）；两个 id 不同=${done.args.labelledBy !== done.out.labelledBy}`);
 
-    // ---- ③ 复制语义不许变（chat.tool.copyHint：复制参数与结果 JSON） ----
+    // ---- ③ 标签**不占额外一行、不压首行**（主人明确要求「别占大量空白」） ----
+    P.record('labelsNoOverlap', done.args.labelAboveFirstLine === true && done.out.labelAboveFirstLine === true &&
+      done.args.bandFitsLabel === true && done.out.bandFitsLabel === true,
+      `参数：标签底 ${done.args.labelBottom} ≤ 首行顶 ${done.args.firstLineTop}（上内边距带 ${done.args.padTop}px 装得下 ${done.args.labelH}px 标签）` +
+      `；结果：标签底 ${done.out.labelBottom} ≤ 首行顶 ${done.out.firstLineTop}（带 ${done.out.padTop}px / 标签 ${done.out.labelH}px）` +
+      ` ⇒ 不压首行、也不多占一行`);
+
+    // ---- ④ 两块内容与夹具**逐字相等**（补标签不许动内容） ----
+    const expectArgs = JSON.stringify({ command: 'echo hi' });
+    P.record('contentVerbatim', done.args.text === expectArgs && done.out.text === RESULT_TEXT,
+      `参数块 = ${JSON.stringify(done.args.text)}（夹具 ${JSON.stringify(expectArgs)}）；` +
+      `结果块 = ${JSON.stringify(done.out.text)}（夹具 ${JSON.stringify(RESULT_TEXT)}）`);
+
+    // ---- ⑤ 运行中的卡：**没有**「结果」标签，也没有空的结果块 ----
+    const running = await ev(CARD(1));
+    out.raw.runningCard = running;
+    P.record('noOrphanResultLabel', running.missing === false && running.running === true &&
+      running.out.present === false && running.args.present === true && running.args.labelVisible === true,
+      `运行中卡（状态 pill=「${running.state}」）：结果块 present=${running.out.present}（应为 false）、` +
+      `结果标签 present=${running.out.present}（同源，故也无空标签）；参数块带标签=${running.args.labelVisible}`);
+
+    // ---- ⑥ 复制语义不许变（chat.tool.copyHint：复制参数与结果 JSON） ----
     await input.click('.toolcard-copy', { hover: false });
     await sleep(300);
     const clip = await ev(CLIP);
-    out.raw.clip = { ok: clip.ok, len: clip.ok ? clip.text.length : 0, hasArgs: clip.ok ? clip.text.includes(ARGS) : false };
-    P.record('copyUnchanged', clip.ok === true && clip.text.includes(ARGS),
+    out.raw.clip = { ok: clip.ok, len: clip.ok ? clip.text.length : 0, hasArgs: clip.ok ? clip.text.includes(expectArgs) : false };
+    P.record('copyUnchanged', clip.ok === true && clip.text.includes(expectArgs),
       `点复制后剪贴板 ${clip.ok ? `长度 ${clip.text.length}` : '读取失败'}；` +
-      `仍含参数全文=${clip.ok ? clip.text.includes(ARGS) : false}（copyHint「复制参数与结果（JSON）」未因删行而变）`);
+      `仍含参数全文=${clip.ok ? clip.text.includes(expectArgs) : false}（copyHint「复制参数与结果（JSON）」未变）`);
 
     // ---- ④ 可访问性不许丢（工具卡仍是 summary/可展开/有名字） ----
     await page.send('DOM.enable');

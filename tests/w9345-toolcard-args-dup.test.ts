@@ -30,6 +30,8 @@ interface ToolcardsMod {
     col: El; card: El; body: El; label: El;
   };
   setToolResult: (ref: unknown, text: string, failed: boolean) => void;
+  /** 标签文案（从真 i18n 读，断言不抄字面量）。 */
+  t: (key: string) => string;
 }
 
 let tc: ToolcardsMod;
@@ -41,8 +43,10 @@ beforeAll(async () => {
   installDom();
   tmpDir = mkdtempSync(join(tmpdir(), "w9345-argsdup-"));
   const out = join(tmpDir, "toolcards.mjs");
+  // 顺带导出真 i18n 的 `t`（标签文案断言读它，不抄字面量 ⇒ 换语言/改文案都不会假红）。
   await bundleFrontend(
-    "export { buildToolCard, setToolResult } from './apps/web/src/ui/toolcards.ts';",
+    "export { buildToolCard, setToolResult } from './apps/web/src/ui/toolcards.ts';" +
+    "export { t } from './apps/web/src/i18n/index.ts';",
     out,
   );
   tc = (await import(pathToFileURL(out).href)) as ToolcardsMod;
@@ -53,11 +57,40 @@ afterAll(() => {
   if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
 });
 
-/** 直接子元素里带该 class 的第一个（null = 无）。垫片不做祖先链匹配，见 w1467-dom.ts。 */
-function child(node: El | null, cls: string): El | null {
-  if (node === null) return null;
+/** 直接子元素里带该 class 的第一个（null = 无/未挂载）。垫片不做祖先链匹配，见 w1467-dom.ts。 */
+function child(node: El | null | undefined, cls: string): El | null {
+  if (!node) return null;
   for (const c of node.childNodes) if (c.classList.contains(cls)) return c;
   return null;
+}
+
+/**
+ * 递归找带该 class 的第一个后代。
+ * ★ W9348 起正文块住进 `.tool-block` 宿主（标签是它的首子节点），
+ *   所以 `.tool-args` / `.tool-out` 不再是 `.toolcard-body` 的**直接**子节点 ——
+ *   断言必须按**后代**找（与生产代码 `querySelector` 的口径一致）。
+ */
+function deep(node: El | null | undefined, cls: string): El | null {
+  if (!node) return null;
+  for (const c of node.childNodes) {
+    if (c.classList.contains(cls)) return c;
+    const hit = deep(c, cls);
+    if (hit !== null) return hit;
+  }
+  return null;
+}
+
+/** 带标签的正文块：宿主 `.tool-block`（标签 + pre）。 */
+function labeledBlock(body: El | null | undefined, blockCls: string): { host: El | null; label: El | null; block: El | null } {
+  const block = deep(body, blockCls);
+  if (block === null) return { host: null, label: null, block: null };
+  // ★ 块**自己**的父节点就是 `.tool-block` 宿主（不是"父节点里再找一个 tool-block"）。
+  //   垫片只有 `parentNode`（没有 `parentElement`，见 w1467-dom.ts 的 El 定义）。
+  const host = block.parentNode;
+  if (host === null || !host.classList.contains("tool-block")) {
+    return { host: null, label: null, block };
+  }
+  return { host, label: child(host, "tool-block-label"), block };
 }
 
 /** 节点子树的全部文本（递归拼接；垫片的 textContent 不拼子节点，见 w1542 注释）。 */
@@ -88,7 +121,7 @@ describe("W9345 · 工具卡参数不重复", () => {
 
   it("② 完整参数块仍在，内容逐字等于参数全文（不是截断、不是 desc）", () => {
     const ref = card();
-    const full = child(ref.body, "tool-args");
+    const full = deep(ref.body, "tool-args");
     expect(full, "完整参数块必须保留").not.toBeNull();
     // ★ 逐字守「完整」：不是省略号版本，也不是卡头那行的 desc。
     // 不用 expect(x).toBe(长串) —— 垫片的 El 让 vitest 的 diff 格式化器崩
@@ -119,7 +152,7 @@ describe("W9345 · 工具卡参数不重复", () => {
     const ref = card();
     tc.setToolResult(ref, "file body", false);
     // 删了摘要行，结果**内容**一个字都不能少。
-    const out = child(ref.body, "tool-out");
+    const out = deep(ref.body, "tool-out");
     expect(out, "结果全文进 body").not.toBeNull();
     expect(out!.textContent, "结果全文逐字").toBe("file body");
     // 删摘要没有把「成功/失败」这个信息一起删掉。
@@ -136,7 +169,7 @@ describe("W9345 · 工具卡参数不重复", () => {
     // 与被删的 args 预览节点无关。直接验证被删节点确实不在 DOM 里、而完整块在 ——
     // 复制按钮读的后者逐字含参数全文，语义不变。
     expect(ref.body.querySelector(".toolcard-args-preview"), "被删节点不在 DOM").toBeNull();
-    const full = child(ref.body, "tool-args");
+    const full = deep(ref.body, "tool-args");
     expect(full!.textContent, "复制源（参数全文）仍在卡内").toBe(LONG_ARGS);
   });
 
@@ -145,5 +178,71 @@ describe("W9345 · 工具卡参数不重复", () => {
     expect(ref.card.querySelector(".toolcard-copy"), "复制按钮必须保留").not.toBeNull();
     expect(ref.card.querySelector(".toolcard-head"), "折叠头必须保留").not.toBeNull();
     expect(ref.card.querySelector(".toolcard-fold"), "折叠指示必须保留").not.toBeNull();
+  });
+});
+
+/**
+ * W9348：截断行保持删除，但**「参数」/「结果」标签必须回来**。
+ *
+ * 主人原话：「我只让去除 `参数：xxx...` 这种**截断渲染**」——标签是**要留的**。
+ * 标签与截断正文原先长在同一个元素上，删行把标签一起带走了 ⇒ 两块变「光秃秃的」。
+ *
+ * 守**后果**（铁律 11：不钉字号/颜色/坐标常量）：
+ *   ① 标签**可见**且**与块关联**（`aria-labelledby` 指向一个真实存在的标签元素）；
+ *   ② 标签只有文字标签本身，**不带** `{text}`（正文在块里，不许再截断一份）；
+ *   ③ **运行中的卡没有「结果」标签**（也没空块）—— 不许出现「有标签没块」；
+ *   ④ 标签 id **逐块唯一**（`aria-labelledby` 按文档树解析，重复 id 会让所有块
+ *      都念成第一个标签）。
+ */
+describe("W9348 「参数」/「结果」标签", () => {
+  it("① 参数块有可见标签，且标签与块通过 aria-labelledby 关联", () => {
+    const ref = card();
+    const { label, block } = labeledBlock(ref.body, "tool-args");
+    expect(label, "参数块必须带标签").not.toBeNull();
+    expect(label!.textContent.length, "标签要有可见文字").toBeGreaterThan(0);
+    const by = block!.getAttribute("aria-labelledby");
+    expect(by, "块必须用 aria-labelledby 指向标签（不只做视觉）").toBeTruthy();
+    expect(label!.getAttribute("id"), "aria-labelledby 必须指向这个标签").toBe(by);
+  });
+
+  it("② 结果块有可见标签，且同样通过 aria-labelledby 关联", () => {
+    const ref = card();
+    tc.setToolResult(ref, "file body", false);
+    const { label, block } = labeledBlock(ref.body, "tool-out");
+    expect(label, "结果块必须带标签").not.toBeNull();
+    expect(label!.textContent.length, "标签要有可见文字").toBeGreaterThan(0);
+    const by = block!.getAttribute("aria-labelledby");
+    expect(by).toBeTruthy();
+    expect(label!.getAttribute("id")).toBe(by);
+  });
+
+  it("③ 标签只有标签本身（不含截断正文 —— 截断行不许复活）", () => {
+    const ref = card();
+    const { label } = labeledBlock(ref.body, "tool-args");
+    expect(label!.textContent, "标签里不许夹带参数正文").toBe(tc.t("chat.tool.argsLabel"));
+    expect(label!.textContent.indexOf("…") === -1, "标签里不许有省略号").toBe(true);
+    // 两个标签**不相同**（参数 ≠ 结果）：错配了也说明其中一个没接对。
+    tc.setToolResult(ref, "file body", false);
+    const outLabel = labeledBlock(ref.body, "tool-out").label;
+    expect(outLabel!.textContent).toBe(tc.t("chat.tool.resultLabel"));
+    expect(label!.textContent).not.toBe(outLabel!.textContent);
+  });
+
+  it("④ 运行中的卡：没有「结果」标签，也没有空的结果块", () => {
+    const ref = card(); // 只 pushToolCard，没 applyToolResult
+    expect(labeledBlock(ref.body, "tool-out").label, "结果没到就不该有结果标签").toBeNull();
+    expect(deep(ref.body, "tool-out"), "结果没到就不该有空的结果块").toBeNull();
+    // 但参数块此时就带标签（参数是建卡即有的）。
+    expect(labeledBlock(ref.body, "tool-args").label, "参数标签建卡即在").not.toBeNull();
+  });
+
+  it("⑤ 标签 id 逐块唯一（两张卡不能让 aria-labelledby 指到同一处）", () => {
+    const a = card();
+    const b = card();
+    const idA = labeledBlock(a.body, "tool-args").block!.getAttribute("aria-labelledby");
+    const idB = labeledBlock(b.body, "tool-args").block!.getAttribute("aria-labelledby");
+    expect(idA).toBeTruthy();
+    expect(idB).toBeTruthy();
+    expect(idA, "两张卡的参数标签 id 必须不同").not.toBe(idB);
   });
 });

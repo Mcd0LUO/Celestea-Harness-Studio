@@ -8,6 +8,9 @@ export const chat = {
   'chat.tool.running': 'Running',
   'chat.tool.copy': 'Copy',
   'chat.tool.copyHint': 'Copy the arguments and result (JSON)',
+  // W9348: labels for the two full blocks (label only - the text lives in the block).
+  'chat.tool.argsLabel': 'Arguments',
+  'chat.tool.resultLabel': 'Result',
   'chat.tool.preview': 'Preview',
   'chat.tool.previewHint': 'Preview this file in the side panel',
   'chat.tool.failed': 'Failed',

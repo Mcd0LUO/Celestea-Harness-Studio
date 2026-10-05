@@ -39,25 +39,77 @@
      沿用同一归属：控件永远在可视区内，且仍不与正文相交。
    ============================================================================ */
 
-/* 工具条：`.code-wrap` 里 `pre` 前面的一行（正常流，占位）。 */
+/* ============================================================================
+   ③ W9347：工具条从「块外一行」收进「块内右上角」
+   ----------------------------------------------------------------------------
+   主人原话：「这个 [复制][json] 应该放到**代码块里面的边上**，而不是外面 ——
+   现在的独立一行**占掉大量空白**」。
+
+   ★ 为什么这次能收进块里，而 W1526 当年只能放在块外（别把它当推翻）：
+     W1526 被真机证伪的是**浮动覆盖**（`position:absolute` 直接压在首行上 ⇒ 短块首行
+     被盖住）与**放进 `pre` 内部**（`pre` 是 `overflow-x:auto` ⇒ 随长行横向滚走）。
+     本次两者都不沾：
+       · 控件**仍不在 `pre` 里**（还是 `.code-wrap` 的直接子节点，与 `pre` 平行）
+         ⇒ 横向滚动带不走它（code-copy.test.ts「按钮是 pre 的兄弟」那条断言继续有效）；
+       · 它**不是覆盖**在正文上的浮层：`.code-wrap` 用 `padding-top` **实打实预留**
+         一条顶带（= 工具条的高度 + 上下边距），`pre` 在这条带**下面**才开始
+         ⇒ 首行与工具条是**上下相邻**的两块，几何上不可能相交。
+     换句话说：当年那条「相邻两个块 ⇒ 不可能相交」的不变量**仍然成立**，只是
+     「块」从 [工具条 | pre] 变成了 [`.code-wrap`(含顶带) | pre]。
+
+   做法（三步，全在 CSS，DOM 归属一字未动）：
+     a. 边框/底色/圆角从 `pre` **上移**到 `.code-wrap`（块 = 工具条 + 正文整体）；
+        `pre` 自身去掉边框，保留左右对齐的 padding。
+     b. `.code-wrap` 加 `padding-top: var(--code-head-band)`，即那条顶带。
+     c. `.code-head` 改**绝对定位**贴在该顶带内（top/right 就位）——它落在 **wrap 的
+        padding 区**里，**不在 pre 的盒内**，所以既不压字也不随长行滚走。
+
+   省下的高度：独立行方案下工具条那一行（≈24px 命中区 + 6px 上下 padding ≈ 30px）
+   是**额外**的块高；本方案把它压进 pre 自己的上内边距里（10px → 10px+band 的同时
+   pre 不再自带外边距），净省约 24–28px。**实测数字见 results 报告与探针 raw 输出。**
+
+   ⚠️ 边框迁移的一个代价（如实记账）：`pre` 原先自带 `margin: .7em 0`，那个外边距
+     现在挂在 `.code-wrap` 上（否则相邻两块会贴在一起）。
+   ============================================================================ */
+
+/* ---- a. 「块」的视觉外壳从 pre 上移到 .code-wrap ---- */
+.rendered .code-wrap {
+  position: relative;              /* 顶带的定位上下文（components.css 已有，补在这里） */
+  background: var(--c-code-bg);
+  border: 1px solid var(--c-border-subtle);
+  border-radius: var(--r-md);
+  /* 块之间的外边距：从 pre 搬上来（pre 自己不再有外边距）。 */
+  margin: .7em 0;
+  /* ★ b. 顶带：工具条的高度 + 上下留边。**这是「永不压字」的唯一保证** ——
+     pre 从这条带的**下沿**才开始画第一行，两者不可能相交（见文件头论证）。 */
+  padding-top: var(--code-head-band);
+  /* ⚠️ 刻意**不**加 `overflow:hidden`：它会裁掉复制按钮 :focus-visible 的焦点环
+     （outline-offset:1px 在 wrap 边界外），而焦点环可见是硬要求。圆角对顶带的
+     视觉收益不值这个风险 —— 顶带与正文同底色，不裁也不会溢出。 */
+}
+.rendered .code-wrap > pre {
+  /* 外壳上移 ⇒ pre 只留「正文盒」：去边框、去底色、去外边距。
+     overflow-x:auto **保留**（那正是「控件不能放进来」的原因，见文件头）。 */
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+}
+
+/* ---- c. 工具条：绝对定位在这条顶带里（不是覆盖在正文上的浮层）---- */
 .rendered .code-head {
+  position: absolute;
+  /* top/right 相对 .code-wrap（定位上下文在上面）。band 高度本身就够放它。 */
+  top: 0; right: 0; left: auto; bottom: auto;
   display: flex; align-items: center; gap: 6px;
-  /* W9344：整体右对齐 —— 工具条上只有徽标与复制两件装饰，把它们一起推到右上角。
-     为什么给**工具条**右对齐而不是给徽标 `margin-left:auto`：前者让「工具条上的
-     一切」都靠右，新增控件不必各自记得写 auto（漏一个就跑到左边去了）。
-     文档序由 code-extras 保证是 [复制] [徽标]（见该文件 addBadge 的注释），
-     故视觉顺序 = [复制图标] [json]。折叠按钮仍带自己的 margin-left:6px 跟在最右。 */
+  /* W9344：整体右对齐 ⇒ 视觉顺序 [复制图标] [json]（文档序由 code-extras 保证）。 */
   justify-content: flex-end;
-  /* 与 pre 的边框对齐（pre 是 border-box，左右各 1px 边框），并给装饰留出
-     与其尺寸相称的边距 —— W9344：控件移右上角后，贴边会显得被切掉。
-     2px 是「与 pre 边框对齐」的底线，4px 是这一行元素（14px 图标 / 20px 徽标）
-     视觉上不贴边的最小值。 */
-  padding: 2px 4px 4px;
+  padding: 3px 6px 3px 10px;
   /* 装饰不该被拖选进复制内容（复制读的是 code.textContent，不受影响）。 */
   user-select: none; -webkit-user-select: none;
 }
-/* 徽标与按钮都是普通流内盒 —— 覆盖 components.css 的 position:absolute。
-   这一条是「不挡文字」的机械保证：`position:static` ⇒ 不脱离文档流 ⇒ 不重叠。 */
+
+/* 徽标与按钮在工具条里是普通流内盒（不再是各自 absolute —— 定位交给父级 .code-head）。 */
 .rendered .code-head .code-badge,
 .rendered .code-head .code-copy,
 .rendered .code-head .code-copy-note,
@@ -66,30 +118,26 @@
   inset: auto;
   opacity: 1;
 }
-/* 复制按钮推到徽标左边（原先是「推到最右」）——不再需要 auto：工具条已整体右对齐
-   （见上面 .code-head 的 justify-content），文档序 [复制][徽标] 直接决定视觉顺序。 */
+/* 复制按钮与徽标的左右次序由文档序决定（右对齐已把整组推到右上角）。 */
 .rendered .code-head .code-copy { margin-left: 0; }
 .rendered .code-head .code-fold { margin-left: 6px; }
 
-/* 复制按钮此前是「悬停才显形」的浮层（opacity:0，:hover 才 1）。它现在是**占位**：
+/* 复制按钮此前是「悬停才显形」的浮层（opacity:0，:hover 才 1）。它是**占位**：
    隐藏会留下空洞，且「看得见才点得到」对触屏是硬要求（响应式层 §4 同一口径）。
    ⇒ 常显但压低对比度，悬停/聚焦提亮。 */
 .rendered .code-head .code-copy { color: var(--c-text-3); }
 .rendered .code-head .code-copy:hover,
 .rendered .code-head .code-copy:focus-visible { color: var(--c-text-1); }
 
-/* W9344：复制控件改图标后的外形与命中区。
-   · 图标 14px（ui/icons.ts 的 DEFAULT_SIZE.copy），描边 currentColor ⇒ 跟随上面两行配色；
-   · 命中区仍是 24×24（SC 2.5.8 的下限，也与工具条里其它小元素相称），图形居中；
-   · 内边距 0 是为了让「图标 + 24px 盒」的几何可预期（图标宽 14 ⇒ 左右各留 5px）。 */
+/* 复制控件的外形与命中区：14px 图标（ui/icons.ts）居中在 24×24 盒里（SC 2.5.8 下限）。 */
 .rendered .code-head .code-copy {
   display: inline-flex; align-items: center; justify-content: center;
   width: 24px; height: 24px; min-width: 24px;
-  padding: 0; font-size: 0; line-height: 0; /* 保险：不给任何可见文字留空间 */
+  padding: 0; font-size: 0; line-height: 0;
 }
 .rendered .code-head .code-copy-ico { display: block; flex: 0 0 auto; }
-/* 回显（role=status）：紧挨复制按钮左侧，1.2s 后自行清空（code-copy.ts 的 FEEDBACK_MS）。
-   `empty` 时不占位 ⇒ 平时工具条里看不到它，工具条高度不被它改变。 */
+/* 回显（role=status）：紧挨复制按钮左侧，1.2s 后清空（code-copy.ts 的 FEEDBACK_MS）。
+   平时 :empty ⇒ 不占位。 */
 .rendered .code-head .code-copy-note {
   color: var(--c-ok); font-size: 11px; line-height: 1.4; white-space: nowrap;
   margin-right: 4px;
@@ -97,7 +145,18 @@
 .rendered .code-head .code-copy-note:empty { display: none; }
 .rendered .code-head .code-copy-note.is-err { color: var(--c-err); }
 
-/* 没有工具条时（两个组件都关掉）不留空隙：上面这条 padding 只作用于存在的工具条。 */
+/* 顶带高度 = 工具条需要的净高（24px 命中区 + 上下 3px 边 + 与正文之间 4px 呼吸）。
+   写成 token 是为了「唯一真源」：工具条改动时不必回来重算 padding。 */
+:root { --code-head-band: 31px; }
+
+/* ---- 没有工具条时（两个组件都关掉）不留顶带：band 只在有 .code-head 时生效 ----
+   做法：默认 padding-top 为 0，`.code-wrap:has(> .code-head)` 才给顶带
+   （上面那条 `.code-wrap` 的 padding-top 声明被这条覆盖 —— 两处刻意分开写：
+   一处讲「顶带是什么」，一处讲「什么时候才有顶带」）。
+   （:has 在本仓现代 Chromium 上可用；若将来要降级，备选是增强遍在有控件时给
+   .code-wrap 挂一个 data 属性 —— 代价是 DOM 归属要动，故先用 :has。） */
+.rendered .code-wrap { padding-top: 0; }
+.rendered .code-wrap:has(> .code-head) { padding-top: var(--code-head-band); }
 
 /* ============================================================================
    ② 颜色：`--hl-*` 对齐 VSCode

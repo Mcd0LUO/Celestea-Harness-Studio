@@ -8,6 +8,11 @@ export const chat = {
   'chat.tool.running': '运行中',
   'chat.tool.copy': '复制',
   'chat.tool.copyHint': '复制参数与结果（JSON）',
+  // W9348：两个完整块的**标签**（只有标签，不带 {text} —— 正文在块里）。
+  // 旧的 chat.tool.args/result 是「标签 + 截断正文」长在同一个元素上的那种写法，
+  // 随 W9345 删掉截断行一起没了；块还在，得把标签补回来，否则两块光秃秃分不清。
+  'chat.tool.argsLabel': '参数',
+  'chat.tool.resultLabel': '结果',
   'chat.tool.preview': '预览',
   'chat.tool.previewHint': '侧边预览这个文件',
   'chat.tool.failed': '失败',
