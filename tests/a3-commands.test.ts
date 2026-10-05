@@ -38,15 +38,18 @@ interface GoalRequest { url: string; method: string; body: Record<string, unknow
  * W9209：这条 stub 过去对**任何**以 `/goal` 结尾的 URL 都回捏造的 200，
  * 于是 `/goal` 的后端端点根本不存在也测不出来（F-01 被它掩盖了整整一轮）。
  *
- * 现在它按**真实契约**应答（`contracts/endpoints.json#post_session_goal`）：
+ * 现在它按**真实契约**应答（`contracts/endpoints.json#post_session_goal`，W9347 扩展 v1）：
  *   · 只认**确切路径** `/api/sessions/<id>/goal`（POST）——路径写错 = 404，
  *     而不是「只要尾巴对就成功」；
- *   · 请求体必须是 `{text: string}`，否则 422（契约的 422 文案）；
- *   · 非空 text 回 `{ok,session,goal:{text,createdAt,updatedAt}}`；
- *     空/纯空白 text 回 `{ok,session,goal:null}`（契约的清除语义）；
+ *   · 请求体是 `{text?}` / `{paused?}`，**至少一个**；两个都给时先落 text 再落 paused；
+ *   · text 空/纯空白 = 删除（回 goal:null）；paused 非 boolean = 422；
+ *     **当前无目标**时 paused = 422（cannot pause: no goal）；
+ *   · 200 回 `{ok,session,goal:{text,paused,createdAt,updatedAt}|null}`（paused 恒在）；
  *   · 其余一切（含未知的 /api/... 路径）如实 404 —— 绝不「什么都说成功」。
  */
 function contractFetch(calls: string[], goalRequests: GoalRequest[]) {
+  // 桩服务端的真源（模拟后端 sidecar）；paused 在回声里恒在。
+  let stored: { text: string; paused: boolean } | null = null;
   return async (url: unknown, init?: { method?: string; body?: unknown }) => {
     const u = String(url);
     calls.push(u);
@@ -61,10 +64,23 @@ function contractFetch(calls: string[], goalRequests: GoalRequest[]) {
       }
       goalRequests.push({ url: u, method, body });
       if (method !== 'POST') return reply(405, { error: 'not allowed' });
-      if (typeof body['text'] !== 'string') return reply(422, { ok: false, error: "field 'text' must be a string" });
-      const text = body['text'];
+      const hasText = Object.prototype.hasOwnProperty.call(body, 'text');
+      const hasPaused = Object.prototype.hasOwnProperty.call(body, 'paused');
+      if (!hasText && !hasPaused) return reply(422, { ok: false, error: 'give text or paused' });
+      if (hasText && typeof body['text'] !== 'string') return reply(422, { ok: false, error: "field 'text' must be a string" });
+      if (hasPaused && typeof body['paused'] !== 'boolean') return reply(422, { ok: false, error: "field 'paused' must be a boolean" });
       const session = decodeURIComponent((/^\/api\/sessions\/(.+)\/goal$/.exec(u) as RegExpExecArray)[1] as string);
-      return reply(200, { ok: true, session, goal: text.trim() === '' ? null : { text: text.trim(), createdAt: 'a', updatedAt: 'b' } });
+      // 先落 text、再落 paused（冻结契约 v1 的顺序）。
+      if (hasText) {
+        const text = (body['text'] as string).trim();
+        stored = text === '' ? null : { text, paused: stored?.paused ?? false };
+      }
+      if (hasPaused && stored === null) return reply(422, { ok: false, error: 'cannot pause: no goal' });
+      if (hasPaused && stored !== null) stored = { text: stored.text, paused: body['paused'] as boolean };
+      const goal = stored === null
+        ? null
+        : { text: stored.text, paused: stored.paused, createdAt: 'a', updatedAt: 'b' };
+      return reply(200, { ok: true, session, goal });
     }
     if (u.includes('/api/turn')) return reply(200, { ok: true, turn: 1 });
     return reply(404, { error: 'not found' });
@@ -180,14 +196,13 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
     expect(doc.querySelector('.exec-note')?.textContent ?? '').not.toBe('');
   });
 
-  it('/goal 设置可见（徽标/条）与 /goal done 清除', async () => {
+  it('/goal 设置后浮动胶囊出现（文字可见）', async () => {
     const { cmd } = await boot();
     await cmd.dispatchCommand('/goal 把 F2 做完');
     await flush();
-    expect(doc.querySelector('.goal-bar .goal-text')?.textContent).toContain('把 F2 做完');
-    await cmd.dispatchCommand('/goal done');
-    await flush();
-    expect(doc.querySelector('.goal-bar')?.classList.contains('hidden')).toBe(true);
+    const capsule = doc.querySelector('.goal-capsule');
+    expect(capsule?.classList.contains('hidden')).toBe(false);
+    expect(doc.querySelector('.goal-capsule .goal-capsule-text')?.textContent).toContain('把 F2 做完');
   });
 
   /**
@@ -211,6 +226,8 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
     expect(goalRequests[0]?.body['text']).toBe('把 F2 做完');
     // 'done' 是清除：前端必须发空串，而不是某个 "done" 字面量。
     expect(goalRequests[1]?.body['text']).toBe('');
+    // 清除后胶囊消失、不占位（W9347）。
+    expect(doc.querySelector('.goal-capsule')?.classList.contains('hidden')).toBe(true);
   });
 
   it('未知命令给可读提示（不静默、不发 turn）', async () => {

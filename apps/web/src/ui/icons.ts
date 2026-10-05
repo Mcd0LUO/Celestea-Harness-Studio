@@ -99,7 +99,11 @@ export type IconName =
   | 'attach-clip'
   // statusline 工作方式徽标（16 网格 · 13px · 描边 1.5）
   | 'mode-standard'
-  | 'mode-execution';
+  | 'mode-execution'
+  // W9347 目标胶囊的三个动作（16 网格 · 14px · 描边 1.5；与 copy 同档）
+  | 'pencil'
+  | 'pause-glyph'
+  | 'trash';
 
 /**
  * 图标几何唯一真源。
@@ -212,6 +216,29 @@ export const ICONS: Record<IconName, IconSpec> = {
     source: 'repo/statusline-mode',
     grid: 16,
   },
+  // W9347：目标胶囊的「编辑（一支笔）/ 暂停 / 删除」。网格与描边沿用本表既有的
+  // 16 网格 · 描边 1.5 档（copy 就是这一档），故与 statusline 徽标视觉同重。
+  pencil: {
+    viewBox: '0 0 16 16',
+    paths: ['M11.2 2.4 13.6 4.8 5.6 12.8 2.6 13.4 3.2 10.4zM9.9 3.7 12.3 6.1'],
+    strokeWidth: 1.5,
+    source: 'repo/w9347',
+    grid: 16,
+  },
+  'pause-glyph': {
+    viewBox: '0 0 16 16',
+    paths: ['M5.6 3.2v9.6M10.4 3.2v9.6'],
+    strokeWidth: 1.5,
+    source: 'repo/w9347',
+    grid: 16,
+  },
+  trash: {
+    viewBox: '0 0 16 16',
+    paths: ['M2.8 4.2h10.4M6.4 4.2V2.8h3.2v1.4M4.2 4.2l.7 9a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.7-9M6.7 6.8v4.6M9.3 6.8v4.6'],
+    strokeWidth: 1.5,
+    source: 'repo/w9347',
+    grid: 16,
+  },
 };
 
 /** 每个图标的默认渲染尺寸（px）。**逐字取自迁移前的调用点**，未归一化。 */
@@ -231,6 +258,9 @@ const DEFAULT_SIZE: Record<IconName, number> = {
   'attach-clip': 16,
   'mode-standard': 13,
   'mode-execution': 13,
+  'pencil': 14,
+  'pause-glyph': 14,
+  trash: 14,
 };
 
 /** 调用点可覆盖的渲染参数。 */

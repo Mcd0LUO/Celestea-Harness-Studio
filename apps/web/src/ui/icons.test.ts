@@ -96,6 +96,11 @@ describe('W9324 ② 视觉不回退（迁移前逐字对齐的数值）', () => 
       // 网格/描边**刻意对齐本表既有的 16 网格 · 描边 1.5 档**（与 mode-* 同档），
       // 渲染尺寸 14px 与 chevron-fold 一致 —— 工具条里的小元素因此视觉同重。
       copy: { viewBox: '0 0 16 16', strokeWidth: 1.5, size: '14' },
+      // W9347 目标胶囊的三枚动作图标（编辑/暂停/删除）：新画，网格与描边同样
+      // 对齐 16 网格 · 描边 1.5 档，渲染 14px（与 copy / chevron-fold 一致）。
+      pencil: { viewBox: '0 0 16 16', strokeWidth: 1.5, size: '14' },
+      'pause-glyph': { viewBox: '0 0 16 16', strokeWidth: 1.5, size: '14' },
+      trash: { viewBox: '0 0 16 16', strokeWidth: 1.5, size: '14' },
     };
     for (const name of ALL) {
       const want = BEFORE[name];

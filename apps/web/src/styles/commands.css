@@ -71,44 +71,138 @@
 .exec-stream.err .exec-stream-body { color: var(--c-err); }
 .msg.exec.exec-note .bubble { background: var(--c-surface-raised); border: none; }
 
-/* ---- 持久目标条（会话页顶部，一眼可见） ---- */
-.goal-bar {
-  position: fixed;
-  top: 44px;
+/* ---- W9347：持久目标**浮动胶囊**（聊天区消息流上方；取代 W9209 的顶部 .goal-bar） ----
+   · 浮动（absolute）且**不占布局**：不推走消息、不给消息区加内边距；
+   · 胶囊**只占一行**：内容用 flex nowrap，文字列单行截断；
+   · 文字区 **≈2 个汉字宽**（--goal-text-w: 2em）：这是产品的视觉密度要求
+     （「大约 2 个汉字宽」），截断由 text-overflow 承担，完整文本在 title 里；
+   · 三个动作按钮命中区 ≥24×24（WCAG 2.5.8，min-inline-size/min-block-size）；
+   · 暂停态有**可见区分**（换色描边 + 文字删除线 + ⏸ 角标），不只靠颜色。
+   所有颜色走 tokens.css 的 --c-* 令牌。 */
+.goal-capsule {
+  /* 绝对定位挂在 #messages（position: relative）里 ⇒ top:0 就是**消息区上缘**，
+     胶囊因此永远贴在消息区上方，不会因 #main 的 flex 尺寸变化而漂到顶栏上。 */
+  position: absolute;
+  top: 6px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 25;
+  /* 浮在消息之上但**低于**设置页/二级弹窗；与 .ws-strip(25) / .cmd-popup(40) 不冲突
+     （补全框是视口坐标，锚在输入框上沿，不与消息区顶部同框）。 */
+  z-index: 26;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  max-width: min(760px, 82vw);
-  padding: 5px 10px;
+  gap: 6px;
+  max-width: min(680px, 90vw);
+  padding: 2px 6px 2px 10px;
   border: 1px solid var(--c-accent-ring);
   border-radius: 999px;
   background: var(--c-surface-raised);
   box-shadow: var(--shadow-panel);
+  color: var(--c-text-1);
+  font-size: 12.5px;
+  line-height: 20px;
 }
-.goal-bar.hidden { display: none; }
-.goal-tag {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--c-accent);
-  border: 1px solid var(--c-accent-ring);
-  border-radius: var(--r-sm);
-  padding: 0 4px;
-  flex: 0 0 auto;
+.goal-capsule.hidden { display: none; }
+
+/* 文字列：≈2 汉字宽。min-width:0 是 flex 截断生效的前提。 */
+.goal-capsule-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  --goal-text-w: 2em;
 }
-.goal-text { font-size: 12.5px; color: var(--c-text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.goal-done {
-  flex: 0 0 auto;
-  border: none;
+.goal-capsule-text {
+  display: block;
+  width: var(--goal-text-w);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--c-text-1);
+  /* 展开态由 .goal-capsule-editing 放开；此处是收起态的固定密度。 */
+}
+/* 暂停态文字本体是可点控件（点它 = 恢复），复位按钮默认样式。 */
+button.goal-capsule-text {
+  border: 0;
   background: none;
-  color: var(--c-text-3);
-  font-size: 12px;
+  padding: 0;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
-  padding: 0 2px;
 }
-.goal-done:hover { color: var(--c-text-1); }
+
+/* 暂停态：**可见区分** —— 描边换色 + 文字删除线 + 一个**独立角标**（不只靠颜色；
+   全站禁虚线（w847 的机械门禁扫的是**整个 .css 文本**，注释里的英文词同样计数），
+   所以用实线描边换色 + 文字删除线，而不是改成虚线描边）。 */
+.goal-capsule.goal-capsule-paused {
+  border-color: var(--c-text-3);
+  background: var(--c-surface-raised);
+  color: var(--c-text-2);
+}
+.goal-capsule-paused .goal-capsule-text { color: var(--c-text-2); text-decoration: line-through; }
+/* 角标在 2 汉字宽的截断盒**外面**（兄弟节点）——放进盒内会被 overflow:hidden 裁掉。
+   用**文字**「暂停/Paused」而不是图形符号：⏸ 这类字形在正文/等宽字体里会掉成两根竖杠，
+   与右侧的暂停**图标**长得一模一样，等于没提供区分（真机截图实测）。 */
+.goal-capsule-paused-mark {
+  flex: 0 0 auto;
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+  font-size: 10.5px;
+  line-height: 15px;
+  /* 角标**不是**控件：点它不会发生任何事，做成可点形状等于宣告一个空操作。
+     「暂停时点胶囊 = 恢复」的可点目标是文字本体那个 button。 */
+  pointer-events: none;
+}
+
+/* 三个动作按钮：编辑 / 暂停 / 删除。顺序由 DOM 决定（TS 里 append 的次序）。 */
+.goal-capsule-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.goal-act {
+  /* SC 2.5.8：命中区 ≥24×24，视觉仍是 14px 的小图标。 */
+  min-inline-size: 24px;
+  min-block-size: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--c-text-2);
+  cursor: pointer;
+  padding: 0;
+  transition: background .12s ease, color .12s ease;
+}
+.goal-act:hover { background: var(--c-accent-soft); color: var(--c-text-1); }
+.goal-act:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
+.goal-act-icon { display: block; pointer-events: none; }
+
+/* 编辑展开态：胶囊变成一行输入（**不受 2 汉字宽限制**）。 */
+.goal-capsule-editing {
+  padding: 2px 10px;
+  border-radius: var(--r-md);
+}
+.goal-capsule-input { display: flex; align-items: center; width: min(520px, 70vw); }
+.goal-input {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--c-text-1);
+  font: inherit;
+  line-height: 20px;
+  padding: 0;
+  outline: none;
+}
+.goal-input::placeholder { color: var(--c-text-3); }
+
+/* 动效（hover 底色 / 焦点）遵守 tokens.css 的全局 prefers-reduced-motion；本段不
+   自查 matchMedia（那会让两处口径漂移）。 */
 
 /* ---- statusline 目标徽标（#slGoal；有目标才显示） ---- */
 .sl-goal {

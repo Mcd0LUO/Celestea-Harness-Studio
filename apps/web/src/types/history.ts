@@ -24,7 +24,10 @@ export interface HistoryMsg {
    * 'inbox'（worker 回执 / 系统注入）；
    * W784 提问行：'question'（模型问了）/ 'answer'（作答或超时结算）。
    */
-  kind?: 'call' | 'result' | 'steering' | 'queued' | 'inbox' | 'question' | 'answer' | 'skill' | 'memory' | 'receipt' | 'compact';
+  /** W9347：`goal` = 持久目标的常驻行 / 变更通知（origin='goal' 投影来的 kind，
+     见 packages/session/src/messages.ts 的 ORIGIN_LABEL）。少它不会报错（?、取自 JSON），
+     但它是这份联合的**唯一真源** —— 别让它与后端的 origin 集合漂移。 */
+  kind?: 'call' | 'result' | 'steering' | 'queued' | 'inbox' | 'question' | 'answer' | 'skill' | 'memory' | 'receipt' | 'compact' | 'goal';
   /**
    * W805：该 user 消息携带的图片引用（元数据）。缺省 = 无附件，字段被省略；
    * P0 无字节回读端点，历史回放只能渲染元数据（设计 §7.4 已知限制）。

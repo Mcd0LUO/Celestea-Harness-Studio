@@ -76,7 +76,7 @@ const LEGACY_MAGIC: { file: string; value: number; sel: string; why: string }[] 
   { file: "attachments.css", value: 4000, sel: ".attach-lightbox", why: "图片放大灯箱。语义上是模态层，但值 4000 已长期盖过一切；收敛会改变它与 .ctx-scrim(90) 的相对序，本轮不动。" },
   { file: "caret.css", value: 0, sel: ".caret-mirror", why: "假光标镜像：层叠上下文**内部**的绘制序，从不与浮层比大小。" },
   { file: "commands.css", value: 40, sel: ".cmd-popup", why: "斜杠命令补全框：锚在输入框上沿的浮层，理想是 --z-float(20)。收敛会把它降到 .preview-host(35) 之下，而两者可能同屏，无法用本次路径证明无回归。" },
-  { file: "commands.css", value: 25, sel: ".goal-bar", why: "目标条：常驻条，理想是 --z-dock(10)；同上，本轮不挪实际位置。" },
+  { file: "commands.css", value: 26, sel: ".goal-capsule", why: "目标胶囊（W9347 取代 .goal-bar）：贴在消息流上方的浮层，须高于消息/rail 内部层叠（.taskpanel 3/.sess-pane 1）与 .ws-strip 25，但远低于设置页(70)。理想是 --z-dock(10)，本轮不挪实际位置。" },
   { file: "components.css", value: 1, sel: ".rendered .csv-table thead th", why: "sticky 表头：表格滚动容器内部的绘制序，从不与浮层比大小。" },
   { file: "components.css", value: 60, sel: ".img-zoom", why: "图片灯箱：inset:0 铺满视口且盖住侧栏设置入口 ⇒ 与设置页不可能同时可操作（真机确认），改值不可观测。" },
   { file: "components.css", value: 95, sel: ".switch-progress", why: "会话切换顶部细条：非交互（pointer-events:none），盖住谁都不影响可点性。理想是 --z-progress；本轮不挪。" },

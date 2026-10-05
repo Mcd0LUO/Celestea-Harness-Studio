@@ -97,6 +97,11 @@ function inboxKind(kind: string): { title: string; collapsed: boolean } | undefi
   if (kind === 'receipt') return { title: t('chat.inbox.receipt'), collapsed: false };
   if (kind === 'steering') return { title: t('chat.user.steering'), collapsed: false };
   if (kind === 'compact') return { title: t('chat.inbox.compact'), collapsed: false };
+  // W9347：目标常驻行（`[目标] …`）与目标变更通知（`[目标] 已更新：…`）都以
+  // origin=goal 注入。**必须**显示成带「目标」标签的注入块 —— 它们是系统注入，
+  // 不是用户说的话；渲染成用户气泡会让用户以为是自己输入的。
+  // 默认展开：它们是**给人看的一次性事件**（与 receipt/compact 同族，不是每轮背景）。
+  if (kind === 'goal') return { title: t('chat.inbox.goal'), collapsed: false };
   return undefined;
 }
 
