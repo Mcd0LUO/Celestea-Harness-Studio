@@ -230,7 +230,7 @@
             "name": "tools",
             "type": "array<{name:string,description:string}>",
             "required": false,
-            "note": "schemas() of the queried session's generation; sorted by name; up to 23 tools in standard mode (read_image is mounted only when the session has an attachment store), the 17 execution-mode names in execution mode"
+            "note": "schemas() of the queried session's generation; sorted by name; up to 27 tools in standard mode (read_image is mounted only when the session has an attachment store; the four read-only desktop_* tools only when the host is win32 and a built helper exists), the 17 execution-mode names in execution mode"
           }
         ]
       },

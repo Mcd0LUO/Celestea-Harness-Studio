@@ -111,6 +111,18 @@ export const BUILTIN_MOUNTS: readonly MountRow[] = [
     note: "swarmPlugin(opts): opts.name defaults the mount name; it registers agent_swarm AND provides the roster.",
   },
   {
+    kind: "plugin",
+    file: "packages/desktop/src/plugin.ts",
+    layer: "L1",
+    nameArg: "name",
+    defaultName: "celestea.desktop.Desktop",
+    viaDefinePlugin: true,
+    // The helper client token lives in client.ts (the module that OWNS the client);
+    // plugin.ts re-exports it the way swarm re-exports SWARM_TOOL_NAME.
+    provides: ["DESKTOP_CLIENT_SERVICE"],
+    note: "desktopPlugin(opts): opts.name defaults the mount name; it registers the four M1 read-only tools AND provides the helper client (one process per engine generation, started lazily on the first tool call).",
+  },
+  {
     kind: "provide",
     file: "packages/swarm/src/executor.ts",
     layer: "L1",
@@ -197,6 +209,7 @@ export const PACKAGE_LAYER: Readonly<Record<string, MountLayer>> = {
   "packages/tools": "L1",
   "packages/workers": "L1",
   "packages/swarm": "L1",
+  "packages/desktop": "L1",
   "packages/runtime": "L2",
   "apps/studio": "L3",
 };

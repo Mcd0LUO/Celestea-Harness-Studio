@@ -117,6 +117,12 @@ importers:
 
   packages/core: {}
 
+  packages/desktop:
+    dependencies:
+      '@celestea/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/llm:
     dependencies:
       '@celestea/core':
@@ -131,6 +137,9 @@ importers:
       '@celestea/core':
         specifier: workspace:*
         version: link:../core
+      '@celestea/desktop':
+        specifier: workspace:*
+        version: link:../desktop
       '@celestea/session':
         specifier: workspace:*
         version: link:../session

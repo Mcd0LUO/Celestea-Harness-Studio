@@ -83,6 +83,7 @@ export interface PluginCatalogRow {
  *   - `studio.engine.tools`          —— `engineTools()` 里 `definePlugin` 的字面名
  *   - `celestea.runtime.workers`     —— `worker-wiring.ts` 的 `DEFAULT_WORKER_PLUGIN`
  *   - `celestea.runtime.swarm`       —— `swarm-wiring.ts` 的 `DEFAULT_SWARM_PLUGIN`
+ *   - `celestea.runtime.desktop`     —— `desktop-wiring.ts` 的 `DEFAULT_DESKTOP_PLUGIN`
  *   - `celestea.runtime.watchdog`    —— `WATCHDOG_PLUGIN_NAME`
  *
  * `TOOLS_PLUGIN_NAME`（`packages/tools` 的 `toolsPlugin()`）**不是**这里的一员：
@@ -98,6 +99,14 @@ export const ENGINE_SWARM_PLUGIN = "celestea.runtime.swarm";
 /** W9331: the degenerate-repetition guard, mounted by `compose()`. */
 export const ENGINE_REPEAT_GUARD_PLUGIN = "celestea.runtime.repeat-guard";
 export const ENGINE_WATCHDOG_PLUGIN = WATCHDOG_PLUGIN_NAME;
+/**
+ * M1 桌面只读面（computer-use 规划 D4/D7）。与 swarm 相反：**默认开**（D7 用户裁决）。
+ *
+ * 默认开只决定「工具面是否注册可见」——helper 未构建 / 非 win32 时
+ * `compose()` 的 4e 静态检查不通过，整个插件不挂、四个 `desktop_*` 名字一个都不出现
+ * （规划 §5「必然失败的工具不如不挂」）。所以「默认开」与「没构建就没有工具」不矛盾。
+ */
+export const ENGINE_DESKTOP_PLUGIN = "celestea.runtime.desktop";
 
 export const ENGINE_PLUGIN_NAMES: readonly string[] = [
   "studio.engine.llm",
@@ -106,6 +115,7 @@ export const ENGINE_PLUGIN_NAMES: readonly string[] = [
   ENGINE_WORKERS_PLUGIN,
   ENGINE_SWARM_PLUGIN,
   ENGINE_REPEAT_GUARD_PLUGIN,
+  ENGINE_DESKTOP_PLUGIN,
   ENGINE_WATCHDOG_PLUGIN,
 ];
 
@@ -125,6 +135,8 @@ export interface EnginePluginSwitches {
   swarm: boolean;
   /** `compose({ repeatGuard: false })` —— W9331 的重复崩塌守卫。 */
   repeatGuard: boolean;
+  /** `compose({ desktop: false })` —— M1 的四个只读桌面工具。 */
+  desktop: boolean;
   /** `compose({ watchdog: false })`。 */
   watchdog: boolean;
 }
@@ -151,6 +163,7 @@ export function enginePluginSwitchesOf(disabled: readonly string[]): EnginePlugi
     workers: off.has(ENGINE_WORKERS_PLUGIN),
     swarm: off.has(ENGINE_SWARM_PLUGIN),
     repeatGuard: off.has(ENGINE_REPEAT_GUARD_PLUGIN),
+    desktop: off.has(ENGINE_DESKTOP_PLUGIN),
     watchdog: off.has(ENGINE_WATCHDOG_PLUGIN),
   };
 }
@@ -231,6 +244,11 @@ const ENGINE_POLICY: Readonly<Record<string, { disable: PluginDisable; reason?: 
   // 支持）。它同样可以关，所以走同一条热插拔机制——只是默认方向相反，这正是
   // `defaultEnabled` 存在的意义：两个方向共用一套表示。
   [ENGINE_REPEAT_GUARD_PLUGIN]: { disable: "optional" },
+  // 桌面只读面（computer-use M1）：**默认开**，所以不写 `defaultEnabled: false`——
+  // 规划 D7 是用户裁决，与调度方推荐相反。写工具的授权完全走闸门，不靠这一行的默认位；
+  // 而 helper 没构建时 4e 静态检查会让整个插件缺席，面板上关掉/打开都不会让四个必然
+  // 失败的名字出现在提示词里。
+  [ENGINE_DESKTOP_PLUGIN]: { disable: "optional" },
   [ENGINE_WATCHDOG_PLUGIN]: { disable: "optional" },
 };
 

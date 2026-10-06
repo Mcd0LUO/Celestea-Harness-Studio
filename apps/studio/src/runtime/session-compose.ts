@@ -338,7 +338,7 @@ export class SessionComposer {
     // 当前的开关。`compose()` 是「一代」的构造点，所以「开关变更在下一 turn 边界
     // 生效」不需要任何额外机制——`invalidateAll()` 把实例标脏，下一次 `ensure()`
     // 走到这里，读到的就是新值。
-    const switches = this.opts.pluginSwitches?.() ?? { tools: false, workers: false, swarm: false, watchdog: false, repeatGuard: false };
+    const switches = this.opts.pluginSwitches?.() ?? { tools: false, workers: false, swarm: false, watchdog: false, repeatGuard: false, desktop: false };
     // W804 (multimodal P0 section 5): the session's attachment store. It lives
     // INSIDE the session directory, so trash/archive/delete carry it along. The
     // DETACHED generation (dir === null, the face /api/tools and the default
@@ -512,6 +512,16 @@ export class SessionComposer {
       // without a loopFactory (a member turn cannot be built), so omitting this
       // line silently produced "unknown tool: agent_swarm" in production.
       swarm: switches.swarm ? false : this.swarmWiring(),
+      // computer-use M1: the four read-only desktop tools. Same shape as the swarm
+      // line above — the switch turns the plugin off and everything else is the
+      // wiring's own business. `attachments` is the session's own store, so a
+      // screenshot rides the SAME W804 chain read_image and the browser tools use
+      // (a screenshot in a second store would be invisible to the projection).
+      // Whether THIS machine can run it is not decided here: ensureDesktopWiring
+      // does a static win32 + built-helper check at mount time and mounts nothing
+      // when it fails, so a host without the build never advertises four tools
+      // that would always fail.
+      desktop: switches.desktop ? false : { attachments },
       // W9331: `null` = the guard plugin is NOT mounted (the host switched it
       // off, or the environment did), which is what makes `repeatGuard` in the
       // loop factory above genuinely absent rather than defaulted-on.

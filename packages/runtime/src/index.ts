@@ -29,6 +29,8 @@
  *   inbox-checkpoint.ts W787: queue + delivered ids -> checkpoint.json (§1.3 P1)
  *   session-registry.ts session id -> independent Runtime        (W513)
  *   worker-wiring.ts   worker driver seams + host receipt drain  (compose.rs:148-193)
+ *   desktop-wiring.ts  computer-use M1: the win32 + built-helper STATIC check and
+ *                       the read-only desktop tools wiring (compose step 4e)
  *   watchdog-mount.ts  W740: mount the liveness watchdog (workers/watchdog.ts)
  *   repeat-guard-mount.ts W9331: mount the degenerate-repetition guard
  *                      (upstream dsh-guard-repeat-output 2.1.6, MIT)
@@ -69,6 +71,12 @@ export * from "./inbox-checkpoint.js";
 export * from "./session-registry.js";
 export * from "./recovery.js";
 export * from "./worker-wiring.js";
+// computer-use M1: the desktop static check + wiring. NOT `export *` from the
+// package — the desktop package’s own surface stays owned by @celestea/desktop, and
+// what a host needs from here is the CHECK (so a host can explain why nothing
+// mounted) and the wiring entry point.
+export { checkDesktopMount, ensureDesktopWiring, defaultHelperPath } from "./desktop-wiring.js";
+export type { DesktopHost, DesktopMountCheck, DesktopMountCheckOptions, DesktopWiring } from "./desktop-wiring.js";
 export * from "./watchdog-mount.js";
 export * from "./repeat-guard-mount.js";
 export * from "./repetition-cleanup.js";

@@ -19,8 +19,9 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
+import { checkDesktopMount } from "@celestea/runtime";
 import { pluginNames } from "@celestea/core";
-import { ENGINE_PLUGIN_NAMES, pluginCatalog } from "./plugin-catalog.js";
+import { ENGINE_DESKTOP_PLUGIN, ENGINE_PLUGIN_NAMES, pluginCatalog } from "./plugin-catalog.js";
 import { FIXED_NOW, getJson, jsonRequest, makeHarness, type StudioHarness } from "./harness.test-util.js";
 import { hostPlugins, storePlugins } from "./plugins.js";
 import { engineOf, makeEngineHarness } from "./runtime/test-util.js";
@@ -35,6 +36,20 @@ function open(): StudioHarness {
   const h = makeHarness({ session: { name: "s1", log: "" } });
   harnesses.push(h);
   return h;
+}
+
+/**
+ * Is `compose()`'s 4e step going to mount the desktop plugin ON THIS MACHINE?
+ *
+ * It calls the REAL `checkDesktopMount` (re-exported by @celestea/runtime) rather
+ * than restating its two conditions: a second copy of "win32 AND a built helper"
+ * here would be a second source of truth for the same rule, and the day one side
+ * changed the anti-drift assertion below would keep passing on a wrong
+ * expectation. The platform is left at its default (`process.platform`, read
+ * inside the wiring) because the test asserts what THIS machine really mounts.
+ */
+function desktopMountableHere(): boolean {
+  return checkDesktopMount().ok;
 }
 
 interface PluginRow {
@@ -109,13 +124,22 @@ describe("W9322 GET /api/plugins · engine layer", () => {
     // panel must show it so the user can turn it ON), so the anti-drift assertion
     // is "mounted === the catalog MINUS the default-off rows", which still goes
     // red the day a name is added, removed or renamed on either side.
+    //
+    // computer-use M1 adds a SECOND legitimate reason for a catalog row to be
+    // absent from the mount record: `celestea.runtime.desktop` is default ON (D7)
+    // but compose()'s 4e step mounts it only when a STATIC check passes — win32
+    // AND a built helper binary (packages/runtime/src/desktop-wiring.ts). On a
+    // machine that has not run `node scripts/build-desktop-helper.mjs`, the
+    // desktop plugin genuinely is not mounted and the four `desktop_*` tools
+    // genuinely are not in the registry. That is the designed state, not drift:
+    // mounting them anyway would advertise four tools that always fail.
     const expectedMounted = ENGINE_PLUGIN_NAMES.filter(
       (name) => pluginCatalog([]).find((row) => row.name === name)?.defaultEnabled !== false,
-    );
+    ).filter((name) => name !== ENGINE_DESKTOP_PLUGIN || desktopMountableHere());
     expect(mounted).toEqual(expectedMounted);
     // ...and the default-off row is genuinely the ONLY difference, asserted
     // explicitly so this test cannot silently stop testing the default.
-    expect(ENGINE_PLUGIN_NAMES.filter((name) => !expectedMounted.includes(name))).toEqual(["celestea.runtime.swarm"]);
+    expect(ENGINE_PLUGIN_NAMES.filter((name) => !expectedMounted.includes(name)).filter((name) => name !== ENGINE_DESKTOP_PLUGIN)).toEqual(["celestea.runtime.swarm"]);
     expect(mounted).not.toContain("celestea.runtime.swarm");
 
     const engineRows = (await rowsOf(h)).filter((row) => row.layer === "engine");
@@ -130,6 +154,7 @@ describe("W9322 GET /api/plugins · engine layer", () => {
       "celestea.runtime.workers",
       "celestea.runtime.swarm",
       "celestea.runtime.repeat-guard",
+      "celestea.runtime.desktop",
       "celestea.runtime.watchdog",
     ]);
   });

@@ -22,6 +22,11 @@
  *   4d. repetition guard     W9331: mount the degenerate-repetition guard so a
  *                            host cannot silently ship without it. Default ON, and
  *                            still switchable through the hot-swap catalog;
+ *   4e. desktop wiring       mount the desktop read-only tools AFTER the tools
+ *                            plugin, so the four `desktop_*` names land in the tool
+ *                            registry. Mount time is a STATIC check only (win32 +
+ *                            a built helper) and spawns nothing; the helper starts
+ *                            lazily on the first tool call (M1, 规划 §5);
  *   5. seam resolution       session (required) + llm / tools / agentLoop
  *                            (optional, and `null` when no plugin provides them);
  *   6. driver attach         hand Llm/ToolRegistry/AgentLoop to the worker
@@ -75,6 +80,7 @@ import { createUsageTracker, type UsageAccounting } from "./usage.js";
 import type { InjectionLane, PendingInjection } from "@celestea/core";
 import { createSessionInbox, type SessionInbox } from "./inbox.js";
 import { checkpointInboxSink } from "./inbox-checkpoint.js";
+import { ensureDesktopWiring, type DesktopHost, type DesktopWiring } from "./desktop-wiring.js";
 import { ensureSwarmWiring, type SwarmHost, type SwarmWiring } from "./swarm-wiring.js";
 import { ensureWorkerWiring, type WorkerHost, type WorkerWiring } from "./worker-wiring.js";
 import { checkpointStoreOf } from "@celestea/session";
@@ -141,6 +147,20 @@ export interface ComposeConfig {
    * the host passes a `loopFactory` — a member turn cannot be built without one).
    */
   swarm?: SwarmWiring | false;
+  /**
+   * Desktop read-only tools (`desktop_list_windows` / `desktop_get_window` /
+   * `desktop_list_apps` / `desktop_get_window_state`, M1); `false` disables them.
+   *
+   * `desktop: {}` means "mount them if this host can actually run them" — the
+   * mount is a STATIC check (win32 + a built helper, 规划 §5) and nothing is
+   * spawned until the first tool call. A host that has not built the helper gets
+   * NO desktop names at all rather than four that always fail.
+   *
+   * Default OFF here (absent = not mounted), exactly like `swarm`: the host
+   * opts in by passing the wiring, and the hot-swap catalog decides whether a
+   * session is even allowed to.
+   */
+  desktop?: DesktopWiring | false;
   /**
    * W9331: the degenerate-repetition guard (upstream `dsh-guard-repeat-output`
    * 2.1.6, MIT). `false` never mounts it; a partial object overrides the resolved
@@ -261,6 +281,14 @@ export function compose(config: ComposeConfig): Runtime {
     emptyTools || config.swarm === false || config.swarm === undefined
       ? null
       : ensureSwarmWiring(ctx, { ...config.swarm, agentConfig, ...(config.loopFactory === undefined ? {} : { loopFactory: config.loopFactory }), signal: config.swarm.signal ?? (() => swarmSignal.current) });
+  // 4e. desktop wiring: mounted AFTER the tools plugin (its tools register into the
+  // tool registry) and it spawns nothing here — the helper is lazy-started by the
+  // first tool call. `emptyTools` suppresses it for the same reason it suppresses
+  // workers/swarm: 「这一代没有工具面」是一个整体语义。
+  const desktopHost =
+    emptyTools || config.desktop === false || config.desktop === undefined
+      ? null
+      : ensureDesktopWiring(ctx, config.desktop);
   const inbox = config.inbox ?? createSessionInbox();
   // E §1.3 P1 ①: the lanes + the accepted-id ledger live in this session's
   // checkpoint sidecar when the log is a checkpointed persistent one; an
@@ -331,8 +359,11 @@ export function compose(config: ComposeConfig): Runtime {
     llm,
     tools,
     agentLoop,
-    plugins: pluginNamesOf(plugins, workerHost, mounted, swarmHost, guardSettings !== null),
-    shutdownHooks: [...(config.shutdownHooks ?? []), stopWatchdog(mounted)],
+    plugins: pluginNamesOf(plugins, workerHost, mounted, swarmHost, guardSettings !== null, desktopHost),
+    // 规划 §5 的回收：helper 进程挂在引擎这一代的生命周期上，所以它随 shutdownHooks
+    // 一起死。（core 的 Plugin 没有 unmount 原语，Context 也没有 effect，所以这里是
+    // 本仓唯一真实的回收 seam，而不是规划 §5 字面写的 ctx.effect。）
+    shutdownHooks: [...(config.shutdownHooks ?? []), stopWatchdog(mounted), ...(desktopHost === null ? [] : [desktopStopHook(desktopHost)])],
     // W1900: the Runtime writes the single water-level reader here.
     usagePlane,
   };
@@ -358,13 +389,24 @@ export function pluginNamesOf(
   mounted: MountedWatchdog | null = null,
   swarmHost: SwarmHost | null = null,
   repeatGuardMounted: boolean = false,
+  desktopHost: DesktopHost | null = null,
 ): string[] {
   const names = pluginNames(plugins);
   if (workerHost !== null && workerHost.mountedPlugin !== null) names.push(workerHost.mountedPlugin);
   if (swarmHost !== null && swarmHost.mountedPlugin !== null) names.push(swarmHost.mountedPlugin);
   if (repeatGuardMounted) names.push(REPEAT_GUARD_PLUGIN_NAME);
+  // 4e: the desktop plugin is named ONLY when it really mounted. A host that has
+  // not built the helper genuinely has no such plugin, and the hot-swap inventory
+  // (apps/studio/src/plugins-inventory.test.ts) compares this list against the
+  // catalog with exactly that rule.
+  if (desktopHost !== null) names.push(desktopHost.mountedPlugin);
   if (workerHost !== null && mounted !== null) names.push(WATCHDOG_PLUGIN_NAME);
   return names;
+}
+
+/** 杀 helper 的 shutdown hook（幂等：stop() 本身可重复调用）。 */
+function desktopStopHook(host: DesktopHost): ShutdownHook {
+  return () => host.client.stop();
 }
 
 /**
