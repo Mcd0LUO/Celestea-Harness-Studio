@@ -23,7 +23,15 @@ interface Fake { spawn: DesktopSpawner; writes: string[]; metas: Array<Record<st
  * 一个逐条应答的假 helper。它**按真实协议**区分 ping / call，并原样回 official_ok 信封——
  * 一个「什么都答成功」的 stub 会把「根本没接通」伪装成「接通了」。
  */
-function fakeHelper(opts: { answer: (name: string, args: Record<string, unknown>) => Answer; handshakeFails?: boolean; onSpawn?: (n: number) => void }): Fake {
+function fakeHelper(opts: {
+  answer: (name: string, args: Record<string, unknown>) => Answer;
+  handshakeFails?: boolean;
+  onSpawn?: (n: number) => void;
+  /** 握手回答前要等的门：制造「spawned but not handshaked」窗口。 */
+  beforePing?: () => Promise<void> | void;
+  /** 业务回答改成按**原始字节**投递（测 UTF-8 跨块），带一个切分点。 */
+  splitReply?: { bytes: Buffer; splitAt: number; rawRequestId: number };
+}): Fake {
   const writes: string[] = [];
   const metas: Array<Record<string, unknown> | undefined> = [];
   let spawns = 0;
@@ -56,22 +64,35 @@ function fakeHelper(opts: { answer: (name: string, args: Record<string, unknown>
       kill: () => true,
     };
     const emit = (key: string, arg: unknown) => { for (const fn of bus.get(key) ?? []) fn(arg); };
+    const send = (reply: unknown) => { emit("o:data", JSON.stringify(reply) + "\n"); };
     const answer = (line: string) => {
       const req = JSON.parse(line) as { id: number; method: string; params: { name?: string; arguments?: Record<string, unknown> }; meta?: Record<string, unknown> };
       metas.push(req.meta);
-      let reply: unknown;
       if (req.method === "ping") {
-        reply = opts.handshakeFails
+        const reply = opts.handshakeFails
           ? { id: req.id, ok: false, error: "unknown argument: --boom" }
           : { id: req.id, ok: true, result: { version: "0.1.0", platform: "win32", features: ["uia", "enum-windows"] } };
-      } else {
-        const name = req.params.name ?? "";
-        const got = opts.answer(name, req.params.arguments ?? {});
-        reply = got.ok
-          ? { id: req.id, ok: true, result: { ok: true, name, value: got.value, images: got.images ?? [] } }
-          : { id: req.id, ok: false, error: got.error };
+        // 握手门：先返回一个 pending 的 Promise，让「spawned but not handshaked」
+        // 窗口真实存在（响应推迟到放行之后），窗口内的并发调用才是被测对象。
+        const gate = opts.beforePing?.();
+        if (gate === undefined) { send(reply); return; }
+        void Promise.resolve(gate).then(() => send(reply));
+        return;
       }
-      emit("o:data", JSON.stringify(reply) + "\n");
+      if (opts.splitReply !== undefined && req.id === opts.splitReply.rawRequestId) {
+        // 按原始字节分两段投递，切点落在某个多字节字符**中间**。
+        const { bytes, splitAt } = opts.splitReply;
+        emit("o:data", bytes.subarray(0, splitAt));
+        emit("o:data", bytes.subarray(splitAt));
+        return;
+      }
+      const name = req.params.name ?? "";
+      const got = opts.answer(name, req.params.arguments ?? {});
+      send(
+        got.ok
+          ? { id: req.id, ok: true, result: { ok: true, name, value: got.value, images: got.images ?? [] } }
+          : { id: req.id, ok: false, error: got.error },
+      );
     };
     return child;
   };
@@ -223,6 +244,61 @@ describe("desktop client · lazy start, one restart, then a structured error", (
     const c = client(fake, "darwin");
     await expect(c.callTool("list_windows", {})).rejects.toThrow(/win32/);
     expect(fake.spawnCount()).toBe(0);
+  });
+});
+
+describe("desktop client · concurrency during the handshake window", () => {
+  it("makes every concurrent caller await ONE starting promise, and writes no business request before the handshake", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const seen: string[] = [];
+    const fake = fakeHelper({
+      answer: (name) => {
+        seen.push(name);
+        return name === "list_windows" ? { ok: true, value: [{ app: "a.exe", id: 1 }] } : { ok: true, value: [] };
+      },
+      beforePing: () => gate,
+    });
+    const c = client(fake);
+    // 三个并发调用：两个业务 + 一个握手。握手单独持有（不塞进 Promise.all 的数组），
+    // 这样它的返回类型不会被数组的元素类型并成 `HelperCallResult`。
+    const handshake = c.handshake();
+    const calls = [c.callTool("list_windows", {}), c.callTool("list_apps", {})];
+    // 窗口期内：只 spawn 了一次（并发调用共用同一次启动），且除 ping 外**零**业务写入 ——
+    // 这正是旧实现（先判 child）会把业务请求写进未握手 helper 的地方。
+    expect(fake.spawnCount()).toBe(1);
+    expect(fake.writes.map((line) => JSON.parse(line).method)).toEqual(["ping"]);
+    release();
+    const [first, second] = await Promise.all(calls);
+    const hs = await handshake;
+    expect(seen).toEqual(["list_windows", "list_apps"]);
+    expect((first as { value: unknown }).value).toEqual([{ app: "a.exe", id: 1 }]);
+    expect((second as { value: unknown }).value).toEqual([]);
+    // 并发的 handshake() 拿到的是真信封，而不是一个伪 handshake_failed。
+    expect(hs.platform).toBe("win32");
+    expect(hs.version).toBe("0.1.0");
+    // 单例：三个并发调用共用一个 helper 进程。
+    expect(fake.spawnCount()).toBe(1);
+  });
+});
+
+describe("desktop client · a multi-byte character split across stdio chunks", () => {
+  it("keeps a Chinese window title intact when the split lands mid-character", async () => {
+    const TITLE = "万界放映厅：跨时代聊天室 — 正在输入… 🎬";
+    // 请求 id 1 = 握手、2 = 第一个业务调用（client 从 1 开始发）。
+    const reply = Buffer.from(JSON.stringify({ id: 2, ok: true, result: { ok: true, name: "list_windows", value: [{ app: "notepad.exe", id: 5, title: TITLE }], images: [] } }) + "\n", "utf8");
+    // 切点落在 TITLE 第一个多字节字符（「万」= E4 B8 87）的第 1 个字节之后。
+    const cut = reply.indexOf(Buffer.from(TITLE.slice(0, 1), "utf8").subarray(0, 1)) + 1;
+    expect(cut).toBeGreaterThan(0);
+    const fake = fakeHelper({
+      answer: () => ({ ok: true, value: [] }),
+      splitReply: { bytes: reply, splitAt: cut, rawRequestId: 2 },
+    });
+    const c = client(fake);
+    const res = (await c.callTool("list_windows", {})) as { value: Array<{ title?: string }> };
+    expect(res.value[0]?.title).toBe(TITLE);
+    // 逐块独立 toString 会在这里产出 U+FFFD；StringDecoder 不会。
+    expect(String(res.value[0]?.title)).not.toContain("\uFFFD");
   });
 });
 

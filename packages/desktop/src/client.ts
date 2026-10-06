@@ -26,6 +26,7 @@
  */
 
 import { spawn as nodeSpawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import {
   DESKTOP_CALL_TIMEOUT_MS,
   DESKTOP_HANDSHAKE_TIMEOUT_MS,
@@ -78,6 +79,9 @@ export class DesktopHelperClient {
   /** 正在进行的 spawn+握手；并发调用共用同一次启动（这是「单例」的具体含义）。 */
   private starting: Promise<void> | null = null;
   private buffer = "";
+  /** Per-connection UTF-8 decoders (split multi-byte characters across chunks). */
+  private readonly stdoutDecoder = new StringDecoder("utf8");
+  private readonly stderrDecoder = new StringDecoder("utf8");
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
   /** 上一次连续失败的性质；成功即清零。null = 健康。 */
@@ -210,8 +214,14 @@ export class DesktopHelperClient {
   }
 
   private async ensureStarted(): Promise<void> {
-    if (this.child !== null) return;
+    // `starting` FIRST, then `child`. The order is load-bearing: start() assigns
+    // `this.child` the moment the process is spawned but keeps `this.starting` set
+    // until the ping handshake resolves, so checking `child` first would let a
+    // second caller sail through a window in which nothing is ready — its
+    // handshake() would fail with a phantom handshake_failed, and its callTool
+    // would write a business request into a helper that has not said hello yet.
     if (this.starting !== null) return this.starting;
+    if (this.child !== null) return;
     this.starting = this.start()
       .catch((e: unknown) => {
         // 启动失败不留半开的 child：下一次调用要能干净地重来。
@@ -252,7 +262,8 @@ export class DesktopHelperClient {
     });
     child.stdout?.on("data", (chunk: unknown) => this.onStdout(chunk));
     child.stderr?.on("data", (chunk: unknown) => {
-      const text = asText(chunk);
+      // Same reasoning as stdout: helper stderr carries window/process names too.
+      const text = this.stderrDecoder.write(asBuffer(chunk));
       if (text.trim() !== "") this.note(`[celestea-desktop] helper stderr: ${text}`);
     });
     // 握手走 ping：它刻意绕开 turn 中断 / 桌面锁 / 托管策略闸门（main.rs 的 ping
@@ -310,7 +321,13 @@ export class DesktopHelperClient {
   }
 
   private onStdout(chunk: unknown): void {
-    this.buffer += asText(chunk);
+    // A StringDecoder, NOT chunk.toString('utf8'): stdio delivers **arbitrary**
+    // byte boundaries, so a multi-byte character (a Chinese window title, an
+    // emoji) can straddle two chunks. Decoding each chunk independently turns
+    // the split character into U+FFFD — a silent corruption of the one field
+    // (titles) a desktop tool exists to report. The decoder holds the partial
+    // tail and prepends it to the next chunk.
+    this.buffer += this.stdoutDecoder.write(asBuffer(chunk));
     let newline = this.buffer.indexOf("\n");
     while (newline >= 0) {
       const line = this.buffer.slice(0, newline).trim();
@@ -386,6 +403,21 @@ function asText(chunk: unknown): string {
   if (typeof chunk === "string") return chunk;
   if (Buffer.isBuffer(chunk)) return chunk.toString("utf8");
   return String(chunk);
+}
+
+/**
+ * The raw bytes of one stdio chunk (what a StringDecoder needs).
+ *
+ * A stdio stream hands over Buffers. A **string** can only appear from a test
+ * fixture or an already-decoded stream; in that case its characters are
+ * re-encoded to UTF-8 so the decoder sees one consistent byte stream (this
+ * also keeps the split-character test honest: a fixture that splits by
+ * character would otherwise be decoded as a string and hide the bug).
+ */
+function asBuffer(chunk: unknown): Buffer {
+  if (Buffer.isBuffer(chunk)) return chunk;
+  if (chunk instanceof Uint8Array) return Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+  return Buffer.from(String(chunk), "utf8");
 }
 
 function readImages(value: unknown): readonly HelperImage[] {
