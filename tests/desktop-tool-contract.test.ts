@@ -110,7 +110,9 @@ describe("contracts/tools.json · desktop write nine (M2)", () => {
   const find = (name: string) => t.tools.find((tool) => tool.name === name);
   const params = (name: string) =>
     find(name)?.parameters as unknown as {
-      properties?: Record<string, { type?: string; enum?: readonly string[]; required?: string[]; additionalProperties?: boolean }>;
+      // M2-B（一行类型修补，M2-A 的 fcbd5fe 引入的类型漏洞）：嵌套 window 对象自己也有
+      // properties，而这个内联类型漏了它 —— 运行时 10/10 全绿，只有 tsc 会红。
+      properties?: Record<string, { type?: string; enum?: readonly string[]; required?: string[]; additionalProperties?: boolean; properties?: Record<string, unknown> }>;
       required?: string[];
       additionalProperties?: boolean;
     };

@@ -214,8 +214,14 @@ export interface DesktopConfirmRequest {
   timeoutMs: number;
 }
 
-/** 人的裁决。`cancelled` 与「拒绝」分开：一个是被拒，一个是被取消。 */
-export type DesktopConfirmOutcome = "approve" | "deny" | "cancelled";
+/**
+ * 人的裁决。
+ *
+ * `cancelled` 与「拒绝」分开（一个是被拒、一个是被取消），`timeout` 又与两者分开：
+ * 传输自己也有一个同长的截止时间（这样 UI 能显示倒计时），它先到时必须如实报告
+ * 「没人答」，而不是把空答案伪装成一次拒绝——那会让审计与模型都读错事实。
+ */
+export type DesktopConfirmOutcome = "approve" | "deny" | "cancelled" | "timeout";
 
 /**
  * 确认通道：把一次请求交给人，等一个裁决。
@@ -227,12 +233,29 @@ export interface DesktopConfirmChannel {
   confirm(request: DesktopConfirmRequest): Promise<DesktopConfirmOutcome>;
 }
 
+/**
+ * 「一个 work 与一个总超时赛跑」这件事的端口（M2-B，W2014 超时原语棘轮）。
+ *
+ * 为什么不直接 import `packages/tools` 的 `bounded`：`packages/desktop` 只依赖 `core`
+ * （ARCHITECTURE §1：L1 包之间不得横向依赖），而那个原语住在 `packages/tools`。直接
+ * import 会在 tsc 与 node 两侧都解析不到（包下没有那条 symlink），还会在依赖图上多出
+ * 一条 L1↔L1 边（要改三处登记 + 评审）。
+ *
+ * 所以这里声明**结构化端口**，形状就是 `bounded` 的 resolve 策略签名；宿主
+ * （apps/studio，本来就依赖 tools）注入真身。于是全仓仍然只有**一处** race
+ * （packages/tools/src/sandbox/async.ts:88），而闸门的超时语义一字未变。
+ *
+ * 它是**必填**的：少了它，闸门就失去「通道不守约也照样 fail-closed」那条兜底，
+ * 而那正是这个端口存在的理由——让「忘了注入」在编译期就红，而不是在慢路径上静默挂死。
+ */
+export type DesktopDeadline = <T, R>(work: Promise<T>, timeoutMs: number, onTimeout: () => R) => Promise<T | R>;
+
 /** 反疲劳限流（照 grants-tokens.ts::GrantRateLimiter 的口径）。 */
 export interface DesktopConfirmLimiter {
   /** 冷却剩余毫秒；0 = 不在冷却。 */
   cooldownRemainingMs(): number;
   /** 记一次裁决。只有**明确拒绝**计入阈值；批准清零；超时/取消不计。 */
-  record(outcome: DesktopConfirmOutcome | "timeout"): void;
+  record(outcome: DesktopConfirmOutcome): void;
 }
 
 export interface DesktopConfirmLimiterOptions {
@@ -282,6 +305,8 @@ export interface DesktopGateOptions {
   grants: DesktopGateGrantSource;
   /** 确认通道；缺席 = 需要确认的调用一律 deny（fail-closed）。 */
   confirm?: DesktopConfirmChannel | null;
+  /** 超时原语（宿主注入 `bounded`；见 [DesktopDeadline]）。**必填**：闸门不自己造 race。 */
+  deadline: DesktopDeadline;
   /** 反疲劳限流器（宿主跨代复用；缺席 = 闸门自建一个）。 */
   limiter?: DesktopConfirmLimiter;
   /** 平台 id，**形参注入**（规划 §7）。只决定应用名/标题比较是否折叠大小写。 */
@@ -351,7 +376,7 @@ export function createDesktopGate(opts: DesktopGateOptions): DesktopGate {
       }
       // (d) 需要人确认的两条理由。
       const reason = confirmReasonOf(method, scope, target, platform);
-      if (reason !== null) return confirmOrDeny(channel, limiter, { method, ...target, reason, timeoutMs });
+      if (reason !== null) return confirmOrDeny(channel, limiter, { method, ...target, reason, timeoutMs }, opts.deadline);
       // (e) 放行，并把目标应用交给 helper。
       return { kind: "allow", approvedApp: target.app };
     },
@@ -363,6 +388,7 @@ async function confirmOrDeny(
   channel: DesktopConfirmChannel | null,
   limiter: DesktopConfirmLimiter,
   request: DesktopConfirmRequest,
+  deadline: DesktopDeadline,
 ): Promise<DesktopGateVerdict> {
   const cooling = limiter.cooldownRemainingMs();
   if (cooling > 0) {
@@ -377,8 +403,9 @@ async function confirmOrDeny(
       `this host has no confirmation channel, so '${request.method}' on '${request.app}' cannot be approved by a human and is refused.`,
     );
   }
-  const outcome = await settle(channel, request);
-  limiter.record(outcome);
+  const outcome = await settle(channel, request, deadline);
+  // 只有**真实裁决**进限流器：通道故障（failed）不是用户的选择，不该影响反疲劳计数。
+  if (outcome !== "failed") limiter.record(outcome);
   if (outcome === "approve") return { kind: "allow", approvedApp: request.app };
   if (outcome === "timeout") {
     return deny(
@@ -410,27 +437,24 @@ async function confirmOrDeny(
  * 双保险的理由：通道自己也会按 `timeoutMs` park（这样 UI 能显示倒计时），但闸门不能
  * 把「一个不守约的通道」当成「一个可以无限等的通道」——超时必须在闸门这一侧也是真的。
  * 通道抛错 = 通道坏了 = fail-closed，与「人拒绝」区分开（不同的 code）。
+ *
+ * W2014：这里的赛跑**不自己写**，交给注入的 [DesktopDeadline]（生产上是 tools 的
+ * `bounded`）—— 全仓只留一处 race。计时器的清理、迟到的响应、以及「截止已到之后
+ * 才落地的 rejection 不许冒成 unhandled rejection」都由那个原语统一处理；闸门只回答
+ * 「超时了算什么」（= `timeout`，然后 fail-closed）。
  */
 async function settle(
   channel: DesktopConfirmChannel,
   request: DesktopConfirmRequest,
-): Promise<DesktopConfirmOutcome | "timeout" | "failed"> {
+  deadline: DesktopDeadline,
+): Promise<DesktopConfirmOutcome | "failed" | "timeout"> {
   const asked = Promise.resolve()
     .then(() => channel.confirm(request))
     .then(
       (value): DesktopConfirmOutcome => value,
       (): "failed" => "failed",
     );
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const deadline = new Promise<"timeout">((resolve) => {
-    timer = setTimeout(() => resolve("timeout"), Math.max(0, request.timeoutMs));
-    timer.unref?.();
-  });
-  try {
-    return await Promise.race([asked, deadline]);
-  } finally {
-    if (timer !== null) clearTimeout(timer);
-  }
+  return deadline(asked, Math.max(0, request.timeoutMs), () => "timeout" as const);
 }
 
 /** 目标应用解析：`window.app` 优先，其次参数自带的 `app`（launch_app 无 window）。 */

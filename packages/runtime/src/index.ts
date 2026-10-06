@@ -71,12 +71,51 @@ export * from "./inbox-checkpoint.js";
 export * from "./session-registry.js";
 export * from "./recovery.js";
 export * from "./worker-wiring.js";
-// computer-use M1: the desktop static check + wiring. NOT `export *` from the
-// package — the desktop package’s own surface stays owned by @celestea/desktop, and
-// what a host needs from here is the CHECK (so a host can explain why nothing
-// mounted) and the wiring entry point.
-export { checkDesktopMount, ensureDesktopWiring, defaultHelperPath } from "./desktop-wiring.js";
-export type { DesktopHost, DesktopMountCheck, DesktopMountCheckOptions, DesktopWiring } from "./desktop-wiring.js";
+// computer-use M1/M2: the desktop static check + wiring, plus (M2) the gate's
+// host-facing surface. NOT `export *` from the package — the desktop package's own
+// surface stays owned by @celestea/desktop, and what a host needs from here is the
+// CHECK (so a host can explain why nothing mounted), the wiring entry point, and
+// the two factories + port types it needs to BUILD a gate (the host is the only
+// layer that holds the session's grants and the way to ask a human, and it does
+// not depend on @celestea/desktop — see desktop-wiring.ts).
+export {
+  checkDesktopMount,
+  ensureDesktopWiring,
+  defaultHelperPath,
+  createDesktopConfirmLimiter,
+  createDesktopGate,
+  denyAllGate,
+  DESKTOP_APP_DENIED_CODE,
+  DESKTOP_APP_UNRESOLVED_CODE,
+  DESKTOP_CAP_NOT_GRANTED_CODE,
+  DESKTOP_CONFIRM_CANCELLED_CODE,
+  DESKTOP_CONFIRM_COOLDOWN_CODE,
+  DESKTOP_CONFIRM_DENIED_CODE,
+  DESKTOP_CONFIRM_FAILED_CODE,
+  DESKTOP_CONFIRM_TIMEOUT_CODE,
+  DESKTOP_CONFIRM_TIMEOUT_MS,
+  DESKTOP_CONFIRM_UNAVAILABLE_CODE,
+  DESKTOP_DENIAL_COOLDOWN_MS,
+  DESKTOP_DENIAL_THRESHOLD,
+} from "./desktop-wiring.js";
+export type {
+  DesktopHost,
+  DesktopMountCheck,
+  DesktopMountCheckOptions,
+  DesktopWiring,
+  DesktopAppAccessList,
+  DesktopAppScope,
+  DesktopConfirmChannel,
+  DesktopConfirmLimiter,
+  DesktopConfirmOutcome,
+  DesktopConfirmReason,
+  DesktopConfirmRequest,
+  DesktopGate,
+  DesktopGateCall,
+  DesktopGateGrant,
+  DesktopGateGrantSource,
+  DesktopGateVerdict,
+} from "./desktop-wiring.js";
 export * from "./watchdog-mount.js";
 export * from "./repeat-guard-mount.js";
 export * from "./repetition-cleanup.js";

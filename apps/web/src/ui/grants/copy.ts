@@ -44,6 +44,10 @@ export function confirmMessageFor(def: CapDef, scope: GrantScope, expiresAt: num
       return t('grants.copy.netHosts', { hosts: listOf(scope.hosts).join(sep()), until });
     case 'tool_extra':
       return t('grants.copy.toolExtra', { tools: listOf(scope.tools).join(sep()), until });
+    case 'desktop':
+      // M2：应用清单的录入与展示在 M2-B2；本轮 scope 恒为空（= 不限制），所以句式里
+      // 没有范围值可填。
+      return t('grants.copy.desktop', { until });
   }
 }
 

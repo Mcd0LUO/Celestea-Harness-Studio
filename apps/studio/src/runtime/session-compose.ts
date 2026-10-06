@@ -55,6 +55,7 @@ import type { EnginePluginSwitches } from "../plugin-catalog.js";
 import type { PendingQuestion, QuestionRegistry } from "../question-registry.js";
 import { questionAnsweredRow, questionAskedRow } from "../question-rows.js";
 import { EMPTY_GRANTS } from "./engine-grants.js";
+import { desktopWiringOf } from "./desktop-gate-host.js";
 import { createEngineLlm, liveEngineLlm } from "./llm-assembly.js";
 import type { FallbackWiring } from "./fallback-host.js";
 import { workerTablePath } from "./worker-table.js";
@@ -521,7 +522,10 @@ export class SessionComposer {
       // does a static win32 + built-helper check at mount time and mounts nothing
       // when it fails, so a host without the build never advertises four tools
       // that would always fail.
-      desktop: switches.desktop ? false : { attachments },
+      // M2：写 9 的分级闸门 + 它的确认传输（全部细节在 desktop-gate-host.ts）。
+      desktop: switches.desktop
+        ? false
+        : desktopWiringOf({ sessionId, grants: read.grants, attachments, registry: this.opts.questionRegistry, publishQuestion: this.opts.publishQuestion, now: this.opts.now }),
       // W9331: `null` = the guard plugin is NOT mounted (the host switched it
       // off, or the environment did), which is what makes `repeatGuard` in the
       // loop factory above genuinely absent rather than defaulted-on.
@@ -617,6 +621,12 @@ export class SessionComposer {
     };
   }
 
+  /**
+   * computer-use M2: the desktop gate of ONE session generation.
+   *
+   * Two things are deliberately NOT decided here:
+   *   · **whether this machine can run desktop tools at all** — that is the mount-time
+   *     static check in `ensureDesktopWiring` (win32 + built helper), and a gate that is
   /**
    * W783: the user-question wiring of ONE session generation, or null when the
    * host mounted no table (the tool is then not offered to the model at all).

@@ -12,7 +12,7 @@ import type { EffectiveGrants, GrantCap, GrantEntry, GrantScope } from '../../ty
 import { t } from '../../i18n';
 
 /** 危险能力（侧栏红色小盾 + 二次确认，设计 §3.1/§3.3；W751 起不再要求逐字确认词）。 */
-export const DANGER_CAPS: ReadonlySet<string> = new Set(['network', 'write_roots', 'unsandboxed']);
+export const DANGER_CAPS: ReadonlySet<string> = new Set(['network', 'write_roots', 'unsandboxed', 'desktop']);
 
 /** 每项能力的用户语言定义（名称 / 一句话影响 / 表单形态）。 */
 export interface CapDef {
@@ -110,6 +110,20 @@ export function caps(): readonly CapDef[] {
       confirmWord: '',
       defaultTtl: 0,
       maxTtl: 900,
+    },
+    {
+      cap: 'desktop',
+      label: t('grants.cap.desktop.label'),
+      impact: t('grants.cap.desktop.impact'),
+      extra: t('grants.cap.desktop.extra'),
+      // M2：本轮先按 `bool` 录入 —— 授权就是「这台机器的鼠标键盘可以被模型动」，
+      // 应用清单留空 = 不限制（规划 §4.3 的默认档）。应用清单的录入框在 M2-B2 单独
+      // 落地（规划 §10.5：先文本框），届时本项改为专用 kind；存量空 scope 的语义不变。
+      kind: 'bool',
+      danger: true,
+      confirmWord: '',
+      defaultTtl: 0,
+      maxTtl: 3600,
     },
   ];
 }
@@ -243,5 +257,6 @@ export function markFromEffective(eff: EffectiveGrants | undefined): GrantMark {
   if (listOf(eff.net_hosts).length) list.push('net_hosts');
   if (listOf(eff.tool_extra).length) list.push('tool_extra');
   if (eff.unsandboxed === true) list.push('unsandboxed');
+  if (eff.desktop === true) list.push('desktop');
   return { count: list.length, danger: list.some((c) => DANGER_CAPS.has(c)), caps: list };
 }

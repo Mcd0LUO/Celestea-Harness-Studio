@@ -60,8 +60,19 @@ const STANDARD_FACE: readonly string[] = [
   "write_file",
 ].sort();
 
-/** `read-only` (W9) = the standard face minus the preset's `toolDeny` (`write_file`). */
-const READ_ONLY_FACE: readonly string[] = STANDARD_FACE.filter((name) => name !== "write_file");
+/**
+ * M2-B · the thirteen `desktop_*` tools are an **optional face** — mounted only when the
+ * host is win32 AND a built helper exists (规划 §5). They stay OUT of STANDARD_FACE above:
+ * that constant is the UNCONDITIONAL face, and folding an optional mount into it would make
+ * "optional" read as "required" on every other host.
+ */
+const DESKTOP_FACE: readonly string[] = ["desktop_activate_window", "desktop_click", "desktop_drag", "desktop_get_window", "desktop_get_window_state", "desktop_launch_app", "desktop_list_apps", "desktop_list_windows", "desktop_press_key", "desktop_scroll", "desktop_secondary_action", "desktop_set_value", "desktop_type_text"];
+
+/** 本机默认面 = 无条件面 + 已挂载的可选面（见 DESKTOP_FACE 的理由）。 */
+const MOUNTED_STANDARD_FACE: readonly string[] = [...STANDARD_FACE, ...DESKTOP_FACE].sort();
+
+/** `read-only` (W9) = the mounted standard face minus the preset's `toolDeny` (`write_file`). */
+const READ_ONLY_FACE: readonly string[] = MOUNTED_STANDARD_FACE.filter((name) => name !== "write_file");
 
 /** The execution-mode face (W791 M7; W884 keeps load_skill; W1900 keeps the compression trio): the mode fold, before any permission. W9331: minus `agent_swarm` (default off). */
 const EXECUTION_FACE: readonly string[] = ["browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"].sort();
@@ -111,7 +122,7 @@ describe("W857 · the permission baseline reaches the reported tool face", () =>
     const adapter = engineOf(h);
 
     // Baseline: no permission.json yet -> the full standard face, name for name.
-    expect(adapterFace(adapter, READ_ONLY_SESSION)).toEqual(STANDARD_FACE);
+    expect(adapterFace(adapter, READ_ONLY_SESSION)).toEqual(MOUNTED_STANDARD_FACE);
 
     writePermission(h, "ro", "read-only");
     // The regression: before W857 this answered the 13-name standard face.
@@ -120,11 +131,11 @@ describe("W857 · the permission baseline reaches the reported tool face", () =>
 
     // The preset is read per call — no recompose, no re-activate.
     writePermission(h, "ro", "full-access");
-    expect(adapterFace(adapter, READ_ONLY_SESSION)).toEqual(STANDARD_FACE);
+    expect(adapterFace(adapter, READ_ONLY_SESSION)).toEqual(MOUNTED_STANDARD_FACE);
 
     // Deleting the file resolves to the default (full-access) again (W9 order).
     rmSync(join(h.workspace, "ro", "permission.json"));
-    expect(adapterFace(adapter, READ_ONLY_SESSION)).toEqual(STANDARD_FACE);
+    expect(adapterFace(adapter, READ_ONLY_SESSION)).toEqual(MOUNTED_STANDARD_FACE);
   });
 
   it("keeps the deny per session and agrees with the composed instance and HTTP", async () => {
@@ -133,7 +144,7 @@ describe("W857 · the permission baseline reaches the reported tool face", () =>
     writePermission(h, "ro", "read-only");
 
     // A neighbour without the file keeps the full face: nothing leaked.
-    expect(adapterFace(adapter, BYSTANDER_SESSION)).toEqual(STANDARD_FACE);
+    expect(adapterFace(adapter, BYSTANDER_SESSION)).toEqual(MOUNTED_STANDARD_FACE);
 
     // The COMPOSED INSTANCE — the registry the agent loop really dispatches
     // through — already applied toolDeny before W857. The reported face must
@@ -144,7 +155,7 @@ describe("W857 · the permission baseline reaches the reported tool face", () =>
 
     // The exact surface from the bug report.
     expect(await httpFace(h, READ_ONLY_SESSION)).toEqual(composed);
-    expect(await httpFace(h, BYSTANDER_SESSION)).toEqual(STANDARD_FACE);
+    expect(await httpFace(h, BYSTANDER_SESSION)).toEqual(MOUNTED_STANDARD_FACE);
   });
 
   it("keeps the execution fold: toolDeny subtracts, it never restores a folded name", () => {

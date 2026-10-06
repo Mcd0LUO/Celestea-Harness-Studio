@@ -33,9 +33,9 @@ export const MAX_SCOPE_VALUE_CHARS = 200;
 /** Cap on the number of entries per scope list. */
 export const MAX_SCOPE_ENTRIES = 32;
 
-export type GrantCap = "network" | "read_roots" | "write_roots" | "net_hosts" | "tool_extra" | "unsandboxed";
+export type GrantCap = "network" | "read_roots" | "write_roots" | "net_hosts" | "tool_extra" | "unsandboxed" | "desktop";
 
-export const GRANT_CAPS: readonly GrantCap[] = ["network", "read_roots", "write_roots", "net_hosts", "tool_extra", "unsandboxed"];
+export const GRANT_CAPS: readonly GrantCap[] = ["network", "read_roots", "write_roots", "net_hosts", "tool_extra", "unsandboxed", "desktop"];
 
 /**
  * W819-8: caps that are KNOWN and still read back (GRANT_CAPS) but are NOT
@@ -54,13 +54,36 @@ export const MAX_TTL_SEC: Readonly<Record<GrantCap, number>> = {
   net_hosts: 86400,
   tool_extra: 86400,
   unsandboxed: 900,
+  // M2: 与 network 同档 —— 两者都是「会话级的能力位、没有路径范围」，而桌面写工具
+  // 的作用面（用户的鼠标键盘）比一条出网规则更难收回，所以不给它更长的上限。
+  desktop: 3600,
 };
+
+/**
+ * M2 · 一份应用清单（grants `kind:'apps'` 的 allow 或 deny 一侧）。
+ *
+ * `exes` 按**文件名**比较（裸名或全路径都行，见 gate.ts::sameExe），`titles` 与
+ * 窗口标题精确比较。形状参考官方 CU 的 `defaultAppAccess`，但用 exes/titles 而不是
+ * aumids：UIA/EnumWindows 只能稳定拿到进程名 + 窗口标题（规划 §4.3）。
+ */
+export interface GrantAppList {
+  exes?: string[];
+  titles?: string[];
+}
+
+/** 应用级 scope（M2）：`allow` 为空/缺席 = 不限制；deny 永远赢。 */
+export interface GrantAppScope {
+  allow?: GrantAppList;
+  deny?: GrantAppList;
+}
 
 /** Scope of one grant entry: at most one of these lists is meaningful per cap. */
 export interface GrantScope {
   roots?: string[];
   hosts?: string[];
   tools?: string[];
+  /** M2: the `desktop` cap's application scope. */
+  apps?: GrantAppScope;
 }
 
 export interface GrantRecord {
@@ -171,13 +194,36 @@ export function emptyGrantsFile(session: string, now: number): GrantsFile {
 /** Canonical scope JSON — the `scope_hash` input shared with the UI (§6.4). */
 export function canonicalScopeJson(cap: string, scope: GrantScope): string {
   const keys = Object.keys(scope).sort();
-  const out: Record<string, string[]> = {};
+  const out: Record<string, unknown> = {};
   for (const key of keys) {
     const value = scope[key as keyof GrantScope];
     if (value === undefined) continue;
-    out[key] = [...value].sort();
+    out[key] = canonicalScopeValue(value);
   }
   return JSON.stringify({ cap, scope: out });
+}
+
+/**
+ * 一个 scope 值的规范形式。
+ *
+ * 数组（既有的 roots/hosts/tools）**逐字保持旧行为**：取值后 `.sort()` —— 冻结向量
+ * （contracts/scope-hash-vectors.json）与前端 security/scope-hash.ts 钉的就是这个形状。
+ * 嵌套对象（M2 的 apps）递归规范化：键排序、每层的列表排序。
+ *
+ * 为什么必须支持对象：旧实现对任何非数组值都做 `[...value]`，遇到 `apps` 这种对象会
+ * 抛 TypeError，而 `canonicalScopeHash` 是授予令牌的必经之路 —— 一个手写的 apps scope
+ * 就能让整个 POST /grants 500。
+ */
+function canonicalScopeValue(value: unknown): unknown {
+  if (Array.isArray(value)) return [...(value as string[])].sort();
+  if (typeof value === "object" && value !== null) {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = canonicalScopeValue((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  return value;
 }
 
 /** sha256 hex of [canonicalScopeJson] — the `scope_hash` of §6.4. */
@@ -200,28 +246,93 @@ export function validateScope(
   const key = SCOPE_KEY[cap];
   if (key === null) return { ok: true, scope: {} };
   const values = rec[key];
-  if (values === undefined || values === null) return { ok: false, error: `scope.${key} is required` };
-  if (!Array.isArray(values)) return { ok: false, error: `scope.${key} must be an array of strings` };
-  if (values.length === 0) return { ok: false, error: `scope.${key} must not be empty` };
-  if (values.length > MAX_SCOPE_ENTRIES) return { ok: false, error: `scope.${key} holds more than ${MAX_SCOPE_ENTRIES} entries` };
-  const out: string[] = [];
-  for (const value of values) {
-    if (typeof value !== "string" || value.trim() === "") return { ok: false, error: `scope.${key} entries must be non-empty strings` };
-    if (value.length > MAX_SCOPE_VALUE_CHARS) return { ok: false, error: `scope.${key} entry is longer than ${MAX_SCOPE_VALUE_CHARS} chars` };
-    if (looksLikeCredential(value, known)) return { ok: false, error: "value looks like a credential" };
-    out.push(value.trim());
+  if (values === undefined || values === null) {
+    // M2: the `desktop` scope is OPTIONAL. A capability bit with no application
+    // list is the NORMAL state (规划 §4.3: allow 为空 = 不限制), so demanding a
+    // scope here would make the plain "grant desktop" click a 400.
+    if (OPTIONAL_SCOPE_CAPS.includes(cap)) return { ok: true, scope: {} };
+    return { ok: false, error: `scope.${key} is required` };
   }
-  return { ok: true, scope: { [key]: [...new Set(out)] } as GrantScope };
+  if (key === "apps") return validateAppScope(values, known);
+  const list = readScopeList(values, key, known);
+  if (typeof list === "string") return { ok: false, error: list };
+  return { ok: true, scope: { [key]: list } as GrantScope };
 }
 
-const SCOPE_KEY: Readonly<Record<GrantCap, "roots" | "hosts" | "tools" | null>> = {
+/**
+ * M2 · 应用清单的校验（`scope.apps`）。
+ *
+ * 与其它 scope 的两点不同，都是形状决定的：① 它是**嵌套对象**（allow/deny 各一份清单），
+ * ② 每一侧都可以缺席 —— 但两侧**都**空等于什么都没说，所以那一种被拒（否则会存下一条
+ * 看起来有范围、实际没有任何约束的授权）。
+ */
+function validateAppScope(raw: unknown, known: readonly string[]): { ok: true; scope: GrantScope } | { ok: false; error: string } {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { ok: false, error: "scope.apps must be an object with allow and/or deny" };
+  }
+  const rec = raw as Record<string, unknown>;
+  const apps: GrantAppScope = {};
+  for (const side of APP_SIDES) {
+    const value = rec[side];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "object" || Array.isArray(value)) return { ok: false, error: `scope.apps.${side} must be an object` };
+    const list: GrantAppList = {};
+    for (const field of APP_FIELDS) {
+      const entries = (value as Record<string, unknown>)[field];
+      if (entries === undefined || entries === null) continue;
+      const parsed = readScopeList(entries, `apps.${side}.${field}`, known);
+      if (typeof parsed === "string") return { ok: false, error: parsed };
+      if (parsed.length > 0) list[field] = parsed;
+    }
+    if (Object.keys(list).length > 0) apps[side] = list;
+  }
+  if (Object.keys(apps).length === 0) return { ok: false, error: "scope.apps must name at least one allow/deny entry" };
+  return { ok: true, scope: { apps } };
+}
+
+/**
+ * One scope list: non-empty strings, capped in count and length, credential-screened.
+ * `key` is the path shown in the error (`roots` / `apps.deny.exes`), so the frozen
+ * 400 strings of §6.2 keep naming the field the caller actually got wrong.
+ */
+function readScopeList(values: unknown, key: string, known: readonly string[]): string[] | string {
+  if (!Array.isArray(values)) return `scope.${key} must be an array of strings`;
+  if (values.length === 0) return `scope.${key} must not be empty`;
+  if (values.length > MAX_SCOPE_ENTRIES) return `scope.${key} holds more than ${MAX_SCOPE_ENTRIES} entries`;
+  const out: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string" || value.trim() === "") return `scope.${key} entries must be non-empty strings`;
+    if (value.length > MAX_SCOPE_VALUE_CHARS) return `scope.${key} entry is longer than ${MAX_SCOPE_VALUE_CHARS} chars`;
+    if (looksLikeCredential(value, known)) return "value looks like a credential";
+    out.push(value.trim());
+  }
+  return [...new Set(out)];
+}
+
+const SCOPE_KEY: Readonly<Record<GrantCap, "roots" | "hosts" | "tools" | "apps" | null>> = {
   network: null,
   unsandboxed: null,
   read_roots: "roots",
   write_roots: "roots",
   net_hosts: "hosts",
   tool_extra: "tools",
+  desktop: "apps",
 };
+
+/**
+ * Caps whose scope key may be ABSENT (M2: `desktop`).
+ *
+ * Every other cap's scope IS its meaning (a `read_roots` grant with no roots grants
+ * nothing), so an absent list stays a 400 there. `desktop` is a capability bit first
+ * and a scope second: no list means "no application restriction", which is the
+ * documented default (规划 §4.3).
+ */
+const OPTIONAL_SCOPE_CAPS: readonly GrantCap[] = ["desktop"];
+
+/** The two sides of an application scope, in the order errors are reported. */
+const APP_SIDES = ["allow", "deny"] as const;
+/** The two kinds of entry an application list holds. */
+const APP_FIELDS = ["exes", "titles"] as const;
 
 /**
  * Read + validate the file. `exists:false` = the normal least-privilege state.
@@ -272,8 +383,34 @@ function normalizeStoredScope(cap: GrantCap, raw: unknown): GrantScope {
   if (key === null) return {};
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
   const values = (raw as Record<string, unknown>)[key];
+  if (key === "apps") return normalizeStoredApps(values);
   if (!Array.isArray(values)) return {};
   return { [key]: values.filter((v): v is string => typeof v === "string") } as GrantScope;
+}
+
+/**
+ * A stored `apps` scope, read back leniently (whitelist, drop what does not fit).
+ *
+ * Same posture as the flat lists above: a hand-edited grants.json may hold anything,
+ * and the safe side is to keep only what this build understands. An empty result is
+ * `{}` — i.e. "no application restriction", never a half-filled list.
+ */
+function normalizeStoredApps(raw: unknown): GrantScope {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const apps: GrantAppScope = {};
+  for (const side of APP_SIDES) {
+    const list = (raw as Record<string, unknown>)[side];
+    if (typeof list !== "object" || list === null || Array.isArray(list)) continue;
+    const out: GrantAppList = {};
+    for (const field of APP_FIELDS) {
+      const entries = (list as Record<string, unknown>)[field];
+      if (!Array.isArray(entries)) continue;
+      const strings = entries.filter((v): v is string => typeof v === "string" && v.trim() !== "");
+      if (strings.length > 0) out[field] = strings;
+    }
+    if (Object.keys(out).length > 0) apps[side] = out;
+  }
+  return Object.keys(apps).length === 0 ? {} : { apps };
 }
 
 function numberOr(value: unknown, fallback: number): number {

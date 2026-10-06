@@ -56,6 +56,8 @@ export function phraseFor(def: CapDef, scope: GrantScope): string {
       return t('grants.phrase.toolExtra', { tools: listOf(scope.tools).join(t('grants.copy.listSep')) });
     case 'unsandboxed':
       return t('grants.phrase.unsandboxed');
+    case 'desktop':
+      return t('grants.phrase.desktop');
   }
 }
 

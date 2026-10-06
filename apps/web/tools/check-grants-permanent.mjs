@@ -76,7 +76,9 @@ async function loadProductionModules() {
 function checkDefaults({ request, caps, presets, i18n }) {
   const zh = i18n.localeDict('zh');
   const defs = caps.caps();
-  check(defs.length === 6, `能力位数量异常：${defs.length}（期望 6）`);
+  // M2：6 -> 7（computer-use 的 `desktop` 能力位，danger:true）。这个数字是**冻结的**：
+  // 加能力位必须同时改这里，逼作者确认「新能力位也走默认永久那条路径」。
+  check(defs.length === 7, `能力位数量异常：${defs.length}（期望 7）`);
   // 规范值断言（门禁可硬编码期望值；生产代码里不得出现该字面量）：zh 永久 label 必须就是「永久」。
   check(zh['grants.permanent.label'] === '永久', `zh["grants.permanent.label"] 必须是「永久」，实际：${zh['grants.permanent.label']}`);
   // permanentLabel() 是真实 UI（quick.ts 永久 chip / rows.ts「已授予永久」）用的那条路径，
@@ -316,5 +318,5 @@ if (problems.length) {
   process.exit(1);
 }
 console.log(
-  '✓ 授权默认永久门禁通过：默认授予 ttl_sec=0（6 个能力位 + 预设）、zh/en 永久文案均不含时刻、临时档仍可按显式时长授予。',
+  '✓ 授权默认永久门禁通过：默认授予 ttl_sec=0（7 个能力位 + 预设）、zh/en 永久文案均不含时刻、临时档仍可按显式时长授予。',
 );

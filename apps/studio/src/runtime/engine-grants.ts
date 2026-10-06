@@ -46,6 +46,8 @@ import {
   knownSecretsOf,
   looksLikeCredential,
   readGrantsFile,
+  type GrantAppList,
+  type GrantAppScope,
   type GrantCap,
   type GrantRecord,
   type GrantsFile,
@@ -63,6 +65,21 @@ export interface EffectiveGrants {
   workspaceWritable: boolean;
   /** W9: tools the baseline removes from the face (before tool_extra adds). */
   toolDeny: readonly string[];
+  /**
+   * M2: the session's **desktop capability bit** (computer-use 写工具的总开关).
+   *
+   * 与其它 cap 的差别：它不是一个「范围」，而是「这台机器上的鼠标键盘能不能被模型
+   * 动」这一句话。闸门（packages/desktop/src/gate.ts）读它决定放不放行；没有它，
+   * 九个写工具一律拒绝。
+   */
+  desktop: boolean;
+  /**
+   * M2: 该能力位的**应用级 scope**（`grants` 文件里的 `kind:'apps'`）。
+   *
+   * 空对象 = 不限制（规划 §4.3：allow 为空 = 不限制）。它的语义是「在已授权之上再
+   * 收窄」：deny 命中即拒，allow 非空且未命中则升级为逐次确认。
+   */
+  apps: GrantAppScope;
   /** Provenance for the audit trail / UI (`cap` + grant id + expiry). */
   sources: ReadonlyArray<{ cap: string; grantId: string; expiresAt: number | null }>;
 }
@@ -76,6 +93,8 @@ export const EMPTY_GRANTS: EffectiveGrants = {
   unsandboxed: false,
   workspaceWritable: true,
   toolDeny: [],
+  desktop: false,
+  apps: {},
   sources: [],
 };
 
@@ -223,6 +242,13 @@ function intersectGrants(
       // pure SUBTRACTION, so a name the `execution` mode already folded away can
       // never come back through this list (engine-plugins keeps them blocked).
       toolDeny: [...new Set([...permission.toolDeny, ...sessionDisabled])],
+      // M2: the desktop bit and its application scope are passed through UNTOUCHED —
+      // the permission baseline's lever over tools is `toolDeny` (a name list), and it
+      // already covers by-name denial of the nine desktop write tools. There is no
+      // baseline field that speaks about "mouse and keyboard", so inventing one here
+      // would be a second, invisible ceiling.
+      desktop: grants.desktop,
+      apps: grants.apps,
       sources: grants.sources,
     },
     warnings,
@@ -232,7 +258,7 @@ function intersectGrants(
 /** Fold the (already shape-checked) entries into the effective set. */
 function collect(file: GrantsFile, env: NodeJS.ProcessEnv, now: number): { grants: EffectiveGrants; warnings: string[] } {
   const warnings: string[] = [];
-  const acc: Mutable = { readRoots: [], writeRoots: [], netHosts: [], toolExtra: [], sources: [] };
+  const acc: Mutable = { readRoots: [], writeRoots: [], netHosts: [], toolExtra: [], apps: {}, sources: [] };
   const ctx: Ctx = { env, known: knownSecretsOf(env), readRoots: envReadRoots(env) };
   for (const grant of file.grants) {
     if (isExpired(grant, now)) {
@@ -241,7 +267,10 @@ function collect(file: GrantsFile, env: NodeJS.ProcessEnv, now: number): { grant
     }
     applyGrant(acc, grant, ctx, warnings);
   }
-  return { grants: { ...acc, network: acc.network === true, unsandboxed: acc.unsandboxed === true, workspaceWritable: true, toolDeny: [] }, warnings };
+  return {
+    grants: { ...acc, network: acc.network === true, unsandboxed: acc.unsandboxed === true, desktop: acc.desktop === true, apps: acc.apps ?? {}, workspaceWritable: true, toolDeny: [] },
+    warnings,
+  };
 }
 
 /**
@@ -263,6 +292,8 @@ function show(entry: string, ctx: Ctx): string {
 interface Mutable {
   network?: boolean;
   unsandboxed?: boolean;
+  desktop?: boolean;
+  apps?: GrantAppScope;
   readRoots: string[];
   writeRoots: string[];
   netHosts: string[];
@@ -281,6 +312,12 @@ function applyGrant(acc: Mutable, grant: GrantRecord, ctx: Ctx, warnings: string
   }
   if (grant.cap === "unsandboxed") {
     acc.unsandboxed = true;
+    keep();
+    return;
+  }
+  if (grant.cap === "desktop") {
+    acc.desktop = true;
+    acc.apps = mergeAppScope(acc.apps ?? {}, appsOf(grant));
     keep();
     return;
   }
@@ -475,6 +512,40 @@ export function validatePermissionPreset(
   return { ok: true, preset: { ...parsed, writeRoots: roots } };
 }
 
+/**
+ * One `desktop` grant's application scope (already shape-checked by the reader).
+ */
+function appsOf(grant: GrantRecord): GrantAppScope {
+  const apps = grant.scope.apps;
+  if (typeof apps !== "object" || apps === null) return {};
+  return apps;
+}
+
+/**
+ * Two application scopes, unioned side by side (M2).
+ *
+ * WHY UNION AND NOT INTERSECTION: this file's whole posture is "grants only WIDEN"
+ * (see the header). A second `desktop` grant is an anomaly — the UI writes one record
+ * per cap — and the reading that matches the posture is "the user allowed these apps",
+ * so the union is what they asked for twice. The restriction side is unaffected:
+ * `deny` still wins over `allow` at the gate (规划 §4.4), so a union can never turn a
+ * denied app into an allowed one.
+ */
+function mergeAppScope(into: GrantAppScope, extra: GrantAppScope): GrantAppScope {
+  const out: GrantAppScope = {};
+  for (const side of ["allow", "deny"] as const) {
+    const lists = [into[side], extra[side]].filter((l): l is GrantAppList => l !== undefined);
+    if (lists.length === 0) continue;
+    const merged: GrantAppList = {};
+    for (const field of ["exes", "titles"] as const) {
+      const values = [...new Set(lists.flatMap((l) => l[field] ?? []))];
+      if (values.length > 0) merged[field] = values;
+    }
+    if (Object.keys(merged).length > 0) out[side] = merged;
+  }
+  return out;
+}
+
 export function grantsActiveCaps(grants: EffectiveGrants): string[] {
   const caps: GrantCap[] = [];
   if (grants.network) caps.push("network");
@@ -483,6 +554,7 @@ export function grantsActiveCaps(grants: EffectiveGrants): string[] {
   if (grants.netHosts.length > 0) caps.push("net_hosts");
   if (grants.toolExtra.length > 0) caps.push("tool_extra");
   if (grants.unsandboxed) caps.push("unsandboxed");
+  if (grants.desktop) caps.push("desktop");
   return caps;
 }
 

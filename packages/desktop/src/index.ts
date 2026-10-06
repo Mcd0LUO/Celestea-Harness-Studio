@@ -28,12 +28,50 @@ export { DESKTOP_CLIENT_SERVICE, DesktopHelperClient } from "./client.js";
 export { helperImageBytes, storeHelperImages, type BridgeOutcome } from "./attachments.js";
 
 // ── 分级闸门（M2 写工具的唯一放行通道）──
+// 接口给 tool.ts 用；实现（createDesktopGate）与它的两个端口给宿主用：
+// packages/runtime 注入闸门，apps/studio 提供授权源与确认通道。
 export {
+  createDesktopConfirmLimiter,
+  createDesktopGate,
   denyAllGate,
+  DESKTOP_APP_DENIED_CODE,
+  DESKTOP_APP_UNRESOLVED_CODE,
+  DESKTOP_CAP_NOT_GRANTED_CODE,
+  DESKTOP_CONFIRM_CANCELLED_CODE,
+  DESKTOP_CONFIRM_COOLDOWN_CODE,
+  DESKTOP_CONFIRM_DENIED_CODE,
+  DESKTOP_CONFIRM_FAILED_CODE,
+  DESKTOP_CONFIRM_TIMEOUT_CODE,
+  DESKTOP_CONFIRM_TIMEOUT_MS,
+  DESKTOP_CONFIRM_UNAVAILABLE_CODE,
+  DESKTOP_DENIAL_COOLDOWN_MS,
+  DESKTOP_DENIAL_THRESHOLD,
+  DESKTOP_METHOD_UNKNOWN_CODE,
+  DESKTOP_READ_ONLY_METHODS,
+  DESKTOP_SENSITIVE_METHODS,
+  DESKTOP_WRITE_METHODS,
   GATE_UNCONFIGURED_CODE,
   GATE_UNCONFIGURED_REASON,
 } from "./gate.js";
-export type { DesktopGate, DesktopGateCall, DesktopGateVerdict, DesktopGateAllow, DesktopGateDeny } from "./gate.js";
+export type {
+  DesktopAppAccessList,
+  DesktopAppScope,
+  DesktopConfirmChannel,
+  DesktopConfirmLimiter,
+  DesktopConfirmLimiterOptions,
+  DesktopConfirmOutcome,
+  DesktopConfirmReason,
+  DesktopConfirmRequest,
+  DesktopDeadline,
+  DesktopGate,
+  DesktopGateAllow,
+  DesktopGateCall,
+  DesktopGateDeny,
+  DesktopGateGrant,
+  DesktopGateGrantSource,
+  DesktopGateOptions,
+  DesktopGateVerdict,
+} from "./gate.js";
 
 // ── 工具与插件装配 ──
 export { desktopToolSpec, desktopTools, type DesktopToolDeps } from "./tool.js";

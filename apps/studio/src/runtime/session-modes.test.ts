@@ -117,6 +117,17 @@ describe("W729 per-session mode prompts (real engine, one process)", () => {
     }
   });
 
+  /**
+   * M2-B · the thirteen `desktop_*` tools are an **optional face** — mounted only when the
+   * host is win32 AND a built helper exists (规划 §5). They are kept out of the standard
+   * literal below so "optional" cannot be read as "required" on another host; the execution
+   * literal needs no delta at all, because the mode folds them (that IS the assertion).
+   */
+  const DESKTOP_FACE = ["desktop_activate_window", "desktop_click", "desktop_drag", "desktop_get_window", "desktop_get_window_state", "desktop_launch_app", "desktop_list_apps", "desktop_list_windows", "desktop_press_key", "desktop_scroll", "desktop_secondary_action", "desktop_set_value", "desktop_type_text"];
+  /** 本机默认面 = 无条件面 + 已挂载的可选面（见 DESKTOP_FACE 的理由）。 */
+  const STANDARD_FACE = ["ask_user_question", "browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "list_dir", "load_skill", "process_control", "read_file", "read_image", "remember", "run_code", "run_shell", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status", "write_file", ...DESKTOP_FACE].sort();
+  const EXECUTION_FACE = ["browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"].sort();
+
   it("M7 (P1, supersedes P0 invariant ②): execution folds the direct face, standard does not", async () => {
     const h = twoModes();
     await activate(h, "sample-ws/std");
@@ -129,8 +140,8 @@ describe("W729 per-session mode prompts (real engine, one process)", () => {
     // OFF, so the tool is not registered and there is nothing for either mode to
     // fold. (Turning it on does not change the relative fold: it appears in
     // standard and is folded in execution, like every other non-keep tool.)
-    expect(faceOf("sample-ws/std")).toEqual(["ask_user_question", "browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "list_dir", "load_skill", "process_control", "read_file", "read_image", "remember", "run_code", "run_shell", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status", "write_file"]);
-    expect(faceOf("sample-ws/exec")).toEqual(["browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"]);
+    expect(faceOf("sample-ws/std")).toEqual(STANDARD_FACE);
+    expect(faceOf("sample-ws/exec")).toEqual(EXECUTION_FACE);
   });
 
   it("P0 invariant ①: a session WITHOUT session.json.mode keeps the DEFAULT mode prompt", async () => {

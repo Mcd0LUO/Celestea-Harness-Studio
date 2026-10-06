@@ -25,12 +25,56 @@
 import { existsSync } from "node:fs";
 import { TOOL_REGISTRY_SERVICE, mountPlugins, type Context, type ToolRegistry } from "@celestea/core";
 import {
-  DESKTOP_M1_TOOL_NAMES,
   DESKTOP_SUPPORTED_PLATFORM,
+  DESKTOP_TOOL_NAMES,
   DesktopHelperClient,
   desktopPlugin,
   helperBinPath,
   type DesktopAttachmentStore,
+  type DesktopGate,
+} from "@celestea/desktop";
+
+// ── computer-use M2：把闸门的**宿主面向 surface** 从本模块转发出去 ──
+//
+// 为什么需要这一层转发：闸门由**宿主**（apps/studio）构造 —— 它才拿得到会话授权与
+// 「问人」的通道 —— 而 apps/studio 的依赖表里没有 @celestea/desktop（桌面能力的装配缝
+// 在 packages/runtime，宿主从来只经 desktop-wiring 说话）。宿主直接 import
+// @celestea/desktop 会在 tsc 与 node 两侧都解析不到（那是个没有 symlink 的包），
+// 而 runtime 本来就依赖它。
+//
+// 转发的是**构造闸门所需的最小集合**：两个工厂 + 原因码常量 + 端口类型。
+// 工具面的东西（desktopTools / DesktopHelperClient）**不**在这里转发 —— 它们是
+// @celestea/desktop 自己的 surface，宿主不需要。
+export {
+  createDesktopConfirmLimiter,
+  createDesktopGate,
+  denyAllGate,
+  DESKTOP_APP_DENIED_CODE,
+  DESKTOP_APP_UNRESOLVED_CODE,
+  DESKTOP_CAP_NOT_GRANTED_CODE,
+  DESKTOP_CONFIRM_CANCELLED_CODE,
+  DESKTOP_CONFIRM_COOLDOWN_CODE,
+  DESKTOP_CONFIRM_DENIED_CODE,
+  DESKTOP_CONFIRM_FAILED_CODE,
+  DESKTOP_CONFIRM_TIMEOUT_CODE,
+  DESKTOP_CONFIRM_TIMEOUT_MS,
+  DESKTOP_CONFIRM_UNAVAILABLE_CODE,
+  DESKTOP_DENIAL_COOLDOWN_MS,
+  DESKTOP_DENIAL_THRESHOLD,
+} from "@celestea/desktop";
+export type {
+  DesktopAppAccessList,
+  DesktopAppScope,
+  DesktopConfirmChannel,
+  DesktopConfirmLimiter,
+  DesktopConfirmOutcome,
+  DesktopConfirmReason,
+  DesktopConfirmRequest,
+  DesktopGate,
+  DesktopGateCall,
+  DesktopGateGrant,
+  DesktopGateGrantSource,
+  DesktopGateVerdict,
 } from "@celestea/desktop";
 
 const DEFAULT_DESKTOP_PLUGIN = 'celestea.runtime.desktop';
@@ -44,6 +88,15 @@ export interface DesktopWiring {
   helperPath?: string;
   /** 会话附件仓库（截图落点）。缺省 = 诚实降级（get_window_state 不带图）。 */
   attachments?: DesktopAttachmentStore | null;
+  /**
+   * 写工具的分级闸门（M2）。缺席 = 写 9 一律拒绝（fail-closed），只读 4 不受影响。
+   *
+   * 为什么由宿主注入而不是本文件构造：闸门要读会话授权（grants）与应用级 scope，
+   * 还要有一条问人的通道（进程级挂起问题表 + SSE 发布）——那些都在 apps/studio 一侧。
+   * runtime 是装配层，拿不到也不该拿到它们（ARCHITECTURE §1 的分层）；它只负责把
+   * 「有没有闸门」原样交给插件。
+   */
+  gate?: DesktopGate;
   /** 单次调用超时（缺省 20s，规划 §5）。 */
   timeoutMs?: number;
   /** Mount name (auto-named when omitted). */
@@ -143,6 +196,15 @@ export function ensureDesktopWiring(
     ...(wiring.timeoutMs === undefined ? {} : { timeoutMs: wiring.timeoutMs }),
   });
   const name = wiring.name ?? DEFAULT_DESKTOP_PLUGIN;
-  mountPlugins(ctx, [desktopPlugin({ client, attachments: wiring.attachments ?? null, name })]);
-  return { mountedPlugin: name, toolNames: DESKTOP_M1_TOOL_NAMES, client };
+  mountPlugins(ctx, [
+    desktopPlugin({
+      client,
+      attachments: wiring.attachments ?? null,
+      ...(wiring.gate === undefined ? {} : { gate: wiring.gate }),
+      name,
+    }),
+  ]);
+  // M2：注册面是十三个（只读 4 + 写 9）。写 9 在注册表里、由**闸门**在调用时放行，
+  // 所以这里如实报十三个，而不是 M1 的四个。
+  return { mountedPlugin: name, toolNames: DESKTOP_TOOL_NAMES, client };
 }
