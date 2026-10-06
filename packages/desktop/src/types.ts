@@ -18,11 +18,22 @@ export const DESKTOP_GET_WINDOW_TOOL = "desktop_get_window";
 export const DESKTOP_LIST_APPS_TOOL = "desktop_list_apps";
 export const DESKTOP_GET_WINDOW_STATE_TOOL = "desktop_get_window_state";
 
+/** 写九工具的契约名（M2）。 */
+export const DESKTOP_CLICK_TOOL = "desktop_click";
+export const DESKTOP_PRESS_KEY_TOOL = "desktop_press_key";
+export const DESKTOP_TYPE_TEXT_TOOL = "desktop_type_text";
+export const DESKTOP_SCROLL_TOOL = "desktop_scroll";
+export const DESKTOP_SET_VALUE_TOOL = "desktop_set_value";
+export const DESKTOP_DRAG_TOOL = "desktop_drag";
+export const DESKTOP_SECONDARY_ACTION_TOOL = "desktop_secondary_action";
+export const DESKTOP_ACTIVATE_WINDOW_TOOL = "desktop_activate_window";
+export const DESKTOP_LAUNCH_APP_TOOL = "desktop_launch_app";
+
 /**
  * M1 的工具面：只读四个。
  *
- * 写九工具（click / press_key / type_text / …）在 M2 才进契约，**这里一个都不列**——
- * 列了就是「挂了但报错」的中间态，恰恰是规划 §2 要消灭的形态。
+ * 保留这个名字而不是就地改名：装配根与插件目录都按「M1 就只读四个」理解它，而它是
+ * 规划与决策笔记里一个可引用的既有事实。写九个在下面单独列。
  */
 export const DESKTOP_M1_TOOL_NAMES: readonly string[] = [
   DESKTOP_LIST_WINDOWS_TOOL,
@@ -30,6 +41,22 @@ export const DESKTOP_M1_TOOL_NAMES: readonly string[] = [
   DESKTOP_LIST_APPS_TOOL,
   DESKTOP_GET_WINDOW_STATE_TOOL,
 ];
+
+/** M2 的写九工具。**每一个都必须先过闸门**（见 gate.ts）。 */
+export const DESKTOP_WRITE_TOOL_NAMES: readonly string[] = [
+  DESKTOP_CLICK_TOOL,
+  DESKTOP_PRESS_KEY_TOOL,
+  DESKTOP_TYPE_TEXT_TOOL,
+  DESKTOP_SCROLL_TOOL,
+  DESKTOP_SET_VALUE_TOOL,
+  DESKTOP_DRAG_TOOL,
+  DESKTOP_SECONDARY_ACTION_TOOL,
+  DESKTOP_ACTIVATE_WINDOW_TOOL,
+  DESKTOP_LAUNCH_APP_TOOL,
+];
+
+/** 全部十三个（M1 只读 4 + M2 写 9）。 */
+export const DESKTOP_TOOL_NAMES: readonly string[] = [...DESKTOP_M1_TOOL_NAMES, ...DESKTOP_WRITE_TOOL_NAMES];
 
 /**
  * helper 侧的对应方法名（helper/src/tools.rs 的 window2 工具表）。
@@ -44,6 +71,15 @@ export const DESKTOP_TOOL_METHODS: Readonly<Record<string, string>> = {
   [DESKTOP_GET_WINDOW_TOOL]: "get_window",
   [DESKTOP_LIST_APPS_TOOL]: "list_apps",
   [DESKTOP_GET_WINDOW_STATE_TOOL]: "get_window_state",
+  [DESKTOP_CLICK_TOOL]: "click",
+  [DESKTOP_PRESS_KEY_TOOL]: "press_key",
+  [DESKTOP_TYPE_TEXT_TOOL]: "type_text",
+  [DESKTOP_SCROLL_TOOL]: "scroll",
+  [DESKTOP_SET_VALUE_TOOL]: "set_value",
+  [DESKTOP_DRAG_TOOL]: "drag",
+  [DESKTOP_SECONDARY_ACTION_TOOL]: "perform_secondary_action",
+  [DESKTOP_ACTIVATE_WINDOW_TOOL]: "activate_window",
+  [DESKTOP_LAUNCH_APP_TOOL]: "launch_app",
 };
 
 /**

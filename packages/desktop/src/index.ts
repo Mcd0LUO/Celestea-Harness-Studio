@@ -27,6 +27,14 @@ export { DESKTOP_CLIENT_SERVICE, DesktopHelperClient } from "./client.js";
 // ── 截图桥 ──
 export { helperImageBytes, storeHelperImages, type BridgeOutcome } from "./attachments.js";
 
+// ── 分级闸门（M2 写工具的唯一放行通道）──
+export {
+  denyAllGate,
+  GATE_UNCONFIGURED_CODE,
+  GATE_UNCONFIGURED_REASON,
+} from "./gate.js";
+export type { DesktopGate, DesktopGateCall, DesktopGateVerdict, DesktopGateAllow, DesktopGateDeny } from "./gate.js";
+
 // ── 工具与插件装配 ──
 export { desktopToolSpec, desktopTools, type DesktopToolDeps } from "./tool.js";
 export { desktopPlugin, type DesktopPluginOptions } from "./plugin.js";

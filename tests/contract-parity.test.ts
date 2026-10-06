@@ -89,7 +89,21 @@ const SWARM_TOOL = "agent_swarm";
  * (tests/desktop-tool-contract.test.ts) and desktop-wiring.test.ts asserts the
  * mount/absence rule itself.
  */
-const DESKTOP_TOOLS = ["desktop_get_window", "desktop_get_window_state", "desktop_list_apps", "desktop_list_windows"];
+const DESKTOP_TOOLS = [
+  "desktop_activate_window",
+  "desktop_click",
+  "desktop_drag",
+  "desktop_get_window",
+  "desktop_get_window_state",
+  "desktop_launch_app",
+  "desktop_list_apps",
+  "desktop_list_windows",
+  "desktop_press_key",
+  "desktop_scroll",
+  "desktop_secondary_action",
+  "desktop_set_value",
+  "desktop_type_text",
+];
 
 /** The golden fixtures are exported on demand (`pnpm golden:export`). */
 const HAS_FIXTURES = existsSync(fixturePath("index.json"));
@@ -238,8 +252,8 @@ describe("W744 · all 8 builtin tool specs match the implementation registry", (
     // no member turn can be built), so it is excluded here for the same reason the
     // compression trio is — but it is covered by swarm-wiring.test.ts, which
     // asserts the tool really lands in a composed registry.
-    // computer-use M1: 23 -> 27, the same treatment (conditional mount).
-    expect(CONTRACT.tools).toHaveLength(27);
+    // computer-use M1: 23 -> 27, M2: 27 -> 36, the same treatment (conditional mount).
+    expect(CONTRACT.tools).toHaveLength(36);
     expect(uncoveredTools(CONTRACT, specs, [...WORKER_TOOLS, ...QUESTION_TOOLS, READ_IMAGE_TOOL, ...BROWSER_TOOLS, ...COMPRESSION_TOOLS, SWARM_TOOL, ...DESKTOP_TOOLS])).toEqual([]);
   });
 

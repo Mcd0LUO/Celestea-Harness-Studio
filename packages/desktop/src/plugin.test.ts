@@ -1,7 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { Context, TOOL_REGISTRY_SERVICE, mountPlugins, type Tool, type ToolInput, type ToolOutput, type ToolRegistry, type ToolSpec } from "@celestea/core";
-import { DesktopHelperClient, desktopPlugin, type DesktopChildProcess, type DesktopSpawner, type HelperImage } from "./index.js";
+import { DesktopHelperClient, desktopPlugin, denyAllGate, type DesktopChildProcess, type DesktopSpawner, type HelperImage } from "./index.js";
+import type { DesktopGate, DesktopGateCall } from "./gate.js";
+import type { DesktopToolDeps } from "./tool.js";
+
+/** The deps subset the tests drive directly (attachments + gate). */
+type DesktopGateDeps = Pick<DesktopToolDeps, "attachments">;
 
 /**
  * M1 链路的**行为**门禁（契约形状在 tests/desktop-tool-contract.test.ts）。
@@ -123,21 +128,30 @@ function client(fake: Fake, platform = "win32"): DesktopHelperClient {
   return new DesktopHelperClient({ helperPath: "C:/fake/celestea-desktop-helper.exe", platform, spawn: fake.spawn, stderr: { write: () => true }, handshakeTimeoutMs: 500, timeoutMs: 500 });
 }
 
-function mountFake(fake: Fake, attachments: DesktopHelperClient extends never ? never : Parameters<typeof desktopPlugin>[0]["attachments"] = null) {
+function mountFake(
+  fake: Fake,
+  attachments: DesktopGateDeps["attachments"] = null,
+  gate?: DesktopGate,
+) {
   const reg = fakeRegistry();
   const ctx = Context.root();
   ctx.provide(TOOL_REGISTRY_SERVICE, reg);
-  mountPlugins(ctx, [desktopPlugin({ client: client(fake), attachments })]);
+  mountPlugins(ctx, [desktopPlugin({ client: client(fake), attachments, ...(gate === undefined ? {} : { gate }) })]);
   return reg;
 }
 
 const JPEG = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8A9/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8BKQ//9k=";
 
 describe("desktop plugin · mount-time registration", () => {
-  it("registers exactly the four read-only tools, and no-ops without a registry", () => {
+  it("registers exactly the thirteen window2 tools, and no-ops without a registry", () => {
     const reg = mountFake(fakeHelper({ answer: () => ({ ok: true, value: [] }) }));
+    // M1 时这里钉的是四个只读；M2 起是十三个（helper 的 window2 核心面，恰好 13 个）。
+    // 写 9 也在注册表里 —— 它们由**闸门**在调用时放行，不是由注册表决定有没有。
     expect(reg.schemas().map((s) => s.name).sort()).toEqual([
-      "desktop_get_window", "desktop_get_window_state", "desktop_list_apps", "desktop_list_windows",
+      "desktop_activate_window", "desktop_click", "desktop_drag", "desktop_get_window",
+      "desktop_get_window_state", "desktop_launch_app", "desktop_list_apps", "desktop_list_windows",
+      "desktop_press_key", "desktop_scroll", "desktop_secondary_action", "desktop_set_value",
+      "desktop_type_text",
     ]);
     // No ToolRegistry = the tools plugin has not mounted: a no-op, never a throw.
     const bare = Context.root();
@@ -314,5 +328,72 @@ describe("desktop client · a helper error is a RESULT the model can read", () =
       error: "Windows desktop is locked (input desktop is Winlogon); unlock before using computer-use",
       detail: { method: "list_windows" },
     });
+  });
+});
+
+describe("desktop tools · the M2 write nine and the gate", () => {
+  const WRITE = [
+    ["desktop_click", "click"],
+    ["desktop_press_key", "press_key"],
+    ["desktop_type_text", "type_text"],
+    ["desktop_scroll", "scroll"],
+    ["desktop_set_value", "set_value"],
+    ["desktop_drag", "drag"],
+    ["desktop_secondary_action", "perform_secondary_action"],
+    ["desktop_activate_window", "activate_window"],
+    ["desktop_launch_app", "launch_app"],
+  ] as const;
+
+  it("registers all thirteen and refuses every write tool under denyAllGate, without touching the helper", async () => {
+    const fake = fakeHelper({ answer: () => ({ ok: true, value: null }) });
+    const reg = mountFake(fake, null, denyAllGate());
+    expect(reg.schemas()).toHaveLength(13);
+    for (const [tool] of WRITE) {
+      const out = await reg.dispatch({ call_id: `c-${tool}`, name: tool, args: { window: { app: "notepad.exe", id: 1 } } });
+      // 结果不是异常：turn 存活，模型看到能据此改计划的一句话。
+      expect(out.error, tool).toBeNull();
+      expect(out.value, tool).toEqual({
+        ok: false,
+        code: "desktop_gate_unconfigured",
+        error: "desktop gate 尚未启用（M2 集成中）",
+        source: "desktop_gate",
+        step: expect.any(String),
+      });
+    }
+    // 闸门拒的东西一次都不该发往 helper —— 连进程都不该起。
+    expect(fake.spawnCount()).toBe(0);
+  });
+
+  it("sends a write method with the approvedApp the GATE returned, and nothing else", async () => {
+    const fake = fakeHelper({ answer: () => ({ ok: true, value: null }) });
+    const seen: DesktopGateCall[] = [];
+    const reg = mountFake(fake, null, {
+      check: (call) => {
+        seen.push(call);
+        return Promise.resolve({ kind: "allow", approvedApp: "notepad.exe" });
+      },
+    });
+    const out = await reg.dispatch({ call_id: "c1", name: "desktop_click", args: { window: { app: "notepad.exe", id: 1 }, x: 10, y: 20 } });
+    expect(out.error).toBeNull();
+    expect(out.value).toMatchObject({ ok: true, method: "click" });
+    // 闸门拿到的是原样的方法名与参数（目标应用由它自己解析）。
+    expect(seen).toEqual([{ method: "click", arguments: { window: { app: "notepad.exe", id: 1 }, x: 10, y: 20 } }]);
+    // 批准只经闸门这一条路进 helper 的 meta。
+    const call = JSON.parse(fake.writes[1] ?? "{}") as { method?: string; params?: { name?: string }; meta?: Record<string, unknown> };
+    expect(call.method).toBe("call");
+    expect(call.params?.name).toBe("click");
+    expect(call.meta?.["x-oai-cua-approved-app"]).toBe("notepad.exe");
+  });
+
+  it("passes a helper lease_violation through as a result, leaving the turn alive", async () => {
+    // helper 的租约冲突原句（规划 §5：检测到外部输入 → 中止剩余动作）。它必须原样
+    // 到达模型 —— 翻译它等于丢掉「用户抢了鼠标」这个事实。
+    const message = "lease_violation: external input detected during the action sequence; stopped after 2 of 5 steps";
+    const fake = fakeHelper({ answer: (name) => (name === "type_text" ? { ok: false, error: message } : { ok: true, value: null }) });
+    const reg = mountFake(fake, null, { check: () => Promise.resolve({ kind: "allow", approvedApp: "notepad.exe" }) });
+    const out = await reg.dispatch({ call_id: "c1", name: "desktop_type_text", args: { window: { app: "notepad.exe", id: 1 }, text: "hi" } });
+    // ToolOutput.error 是 null（工具没抛），原句在 value 里。
+    expect(out.error).toBeNull();
+    expect(out.value).toEqual({ ok: false, step: "type_text", code: "tool_error", error: message, detail: { method: "type_text" } });
   });
 });

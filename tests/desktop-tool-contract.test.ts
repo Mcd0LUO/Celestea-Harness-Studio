@@ -24,18 +24,29 @@ describe("contracts/tools.json · desktop read-only four (M1)", () => {
   const t = loadTools();
   const find = (name: string) => t.tools.find((tool) => tool.name === name);
 
-  it("declares exactly the four M1 read-only tools, and none of the nine M2 write tools", () => {
+  it("declares exactly the thirteen window2 tools (M1 read-only 4 + M2 write 9)", () => {
     const M1 = ["desktop_list_windows", "desktop_get_window", "desktop_list_apps", "desktop_get_window_state"];
-    for (const name of M1) {
+    const M2 = [
+      "desktop_click",
+      "desktop_press_key",
+      "desktop_type_text",
+      "desktop_scroll",
+      "desktop_set_value",
+      "desktop_drag",
+      "desktop_secondary_action",
+      "desktop_activate_window",
+      "desktop_launch_app",
+    ];
+    for (const name of [...M1, ...M2]) {
       expect(find(name), `contracts/tools.json must declare ${name}`).toBeDefined();
     }
-    // 写 9 个在 M2 才进契约（要先有分级闸门，规划 §4）。这里钉住「现在没有」，
-    // 所以有人提前登记一个写工具时会被这条挡住——那会绕过闸门的工作。
+    // 恰好十三个：多一个就是「挂了但必然被闸门拒」的名字（helper 只认 window2 核心面），
+    // 少一个就是契约与实现漂移。两个方向都红。
     const declared = t.tools.map((tool) => tool.name).filter((name) => name.startsWith("desktop_"));
-    expect(declared.sort()).toEqual([...M1].sort());
-    // 契约总数同步（M1 只加 4：23 -> 27；M2 才 27 -> 36）。
-    expect(t.count).toBe(27);
-    expect(t.tools).toHaveLength(27);
+    expect(declared.sort()).toEqual([...M1, ...M2].sort());
+    // 契约总数同步（M1 加 4：23 -> 27；M2 再加 9：27 -> 36）。
+    expect(t.count).toBe(36);
+    expect(t.tools).toHaveLength(36);
   });
 
   it("freezes the two zero-argument discovery tools (closed, no required keys)", () => {
@@ -91,5 +102,88 @@ describe("contracts/tools.json · desktop read-only four (M1)", () => {
         expect(schema.description?.trim().length, `${name}.${key}`).toBeGreaterThan(0);
       }
     }
+  });
+});
+
+describe("contracts/tools.json · desktop write nine (M2)", () => {
+  const t = loadTools();
+  const find = (name: string) => t.tools.find((tool) => tool.name === name);
+  const params = (name: string) =>
+    find(name)?.parameters as unknown as {
+      properties?: Record<string, { type?: string; enum?: readonly string[]; required?: string[]; additionalProperties?: boolean }>;
+      required?: string[];
+      additionalProperties?: boolean;
+    };
+
+  /**
+   * 写工具的 required 集合与顺序，逐一钉死（helper/src/tools.rs 的 window2 写工具表）。
+   *
+   * 写工具的 required 差异是有意义的、不是笔误：click 只要 window（x/y 与 element_index
+   * 互斥，两者皆空是合法调用），而 scroll 要 x+y+两个 delta，drag 要四个坐标。所以这里
+   * 逐个列出来，而不是断言一个共同形状——断言共同形状会把这些真实差异全放过去。
+   */
+  it("freezes the required set of every write tool", () => {
+    const expected: Array<[string, string[]]> = [
+      ["desktop_click", ["window"]],
+      ["desktop_press_key", ["window", "key"]],
+      ["desktop_type_text", ["window", "text"]],
+      ["desktop_scroll", ["window", "x", "y", "scrollX", "scrollY"]],
+      ["desktop_set_value", ["window", "element_index", "value"]],
+      ["desktop_drag", ["window", "from_x", "from_y", "to_x", "to_y"]],
+      ["desktop_secondary_action", ["window", "element_index", "action"]],
+      ["desktop_activate_window", ["window"]],
+      ["desktop_launch_app", ["app"]],
+    ];
+    for (const [name, required] of expected) {
+      expect(params(name).required, name).toEqual(required);
+    }
+  });
+
+  it("keeps every write tool a closed object (an undeclared argument is a schema error)", () => {
+    for (const name of [
+      "desktop_click", "desktop_press_key", "desktop_type_text", "desktop_scroll",
+      "desktop_set_value", "desktop_drag", "desktop_secondary_action",
+      "desktop_activate_window", "desktop_launch_app",
+    ]) {
+      expect(params(name).additionalProperties, name).toBe(false);
+    }
+  });
+
+  it("pins mouse_button to the helper's six accepted spellings", () => {
+    // helper/src/tools.rs 的 click.mouse_button 枚举就是这六个：全名 + 单字母别名。
+    // 多一个或少一个都会让模型发出一个 helper 拒绝的字面量。
+    expect(params("desktop_click").properties?.["mouse_button"]?.enum).toEqual([
+      "left", "right", "middle", "l", "r", "m",
+    ]);
+  });
+
+  it("keeps the nested window object identical to the read-only tools (one shape, not two)", () => {
+    // 八个带 window 的写工具与只读侧共用同一份 {app,id,title} 形状。分成两份 schema 的
+    // 那天就会漂移（helper 只会解析一种），所以这里逐个比一次。
+    const reference = params("desktop_get_window_state").properties?.["window"];
+    for (const name of [
+      "desktop_click", "desktop_press_key", "desktop_type_text", "desktop_scroll",
+      "desktop_set_value", "desktop_drag", "desktop_secondary_action",
+      "desktop_activate_window",
+    ]) {
+      const window = params(name).properties?.["window"];
+      expect(window?.type, name).toBe(reference?.type);
+      expect(window?.required, name).toEqual(["app", "id"]);
+      expect(window?.additionalProperties, name).toBe(false);
+      expect(Object.keys(window?.properties ?? {}).sort(), name).toEqual(["app", "id", "title"]);
+    }
+  });
+
+  it("keeps scroll's two deltas and drag's four coordinates numeric, and indexes integral", () => {
+    expect(params("desktop_scroll").properties?.["scrollX"]?.type).toBe("number");
+    expect(params("desktop_scroll").properties?.["scrollY"]?.type).toBe("number");
+    for (const key of ["from_x", "from_y", "to_x", "to_y"]) {
+      expect(params("desktop_drag").properties?.[key]?.type, key).toBe("number");
+    }
+    // element_index 是 UIA 节点序号：整数。写成 number 会让模型发小数，helper 侧解析失败。
+    for (const name of ["desktop_set_value", "desktop_secondary_action", "desktop_click"]) {
+      expect(params(name).properties?.["element_index"]?.type, name).toBe("integer");
+    }
+    expect(params("desktop_click").properties?.["click_count"]?.type).toBe("integer");
   });
 });

@@ -205,8 +205,10 @@ export const FROZEN_COUNTS = {
   //   `desktop_*` tools (computer-use M1: list/get windows, list apps, and a
   //   window's screenshot + accessibility tree; their pixels ride the existing W804
   //   attachment chain, the tools are registered by compose()'s 4e step only when
-  //   this host is win32 AND a built helper exists, and the helper adds no endpoint).
-  tools: 27,
+  //   this host is win32 AND a built helper exists, and the helper adds no endpoint),
+  //   and the nine desktop WRITE tools, each of which passes the tiered gate
+  //   (packages/desktop/src/gate.ts) before anything reaches the helper.
+  tools: 36,
 } as const;
 
 /** One frozen-count divergence, with everything an operator needs to act. */

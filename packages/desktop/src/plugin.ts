@@ -20,6 +20,7 @@
 import { definePlugin, TOOL_REGISTRY_SERVICE, type Plugin, type ToolRegistry } from "@celestea/core";
 import { DESKTOP_CLIENT_SERVICE, type DesktopHelperClient } from "./client.js";
 import { desktopTools, type DesktopToolDeps } from "./tool.js";
+import type { DesktopGate } from "./gate.js";
 import type { DesktopAttachmentStore } from "./types.js";
 
 export interface DesktopPluginOptions {
@@ -27,6 +28,13 @@ export interface DesktopPluginOptions {
   client: DesktopHelperClient;
   /** 会话附件仓库（截图落点；null = 诚实降级，不拒绝挂载）。 */
   attachments?: DesktopAttachmentStore | null;
+  /**
+   * 写工具的分级闸门（M2）。
+   *
+   * absent = 写工具一律拒绝（fail-closed），只读 4 不受影响。真实闸门由 M2 的另一个
+   * 子代理实现并在这里注入；本包只声明形状。
+   */
+  gate?: DesktopGate;
   /** Mount name (auto-named when omitted). */
   name?: string;
 }
@@ -39,7 +47,11 @@ export function desktopPlugin(opts: DesktopPluginOptions): Plugin {
     ctx.provide(DESKTOP_CLIENT_SERVICE, opts.client);
     const tools = ctx.get<ToolRegistry>(TOOL_REGISTRY_SERVICE);
     if (tools === undefined) return;
-    const deps: DesktopToolDeps = { client: opts.client, attachments: opts.attachments ?? null };
+    const deps: DesktopToolDeps = {
+      client: opts.client,
+      attachments: opts.attachments ?? null,
+      ...(opts.gate === undefined ? {} : { gate: opts.gate }),
+    };
     for (const tool of desktopTools(deps)) tools.register(tool);
   });
 }

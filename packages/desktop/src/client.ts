@@ -44,6 +44,17 @@ import {
   type HelperImage,
 } from "./types.js";
 
+/**
+ * 一份**由闸门判决带来**的应用批准。
+ *
+ * 形状带标签是刻意的：客户端的 fail-closed 只认两种来源——带标签的闸门放行，或只读
+ * 白名单内的预置。工具层想给写方法塞一个裸字符串进来骗过闸门，会被这条拒掉。
+ */
+export interface GateApproval {
+  via: "gate";
+  app: string;
+}
+
 /** Context 里的客户端 token（token 属于提供它的模块，core 只留 seam 级 token）。 */
 export const DESKTOP_CLIENT_SERVICE = "celestea.desktop.HelperClient";
 
@@ -148,13 +159,19 @@ export class DesktopHelperClient {
   /**
    * 调一个 helper 工具。
    *
-   * `approvedApp` 只在**只读白名单**内被翻译成 meta 里的应用批准
-   * （见 types.ts::READ_ONLY_METHODS 的「为什么需要它」）。写方法即使将来接上，
-   * 这里也会直接拒绝这个形参——预置批准不是授权通道。
+   * `approvedApp` 的**形状**决定它能不能被接受：
+   *
+   *   - `{ via: "gate", app }` —— 来自闸门判决（gate.ts）。写方法只有这条路能拿到
+   *     应用批准，因为授权语义只存在于闸门里。
+   *   - 裸字符串 —— M1 的只读预置（types.ts::READ_ONLY_METHODS）。它在**写**方法上
+   *     直接抛错：这条 fail-closed 保持不变，否则「工具层自行预置批准」就是一条绕开
+   *     闸门的暗道。
+   *
+   * 不传 = 交给 helper 自己解析（只读发现类方法本来就不需要）。
    */
-  async callTool(method: string, args: Record<string, unknown>, approvedApp?: string): Promise<HelperCallResult> {
+  async callTool(method: string, args: Record<string, unknown>, approvedApp?: string | GateApproval): Promise<HelperCallResult> {
     if (this.closed) throw new DesktopError("helper_crashed", "desktop helper client is stopped");
-    if (approvedApp !== undefined && approvedApp !== "" && !READ_ONLY_METHODS.includes(method)) {
+    if (approvedApp !== undefined && approvedApp !== "" && typeof approvedApp !== "object" && !READ_ONLY_METHODS.includes(method)) {
       // fail-closed：这个分支一旦被触发，说明有人想给非只读方法开预置批准。
       throw new DesktopError("tool_error", `method ${method} is not read-only: pre-granted app approval does not apply to it`);
     }
@@ -178,10 +195,11 @@ export class DesktopHelperClient {
     return result;
   }
 
-  private async callOnce(method: string, args: Record<string, unknown>, approvedApp?: string): Promise<HelperCallResult> {
+  private async callOnce(method: string, args: Record<string, unknown>, approvedApp?: string | GateApproval): Promise<HelperCallResult> {
     await this.ensureStarted();
     const meta: Record<string, unknown> = { [HELPER_BUDGET_META_KEY]: this.options.timeoutMs };
-    if (approvedApp !== undefined && approvedApp !== "") meta[HELPER_APPROVED_APP_META_KEY] = approvedApp;
+    const app = typeof approvedApp === "object" ? approvedApp.app : approvedApp;
+    if (app !== undefined && app !== "") meta[HELPER_APPROVED_APP_META_KEY] = app;
     // 永远走 method:"call"：只有这条路上 helper 才把截图拆到 result.images
     // （main.rs 的 call 分支）。按方法名直调的话截图是内联 data URL，会一路
     // 以文本形式进模型——helper/src/images.rs 的注释把这条写成了硬规则。
