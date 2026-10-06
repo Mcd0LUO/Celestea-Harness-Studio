@@ -2267,12 +2267,30 @@ fn document_text(el: &IUIAutomationElement) -> String {
                 .map(bstr_to_string)
                 .unwrap_or_default(),
         );
-        if text.len() > 32_000 {
-            text[..32_000].to_string()
-        } else {
-            text
-        }
+        truncate_utf8(&text, DOCUMENT_TEXT_MAX_BYTES)
     }
+}
+
+/// Document 文本的字节上限。**这是字节不是字符数**——上限的目的是给 payload 封顶，
+/// 按字符数封顶会让一个纯中文文档的 payload 涨到 3 倍。
+const DOCUMENT_TEXT_MAX_BYTES: usize = 32_000;
+
+/// 按字节上限截断，但**必定落在 UTF-8 字符边界上**。
+///
+/// 为什么需要它：Rust 的字符串切片是按字节的，切点落在多字节字符中间就会 panic
+/// （byte index N is not a char boundary）。真机上这是必踩的：中文文档 + 树超
+/// 32KB 时，panic 发生在 UIA 监视线程里，会把那一条线程整个带走。
+///
+/// 上限本身仍是**字节数**，只是向下取整到边界，所以「payload 不超过 32000 字节」
+/// 这个承诺没有被削弱——最坏情况少 3 个字节（最长的 UTF-8 字符）。
+///
+/// 全仓只此一处按字节切字符串；其它同类写法都在 u16 缓冲上（from_utf16_lossy），
+/// 元素恒为 2 字节、天然安全。新增按字节截断的地方请走这个函数，别再手写裸切片。
+pub(crate) fn truncate_utf8(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    s[..s.floor_char_boundary(max_bytes)].to_string()
 }
 
 fn process_name(pid: u32) -> String {
@@ -2888,6 +2906,58 @@ mod ax_tests {
     fn provider_line_endings_become_lf() {
         assert_eq!(normalize_newlines("a\r\nb\rc\nd"), "a\nb\nc\nd");
         assert_eq!(normalize_newlines("no breaks"), "no breaks");
+    }
+
+    /// 真机 panic 的回归锁：document_text 曾按字节硬切 32000，切点落进多字节字符
+    /// 中间就 panic（end byte index 32000 is not a char boundary; it is inside
+    /// '都'）。panic 发生在 UIA 监视线程里，会把那一条线程整个带走，之后
+    /// accessibility 永久失效——而 include_text 默认 false，所以截图路径照样
+    /// 正常，症状是「模型突然看不见任何可访问性元素」。
+    ///
+    /// 这里构造的就是真机触发条件：**纯中文 + 恰好跨过 32KB 边界**。
+    /// 旧实现在这个输入上必 panic，所以本断言同时是变异负控制。
+    #[test]
+    fn document_text_truncation_never_splits_a_character() {
+        // 每个「都」占 3 字节。32000 / 3 = 10666.67，所以按字节切一定切在字符中间。
+        let doc = "都".repeat(20_000);
+        assert!(doc.len() > DOCUMENT_TEXT_MAX_BYTES);
+        // 预条件：32000 本身不是边界，否则这条测试就退化成恒真断言。
+        assert!(!doc.is_char_boundary(DOCUMENT_TEXT_MAX_BYTES));
+
+        let cut = truncate_utf8(&doc, DOCUMENT_TEXT_MAX_BYTES);
+
+        assert!(cut.len() <= DOCUMENT_TEXT_MAX_BYTES);
+        // 关键：结果必须是合法 UTF-8，且全是完整字符——半字符在 Rust 里根本构造不出来，
+        // 所以「不 panic + 仍是有效字符串」本身就是正确性判据。
+        assert_eq!(cut.chars().count(), DOCUMENT_TEXT_MAX_BYTES / 3);
+        assert!(cut.chars().all(|c| c == '都'));
+        // 没截的路径也要覆盖：短文本原样返回。
+        assert_eq!(truncate_utf8("短文本", DOCUMENT_TEXT_MAX_BYTES), "短文本");
+    }
+
+    /// 上限恰好落在字符边界上时不能少切一个字符。
+    /// 12 字节 = 4 个「都」，所以 12 是边界而 11 不是。
+    #[test]
+    fn truncate_utf8_does_not_drop_a_character_when_the_limit_is_exact() {
+        let doc = "都".repeat(4);
+        assert_eq!(doc.len(), 12);
+        assert_eq!(truncate_utf8(&doc, 12), doc);
+        assert_eq!(truncate_utf8(&doc, 12).chars().count(), 4);
+        // 少一字节就必须退到上一个边界。
+        assert_eq!(truncate_utf8(&doc, 11).chars().count(), 3);
+    }
+
+    /// 四字节字符（emoji）与组合字符也要覆盖：它们让「按 3 字节推算」失效，
+    /// 迫使实现真的去查字符边界而不是打补丁。
+    #[test]
+    fn truncate_utf8_handles_four_byte_characters() {
+        let doc = "🎯".repeat(4_000); // 16000 字节，够不到上限
+        assert_eq!(doc.len(), 16_000);
+        assert!(!doc.is_char_boundary(9_999));
+        let cut = truncate_utf8(&doc, 9_999);
+        assert!(cut.len() <= 9_999);
+        assert_eq!(cut.chars().count(), 9_999 / 4);
+        assert!(cut.chars().all(|c| c == '🎯'));
     }
 
     /// AX-22: names are whitespace-normalised. The first two cases are the raw UIA values

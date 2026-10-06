@@ -163,6 +163,45 @@ grep -rin 'openai' *.rs         # 1 命中，见下
 绝对路径、时间戳等非确定性输入，bit-reproducibility 未验证。所以 sha256 **只能当度量，
 绝不能当门禁**——已按规划执行，并在 `Cargo.toml` 注释与构建脚本输出里都写明了这一点。
 
+## 7.6 真机 panic 修复（2026-10-06，M2 真机验收抓到的）
+
+**现象**：`uia.rs:2271` 按字节硬切 document 文本，切点落进多字节字符中间就 panic：
+
+```
+thread 'computer-use-uia-monitor' panicked: end byte index 32000 is not a char boundary;
+it is inside '都' (bytes 31999..32002)
+```
+
+**触发条件**：窗口文档文本是中文，且超过 32KB。真实中文 Office 应用必踩。
+
+**为什么后果严重（不只是「少截几个字」）**：panic 发生在 UIA **监视线程**里。
+那是一条常驻线程（`uia.rs:798-802`，`thread::Builder::name("computer-use-uia-monitor")`），
+一旦 unwind 出去就再也不会回来——`CLIENT` 是 `OnceLock`，不重启。
+于是这个进程余下的生命里 accessibility 全部失效。
+
+**为什么症状偏「静默」**：`include_text` 默认 false，
+所以 `get_window_state` 的**截图**路径完全不受影响、照样成功返回。
+只有显式请求 `include_text=true` 时才撞上。模型看到的是
+「这个窗口没有可访问性元素」，而不是「取可访问性信息时崩了」。
+
+**修复**：抽出 `truncate_utf8(s, max_bytes)`，用 `str::floor_char_boundary`
+把切点向下取整到字符边界。上限仍是**字节数**（32000），所以 payload 上限的承诺
+没有被削弱——最坏情况少 3 个字节（最长的 UTF-8 字符）。
+
+**全同类写法排查结论**：脚本扫了全仓 19 个 `.rs` 的 `[..N]` / `[N..]` /
+`.truncate(` / `.chars().take(` / `.len() > N` 五类惯用法，共 34 处命中，
+**只有本处是对 UTF-8 字符串按字节切片**。其余全部是：
+- `String::from_utf16_lossy(&buf[..n])`——切的是 `u16` 缓冲，元素恒为 2 字节，
+  `from_utf16_lossy` 自己处理落单代理项，天然安全；
+- `from_le_bytes(blob[4..8])` 之类——切的是 `u8`，安全；
+- `.len() > N` 里的 N 是**元素个数**（`rows`/`matches`/`meta` 字节数）不是字符串。
+
+**回归测试 + 变异负控制**：3 个测试（中文跨边界 / 上限恰好是边界 / 四字节 emoji）。
+变异负控制实测：把 `floor_char_boundary` 改回裸切片后，
+`document_text_truncation_never_splits_a_character` **红**，panic 消息与真机同类：
+`end byte index 32000 is not a char boundary; it is inside '都' (bytes 31998..32001)`。
+还原后全绿。测试数字 138 → **141 passed / 0 failed**。
+
 ## 7.5 参考仓自报的测试数字与实测不符（写给 M3 决策笔记）
 
 任务书里转述的「参考仓自报 148 个 `#[test]`」**与源码对不上**。实测：
