@@ -19,9 +19,20 @@
 
 import type { Hono } from "hono";
 import type { AskUserQuestionAnswerItem } from "@celestea/core";
+import { cookieValue } from "../auth/token.js";
 import { errText } from "../store/result.js";
+import { QUESTION_NONCE_COOKIE, questionNonce, questionNonceCookie, questionNonceMatches, secureCookieFor } from "../store/question-nonce.js";
 import type { RouteTable } from "../routes.js";
 import { failJson, readJsonBody, strField, type Deps, type JsonObject } from "./common.js";
+
+/**
+ * M2: the refusal of an answer that did not come from the Studio browser.
+ *
+ * The whole sentence is a fixed constant: an attacker learns nothing they can
+ * use from it, and a legitimate client (which always carries the cookie) never
+ * sees it.
+ */
+export const QUESTION_NONCE_REQUIRED = "the answer must carry the Studio browser's question nonce";
 
 /** One answer as the request body carries it. */
 type AnswerRead = { ok: true; answers: AskUserQuestionAnswerItem[] } | { ok: false; error: string };
@@ -72,6 +83,21 @@ function registerAnswer(app: Hono, deps: Deps, table: RouteTable): string {
     if (!guard.ok) return guard.response;
     const answer = deps.runtime.answerQuestion;
     if (answer === undefined) return failJson(c, 404, `unknown or already settled question '${requestId}'`);
+    // M2: the answer must come from the Studio browser, not from the session's
+    // own `http_request`. See store/question-nonce.ts for the full reasoning.
+    //
+    // WHY THIS SITS BEFORE `answer.call` AND NOT AFTER: that call IS the settle —
+    // there is no "check the question first, settle later" seam here
+    // (`answerQuestion` does lookup + session guard + settle in one step), so a
+    // check placed after it would be a check that the action already happened.
+    // The cost of checking first is that a caller WITHOUT the cookie gets 403 for
+    // every id, existing or not — which is the better trade: it also stops the
+    // endpoint from confirming which ids are live to a caller who cannot answer
+    // them. A legitimate client (which has the cookie) keeps the documented
+    // 404/409 outcomes untouched.
+    if (!questionNonceMatches(cookieValue(c.req.header("cookie"), QUESTION_NONCE_COOKIE))) {
+      return failJson(c, 403, QUESTION_NONCE_REQUIRED);
+    }
     const outcome = answer.call(deps.runtime, requestId, answers.answers, guard.value);
     if (!outcome.ok) return refuse(c, requestId, outcome.reason);
     // `timed_out:false` is a fact, not a placeholder: a REAL answer arrived, so
@@ -101,7 +127,14 @@ function registerList(app: Hono, deps: Deps, table: RouteTable): string {
       // An ABSENT filter is not the same as filtering by `null`: the latter would
       // return only the detached generation's questions. Passing `undefined`
       // keeps the whole table, which is what a reconnecting client needs.
-      return c.json({ ok: true, questions: pending.call(deps.runtime, asked === "" ? undefined : asked) });
+      const body = { ok: true, questions: pending.call(deps.runtime, asked === "" ? undefined : asked) };
+      // M2: this GET is one of the two places the browser picks up the answer
+      // nonce (the other is `GET /api/events`). It is the recovery path — the
+      // frontend calls it on every SSE reconnect (ui/question/sse.ts), i.e.
+      // BEFORE any card it rebuilds can be answered, which is what makes the
+      // delivery ordering safe rather than lucky.
+      c.header("set-cookie", questionNonceCookie(questionNonce(), secureCookieFor(c.req.header("x-forwarded-proto"))));
+      return c.json(body);
     } catch (e) {
       return failJson(c, 500, errText(e));
     }

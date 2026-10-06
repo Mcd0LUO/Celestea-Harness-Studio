@@ -19,6 +19,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createEventBus, delegatedCallerScope, loadSse } from "@celestea/core";
 import { jsonRequest, type StudioHarness } from "../harness.test-util.js";
 import { createQuestionRegistry, type PendingQuestion, type QuestionRegistry } from "../question-registry.js";
+import { QUESTION_NONCE_COOKIE } from "../store/question-nonce.js";
+import { QUESTION_NONCE_REQUIRED } from "../handlers/questions.js";
 import { createUserQuestionService } from "../user-questions.js";
 import { activate, makeEngineHarness } from "./test-util.js";
 
@@ -63,6 +65,26 @@ async function waitForQuestion(h: StudioHarness, timeoutMs = 5_000): Promise<str
   }
 }
 
+/**
+ * Answer the way the BROWSER does (M2): pick the HttpOnly nonce up from a GET,
+ * then echo it back on the POST.
+ *
+ * `app.request` has no cookie jar, so a real client's two steps must be spelled
+ * out here — and that is exactly the property the fix relies on: the session's
+ * own `http_request` CAN forge every header and body field, but it cannot READ
+ * `Set-Cookie` (its response view is HEADER_SUBSET) and keeps no jar, so it can
+ * never produce this second step.
+ */
+async function answerAsBrowser(h: StudioHarness, id: string, body: unknown): Promise<Response> {
+  const listed = await h.app.request("/api/questions");
+  const cookie = (listed.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+  return h.app.request(`/api/questions/${id}/answer`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify(body),
+  });
+}
+
 const OPTIONS = [
   { id: "mode", question: "选哪个方案？", header: "确认", options: [{ label: "方案 A（推荐）" }, { label: "方案 B", description: "更慢" }] },
 ];
@@ -99,10 +121,7 @@ describe("W783 · the answer resolves the parked tool call (never a message)", (
     // W9206-32: a real client always names the session it is answering for
     // (`card.ts` omits it only for the detached pane); the omitted field used
     // to skip the guard entirely, which is the bypass the fix closes.
-    const answered = await h.app.request(
-      `/api/questions/${id}/answer`,
-      jsonRequest("POST", { answers: [{ id: "mode", selected: ["方案 B"], custom: "补充一句" }], session: "sample-ws/s1" }),
-    );
+    const answered = await answerAsBrowser(h, id, { answers: [{ id: "mode", selected: ["方案 B"], custom: "补充一句" }], session: "sample-ws/s1" });
     expect(answered.status).toBe(200);
     expect(await answered.json()).toEqual({ ok: true, id, session: "sample-ws/s1", timed_out: false });
 
@@ -127,7 +146,7 @@ describe("W783 · the answer resolves the parked tool call (never a message)", (
     const turned = await h.app.request("/api/turn", jsonRequest("POST", { input: "问一下", session: "sample-ws/s1" }));
     expect(turned.status).toBe(202);
     const id = await waitForQuestion(h);
-    await h.app.request(`/api/questions/${id}/answer`, jsonRequest("POST", { answers: [{ id: "mode", selected: ["方案 A（推荐）"] }], session: "sample-ws/s1" }));
+    await answerAsBrowser(h, id, { answers: [{ id: "mode", selected: ["方案 A（推荐）"] }], session: "sample-ws/s1" });
     await waitIdleOf(h);
 
     const raw = readLogOf(h);
@@ -143,6 +162,46 @@ describe("W783 · the answer resolves the parked tool call (never a message)", (
     // The model never sees these audit rows (its own tool_result is the record).
     expect(raw).toContain('"type":"user_question"');
   });
+});
+
+describe("M2 · an answer must come from the Studio browser (the desktop gate's confirmation cannot be self-approved)", () => {
+  it("refuses an answer that carries no nonce cookie, leaving the question parked", async () => {
+    const h = asker(OPTIONS);
+    await activate(h, "sample-ws/s1");
+    await h.app.request("/api/turn", jsonRequest("POST", { input: "问一下", session: "sample-ws/s1" }));
+    const id = await waitForQuestion(h);
+
+    // The exact shape the session's own `http_request` can produce: a correct
+    // body (it knows its own session id) and no cookie (it cannot read one).
+    const forged = await h.app.request(
+      `/api/questions/${id}/answer`,
+      jsonRequest("POST", { answers: [{ id: "mode", selected: ["方案 A（推荐）"] }], session: "sample-ws/s1" }),
+    );
+    expect(forged.status).toBe(403);
+    expect(await forged.json()).toEqual({ ok: false, error: QUESTION_NONCE_REQUIRED });
+    // A refused answer must NOT settle the question: the human can still decide.
+    const still = (await (await h.app.request("/api/questions")).json()) as { questions: unknown[] };
+    expect(still.questions).toHaveLength(1);
+
+    // The browser — which got the cookie from a GET — answers normally.
+    const answered = await answerAsBrowser(h, id, { answers: [{ id: "mode", selected: ["方案 A（推荐）"] }], session: "sample-ws/s1" });
+    expect(answered.status).toBe(200);
+    await waitIdleOf(h);
+  }, 20_000);
+
+  it("hands the nonce to the browser on GET /api/events too, HttpOnly and SameSite=Strict", async () => {
+    // The race-free half: a `question` frame arrives ON this stream, so the
+    // cookie is already stored before any card can be rendered, let alone answered.
+    const h = asker(OPTIONS);
+    const res = await h.app.request("/api/events");
+    const set = res.headers.get("set-cookie") ?? "";
+    await res.body?.cancel();
+    expect(set.startsWith(QUESTION_NONCE_COOKIE + "=")).toBe(true);
+    expect(set).toContain("HttpOnly");
+    expect(set).toContain("SameSite=Strict");
+    // 32 bytes of hex: long enough that guessing is not a strategy.
+    expect(set.split(";")[0]?.split("=")[1]).toMatch(/^[0-9a-f]{64}$/);
+  }, 20_000);
 });
 
 describe("W783 · the maximum wait (§6)", () => {
@@ -196,7 +255,7 @@ describe("W783 · the maximum wait (§6)", () => {
     const after = (await (await h.app.request("/api/questions")).json()) as { questions: unknown[] };
     expect(after.questions).toEqual([]);
     // A late answer is a clear 404, never a silent success (§6.2).
-    const late = await h.app.request(`/api/questions/${id}/answer`, jsonRequest("POST", { answers: [{ id: "mode", selected: [] }], session: "sample-ws/s1" }));
+    const late = await answerAsBrowser(h, id, { answers: [{ id: "mode", selected: [] }], session: "sample-ws/s1" });
     expect(late.status).toBe(404);
   }, 20_000);
 
