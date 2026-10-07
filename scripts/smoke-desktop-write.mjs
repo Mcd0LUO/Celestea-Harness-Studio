@@ -99,6 +99,23 @@ async function grantsProvider(desktop, apps) {
 const toolsFor = (gate) => Object.fromEntries(desktopTools({ client, attachments, gate }).map((t) => [t.spec().name, t]));
 const call = async (tools, name, args) => tools[name].execute(args);
 
+// 真人可能在场（机器就是人的桌面）：租约**正确地**拦下我们的写时，
+// 重新观测后有限重试，并把干扰次数如实打印——不假装没发生，也不让
+// 「租约在工作」把整份冒烟误杀。重试有界：超过上限就是真失败。
+const LEASE_LITERAL_SMOKE = 'user input was detected in this window';
+let interferences = 0;
+async function callWrite(tools, name, args, retries = 3) {
+  let res = await call(tools, name, args);
+  while (res && res.ok === false && JSON.stringify(res).includes(LEASE_LITERAL_SMOKE) && retries > 0) {
+    interferences += 1;
+    retries -= 1;
+    console.log('      [interference] lease tripped by REAL input (it works!) - re-observing and retrying (' + retries + ' left)');
+    await call(ro, 'desktop_get_window_state', { window: args.window, include_text: true });
+    res = await call(tools, name, args);
+  }
+  return res;
+}
+
 function cleanup() {
   try { client.stop(); } catch { /* 忽略：清理不该掩盖真正的失败 */ }
   if (notepad !== null && !KEEP) {
@@ -175,7 +192,7 @@ check('no confirmation card was raised (it never got that far)', autoApproved ==
 console.log('\n(1) type_text into notepad, then read it back through UIA');
 const MARK1 = 'Celestea-M2-A-' + stamp.replace(/[^0-9]/g, '').slice(0, 14);
 await call(allowed, 'desktop_activate_window', { window: WIN });
-const typed1 = await call(allowed, 'desktop_type_text', { window: WIN, text: MARK1 });
+const typed1 = await callWrite(allowed, 'desktop_type_text', { window: WIN, text: MARK1 });
 check('activate_window + type_text both succeeded', typed1.ok === true, JSON.stringify(typed1).slice(0, 160));
 check('the confirm card was actually raised and approved', autoApproved >= 1, `autoApproved=${autoApproved}`);
 const state1 = await call(ro, 'desktop_get_window_state', { window: WIN, include_text: true });
@@ -190,9 +207,12 @@ const cx = Math.round(Number(geom.x ?? 100) + Number(geom.width ?? 400) / 2);
 const cy = Math.round(Number(geom.y ?? 100) + Number(geom.height ?? 300) / 2);
 console.log('      window rect =', JSON.stringify(geom), '-> click at', cx, cy);
 const MARK2 = '|AFTER-CLICK';
-const clicked = await call(allowed, 'desktop_click', { window: WIN, x: cx, y: cy });
+const clicked = await callWrite(allowed, 'desktop_click', { window: WIN, x: cx, y: cy });
 check('click succeeded', clicked.ok === true, JSON.stringify(clicked).slice(0, 160));
-const typed2 = await call(allowed, 'desktop_type_text', { window: WIN, text: MARK2 });
+// 诊断：我们自己的点击之后监测快照必须仍然干净（印章应让钩子认出是自己）。
+const monAfterClick = (await client.callTool('diagnostic_state', {})).value?.inputMonitor ?? {};
+console.log('      inputMonitor after OUR click:', JSON.stringify(monAfterClick));
+const typed2 = await callWrite(allowed, 'desktop_type_text', { window: WIN, text: MARK2 });
 check('the second type_text succeeded', typed2.ok === true, JSON.stringify(typed2).slice(0, 160));
 const state2 = await call(ro, 'desktop_get_window_state', { window: WIN, include_text: true });
 const tree2 = JSON.stringify(state2.accessibility ?? '');
@@ -204,7 +224,7 @@ check('the second text landed AFTER the first (click focused the text area)', at
 // ── 3b. 闸门真放 ────────────────────────────────────────────────────────
 console.log('\n(3b) the same call is ALLOWED once the desktop cap is granted');
 // 无害按键：End。落到记事本文本区只会把光标移到行尾。
-const key = await call(allowed, 'desktop_press_key', { window: WIN, key: 'End' });
+const key = await callWrite(allowed, 'desktop_press_key', { window: WIN, key: 'End' });
 check('press_key(End) went through the gate to the helper', key.ok === true, JSON.stringify(key).slice(0, 160));
 const stillDenied = await call(denied, 'desktop_press_key', { window: WIN, key: 'End' });
 check('the un-granted gate still refuses the same tool', stillDenied.ok === false && stillDenied.code === 'desktop_cap_not_granted', JSON.stringify(stillDenied).slice(0, 120));
@@ -217,7 +237,7 @@ check('the un-granted gate still refuses the same tool', stillDenied.ok === fals
 // （**不盖章**），对 helper 而言与真人的手不可区分——租约因此可以自动化验收。
 console.log('\n(4) lease: an UNSTAMPED external click must trip the lease');
 const LONG = 'celestea-lease-' + 'x'.repeat(2000);
-const warm = await call(allowed, 'desktop_type_text', { window: WIN, text: LONG });
+const warm = await callWrite(allowed, 'desktop_type_text', { window: WIN, text: LONG });
 check('the warm-up write succeeded (the window identity is now known)', warm.ok === true, JSON.stringify(warm).slice(0, 120));
 
 // 点在记事本窗口**内**（截图记录带屏幕坐标 originX/originY/width/height）。
@@ -244,11 +264,12 @@ check('helper refused the write with the real user-input literal',
   JSON.stringify(leased).slice(0, 160));
 
 // 恢复路径：重新观测（remember_capture -> interrupt::clear）后写工具必须恢复可用。
-const relook = await call(ro, 'desktop_get_window_state', { window: WIN, include_screenshot: false });
+const relook = await call(ro, 'desktop_get_window_state', { window: WIN, include_text: true });
 check('re-observing the window succeeds', relook.ok === true, JSON.stringify(relook).slice(0, 120));
 const afterReobserve = await call(allowed, 'desktop_type_text', { window: WIN, text: '|LEASE-RECOVERED' });
 check('writes work again after re-observation (lease reset)', afterReobserve.ok === true, JSON.stringify(afterReobserve).slice(0, 120));
 cleanup();
 await rm(workDir, { recursive: true, force: true });
+if (interferences > 0) console.log('      (real-user interferences observed and retried: ' + interferences + ' — lease working as designed)');
 console.log('\n' + (failures === 0 ? 'WRITE SMOKE PASSED' : 'WRITE SMOKE FAILED: ' + failures + ' assertion(s)'));
 process.exit(failures === 0 ? 0 : 1);

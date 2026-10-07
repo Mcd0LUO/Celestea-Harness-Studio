@@ -211,20 +211,27 @@ let refreshes = 0;
 let leaseHit = null;
 let lastError = null;
 let firstRejection = null;
+let interferences = 0;
 
 while (Date.now() - started < TOTAL_S * 1000) {
   const elapsed = (Date.now() - started) / 1000;
   if (!prompted && elapsed >= PROMPT_AT_S) {
     prompted = true;
     if (AUTO) {
-      // 无印章注入：对 helper 而言与真人击键不可区分（dwExtraInfo=0）。
-      // 租约应触发；注入的字符同时是「击键是否落地」的探针，收尾时从 UIA 读回。
+      // 无印章注入：对 helper 而言与真人击键/点击不可区分（dwExtraInfo=0）。
+      // 文本探针 + 一次点击：文本是「击键是否落地」的探针（收尾从 UIA 读回），
+      // 点击保证钩子里有一次可观测事件，租约触发不依赖文本是否落地。
       const py = process.env.CELESTEA_SMOKE_PYTHON ?? 'python';
+      const ax = Math.round(Number(shot0.originX ?? 0) + CX);
+      const ay = Math.round(Number(shot0.originY ?? 0) + CY);
       const r = spawnSync(py, [
         join(import.meta.dirname ?? '.', 'desktop-inject-input.py'), 'text', AUTO_PROBE,
       ], { encoding: 'utf8', timeout: 30000 });
       console.log('      [auto] injected unstamped keystrokes:', (r.stdout || '').trim(), '| exit', r.status);
-      if (r.status !== 0) console.log('      [auto] injector stderr:', (r.stderr || '').trim() || '(none)');
+      const r2 = spawnSync(py, [
+        join(import.meta.dirname ?? '.', 'desktop-inject-input.py'), 'mouse', String(ax), String(ay),
+      ], { encoding: 'utf8', timeout: 30000 });
+      console.log('      [auto] injected unstamped click at ' + ax + ',' + ay + ':', (r2.stdout || '').trim(), '| exit', r2.status);
     } else {
       console.log('');
       console.log('  ============================================================');
@@ -240,6 +247,20 @@ while (Date.now() - started < TOTAL_S * 1000) {
     if (firstRejection === null) firstRejection = { at: elapsed.toFixed(1), res };
     const text = JSON.stringify(res);
     if (text.includes(LEASE_LITERAL)) {
+      if (AUTO && !prompted) {
+        // 注入点之前的命中只可能是真人在场——租约在正常工作，但它不是
+        // 本次探针的结果。重新观测清掉 dirty 继续等注入点（有界，防死循环）。
+        interferences += 1;
+        if (interferences > 20) {
+          leaseHit = null;
+          lastError = res;
+          break;
+        }
+        console.log('      [auto] real-user lease trip before the probe (it works!) - re-observing, probe still pending');
+        await call('desktop_get_window_state', { window: WIN, include_screenshot: true });
+        await sleep(INTERVAL_MS);
+        continue;
+      }
       leaseHit = { at: elapsed.toFixed(1), res };
       break;
     }
@@ -266,13 +287,17 @@ if (firstRejection !== null) {
 // --auto 对照实验：租约触发后重新观测并读 UIA 文本，验证注入的击键**真的落了地**。
 // 落了 = 200ms 点击节奏下外部击键可落地，「焦点抢夺」推断不成立；
 // 没落 = 复现了手动实测的「打不出字」，是方案 C（焦点节流）的真机证据。
+// 探针落地是**对照实验数据**，不是通过/失败判据：落地与否直接判读焦点抢夺推断。
 let probeLanded = null;
-if (AUTO && leaseHit !== null) {
+if (AUTO && prompted) {
   const relook = await call('desktop_get_window_state', { window: WIN, include_text: true });
   const tree = JSON.stringify(relook.accessibility ?? '');
   probeLanded = tree.includes(AUTO_PROBE);
-  check('the injected keystrokes LANDED in the notepad (UIA readback)', probeLanded,
-    probeLanded ? AUTO_PROBE + ' found' : 'NOT FOUND in ' + tree.length + ' chars');
+  console.log('      [auto] probe readback: ' + (probeLanded
+    ? AUTO_PROBE + ' FOUND in the UIA tree — keystrokes LAND during the 200ms click cadence'
+    : 'NOT FOUND in ' + tree.length + ' chars — keystrokes did NOT land'));
+} else if (AUTO) {
+  console.log('      [auto] probe was never injected (interference overflow) — focus experiment INCONCLUSIVE');
 }
 
 cleanup();
@@ -283,9 +308,12 @@ if (leaseHit !== null) {
   check('helper refused the write with the real lease literal', true, LEASE_LITERAL);
   check('it arrived as a structured result (the turn survived)', leaseHit.res !== null && typeof leaseHit.res === 'object');
   if (AUTO) {
-    console.log(probeLanded
-      ? '      [auto] keystrokes landed => focus-yanking theory REFUTED for this cadence.'
-      : '      [auto] keystrokes did NOT land => focus-yanking theory CONFIRMED, discuss option C.');
+    console.log(probeLanded === null
+      ? '      [auto] focus experiment inconclusive this run.'
+      : probeLanded
+        ? '      [auto] keystrokes landed => focus-yanking theory REFUTED for this cadence.'
+        : '      [auto] keystrokes did NOT land => focus-yanking theory CONFIRMED, discuss option C.');
+    if (interferences > 0) console.log('      [auto] real-user interferences before the probe: ' + interferences + ' (lease works on real hands too)');
   }
   console.log('');
   console.log(AUTO ? 'LEASE AUTO CHECK PASSED' : 'LEASE MANUAL CHECK PASSED');

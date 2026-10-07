@@ -13,6 +13,9 @@
 //! `capture_exclusion()` 恒为 `Off`、`display_hwnds()` 恒空、`visible()` 恒 false。
 //! 这与「不创建 overlay 窗口」自洽。
 //!
+//! 唯一的非零语义是 show()/hide()：参考仓把租约监测的 arm/disarm 挂在
+//! overlay 生命周期上，垫片保留这条接线（见两函数的文档与 tests 模块）。
+//!
 //! 若将来决定移植 overlay：删除本文件，换回参考仓的 `src/overlay/`，
 //! 并同步复核 `capture.rs` 的排除逻辑（本垫片让 `OVERLAY_HWNDS` 注册表恒空）。
 
@@ -68,11 +71,37 @@ pub fn exclude_overlay_from_capture() -> bool {
     false
 }
 
-/// 空操作。
-pub fn show() {}
+/// 没有窗口要显示，但**不是**零语义：参考仓把租约监测的武装挂在
+/// overlay 生命周期上（show → interrupt::arm，hide → interrupt::disarm），
+/// 垫片把这条接线原样保留——2026-10-07 真机实证过丢它的后果：
+/// ARMED 恒 false，无印章外部输入进不了 dirty 判定，租约形同虚设
+/// （写面冒烟 §4：mouseDowns 计到了，armed:false 所以全部忽略）。
+pub fn show() {
+    crate::interrupt::arm();
+}
 
-/// 空操作。
-pub fn hide() {}
+/// 没有窗口要隐藏；参考仓只在「overlay 窗口确实不可见」时 disarm，
+/// 垫片恒无窗口，该条件恒真。hide 的全部调用点都是回合/生命周期边界
+/// （end_turn / interrupt / cancel / idle-exit），动作之间不会调到。
+pub fn hide() {
+    crate::interrupt::disarm();
+}
+
+#[cfg(test)]
+mod tests {
+    /// 接线回归锁：show 必须武装租约监测、hide 必须解除。
+    /// 变异负控制：把 show() 里的 arm() 删掉，本测试第一断言即红
+    /// （2026-10-07 实测该变异，确实红）。
+    #[test]
+    fn show_arms_and_hide_disarms_the_lease_monitor() {
+        super::show();
+        let armed = crate::interrupt::snapshot()["armed"].as_bool();
+        assert_eq!(armed, Some(true), "show() must arm the lease monitor");
+        super::hide();
+        let armed = crate::interrupt::snapshot()["armed"].as_bool();
+        assert_eq!(armed, Some(false), "hide() must disarm the lease monitor");
+    }
+}
 
 /// 恒 false：没有遮罩可涂。
 pub fn mask_for_capture() -> bool {

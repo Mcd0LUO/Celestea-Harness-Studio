@@ -105,7 +105,8 @@ GET /api/events（无竞态，question 帧同流）与 GET /api/questions 下发
   下误标真人，不可用；PORTING.md §7.7），无印章 = 真人。cargo 单测钉死（含变异负
   控制：把时间窗 OR 回去 → 3 条测试红）；真机验收由 scripts/desktop-inject-input.py
   无印章注入自动化（smoke-desktop-write §4 真断言 + lease-manual-check.mjs --auto），
-  真人手动模式保留为可选项。
+  真人手动模式保留为可选项。**已实证**（2026-10-07）：注入触发→真实字面量拒写→
+  观测恢复全链路通过，探针字符 UIA 读回落定「击键可落地」，真人干扰亦被如实拦下。
 - **顾问层**：复核基础设施多次返回无效报告，S1 检查点由编排方独立复跑核销
   （证据落盘 .dsh-tmp/s1-evidence/）；M1 由 fresh-eyes 子代理独立审查替代。
 
