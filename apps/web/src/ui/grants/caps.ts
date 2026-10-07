@@ -21,8 +21,11 @@ export interface CapDef {
   impact: string;
   /** 追加的影响说明（如「撤销前一直有效」）。 */
   extra?: string;
-  /** bool = 无范围；dirs = 选目录；hosts = 站点文本框；tools = 工具名文本框。 */
-  kind: 'bool' | 'dirs' | 'hosts' | 'tools';
+  /**
+   * bool = 无范围；dirs = 选目录；hosts = 站点文本框；tools = 工具名文本框；
+   * apps = **应用清单**（M2-B2a：allow/deny × exes/titles 四个文本框，desktop 专用）。
+   */
+  kind: 'bool' | 'dirs' | 'hosts' | 'tools' | 'apps';
   danger: boolean;
   /**
    * W819-8：预留能力位 —— 已知且仍可回读/撤销，但**不再对外可授**。
@@ -114,12 +117,15 @@ export function caps(): readonly CapDef[] {
     {
       cap: 'desktop',
       label: t('grants.cap.desktop.label'),
-      impact: t('grants.cap.desktop.impact'),
+      // M2-B2a：影响说明改说**应用清单**（可选收窄 + 空 allow = 不限制 + deny 永远赢）。
+      // 旧文案（grants.cap.desktop.impact）已从字典删除 —— 用户现在看得见那四个清单，
+      // 一句不解释它们的说明会直接误导；留着还会被 i18n 死键门禁抓住。
+      impact: t('grants.cap.desktop.impactApps'),
       extra: t('grants.cap.desktop.extra'),
-      // M2：本轮先按 `bool` 录入 —— 授权就是「这台机器的鼠标键盘可以被模型动」，
-      // 应用清单留空 = 不限制（规划 §4.3 的默认档）。应用清单的录入框在 M2-B2 单独
-      // 落地（规划 §10.5：先文本框），届时本项改为专用 kind；存量空 scope 的语义不变。
-      kind: 'bool',
+      // M2-B2a：从 `bool` 升级为 `apps` —— 授权仍然是「这台机器的鼠标键盘可以被模型动」，
+      // 应用清单是**可选的收窄**：四个框全空 = 不限制（规划 §4.3 的默认档），提交的 scope
+      // 与升级前逐字相同（`{}`），所以存量空 scope 的语义与哈希都没变（见 apps.ts 头注）。
+      kind: 'apps',
       danger: true,
       confirmWord: '',
       defaultTtl: 0,

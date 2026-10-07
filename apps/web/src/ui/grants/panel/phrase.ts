@@ -8,6 +8,7 @@
 // ============================================================================
 import type { GrantScope } from '../../../types';
 import { caps, listOf, scopeOf, type CapDef } from '../caps';
+import { appsOfScope, appsPhrase } from '../apps';
 import { t } from '../../../i18n';
 import { activeFor, activeGrants, baselineIsFullAccess, effectiveOf } from './active';
 
@@ -56,8 +57,13 @@ export function phraseFor(def: CapDef, scope: GrantScope): string {
       return t('grants.phrase.toolExtra', { tools: listOf(scope.tools).join(t('grants.copy.listSep')) });
     case 'unsandboxed':
       return t('grants.phrase.unsandboxed');
-    case 'desktop':
-      return t('grants.phrase.desktop');
+    case 'desktop': {
+      // M2-B2a：带应用清单时把清单口径说进预览句（空清单 = 不限制，逐字沿用原文案）。
+      const apps = appsOfScope(scope);
+      return apps.allow === undefined && apps.deny === undefined
+        ? t('grants.phrase.desktop')
+        : t('grants.phrase.desktopScoped', { apps: appsPhrase(apps) });
+    }
   }
 }
 

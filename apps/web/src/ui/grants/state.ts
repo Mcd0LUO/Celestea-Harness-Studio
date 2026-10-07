@@ -6,6 +6,7 @@
 import type { GrantEntry, GrantsResp } from '../../types';
 import type { OverlayHandle } from '../../utils/overlays';
 import type { CapDef } from './caps';
+import { emptyAppsDraft, type AppsDraft } from './apps';
 import type { GrantPreset } from './presets';
 import type { GrantCap } from '../../types';
 
@@ -30,6 +31,45 @@ let panelNote: { text: string; cls: string } | null = null;
 export const inlineError = new Map<string, string>();
 /** 站点/工具文本框草稿（按能力位；重渲染不丢字）。 */
 export const drafts = new Map<string, string>();
+
+/**
+ * M2-B2a：应用清单（desktop 的四个录入框）的草稿存储键。
+ *
+ * 为什么不新开一张 Map：四个框属于**同一个**能力位的范围输入，而既有代码在授予
+ * 成功时已经会 `drafts.delete(def.cap)`（flow.ts）—— 复用同一个键，清草稿这条
+ * 既有行为不用改两处，也不会出现「清了站点草稿忘了应用清单」的半清状态。
+ * 值是一份 JSON 文本（见 apps.ts 的 AppsDraft），**惰性解析**：面板重绘不丢字。
+ */
+export function appsDraftKey(cap: string): string {
+  return cap + '.apps';
+}
+
+/**
+ * M2-B2a：读出四个录入框的草稿（形状见 apps.ts 的 AppsDraft）。
+ *
+ * 解析放在 state.ts 而不是 flow.ts，是为了**不引入环**：flow.ts → panel.ts →
+ * panel/body.ts → panel/rows.ts 已经是一条既有边，rows.ts 若再反向 import
+ * flow.ts 就成环（与 W748 用 state.ts 消环是同一条理由）。
+ *
+ * 容错口径：草稿是用户输入，任何形状都不该让渲染或授予流程抛异常 —— 解析失败
+ * 一律当「四个框都空」（= 不限制），而不是留一个半截清单。
+ */
+export function getAppsDraft(cap: string): AppsDraft {
+  const raw = drafts.get(appsDraftKey(cap));
+  if (!raw) return emptyAppsDraft();
+  try {
+    const parsed = JSON.parse(raw) as Partial<AppsDraft>;
+    if (!parsed || typeof parsed !== 'object') return emptyAppsDraft();
+    const base = emptyAppsDraft();
+    for (const k of Object.keys(base) as Array<keyof AppsDraft>) {
+      const v = parsed[k];
+      if (typeof v === 'string') base[k] = v;
+    }
+    return base;
+  } catch {
+    return emptyAppsDraft();
+  }
+}
 /**
  * 有效期选择（按能力位）：**0 = 永久（默认，也是主路径）**；
  * 只有用户在「临时授权…」里显式改了时长，这里才会出现非 0 的值（W773）。

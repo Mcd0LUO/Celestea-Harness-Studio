@@ -327,6 +327,24 @@
 }
 .grant-hosts-row { display: flex; gap: 6px; margin-top: 5px; }
 .grant-hosts-row .grant-input { margin-top: 0; flex: 1 1 auto; min-width: 0; }
+
+/* M2-B2a：desktop 的应用清单（allow/deny × exes/titles 四个文本框）。
+   复用 .grant-hosts-row / .grant-input 的既有形态，这里只补两件它没有的东西：
+   ① 每个框前的标签（否则标签会按浏览器默认字号显示，与 11.5px 的输入框不搭）；
+   ② 两侧之间的分组线，让「只允许这些」与「始终排除这些」在视觉上是两块。 */
+.grant-apps-editor { margin-top: 4px; }
+.grant-apps-side {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--c-text-2);
+  margin-top: 8px;
+}
+.grant-apps-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--c-text-3);
+  align-self: center;
+}
 .grant-err {
   font-size: 11px;
   color: var(--c-err);
