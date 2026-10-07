@@ -8,7 +8,7 @@
 | 项 | 值 |
 |---|---|
 | 来源（只读） | `.dsh-tmp/refs/dsh-computer-use_codex-style/helper-rs/` |
-| 去路 | `packages/desktop/helper/` |
+| 去路 | `packages/computer-use/helper/` |
 | crate 名 | `celestea-desktop-helper`（原 `dsh-computer-use`） |
 | 来源规模 | 23,133 行 / 21 个 `src/*.rs` + `src/overlay/{mod,motion}.rs` + `src/policy/url_policy.rs` |
 | 去路规模 | 16,390 行 / 19 个 `src/*.rs`（含新增的 overlay 垫片） |
@@ -104,7 +104,7 @@
 ### 自证命令与结果
 
 ```
-cd packages/desktop/helper/src
+cd packages/computer-use/helper/src
 grep -rin 'verbatim' *.rs        # ZERO HITS
 grep -rin 'official docs' *.rs  # ZERO HITS
 grep -rin 'openai' *.rs         # 1 命中，见下

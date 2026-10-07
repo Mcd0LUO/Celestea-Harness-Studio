@@ -73,11 +73,11 @@ export * from "./recovery.js";
 export * from "./worker-wiring.js";
 // computer-use M1/M2: the desktop static check + wiring, plus (M2) the gate's
 // host-facing surface. NOT `export *` from the package — the desktop package's own
-// surface stays owned by @celestea/desktop, and what a host needs from here is the
+// surface stays owned by @celestea/computer-use, and what a host needs from here is the
 // CHECK (so a host can explain why nothing mounted), the wiring entry point, and
 // the two factories + port types it needs to BUILD a gate (the host is the only
 // layer that holds the session's grants and the way to ask a human, and it does
-// not depend on @celestea/desktop — see desktop-wiring.ts).
+// not depend on @celestea/computer-use — see desktop-wiring.ts).
 export {
   checkDesktopMount,
   ensureDesktopWiring,

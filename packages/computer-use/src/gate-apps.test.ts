@@ -63,13 +63,13 @@ describe("M2 gate · 审查修复① 标识符前缀（helper 剥前缀后真的
   it("keeps the prefix tables in lockstep with the helper source (mechanical drift guard)", () => {
     // 真源是 helper 的 Rust 源码；本用例**读它**再比对，所以少抄一个前缀会在这里红。
     const root = process.cwd();
-    const enumRs = readFileSync(join(root, "packages/desktop/helper/src/enum_windows.rs"), "utf8");
+    const enumRs = readFileSync(join(root, "packages/computer-use/helper/src/enum_windows.rs"), "utf8");
     const declared = /pub const APP_ID_PREFIXES[^=]*=\s*&\[([\s\S]*?)\];/.exec(enumRs);
     expect(declared, "找不到 enum_windows.rs::APP_ID_PREFIXES").not.toBeNull();
     const rust = [...(declared as RegExpExecArray)[1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
     expect([...DESKTOP_APP_ID_PREFIXES].sort()).toEqual(rust.sort());
 
-    const catalogRs = readFileSync(join(root, "packages/desktop/helper/src/app_catalog.rs"), "utf8");
+    const catalogRs = readFileSync(join(root, "packages/computer-use/helper/src/app_catalog.rs"), "utf8");
     const shell = /fn strip_known_prefixes[\s\S]*?for prefix in \[([^\]]*)\]/.exec(catalogRs);
     expect(shell, "找不到 app_catalog.rs::strip_known_prefixes 的 shell 前缀表").not.toBeNull();
     const rustShell = [...(shell as RegExpExecArray)[1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!.toLowerCase());

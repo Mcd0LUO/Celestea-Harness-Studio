@@ -6,7 +6,7 @@
 //!
 //! 移植自参考仓 `dsh-computer-use_codex-style/helper-rs`；相对参考仓剔除了
 //! overlay（零操作垫片）、音频、浏览器 URL 闸门与提示词资源，差异清单见
-//! `packages/desktop/helper/PORTING.md`。
+//! `packages/computer-use/helper/PORTING.md`。
 
 use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};

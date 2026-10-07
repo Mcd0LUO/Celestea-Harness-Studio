@@ -245,7 +245,7 @@ export interface DesktopConfirmChannel {
 /**
  * 「一个 work 与一个总超时赛跑」这件事的端口（M2-B，W2014 超时原语棘轮）。
  *
- * 为什么不直接 import `packages/tools` 的 `bounded`：`packages/desktop` 只依赖 `core`
+ * 为什么不直接 import `packages/tools` 的 `bounded`：`packages/computer-use` 只依赖 `core`
  * （ARCHITECTURE §1：L1 包之间不得横向依赖），而那个原语住在 `packages/tools`。直接
  * import 会在 tsc 与 node 两侧都解析不到（包下没有那条 symlink），还会在依赖图上多出
  * 一条 L1↔L1 边（要改三处登记 + 评审）。

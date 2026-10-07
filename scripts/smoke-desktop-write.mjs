@@ -3,7 +3,7 @@
  * scripts/smoke-desktop-write.mjs — computer-use M2 的**真机**验收（规划 §6 M2③）。
  *
  * 与 smoke-desktop.mjs（只读）的分工：那份证「能看」，这份证「能动」——写操作真产生效果、
- * 闸门真拦真放、租约真生效。四项都走**生产代码**（packages/desktop 的 client + tool + 闸门，
+ * 闸门真拦真放、租约真生效。四项都走**生产代码**（packages/computer-use 的 client + tool + 闸门，
  * apps/studio 的真实闸门宿主与授权派生），不是一份复制的协议实现。
  *
  * 为什么是独立脚本而不是 vitest：它要真发键鼠、要 spawn 记事本、要在别的进程注入外部输入。
@@ -25,7 +25,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAttachmentStore } from '../packages/tools/dist/attachments/store.js';
-import { DesktopHelperClient, desktopTools, helperBinPath } from '../packages/desktop/dist/index.js';
+import { DesktopHelperClient, desktopTools, helperBinPath } from '../packages/computer-use/dist/index.js';
 import { createDesktopGateHost } from '../apps/studio/src/runtime/desktop-gate-host.ts';
 import { createQuestionRegistry } from '../apps/studio/src/question-registry.ts';
 import { DESKTOP_CONFIRM_APPROVE } from '../apps/studio/src/runtime/desktop-gate-host.ts';

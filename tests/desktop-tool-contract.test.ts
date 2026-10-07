@@ -6,7 +6,7 @@ import { loadTools } from "@celestea/core";
  * computer-use M1 · 四个只读桌面工具的**契约形状**门禁（第二道防线）。
  *
  * 为什么契约「已经唯一真源」还要断言它：`desktopToolSpec()`
- * （packages/desktop/src/tool.ts）是 `loadTools().tools.find(...)` **直读契约**，
+ * （packages/computer-use/src/tool.ts）是 `loadTools().tools.find(...)` **直读契约**，
  * 那份设计消灭的是【实现与契约漂移】——但保证不了【契约本身对】。契约写错时，
  * GET /api/tools 会一致地输出同一个错，而且没有任何第二份手写 schema 会顶撞它。
  * 一道「实现不漂移」的防线不能替代一道「契约正确」的防线，这是第二道。

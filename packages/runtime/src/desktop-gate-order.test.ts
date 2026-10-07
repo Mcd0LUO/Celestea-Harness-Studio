@@ -8,7 +8,7 @@ import {
   type DesktopGateCall,
   type DesktopGateGrant,
   type DesktopHelperClient,
-} from "@celestea/desktop";
+} from "@celestea/computer-use";
 
 /**
  * M2 真值表的前两行：**preset deny / session deny**（规划 §4.1 第 1、2 层）。

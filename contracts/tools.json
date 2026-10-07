@@ -102,11 +102,11 @@
         "desktop_launch_app"
       ],
       "count": "23 -> 36",
-      "sourceRef": "packages/desktop/src/tool.ts (M1 of docs .dsh-tmp/computer-use-adaptation-plan-v3.md §6; execution is the repo-compiled Rust helper in packages/desktop/helper)",
+      "sourceRef": "packages/computer-use/src/tool.ts (M1 of docs .dsh-tmp/computer-use-adaptation-plan-v3.md §6; execution is the repo-compiled Rust helper in packages/computer-use/helper)",
       "why": "规划 §3 的只读 4：让模型先能「看」。它们是同一批执行体的四个入口——枚举窗口、按 id 复读一个窗口、枚举应用、读一个窗口的截图与可访问性树——所以契约一次登记四个，而 M2 的写 9 个（click / press_key / type_text / scroll / set_value / drag / secondary_action / activate_window / launch_app）要等分级闸门（规划 §4）落地之后才进契约。一个必然被闸门拦住的写工具挂在提示词里，只会让模型反复撞墙。",
-      "optionalMount": "compose() 的 4e 装配步（packages/runtime/src/desktop-wiring.ts）在 mount 时做**静态**判定：平台是 win32 且 helper 产物 packages/desktop/helper/bin/win32-x64/celestea-desktop-helper.exe 存在。缺一则整个插件不挂、四个名字一个都不进注册表——所以 GET /api/tools、模型提示词与契约三处自然一致地消失，不存在「挂了但必然报错」的中间态。mount 时不 spawn 任何进程：helper 在第一次工具调用时才懒启动并握手（规划 §5）。非 win32 同理不挂（规划 §7）。",
+      "optionalMount": "compose() 的 4e 装配步（packages/runtime/src/desktop-wiring.ts）在 mount 时做**静态**判定：平台是 win32 且 helper 产物 packages/computer-use/helper/bin/win32-x64/celestea-desktop-helper.exe 存在。缺一则整个插件不挂、四个名字一个都不进注册表——所以 GET /api/tools、模型提示词与契约三处自然一致地消失，不存在「挂了但必然报错」的中间态。mount 时不 spawn 任何进程：helper 在第一次工具调用时才懒启动并握手（规划 §5）。非 win32 同理不挂（规划 §7）。",
       "defaultEnabled": "默认开（规划 D7，用户裁决，与调度方推荐相反）。默认位只决定「工具面是否注册可见」；helper 未构建时 4e 静态检查让插件缺席，与「默认开」不矛盾。",
-      "imageChain": "desktop_get_window_state 的截图走既有 W804 附件链：helper 把它拆到响应的 images 字段，packages/desktop/src/attachments.ts 写进会话 AttachmentStore，再放进工具结果 value 的**顶层** attachments 数组，由 core 的 projection.ts::toolResultOf 投影成 image block。字节不进会话日志，日志只存 ImageRef。",
+      "imageChain": "desktop_get_window_state 的截图走既有 W804 附件链：helper 把它拆到响应的 images 字段，packages/computer-use/src/attachments.ts 写进会话 AttachmentStore，再放进工具结果 value 的**顶层** attachments 数组，由 core 的 projection.ts::toolResultOf 投影成 image block。字节不进会话日志，日志只存 ImageRef。",
       "enumeration": "computer-use 规划 adds ZERO endpoints: 四个工具都走既有 tool dispatch 与既有 tool/tool_result SSE 帧，API_ENDPOINT_COUNT 不变。",
       "writeFace": {
         "addedTools": [
@@ -121,7 +121,7 @@
           "desktop_launch_app"
         ],
         "count": "27 -> 36",
-        "gate": "M2: the nine write tools each pass the tiered gate (packages/desktop/src/gate.ts) before anything reaches the helper. Only an allow verdict calls the helper (it may carry an approvedApp that feeds the helper-side app approval); a deny becomes a structured result {ok:false, step, code, error, source:desktop_gate} with the gate's own code and reason passed through untranslated. With no gate wired, every write tool is refused (desktop_gate_unconfigured); the read-only four are unaffected.",
+        "gate": "M2: the nine write tools each pass the tiered gate (packages/computer-use/src/gate.ts) before anything reaches the helper. Only an allow verdict calls the helper (it may carry an approvedApp that feeds the helper-side app approval); a deny becomes a structured result {ok:false, step, code, error, source:desktop_gate} with the gate's own code and reason passed through untranslated. With no gate wired, every write tool is refused (desktop_gate_unconfigured); the read-only four are unaffected.",
         "approvalChannel": "Only a gate verdict may inject an app approval (tagged via:gate). The tool layer must not pre-grant one: client.ts keeps fail-closed for a write method given a bare-string approval, so the gate cannot be side-stepped. The read-only four pre-grant is the exception M1 recorded on purpose (the READ_ONLY_METHODS allow-list).",
         "failureMode": "A structured helper error (lease_violation, a locked desktop, a refused approval, ...) is passed through as the tool RESULT rather than thrown, so the turn survives and the model sees the helper's own sentence.",
         "endpoints": "The nine write tools add ZERO endpoints: they all ride the existing tool dispatch and the existing tool/tool_result SSE frames, so API_ENDPOINT_COUNT is unchanged."
@@ -972,7 +972,7 @@
         "properties": {},
         "additionalProperties": false
       },
-      "sourceRef": "packages/desktop/src/tool.ts (M1, computer-use 规划 §3/§5; schemas mirror packages/desktop/helper/src/tools.rs 的 window2 工具表；执行体是本仓自编译的 Rust helper)"
+      "sourceRef": "packages/computer-use/src/tool.ts (M1, computer-use 规划 §3/§5; schemas mirror packages/computer-use/helper/src/tools.rs 的 window2 工具表；执行体是本仓自编译的 Rust helper)"
     },
     {
       "name": "desktop_get_window",
@@ -994,7 +994,7 @@
           "id"
         ]
       },
-      "sourceRef": "packages/desktop/src/tool.ts (M1, computer-use 规划 §3/§5)"
+      "sourceRef": "packages/computer-use/src/tool.ts (M1, computer-use 规划 §3/§5)"
     },
     {
       "name": "desktop_list_apps",
@@ -1004,7 +1004,7 @@
         "properties": {},
         "additionalProperties": false
       },
-      "sourceRef": "packages/desktop/src/tool.ts (M1, computer-use 规划 §3/§5)"
+      "sourceRef": "packages/computer-use/src/tool.ts (M1, computer-use 规划 §3/§5)"
     },
     {
       "name": "desktop_get_window_state",
@@ -1049,7 +1049,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "packages/desktop/src/tool.ts (M1, computer-use 规划 §3/§5)"
+      "sourceRef": "packages/computer-use/src/tool.ts (M1, computer-use 规划 §3/§5)"
     },
     {
       "name": "desktop_click",
@@ -1118,7 +1118,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "packages/desktop/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/desktop/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/desktop/src/gate.ts)"
+      "sourceRef": "packages/computer-use/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/computer-use/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/computer-use/src/gate.ts)"
     },
     {
       "name": "desktop_press_key",
@@ -1160,7 +1160,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "packages/desktop/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/desktop/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/desktop/src/gate.ts)"
+      "sourceRef": "packages/computer-use/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/computer-use/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/computer-use/src/gate.ts)"
     },
     {
       "name": "desktop_type_text",
@@ -1202,7 +1202,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "packages/desktop/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/desktop/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/desktop/src/gate.ts)"
+      "sourceRef": "packages/computer-use/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/computer-use/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/computer-use/src/gate.ts)"
     },
     {
       "name": "desktop_scroll",
@@ -1263,7 +1263,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "packages/desktop/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/desktop/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/desktop/src/gate.ts)"
+      "sourceRef": "packages/computer-use/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/computer-use/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/computer-use/src/gate.ts)"
     },
     {
       "name": "desktop_set_value",
@@ -1310,7 +1310,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "packages/desktop/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/desktop/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/desktop/src/gate.ts)"
+      "sourceRef": "packages/computer-use/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/computer-use/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/computer-use/src/gate.ts)"
     },
     {
       "name": "desktop_drag",
@@ -1371,7 +1371,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "packages/desktop/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/desktop/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/desktop/src/gate.ts)"
+      "sourceRef": "packages/computer-use/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/computer-use/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/computer-use/src/gate.ts)"
     },
     {
       "name": "desktop_secondary_action",
@@ -1418,7 +1418,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "packages/desktop/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/desktop/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/desktop/src/gate.ts)"
+      "sourceRef": "packages/computer-use/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/computer-use/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/computer-use/src/gate.ts)"
     },
     {
       "name": "desktop_activate_window",
@@ -1455,7 +1455,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "packages/desktop/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/desktop/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/desktop/src/gate.ts)"
+      "sourceRef": "packages/computer-use/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/computer-use/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/computer-use/src/gate.ts)"
     },
     {
       "name": "desktop_launch_app",
@@ -1473,7 +1473,7 @@
         ],
         "additionalProperties": false
       },
-      "sourceRef": "packages/desktop/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/desktop/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/desktop/src/gate.ts)"
+      "sourceRef": "packages/computer-use/src/tool.ts (M2, computer-use 规划 §3/§4; parameter shapes mirror packages/computer-use/helper/src/tools.rs 的 window2 写工具表；每一次调用都先过分级闸门 packages/computer-use/src/gate.ts)"
     }
   ]
 }

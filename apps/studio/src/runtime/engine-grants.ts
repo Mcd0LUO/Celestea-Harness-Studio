@@ -69,7 +69,7 @@ export interface EffectiveGrants {
    * M2: the session's **desktop capability bit** (computer-use 写工具的总开关).
    *
    * 与其它 cap 的差别：它不是一个「范围」，而是「这台机器上的鼠标键盘能不能被模型
-   * 动」这一句话。闸门（packages/desktop/src/gate.ts）读它决定放不放行；没有它，
+   * 动」这一句话。闸门（packages/computer-use/src/gate.ts）读它决定放不放行；没有它，
    * 九个写工具一律拒绝。
    */
   desktop: boolean;

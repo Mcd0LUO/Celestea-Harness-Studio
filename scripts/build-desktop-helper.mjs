@@ -5,8 +5,8 @@
  * 为什么是「自编译」而不是下载预编译 exe（总规划 D6）：参考仓里那个来路不明的
  * 预编译二进制不能进供应链。本脚本只跑 cargo，然后把产物拷到 sidecar 约定路径。
  *
- * 产物路径由 packages/desktop 的静态挂载检查消费（总规划 §5）：
- *   packages/desktop/helper/bin/win32-x64/celestea-desktop-helper.exe
+ * 产物路径由 packages/computer-use 的静态挂载检查消费（总规划 §5）：
+ *   packages/computer-use/helper/bin/win32-x64/celestea-desktop-helper.exe
  * 该目录不进 git（见仓库根 .gitignore）。
  *
  * 用法：
@@ -42,7 +42,7 @@ function fail(message) {
 if (process.platform !== "win32") {
   fail(
     "helper 只在 win32 上构建。当前 " + process.platform +
-    "。非 Windows 上 packages/desktop 的挂载检查本就不通过（总规划 §7），" +
+    "。非 Windows 上 packages/computer-use 的挂载检查本就不通过（总规划 §7），" +
     "所以这里直接失败而不是假装成功。",
   );
 }

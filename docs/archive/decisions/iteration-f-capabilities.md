@@ -148,7 +148,7 @@ P1 追加端点单测（二进制/分页/越界/不存在）+ 契约一致性测
 
 ## 4. F4 真机操控（computer-use）
 
-> ⚠️ **L2 桌面路线已被取代（2026-10-07）**：本节「L2 桌面 = X11/Wayland 注入」是 Linux 时代的口径；现行桌面路线是 **Windows 原生**（WGC 截图 / UIA 无障碍树 / SendInput 输入），实现于 `packages/desktop`（派生自 MIT 参考项目，自编译 Rust helper）。现行设计与决策史见 [`docs/feature/computer-use/02-design.md`](../../feature/computer-use/02-design.md)。L1 浏览器（CDP）结论不受影响。
+> ⚠️ **L2 桌面路线已被取代（2026-10-07）**：本节「L2 桌面 = X11/Wayland 注入」是 Linux 时代的口径；现行桌面路线是 **Windows 原生**（WGC 截图 / UIA 无障碍树 / SendInput 输入），实现于 `packages/computer-use`（派生自 MIT 参考项目，自编译 Rust helper）。现行设计与决策史见 [`docs/feature/computer-use/02-design.md`](../../feature/computer-use/02-design.md)。L1 浏览器（CDP）结论不受影响。
 
 **分层**：L0 进程/文件（**已有** shell + 读写文件）→ L1 浏览器（CDP）→ L2 桌面（X11/Wayland 注入）。
 

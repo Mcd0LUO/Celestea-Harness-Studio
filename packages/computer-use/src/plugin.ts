@@ -1,5 +1,5 @@
 /**
- * `@celestea/desktop` as a plugin — 把四个只读工具注册进宿主已挂载的 ToolRegistry。
+ * `@celestea/computer-use` as a plugin — 把四个只读工具注册进宿主已挂载的 ToolRegistry。
  *
  * 形状照 packages/swarm/src/plugin.ts：解析宿主已经 provide 的 ToolRegistry，把工具
  * 注册进去；没有 registry 时**整件事不做**（返回），而不是注册到一个没人能调用的地方。

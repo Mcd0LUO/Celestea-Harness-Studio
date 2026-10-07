@@ -124,11 +124,11 @@ docs/AGENT.local.md
 
 # --- Celestea 桌面 helper（M1 起，总规划 D6 本机自编译） ---
 # cargo 构建目录：可随时重建的中间产物，绝不入库。
-/packages/desktop/helper/target/
+/packages/computer-use/helper/target/
 # 自编译产物落地目录：sidecar 的挂载检查按「exe 在不在」决定挂不挂
 # （总规划 §5），所以它是构建产物而不是可分发资源，由 scripts/build-desktop-helper.mjs 生成。
-/packages/desktop/helper/bin/
+/packages/computer-use/helper/bin/
 # 端口期临时目录：参考仓只读副本、适配规划草稿、顾问复核材料。
 # 全是一次性工作底稿，不属于仓库内容——需要留存的差异结论已经固化进
-# packages/desktop/helper/PORTING.md。
+# packages/computer-use/helper/PORTING.md。
 /.dsh-tmp/

@@ -1,5 +1,5 @@
 /**
- * `@celestea/desktop` 的类型与冻结常量。
+ * `@celestea/computer-use` 的类型与冻结常量。
  *
  * 依赖方向：desktop -> core only（ARCHITECTURE §1 L1），与 packages/swarm 同层同形。
  * 驱动的 seam（ToolRegistry、AttachmentStore、子进程 spawn）全部由装配根
@@ -130,11 +130,11 @@ export const HELPER_BIN_RELATIVE_PATH = 'helper/bin/win32-x64/celestea-desktop-h
  * helper 产物的**绝对路径**。
  *
  * 为什么由本包算而不是由装配根（packages/runtime）算：本文件与编译产物分别住在
- * packages/desktop/src/ 与 packages/desktop/dist/，两者都恰好在**包根的正下方**，
+ * packages/computer-use/src/ 与 packages/computer-use/dist/，两者都恰好在**包根的正下方**，
  * 所以 `dirname(本文件) / ..` 在源码布局与发布布局下是同一个目录，路径不需要分支。
  *
  * 反例（踩过，记在这里）：从 packages/runtime 的模块位置往上数层数，src 布局与 dist
- * 布局层数相同却落在**不同**的目录（都指向 packages/ 而不是 packages/desktop/），
+ * 布局层数相同却落在**不同**的目录（都指向 packages/ 而不是 packages/computer-use/），
  * 于是永远算出一个不存在的路径、4e 静态检查永远不通过、工具面永远不挂——而且不报错。
  * 让**拥有这个常量**的包自己算，是这里唯一不会算错的写法。
  *

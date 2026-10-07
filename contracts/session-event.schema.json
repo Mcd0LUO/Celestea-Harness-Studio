@@ -424,7 +424,7 @@
                 "cancelled",
                 "timeout"
               ],
-              "description": "M2-B2b: the verdict. Four values, deliberately not collapsed: 'someone said no', 'nobody was there' and 'the user closed the card' are three different audit facts. Spellings match DesktopConfirmOutcome in packages/desktop (no second vocabulary)."
+              "description": "M2-B2b: the verdict. Four values, deliberately not collapsed: 'someone said no', 'nobody was there' and 'the user closed the card' are three different audit facts. Spellings match DesktopConfirmOutcome in packages/computer-use (no second vocabulary)."
             },
             "elapsed_ms": {
               "type": "integer",

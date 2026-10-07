@@ -6,7 +6,7 @@
  * 放进测试套件会必然红、于是变成一条 flake 或一个必须 skip 的分支。冒烟是**需要真机**的
  * 证据，所以它自己跑、自己打印、自己退出码说话。
  *
- * 它驱动的是**生产代码**（packages/desktop 的 DesktopHelperClient + desktopTools），
+ * 它驱动的是**生产代码**（packages/computer-use 的 DesktopHelperClient + desktopTools），
  * 不是一份另写的协议实现——所以它证的是链路，不是一个复制的模型。
  *
  * 覆盖 M1③ 的四条：
@@ -23,7 +23,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAttachmentStore } from '../packages/tools/dist/attachments/store.js';
-import { DesktopHelperClient, desktopTools, helperBinPath } from '../packages/desktop/dist/index.js';
+import { DesktopHelperClient, desktopTools, helperBinPath } from '../packages/computer-use/dist/index.js';
 
 const argv = process.argv.slice(2);
 const targetArg = argv.indexOf('--target');

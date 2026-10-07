@@ -18,7 +18,7 @@ window2 的 13 方法面，执行体用其 Rust helper 源码本机自编译，�
 | D1 | 场景 | 通用桌面 + 浏览器为主 | 浏览器面留二期：本仓已有 Chromium CDP 全套（packages/tools/src/browser），复用优先 |
 | D2 | 安全姿态 | 分级闸门 | 「每步确认」太碎、「会话级一次授权」太宽 |
 | D3 | 平台 | 预留跨平台抽象，Windows 先行 | platform 形参注入（write-deny-list 先例），禁止隐式读 process.platform |
-| D4 | 结构路线 | **R2 派生内置**（packages/desktop） | R1 外部插件被否：本仓插件机制纯内置（definePlugin 收进程内闭包，无外部挂载通道），为它先发明挂载机制成本不对等；R3 从零重写被否：重趟参考仓已解决的坑（WGC/双光标/观察租约） |
+| D4 | 结构路线 | **R2 派生内置**（packages/computer-use） | R1 外部插件被否：本仓插件机制纯内置（definePlugin 收进程内闭包，无外部挂载通道），为它先发明挂载机制成本不对等；R3 从零重写被否：重趟参考仓已解决的坑（WGC/双光标/观察租约） |
 | D5 | 首期范围 | window2 全 13 工具（只读 4 + 写 9） | 「只读先行」模型只能看不能动；「含浏览器面」重复造轮子 |
 | D6 | helper 执行体 | **自编译 Rust** | 参考仓 2.5MB 预编译 exe 来路不明（sha256 f9aa7c81…）；本机 cargo 1.98 + MSVC Build Tools（用户批准安装） |
 | D7 | 默认状态 | **默认开**（用户裁决，与调度方推荐「默认关」相反） | 默认开只决定工具面可见；写操作全程受 §2 闸门管控，未授权一样被拦 |
@@ -121,4 +121,4 @@ GET /api/events（无竞态，question 帧同流）与 GET /api/questions 下发
   求和式语义仲裁；engine-plugins.ts 的 liveModeFold 动态折叠修复合并时严禁丢失；
   上游 desktop-packaging.md 有「零 .py/.rs 刻意同质」决定（针对桌面打包 PR #5），
   本特性引入 Rust helper + Python 注入器，上游化前需就此对齐，必要时评估
-  packages/desktop → packages/computer-use 更名以避开俗名 add/add 撞车。
+  packages/computer-use → packages/computer-use 更名以避开俗名 add/add 撞车。

@@ -1,7 +1,7 @@
 /**
  * helper 的 stdio 客户端（NDJSON over stdio，规划 §5）。
  *
- * 协议真源是**移植后的 Rust 源码**（packages/desktop/helper/src），不是任何参考仓：
+ * 协议真源是**移植后的 Rust 源码**（packages/computer-use/helper/src），不是任何参考仓：
  *   - 请求：`{id, method, params, meta}`（protocol.rs::encode_request 的同形子集；
  *     meta 可省，helper 的 `Request` 三个字段都有 `#[serde(default)]`）
  *   - 响应：`{id, ok:true, result}` / `{id, ok:false, error}`

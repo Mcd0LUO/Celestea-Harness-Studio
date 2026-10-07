@@ -18,7 +18,7 @@ type DesktopGateDeps = Pick<DesktopToolDeps, "attachments">;
  *      无 store 时诚实降级且绝不把 base64 塞回文本。
  *
  * 唯一的外部边界是子进程，所以 mock 它（仓内纪律：只 mock 外部边界）。响应形状逐字取自
- * packages/desktop/helper/src：protocol.rs 的 official_ok + call_result(main.rs 的 call 分支)。
+ * packages/computer-use/helper/src：protocol.rs 的 official_ok + call_result(main.rs 的 call 分支)。
  */
 
 type Answer = { ok: true; value: unknown; images?: HelperImage[] } | { ok: false; error: string };

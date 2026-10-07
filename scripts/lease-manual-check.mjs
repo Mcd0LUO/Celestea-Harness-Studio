@@ -33,7 +33,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAttachmentStore } from '../packages/tools/dist/attachments/store.js';
-import { DesktopHelperClient, desktopTools, helperBinPath } from '../packages/desktop/dist/index.js';
+import { DesktopHelperClient, desktopTools, helperBinPath } from '../packages/computer-use/dist/index.js';
 import { createDesktopGateHost, DESKTOP_CONFIRM_APPROVE } from '../apps/studio/src/runtime/desktop-gate-host.ts';
 import { createQuestionRegistry } from '../apps/studio/src/question-registry.ts';
 import { writeGrantsFile, newGrantId } from '../apps/studio/src/store/grants.ts';

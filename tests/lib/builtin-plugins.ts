@@ -112,7 +112,7 @@ export const BUILTIN_MOUNTS: readonly MountRow[] = [
   },
   {
     kind: "plugin",
-    file: "packages/desktop/src/plugin.ts",
+    file: "packages/computer-use/src/plugin.ts",
     layer: "L1",
     nameArg: "name",
     defaultName: "celestea.desktop.Desktop",
@@ -209,7 +209,7 @@ export const PACKAGE_LAYER: Readonly<Record<string, MountLayer>> = {
   "packages/tools": "L1",
   "packages/workers": "L1",
   "packages/swarm": "L1",
-  "packages/desktop": "L1",
+  "packages/computer-use": "L1",
   "packages/runtime": "L2",
   "apps/studio": "L3",
 };

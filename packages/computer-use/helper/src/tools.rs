@@ -59,7 +59,7 @@ fn tool(name: &str, description: &str, parameters: Value) -> Value {
 ///
 /// 写工具（launch_app / click / press_key / type_text / scroll / set_value / drag /
 /// perform_secondary_action / activate_window）会真实改动用户桌面，必须先取得
-/// packages/desktop 的分级闸门授权——schema 本身不表达这件事，靠闸门拦。
+/// packages/computer-use 的分级闸门授权——schema 本身不表达这件事，靠闸门拦。
 pub fn window2_tools() -> Vec<Value> {
     let tools = vec![
         tool(

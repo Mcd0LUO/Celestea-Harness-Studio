@@ -115,13 +115,13 @@ importers:
         specifier: workspace:*
         version: link:../core
 
-  packages/core: {}
-
-  packages/desktop:
+  packages/computer-use:
     dependencies:
       '@celestea/core':
         specifier: workspace:*
         version: link:../core
+
+  packages/core: {}
 
   packages/llm:
     dependencies:
@@ -134,12 +134,12 @@ importers:
       '@celestea/agent-loop':
         specifier: workspace:*
         version: link:../agent-loop
+      '@celestea/computer-use':
+        specifier: workspace:*
+        version: link:../computer-use
       '@celestea/core':
         specifier: workspace:*
         version: link:../core
-      '@celestea/desktop':
-        specifier: workspace:*
-        version: link:../desktop
       '@celestea/session':
         specifier: workspace:*
         version: link:../session

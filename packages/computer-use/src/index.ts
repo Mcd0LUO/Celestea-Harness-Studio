@@ -1,11 +1,11 @@
 /**
- * `@celestea/desktop` — 桌面可见性能力的 TS 半边（规划 §2）。
+ * `@celestea/computer-use` — 桌面可见性能力的 TS 半边（规划 §2）。
  *
  * 职责：四个只读工具的 spec（直读契约）、helper 的 NDJSON stdio 客户端、截图经
  * AttachmentStore 落到工具结果顶层 attachments、以及 mount 时把工具注册进宿主
  * 注册表的插件装配。
  *
- * 执行体是**本仓自编译的 Rust helper**（packages/desktop/helper，总规划 D6），
+ * 执行体是**本仓自编译的 Rust helper**（packages/computer-use/helper，总规划 D6），
  * 协议真源是那份源码的 protocol.rs / main.rs / tools.rs ——不是任何第三方参考仓。
  *
  * 依赖方向：desktop -> core only（ARCHITECTURE §1 L1，与 packages/swarm 同层）。

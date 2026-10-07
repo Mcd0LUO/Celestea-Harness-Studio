@@ -3,7 +3,7 @@
  *
  * ## 为什么需要它（一条真实的越权路径）
  *
- * 分级闸门（packages/desktop/src/gate.ts）把「敏感桌面操作每次都要人点一下」实现成
+ * 分级闸门（packages/computer-use/src/gate.ts）把「敏感桌面操作每次都要人点一下」实现成
  * 一张**挂起的 question**，人的裁决经同一个端点回来。于是「模型无权跳过闸门」这句话
  * 完全依赖「模型答不了这张问题」——而它本来答得了：
  *   · question id 是顺序可猜的 `q-<n>`（question-registry.ts::nextRequestId）；

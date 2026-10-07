@@ -16,7 +16,7 @@
   "dependencies": {
     "@celestea/agent-loop": "workspace:*",
     "@celestea/core": "workspace:*",
-    "@celestea/desktop": "workspace:*",
+    "@celestea/computer-use": "workspace:*",
     "@celestea/session": "workspace:*",
     "@celestea/swarm": "workspace:*",
     "@celestea/tools": "workspace:*",

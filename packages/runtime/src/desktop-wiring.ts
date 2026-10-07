@@ -33,19 +33,19 @@ import {
   type DesktopAttachmentStore,
   type DesktopGate,
   type DesktopTitleResolver,
-} from "@celestea/desktop";
+} from "@celestea/computer-use";
 
 // ── computer-use M2：把闸门的**宿主面向 surface** 从本模块转发出去 ──
 //
 // 为什么需要这一层转发：闸门由**宿主**（apps/studio）构造 —— 它才拿得到会话授权与
-// 「问人」的通道 —— 而 apps/studio 的依赖表里没有 @celestea/desktop（桌面能力的装配缝
+// 「问人」的通道 —— 而 apps/studio 的依赖表里没有 @celestea/computer-use（桌面能力的装配缝
 // 在 packages/runtime，宿主从来只经 desktop-wiring 说话）。宿主直接 import
-// @celestea/desktop 会在 tsc 与 node 两侧都解析不到（那是个没有 symlink 的包），
+// @celestea/computer-use 会在 tsc 与 node 两侧都解析不到（那是个没有 symlink 的包），
 // 而 runtime 本来就依赖它。
 //
 // 转发的是**构造闸门所需的最小集合**：两个工厂 + 原因码常量 + 端口类型。
 // 工具面的东西（desktopTools / DesktopHelperClient）**不**在这里转发 —— 它们是
-// @celestea/desktop 自己的 surface，宿主不需要。
+// @celestea/computer-use 自己的 surface，宿主不需要。
 export {
   createDesktopConfirmLimiter,
   createDesktopGate,
@@ -63,7 +63,7 @@ export {
   DESKTOP_DENIAL_COOLDOWN_MS,
   DESKTOP_DENIAL_THRESHOLD,
   DESKTOP_TITLE_UNRESOLVED_CODE,
-} from "@celestea/desktop";
+} from "@celestea/computer-use";
 export type {
   DesktopAppAccessList,
   DesktopAppScope,
@@ -79,7 +79,7 @@ export type {
   DesktopGateGrantSource,
   DesktopGateVerdict,
   DesktopTitleResolver,
-} from "@celestea/desktop";
+} from "@celestea/computer-use";
 
 const DEFAULT_DESKTOP_PLUGIN = 'celestea.runtime.desktop';
 
@@ -131,9 +131,9 @@ export interface DesktopMountCheck {
 /**
  * 规划 §5 定死的 helper 产物路径。
  *
- * 委托给 **@celestea/desktop 自己的 `helperBinPath()`**：那个包既拥有这个相对路径常量，
+ * 委托给 **@celestea/computer-use 自己的 `helperBinPath()`**：那个包既拥有这个相对路径常量，
  * 又在 src/ 与 dist/ 两种布局下都能从自身位置算出同一个绝对路径（见 types.ts 的
- * 「反例」：从本文件这里数层数，两种布局都落到 packages/ 而不是 packages/desktop/，
+ * 「反例」：从本文件这里数层数，两种布局都落到 packages/ 而不是 packages/computer-use/，
  * 会得到一个永远不存在的路径，于是工具面永远不挂且不报错）。宿主仍可用 helperPath 覆盖。
  */
 export function defaultHelperPath(): string {

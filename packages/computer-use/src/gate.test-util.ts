@@ -41,7 +41,7 @@ export const granted: DesktopGateGrant = { desktop: true };
 /**
  * 测试用的超时原语（W2014）。
  *
- * 生产实现是 `packages/tools` 的 `bounded`，由宿主注入；而 `packages/desktop` 只依赖
+ * 生产实现是 `packages/tools` 的 `bounded`，由宿主注入；而 `packages/computer-use` 只依赖
  * `core`，**测试也解析不到 tools** —— 所以这里写一份最小实现。棘轮的口径是「整行含
  * test 即排除」（它拦的是产品代码里的各自为政），测试本就允许自己造竞态；而这里要验的
  * 是**闸门怎么用这个端口**：超时到了它算什么、通道不守约时会不会挂死。原语自身的语义

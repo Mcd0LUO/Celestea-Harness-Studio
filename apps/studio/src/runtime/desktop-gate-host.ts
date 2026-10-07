@@ -206,7 +206,7 @@ export function createDesktopGateHost(opts: DesktopGateHostOptions): DesktopGate
     // 端口形状：宿主给的是「现取快照」的函数，闸门要的是它的一个方法（DesktopGateGrantSource）。
     grants: { read: opts.grants },
     // W2014：赛跑交给**统一原语**（本层本来就依赖 @celestea/tools，而闸门所在的
-    // packages/desktop 只依赖 core —— 见 gate.ts::DesktopDeadline 的说明）。闸门只回答
+    // packages/computer-use 只依赖 core —— 见 gate.ts::DesktopDeadline 的说明）。闸门只回答
     // 「超时算什么」：resolve 成 "timeout"，由它翻成 desktop_confirm_timeout 的 fail-closed。
     deadline: (work, timeoutMs, onTimeout) => bounded(work, timeoutMs, { mode: "resolve", value: onTimeout }),
     ...(opts.titleResolver === undefined ? {} : { titleResolver: opts.titleResolver }),
