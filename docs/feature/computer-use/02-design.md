@@ -111,7 +111,13 @@ GET /api/events（无竞态，question 帧同流）与 GET /api/questions 下发
 
 ## 6. 已知限制与后续（M2-B2 / 候选）
 
-- 租约真机实测：自动化路径已就绪（--auto / smoke §4），真人 30 秒手动验收保留为
-  可选复核；apps scope 录入 UI；系统确认写会话日志
-  （生产暂不可达，语义已实现）；client.ts 手搓超时收敛；helper 监控线程重启（乙案）；
-  浏览器面二期（复用 packages/tools/src/browser 评估）；macOS/Linux（协议已留 platform 注入点）。
+- 租约真机实测：自动化路径已就绪（--auto / smoke §4），真人 30 秒手动验收保留为可选复核。
+- 确认卡取消按钮（生产暂不可达，语义已实现 fail-closed）；client.ts 手搓超时收敛；
+  helper 监控线程重启（乙案）；浏览器面二期（复用 packages/tools/src/browser 评估）；
+  macOS/Linux（协议已留 platform 注入点）。
+- 上游合并摩擦面（2026-10-07 审查，时点快照）：冻结契约（tools.json 23→36、
+  FROZEN_COUNTS、grants 6→7 位门禁）与 compose 4e 挂载是单点真理，上游演进时需并集
+  求和式语义仲裁；engine-plugins.ts 的 liveModeFold 动态折叠修复合并时严禁丢失；
+  上游 desktop-packaging.md 有「零 .py/.rs 刻意同质」决定（针对桌面打包 PR #5），
+  本特性引入 Rust helper + Python 注入器，上游化前需就此对齐，必要时评估
+  packages/desktop → packages/computer-use 更名以避开俗名 add/add 撞车。
