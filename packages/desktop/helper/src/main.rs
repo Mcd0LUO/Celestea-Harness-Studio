@@ -669,7 +669,6 @@ fn dispatch(state: &Mutex<HelperState>, method: &str, params: &Map<String, Value
             let window = resolve_window(state, params)?;
             prepare_input(state, &window, WindowUse::Captured)?;
             overlay::show();
-            interrupt::mark_synthetic(0.3);
             // Official `type_text` accepts an empty string: the schema requires the
             // key to be present, not to be non-empty (TC-11).
             input::paste_text(&require_text_allow_empty(params, "text")?)?;
@@ -681,7 +680,6 @@ fn dispatch(state: &Mutex<HelperState>, method: &str, params: &Map<String, Value
             policy::deny_press_key(&key).map_err(Error::desktop)?;
             prepare_input(state, &window, WindowUse::Captured)?;
             overlay::show();
-            interrupt::mark_synthetic(0.3);
             input::press_key(&key)?;
             Ok(json!({}))
         }
@@ -1080,7 +1078,6 @@ fn set_value(state: &Mutex<HelperState>, params: &Map<String, Value>) -> Result<
             require_coord_hit(state, &window, px, py)?;
             overlay::show();
             let _ = overlay::position_for("set_value", px as f32, py as f32, true);
-            interrupt::mark_synthetic(0.3);
             input::move_click(px, py, "left", 1)?;
             input::paste_text(&value)?;
             Ok(json!({}))
@@ -1115,7 +1112,6 @@ fn click(state: &Mutex<HelperState>, params: &Map<String, Value>, action: &str) 
     let count = json_i64(params, "click_count")?.unwrap_or(1);
     overlay::show();
     let _ = overlay::position_for(action, px as f32, py as f32, true);
-    interrupt::mark_synthetic(0.3);
     input::move_click(px, py, &button, count)?;
     Ok(json!({}))
 }
@@ -1156,7 +1152,6 @@ fn scroll(state: &Mutex<HelperState>, params: &Map<String, Value>, action: &str)
         let index = json_i64(params, "element_index")?.unwrap() as i32;
         let direction = json_str(params, "direction").unwrap_or_else(|| "down".into());
         let pages = scroll_pages(params)?;
-        interrupt::mark_synthetic(0.3);
         if uia::global()
             .scroll(window.id as isize, index, &direction, pages as i32)
             .is_ok()
@@ -1183,7 +1178,6 @@ fn scroll(state: &Mutex<HelperState>, params: &Map<String, Value>, action: &str)
     let sy = required_delta(params, "scrollY")?;
     overlay::show();
     let _ = overlay::position_for(action, px as f32, py as f32, false);
-    interrupt::mark_synthetic(0.3);
     input::scroll_at(px, py, sx, sy)?;
     Ok(json!({}))
 }
@@ -1203,7 +1197,6 @@ fn drag(state: &Mutex<HelperState>, params: &Map<String, Value>) -> Result<Value
     require_coord_hit(state, &window, x2, y2)?;
     overlay::show();
     let _ = overlay::position_for("drag", x1 as f32, y1 as f32, false);
-    interrupt::mark_synthetic(0.3);
     input::drag_points(x1, y1, x2, y2)?;
     let _ = overlay::position_for("drag", x2 as f32, y2 as f32, true);
     Ok(json!({}))

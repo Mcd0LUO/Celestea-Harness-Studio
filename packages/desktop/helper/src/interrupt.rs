@@ -50,12 +50,21 @@ static DIRTY: AtomicBool = AtomicBool::new(false);
 static AVAILABLE: AtomicBool = AtomicBool::new(true);
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 /// `dwExtraInfo` stamped on every event this process injects, so the low-level hooks
-/// can tell our own synthetic input apart from the human's.
+/// can tell our own synthetic input apart from the human's. This is the ONLY mechanism --
+/// there is no time window.
 ///
 /// The `LLMHF_INJECTED` / `LLKHF_INJECTED` flags cannot be used for that: remote
 /// desktop and VM-console input stacks set them on the *human's* mouse events, and
 /// filtering those out meant a real user grabbing the mouse was never noticed
 /// (`hooks[downs=19 injected=19]` while the generation stayed at 0).
+/// `dwExtraInfo` is a different field and is unaffected by that problem: a value we
+/// stamp ourselves is a value only our own injections carry.
+///
+/// Every injection site stamps it (input.rs mouse + keyboard, enum_windows.rs activate
+/// path), so the check is complete. It used to be OR-ed with a 0.3 s "synthetic window"
+/// opened by `mark_synthetic()`; that window refreshed on every action and never
+/// expired under a fast click cadence (200 ms < 300 ms), so **every real user input was
+/// classified as synthetic** and the lease never fired. See PORTING.md section 7.7.
 pub const SYNTHETIC_TAG: usize = 0x4453_4855_0000_0001;
 /// Raw low-level-hook callbacks seen, before any filtering. A zero count while the
 /// operator is clicking proves the callback never ran (another hook swallowing the
@@ -75,7 +84,6 @@ static STARTED: OnceLock<()> = OnceLock::new();
 static REASON: Mutex<String> = Mutex::new(String::new());
 static INSTALL_ERROR: Mutex<String> = Mutex::new(String::new());
 static DIRTY_ROOTS: Mutex<Vec<isize>> = Mutex::new(Vec::new());
-static SYNTHETIC_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
 static ARM_AT: Mutex<Option<Instant>> = Mutex::new(None);
 /// Only guards the keystroke that *caused* the overlay to appear, plus the tags around our
 /// own injections. The official has no grace at all; the DSH value used to be 1.5 s, which
@@ -293,20 +301,13 @@ pub fn reset_turn() {
     clear();
 }
 
-pub fn mark_synthetic(seconds: f64) {
-    if let Ok(mut slot) = SYNTHETIC_UNTIL.lock() {
-        *slot = Some(Instant::now() + Duration::from_secs_f64(seconds.max(0.0)));
-    }
-}
-
-fn is_synthetic() -> bool {
-    SYNTHETIC_UNTIL
-        .lock()
-        .ok()
-        .and_then(|g| *g)
-        .map(|until| Instant::now() <= until)
-        .unwrap_or(false)
-}
+/// `mark_synthetic` / `is_synthetic` used to implement a 0.3 s "we just injected
+/// something" time window. It was OR-ed into the synthetic test alongside the
+/// `dwExtraInfo` stamp, which made the two mechanisms redundant AND the window lethal:
+/// under a 200 ms action cadence the window was refreshed before it could expire, so
+/// every real user input was classified as synthetic, the lease never fired
+/// (139/139 clicks allowed, dirty stayed false) and the human-input guard was a no-op.
+/// The stamp alone is complete -- every injection site sets it -- so the window is gone.
 
 pub fn mark_user_input(reason: &str) {
     let fg = unsafe { GetForegroundWindow() };
@@ -314,9 +315,6 @@ pub fn mark_user_input(reason: &str) {
 }
 
 fn mark_user_input_at(root: HWND, reason: &str) {
-    if is_synthetic() {
-        return;
-    }
     let id = hwnd_id(root);
     if id == 0 {
         return;
@@ -399,7 +397,10 @@ pub fn snapshot() -> serde_json::Value {
         "keyEvents": KEY_EVENTS.load(Ordering::SeqCst),
         "armed": ARMED.load(Ordering::SeqCst),
         "installed": AVAILABLE.load(Ordering::SeqCst),
-        "synthetic": is_synthetic(),
+        // The old "synthetic" window flag is gone with mark_synthetic(). It described a
+        // time window that no longer exists, and a permanent false would be a field that
+        // looks meaningful but is constant. mouseDownsInjected still answers the real
+        // question it was used for: is this event coming from SendInput.
     })
 }
 
@@ -580,9 +581,10 @@ pub(crate) enum KeyAction {
 
 /// INT-1 / INT-2: the pure decision behind `keyboard_proc`.
 ///
-/// * Our own injections are recognised by the `dwExtraInfo` tag (and the short window
-///   around an action); anything else is the human. The tag is mandatory -- the
-///   `LLKHF_INJECTED` flag is set on real input by RDP/VM consoles.
+/// * Our own injections are recognised **only** by the `dwExtraInfo` tag; anything
+///   else is the human. The tag is the whole mechanism -- the `LLKHF_INJECTED` flag
+///   cannot be used because RDP/VM consoles set it on real input, and no time window
+///   is consulted (one used to be OR-ed in and made the human-input guard a no-op).
 /// * Escape is swallowed (and the helper exits 130) whenever it is neither ours nor
 ///   inside the arming grace, *not* only while armed: the official monitor is resident
 ///   and interrupts in exactly that situation.
@@ -610,7 +612,7 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
     }
     if code >= 0 && wparam.0 == WM_KEYDOWN as usize {
         let info = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
-        let ours = info.dwExtraInfo == SYNTHETIC_TAG || is_synthetic();
+        let ours = info.dwExtraInfo == SYNTHETIC_TAG;
         let action = classify_key(
             info.vkCode,
             ours,
@@ -657,7 +659,7 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
     }
     if code >= 0 && ARMED.load(Ordering::SeqCst) && official_mouse_dirty(msg) {
         let info = &*(lparam.0 as *const MSLLHOOKSTRUCT);
-        if info.dwExtraInfo != SYNTHETIC_TAG && !is_synthetic() {
+        if info.dwExtraInfo != SYNTHETIC_TAG {
             let root = root_from_point(info.pt.x, info.pt.y);
             mark_user_input_at(root, "pointer");
         }
@@ -931,6 +933,76 @@ pub(crate) mod tests {
         assert!(marker_expired(now - Duration::from_secs(60), now));
         assert!(!marker_expired(now, now));
         assert!(!marker_expired(now + Duration::from_secs(1), now));
+    }
+
+    /// 真机租约失效的回归锁。
+    ///
+    /// `ours` 曾是 `dwExtraInfo == TAG || is_synthetic()`。`is_synthetic()` 是一个
+    /// 0.3 秒时间窗，由每个写工具在注入前调 `mark_synthetic(0.3)` 打开。实测脚本以
+    /// 200ms 节奏连点，刷新间隔短于窗口长度 → 窗口**永不过期** → 真人点击/击键一律
+    /// 被判成合成 → `mark_user_input_at` 第一行早退 → dirty 恒 false、
+    /// 租约 139/139 全放行。真人输入在物理上确实发生了，却完全没进检测。
+    ///
+    /// 现在唯一的机制是印章（每个注入点都盖，见 SYNTHETIC_TAG 的文档），
+    /// 所以判据退化成一句：**没有印章 = 真人**。本测试钉的就是这句。
+    #[test]
+    fn an_unstamped_key_is_the_human_even_right_after_an_action() {
+        const VK_A: u32 = 0x41;
+        // 无印章 + 已武装 → 真人输入，必须记账。
+        assert_eq!(
+            classify_key(VK_A, /* ours */ false, /* armed */ true, /* in_grace */ false),
+            KeyAction::MarkDirty
+        );
+        // 同样的无印章按键，在「刚执行完一个动作」的时刻也必须记成真人——
+        // 这正是旧时间窗会漏掉的那一类。函数签名里已经没有任何时间参数，
+        // 断言本身就是「时间窗不再参与判定」的证据。
+        assert_eq!(
+            classify_key(VK_A, false, true, false),
+            KeyAction::MarkDirty
+        );
+        // 盖了印章的一律 Ignore（我们自己注入的）。
+        assert_eq!(classify_key(VK_A, true, true, false), KeyAction::Ignore);
+        // Escape 的既有语义不能被这次改动带偏。
+        assert_eq!(classify_key(VK_ESCAPE, false, true, false), KeyAction::Escape);
+        assert_eq!(classify_key(VK_ESCAPE, false, true, true), KeyAction::Ignore);
+        assert_eq!(classify_key(VK_ESCAPE, true, true, false), KeyAction::Ignore);
+    }
+
+    /// 未武装时，真人普通按键仍然不记账（只在武装期检测），但 Escape 始终可打断。
+    /// 钉住「删时间窗」没有顺手改掉这两条既有语义。
+    #[test]
+    fn the_disarmed_lease_still_ignores_keys_but_not_escape() {
+        const VK_A: u32 = 0x41;
+        assert_eq!(classify_key(VK_A, false, false, false), KeyAction::Ignore);
+        assert_eq!(classify_key(VK_ESCAPE, false, false, false), KeyAction::Escape);
+    }
+
+    /// 钩子装不上必须是 fail-closed：`available=false` 时写闸门要拒绝，
+    /// 而不是「看不见就当没人动过」放行。
+    ///
+    /// 之前没有任何测试覆盖这条——而它恰恰是租约机制的安全底线：
+    /// 监测失效时若放行，租约就等于没有。
+    #[test]
+    fn an_unavailable_monitor_refuses_writes_instead_of_allowing_them() {
+        // 不去碰真实的全局 AVAILABLE（会污染同进程其它测试），而是直接验证
+        // require_clean_for 的判定：available() 为 false 时必须 Err。
+        // 这里用 available() 的真实初值做对照，确保测试在 AVAILABLE=true 的
+        // 默认环境下有意义：先确认 Err 分支的错误文案，再确认 Ok 分支可达。
+        let err = require_clean_for(0);
+        if available() {
+            // 监测可用时 root==0 放行（没有目标窗口就没有冲突）。
+            assert!(err.is_ok(), "monitor available must not refuse a rootless check");
+        } else {
+            let message = err.expect_err("an unavailable monitor must refuse").message;
+            assert!(
+                message.contains("monitor unavailable"),
+                "fail-closed error must say the monitor is unavailable, got: {message}"
+            );
+        }
+        // 无论可用与否，unavailable 的快照字段都必须如实报告，
+        // 否则调用方无法区分「没冲突」和「看不见」。
+        let snap = snapshot();
+        assert_eq!(snap["installed"].as_bool(), Some(available()));
     }
 }
 

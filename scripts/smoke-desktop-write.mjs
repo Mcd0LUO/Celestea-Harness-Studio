@@ -209,17 +209,13 @@ check('press_key(End) went through the gate to the helper', key.ok === true, JSO
 const stillDenied = await call(denied, 'desktop_press_key', { window: WIN, key: 'End' });
 check('the un-granted gate still refuses the same tool', stillDenied.ok === false && stillDenied.code === 'desktop_cap_not_granted', JSON.stringify(stillDenied).slice(0, 120));
 
-// ── 4. 租约：**为什么这条无法自动化**（实测结论，不是推测）────────────────
-// 任务书设想「从另一个进程用 SendInput 注入 = 外部非合成输入」。实测证明这个设想**不成立**：
-// SendInput 注入的事件一律带 INJECTED 标志，无论调用者是哪个进程。helper 恰恰是靠这个
-// 标志区分自己与外人的（规划 §5），所以 SendInput 注入会被判成「helper 自己动的」，
-// 永远不把窗口弄脏。实测的租约快照（helper diagnostic_state -> inputMonitor）：
-//     {"armed":false,"dirty":false,"keyEvents":4,"mouseDowns":1,"mouseDownsInjected":1,"mouseEvents":2}
-// 看到了那次点击（mouseDowns:1），但它是 **injected**（mouseDownsInjected:1），所以 dirty 保持 false。
-//
-// 结论：租约的真实验收需要**真人动鼠标**，或者驱动级注入（拦截驱动 / VHID），这两者都不是
-// 一个 Node 脚本能造出来的。所以下面这段只**探测并如实报告**，不假装它通过。
-console.log('\n(4) lease: probing whether an automated external input can trip the lease');
+// ── 4. 租约真生效：无印章外部输入 = 真人 ─────────────────────────────────
+// helper 只用 dwExtraInfo 印章区分「自己注入的」与「外部输入」（PORTING.md §7.7：
+// LLMHF_INJECTED 标志在 RDP/VM 下会误标真人输入，不能作判据；曾经 OR 进来的 0.3s
+// 时间窗已因「200ms 点击节奏下永不过期、真人输入全被吞」而删除）。
+// scripts/desktop-inject-input.py 用 ctypes 直发 SendInput 且 dwExtraInfo=0
+// （**不盖章**），对 helper 而言与真人的手不可区分——租约因此可以自动化验收。
+console.log('\n(4) lease: an UNSTAMPED external click must trip the lease');
 const LONG = 'celestea-lease-' + 'x'.repeat(2000);
 const warm = await call(allowed, 'desktop_type_text', { window: WIN, text: LONG });
 check('the warm-up write succeeded (the window identity is now known)', warm.ok === true, JSON.stringify(warm).slice(0, 120));
@@ -228,31 +224,30 @@ check('the warm-up write succeeded (the window identity is now known)', warm.ok 
 const shot = (state1.screenshots ?? [])[0] ?? {};
 const insideX = Math.round(Number(shot.originX ?? 0) + Number(shot.width ?? 400) / 2);
 const insideY = Math.round(Number(shot.originY ?? 0) + Number(shot.height ?? 300) / 2);
-console.log('      injecting a click at', insideX, insideY, '(inside our own notepad window)');
+console.log('      injecting an unstamped click at', insideX, insideY, '(inside our own notepad window)');
 const injector = spawnSync(PYTHON, [
-  join(import.meta.dirname ?? '.', 'tmp-external-input.py'),
-  '0', 'mouse', String(insideX), String(insideY),
+  join(import.meta.dirname ?? '.', 'desktop-inject-input.py'),
+  'mouse', String(insideX), String(insideY),
 ], { encoding: 'utf8', timeout: 30000 });
 console.log('      injector said:', (injector.stdout || '').trim() || '(nothing)', '| stderr:', (injector.stderr || '').trim() || '(none)');
+check('the injector actually sent its events', injector.status === 0, 'exit=' + String(injector.status));
 await sleep(500);
 
 const monitor = (await client.callTool('diagnostic_state', {})).value?.inputMonitor ?? {};
 console.log('      helper inputMonitor after the click:', JSON.stringify(monitor));
-const syntheticOnly = (monitor['mouseDownsInjected'] ?? 0) > 0 && monitor['dirty'] !== true;
-console.log('      => the click was recorded but flagged INJECTED, so the lease did not trip:',
-  syntheticOnly ? 'CONFIRMED (SendInput cannot simulate non-injected input)' : 'n/a');
+check('the monitor recorded the click and marked the window dirty', monitor['dirty'] === true, JSON.stringify(monitor));
+
 const leased = await call(allowed, 'desktop_type_text', { window: WIN, text: 'after-external-input' });
 console.log('      type_text result:', JSON.stringify(leased).slice(0, 200));
-const leaseText = JSON.stringify(leased);
-const leaseTripped = leaseText.includes('user input was detected');
-if (leaseTripped) {
-  check('helper refused the write with the real user-input literal', true, 'literal found');
-} else {
-  console.log('  [SKIP] lease trip is NOT automatable: SendInput events carry the INJECTED flag, so the');
-  console.log('         helper correctly treats them as its own. Verifying this needs a HUMAN moving the');
-  console.log('         mouse (or a driver-level injector). Reported as an open item, not as a pass.');
-  console.log('         (This is a deliberate SKIP, not a pass — do not read it as coverage.)');
-}
+check('helper refused the write with the real user-input literal',
+  leased.ok === false && JSON.stringify(leased).includes('user input was detected in this window'),
+  JSON.stringify(leased).slice(0, 160));
+
+// 恢复路径：重新观测（remember_capture -> interrupt::clear）后写工具必须恢复可用。
+const relook = await call(ro, 'desktop_get_window_state', { window: WIN, include_screenshot: false });
+check('re-observing the window succeeds', relook.ok === true, JSON.stringify(relook).slice(0, 120));
+const afterReobserve = await call(allowed, 'desktop_type_text', { window: WIN, text: '|LEASE-RECOVERED' });
+check('writes work again after re-observation (lease reset)', afterReobserve.ok === true, JSON.stringify(afterReobserve).slice(0, 120));
 cleanup();
 await rm(workDir, { recursive: true, force: true });
 console.log('\n' + (failures === 0 ? 'WRITE SMOKE PASSED' : 'WRITE SMOKE FAILED: ' + failures + ' assertion(s)'));

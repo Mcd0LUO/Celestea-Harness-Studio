@@ -44,7 +44,8 @@
 ```sh
 node scripts/smoke-desktop.mjs            # 只读面：握手/列窗/截图附件（约 2s）
 npx tsx scripts/smoke-desktop-write.mjs   # 写面：记事本打字读回/点击聚焦/闸门拦放（约 5s）
-node scripts/lease-manual-check.mjs       # 租约：30 秒，提示出现时请你动一下鼠标
+npx tsx scripts/lease-manual-check.mjs         # 租约：30 秒，提示出现时请你动一下鼠标
+npx tsx scripts/lease-manual-check.mjs --auto  # 租约：无印章注入替代真人，并读回探针字符验证击键落地
 ```
 
 ## 已知限制（本期）

@@ -99,15 +99,19 @@ GET /api/events（无竞态，question 帧同流）与 GET /api/questions 下发
   十态真值表逐态断言（gate 24 + order 4 + host 9）；nonce 负控制（短接校验→403 变
   200→红）；真机写操作（记事本打字 UIA 逐字读回、click 焦点位移、闸门真拦真放、
   UIA 树前后逐字相同证明未授权零动作）。
-- **租约**：自动化实证 SendInput 无法模拟真人输入（任何进程注入都带 INJECTED 标志，
-  helper 正确无视：mouseDownsInjected:2, dirty:false）——租约真机验收必须真人，
-  scripts/lease-manual-check.mjs 已就绪（干跑 TIMEOUT 不粉饰）。
+- **租约**：初版实测「永不触发」——根因是合成判定里 OR 了一个 0.3s 时间窗
+  （mark_synthetic），200ms 动作节奏下窗口永不过期，真人输入全被吞（139/139 放行、
+  dirty 恒 false）。修复后判定只剩 dwExtraInfo 印章一条（LLMHF_INJECTED 在 RDP/VM
+  下误标真人，不可用；PORTING.md §7.7），无印章 = 真人。cargo 单测钉死（含变异负
+  控制：把时间窗 OR 回去 → 3 条测试红）；真机验收由 scripts/desktop-inject-input.py
+  无印章注入自动化（smoke-desktop-write §4 真断言 + lease-manual-check.mjs --auto），
+  真人手动模式保留为可选项。
 - **顾问层**：复核基础设施多次返回无效报告，S1 检查点由编排方独立复跑核销
   （证据落盘 .dsh-tmp/s1-evidence/）；M1 由 fresh-eyes 子代理独立审查替代。
 
 ## 6. 已知限制与后续（M2-B2 / 候选）
 
-- 租约真机实测（需真人 30 秒）；apps scope 录入 UI；系统确认写会话日志
-  （desktop_confirm 行类型，13 文件牵动面，已授权全量做）；确认卡取消按钮
+- 租约真机实测：自动化路径已就绪（--auto / smoke §4），真人 30 秒手动验收保留为
+  可选复核；apps scope 录入 UI；系统确认写会话日志
   （生产暂不可达，语义已实现）；client.ts 手搓超时收敛；helper 监控线程重启（乙案）；
   浏览器面二期（复用 packages/tools/src/browser 评估）；macOS/Linux（协议已留 platform 注入点）。

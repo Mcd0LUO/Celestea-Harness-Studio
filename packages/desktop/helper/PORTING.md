@@ -202,6 +202,54 @@ it is inside '都' (bytes 31999..32002)
 `end byte index 32000 is not a char boundary; it is inside '都' (bytes 31998..32001)`。
 还原后全绿。测试数字 138 → **141 passed / 0 failed**。
 
+## 7.7 租约失效修复（2026-10-06，M2 真机实测抓到的）
+
+**现象**：真机四轮租约实测里，用户**真的在目标记事本里点了鼠标、敲了键盘**，
+但租约 139/139 次全放行、`dirty` 恒 false。真人输入既没被检测到也没干扰注入。
+
+**根因（三处 OR，缺一不可）**：`is_synthetic()` 是一个 0.3 秒「刚注入过」时间窗，
+与 `dwExtraInfo` 印章**并联**参与合成判定：
+
+| 位置 | 旧代码 | 作用 |
+|---|---|---|
+| `interrupt.rs:316` | `mark_user_input_at` 第一行 `if is_synthetic() { return; }` | 真人输入原地早退，DIRTY_ROOTS / DIRTY / GENERATION 全不更新 |
+| `interrupt.rs:613` | `let ours = info.dwExtraInfo == SYNTHETIC_TAG || is_synthetic();` | 键盘判成合成 |
+| `interrupt.rs:660` | `if info.dwExtraInfo != SYNTHETIC_TAG && !is_synthetic()` | 鼠标判成合成 |
+
+**时序**：200ms 节奏连点，每次注入前调 `mark_synthetic(0.3)`。刷新间隔（200ms）
+小于窗口（300ms）→ 窗口永不过期 → 真人输入 100% 被误判。这不是竞态，是**必然**。
+
+**为什么时间窗本来就不该存在**：全仓 `SYNTHETIC_TAG` 只有 5 个引用点，
+其中 3 处是盖章（`input.rs:265` 鼠标、`input.rs:278` 键盘、`enum_windows.rs:718`
+activate 路径）——**每个注入点都盖了章**。印章完备，时间窗是纯冗余。
+且 `classify_key` 的文档注释自己写着「The tag is mandatory」，代码却写成 `tag || window`，
+**注释与代码自相矛盾**，这条 OR 正是从这句注释长出来的。
+
+**修复**：删掉时间窗，只留印章。改动：
+- `interrupt.rs`：删 `mark_synthetic` / `is_synthetic` / `SYNTHETIC_UNTIL`；
+  316/613/660 三处只留印章；修正 `classify_key` 的自相矛盾注释；
+  快照字段 `synthetic` 一并删除——它描述的就是那个已不存在的窗口，
+  留一个恒 `false` 会让调用方误以为它还有意义；`mouseDownsInjected` 仍能回答
+  「这个事件是不是 SendInput 发出来的」这个真问题。
+- `main.rs`：删 7 处 `mark_synthetic(0.3)` 调用。
+
+**测试 + 变异负控制**：3 个新测试（无印章=真人 / 未武装期语义不变 /
+`available=false` 必须 fail-closed）。负控制实测：把「时间窗」重新 OR 回
+`classify_key` 并让窗口恒 true，`.an_unstamped_key_is_the_human_even_right_after_an_action`
+**红**（得到 `Ignore` 而非 `MarkDirty`）——正是真人输入被吞的形态。还原后全绿。
+测试数字 141 → **144 passed / 0 failed**。
+
+**顺带补上的既有缺口**：`available=false` 时 `require_clean_for` 必须 Err
+（fail-closed）——这条本来就对，但此前**零测试覆盖**。监测失效时若放行，
+租约等于没有，所以现在钉住了。
+
+**未解决（有意留到下一轮）**：用户「打不出字」的现象**不是钩子吞的**——
+`keyboard_proc` 三个分支里普通字符键永远走 `CallNextHookEx`，
+唯一 exit(130) 且不放行的分支只对 `VK_ESCAPE` 生效。
+最可能是 `prepare_input` 每次都 `activate_hwnd` 抢前台（200ms 一次），
+但**这条是代码路径推断，没有真机证据**。下一轮实测同时是对照实验：
+修完本条后若租约能触发、而击键仍不落地，才坐实焦点抢夺，再议方案 C。
+
 ## 7.5 参考仓自报的测试数字与实测不符（写给 M3 决策笔记）
 
 任务书里转述的「参考仓自报 148 个 `#[test]`」**与源码对不上**。实测：

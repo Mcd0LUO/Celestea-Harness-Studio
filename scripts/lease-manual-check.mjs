@@ -1,20 +1,27 @@
 #!/usr/bin/env node
 /**
- * scripts/lease-manual-check.mjs — 租约的**手动**真机验收（用户已裁决：30 秒手动）。
+ * scripts/lease-manual-check.mjs — 租约的真机验收（手动 + --auto 两态）。
  *
- * 为什么必须手动：实测证明租约**无法自动化**。SendInput 注入的事件一律带 INJECTED 标志，
- * 而 helper 恰恰靠这个标志区分「自己注入的」与「外部真实输入」（规划 §5），所以任何脚本注入
- * 都会被判成 helper 自己的动作（实测快照：mouseDowns:2 / mouseDownsInjected:2 / dirty:false）。
- * 于是唯一真实的干扰源是**真人的手**——这一项只能由人参与。
+ * 为什么曾经只能手动：旧实现把「0.3s 时间窗」OR 进合成判定，200ms 点击节奏下窗口
+ * 永不过期，真人输入全被吞；且当时对 SendInput 的分类缠在 INJECTED 标志上。
+ * Fix A（PORTING.md §7.7）之后判定只剩 dwExtraInfo 印章一条：不盖章的 SendInput
+ * 对 helper 与真人不可区分，于是 --auto 用 scripts/desktop-inject-input.py 注入
+ * 无印章击键替代「真人的手」，租约可以自动化验收；不带 --auto 仍是真人手动模式。
+ *
+ * --auto 同时是「击键落地」对照实验：注入的字符会在租约触发后从 UIA 树读回，
+ * 打得出来 = 快速点击节奏下外部击键能落地（焦点抢夺推断不成立），
+ * 打不出来 = 复现了手动实测的「打不出字」，回去议方案 C。
  *
  * 它做四件事：
  *   1. 只认**自己**开的那个记事本窗口（先快照已有窗口，再排除它们）——绝不碰用户的文档；
- *   2. activate 之后按 ~200ms 的节奏持续 type_text，让动作序列一直占着窗口；
+ *   2. activate 之后按 ~200ms 的节奏持续 desktop_click（点文本区中心）占着窗口——
+ *      用 click 不用 type_text：打字走剪贴板粘贴路径，会被「verify clipboard text
+ *      before paste」这道防线抢先拦截，命中不到键鼠钩子的租约检查；click 直达。
  *   3. 第 2 秒在 stdout 打一行醒目提示，请人此刻动一下鼠标或按任意键；
  *   4. 断言人动过之后的**下一次**调用返回 user input was detected in this window。
  *
  * 租约检查点在**每次动作开始前**（helper state.rs::require_fresh -> interrupt::require_clean_for），
- * 所以人一动，**下一个** type_text 就会被拒——不需要等当前这次打完。
+ * 所以人一动，**下一个** click 就会被拒——不需要等当前这次点完。
  *
  * 退出码：0 = PASSED；2 = TIMEOUT（人没动，**不算通过**）；1 = 夹具/环境出错。
  *
@@ -36,6 +43,9 @@ const argv = process.argv.slice(2);
 const secondsArg = argv.indexOf('--seconds');
 const TOTAL_S = secondsArg >= 0 ? Number(argv[secondsArg + 1]) : 30;
 const PROMPT_AT_S = 2;
+// --auto：无印章注入替代真人（见文件头）。注入的探针文本稍后要从 UIA 树读回。
+const AUTO = argv.includes('--auto');
+const AUTO_PROBE = 'ZQ-LEASE-PROBE';
 const CHUNK = 'abc';
 const INTERVAL_MS = 200;
 
@@ -177,6 +187,19 @@ await call('desktop_activate_window', { window: WIN });
 const firstLook = await call('desktop_get_window_state', { window: WIN, include_screenshot: true });
 check('the window was observed once before writing', firstLook.ok === true, JSON.stringify(firstLook).slice(0, 120));
 
+// 点击点：窗口客户区中心。click 的 x/y 是【窗口相对】坐标（实测：传屏幕绝对坐标被 helper
+// 以 outside viewport 拒），所以中心 = width/2, height/2，不要加 originX/originY。
+const shot0 = firstLook?.screenshots?.[0];
+if (!shot0 || !(shot0.width > 0) || !(shot0.height > 0)) {
+  check('client-rect available for click point', false, JSON.stringify(firstLook?.screenshots ?? null));
+  cleanup();
+  await rm(workDir, { recursive: true, force: true });
+  process.exit(1);
+}
+const CX = Math.round(shot0.width / 2);
+const CY = Math.round(shot0.height / 2);
+console.log('      click point =', CX + ',' + CY, '(client-area center)');
+
 // ── 2/3/4. 打字循环 + 第 2 秒提示 + 断言租约 ────────────────────────────────
 console.log('');
 console.log('(2) type in a loop for', TOTAL_S, 'seconds');
@@ -193,14 +216,25 @@ while (Date.now() - started < TOTAL_S * 1000) {
   const elapsed = (Date.now() - started) / 1000;
   if (!prompted && elapsed >= PROMPT_AT_S) {
     prompted = true;
-    console.log('');
-    console.log('  ============================================================');
-    console.log('  >>>  move your mouse or press any key NOW (in this notepad) <<<');
-    console.log('  ============================================================');
-    console.log('');
+    if (AUTO) {
+      // 无印章注入：对 helper 而言与真人击键不可区分（dwExtraInfo=0）。
+      // 租约应触发；注入的字符同时是「击键是否落地」的探针，收尾时从 UIA 读回。
+      const py = process.env.CELESTEA_SMOKE_PYTHON ?? 'python';
+      const r = spawnSync(py, [
+        join(import.meta.dirname ?? '.', 'desktop-inject-input.py'), 'text', AUTO_PROBE,
+      ], { encoding: 'utf8', timeout: 30000 });
+      console.log('      [auto] injected unstamped keystrokes:', (r.stdout || '').trim(), '| exit', r.status);
+      if (r.status !== 0) console.log('      [auto] injector stderr:', (r.stderr || '').trim() || '(none)');
+    } else {
+      console.log('');
+      console.log('  ============================================================');
+      console.log('  >>>  move your mouse or press any key NOW (in this notepad) <<<');
+      console.log('  ============================================================');
+      console.log('');
+    }
   }
   calls += 1;
-  const res = await call('desktop_type_text', { window: WIN, text: CHUNK });
+  const res = await call('desktop_click', { window: WIN, x: CX, y: CY });
   if (res && res.ok === false) {
     lastError = res;
     if (firstRejection === null) firstRejection = { at: elapsed.toFixed(1), res };
@@ -224,9 +258,21 @@ while (Date.now() - started < TOTAL_S * 1000) {
 const elapsedS = ((Date.now() - started) / 1000).toFixed(1);
 console.log('');
 console.log('(3) result');
-console.log('      elapsed =', elapsedS, 's | type_text calls =', calls, '| actually typed =', typed, '| freshness refreshes =', refreshes, '| confirm cards =', autoApproved);
+console.log('      elapsed =', elapsedS, 's | click calls =', calls, '| actually clicked =', typed, '| freshness refreshes =', refreshes, '| confirm cards =', autoApproved);
 if (firstRejection !== null) {
   console.log('      first rejection at', firstRejection.at, 's ::', JSON.stringify(firstRejection.res).slice(0, 240));
+}
+
+// --auto 对照实验：租约触发后重新观测并读 UIA 文本，验证注入的击键**真的落了地**。
+// 落了 = 200ms 点击节奏下外部击键可落地，「焦点抢夺」推断不成立；
+// 没落 = 复现了手动实测的「打不出字」，是方案 C（焦点节流）的真机证据。
+let probeLanded = null;
+if (AUTO && leaseHit !== null) {
+  const relook = await call('desktop_get_window_state', { window: WIN, include_text: true });
+  const tree = JSON.stringify(relook.accessibility ?? '');
+  probeLanded = tree.includes(AUTO_PROBE);
+  check('the injected keystrokes LANDED in the notepad (UIA readback)', probeLanded,
+    probeLanded ? AUTO_PROBE + ' found' : 'NOT FOUND in ' + tree.length + ' chars');
 }
 
 cleanup();
@@ -236,8 +282,13 @@ if (leaseHit !== null) {
   console.log('      lease tripped at', leaseHit.at, 's ::', JSON.stringify(leaseHit.res).slice(0, 240));
   check('helper refused the write with the real lease literal', true, LEASE_LITERAL);
   check('it arrived as a structured result (the turn survived)', leaseHit.res !== null && typeof leaseHit.res === 'object');
+  if (AUTO) {
+    console.log(probeLanded
+      ? '      [auto] keystrokes landed => focus-yanking theory REFUTED for this cadence.'
+      : '      [auto] keystrokes did NOT land => focus-yanking theory CONFIRMED, discuss option C.');
+  }
   console.log('');
-  console.log('LEASE MANUAL CHECK PASSED');
+  console.log(AUTO ? 'LEASE AUTO CHECK PASSED' : 'LEASE MANUAL CHECK PASSED');
   process.exit(0);
 }
 console.log('      no lease refusal was seen. Last rejection:',
