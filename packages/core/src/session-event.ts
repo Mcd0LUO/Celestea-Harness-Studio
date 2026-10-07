@@ -20,7 +20,7 @@
 
 import { isRecord, serdeJsonString } from "./json.js";
 import { isImageRef, normalizeImageRef, type ImageRef } from "./message.js";
-import { SESSION_EVENT_ORIGINS, SESSION_EVENT_TYPES, type SessionEvent, type SessionEventOrigin, type SessionEventType, type ToolResultSurface, type TurnOutcome } from "./types.js";
+import { DESKTOP_CONFIRM_OUTCOMES, DESKTOP_CONFIRM_REASONS, SESSION_EVENT_ORIGINS, SESSION_EVENT_TYPES, type DesktopConfirmAnswerEvent, type DesktopConfirmEvent, type DesktopConfirmOutcome, type DesktopConfirmReason, type SessionEvent, type SessionEventOrigin, type SessionEventType, type ToolResultSurface, type TurnOutcome } from "./types.js";
 
 export type ValidateResult = { ok: true; event: SessionEvent } | { ok: false; errors: string[] };
 
@@ -125,6 +125,24 @@ export function validateSessionEvent(raw: unknown): ValidateResult {
       requireArray(raw, "answers", errors);
       optionalBoolean(raw, "timed_out", errors);
       break;
+    // computer-use M2-B2b: the desktop gate's own audit pair. `reason` and
+    // `outcome` are CLOSED SETS (like user_message's origin, W888): an unknown
+    // value is an error, never a silent fallthrough to a valid-looking reason,
+    // because these are the two fields an audit reads to answer "was this
+    // stopped, and what did the human do about it".
+    case "desktop_confirm":
+      requireString(raw, "id", errors);
+      requireString(raw, "method", errors);
+      requireString(raw, "app", errors);
+      requireClosed(raw, "reason", DESKTOP_CONFIRM_REASONS, errors);
+      optionalString(raw, "title", errors);
+      optionalNumber(raw, "timeout_ms", errors);
+      break;
+    case "desktop_confirm_answer":
+      requireString(raw, "id", errors);
+      requireClosed(raw, "outcome", DESKTOP_CONFIRM_OUTCOMES, errors);
+      optionalNumber(raw, "elapsed_ms", errors);
+      break;
     // W2018 (B1): the two field-free compaction markers. Nothing to require —
     // the tag IS the payload, so any object carrying this type is valid.
     case "compaction_start":
@@ -186,6 +204,31 @@ function normalizeSessionEvent(raw: Record<string, unknown>, type: SessionEventT
   if (type === "user_answer") {
     const ev: SessionEvent = { type, id: raw["id"] as string, answers: raw["answers"] as unknown[] };
     if (typeof raw["timed_out"] === "boolean") ev.timed_out = raw["timed_out"];
+    return ev;
+  }
+  if (type === "desktop_confirm") {
+    const ev: DesktopConfirmEvent = {
+      type,
+      id: raw["id"] as string,
+      method: raw["method"] as string,
+      app: raw["app"] as string,
+      reason: raw["reason"] as DesktopConfirmReason,
+    };
+    // Same serde-style omission as user_question's timing fields: absent == not
+    // recorded, and a JSON null normalises to absent rather than to "".
+    if (typeof raw["title"] === "string") ev.title = raw["title"];
+    const timeout = optionalNumberValue(raw["timeout_ms"]);
+    if (timeout !== undefined) ev.timeout_ms = timeout;
+    return ev;
+  }
+  if (type === "desktop_confirm_answer") {
+    const ev: DesktopConfirmAnswerEvent = {
+      type,
+      id: raw["id"] as string,
+      outcome: raw["outcome"] as DesktopConfirmOutcome,
+    };
+    const elapsed = optionalNumberValue(raw["elapsed_ms"]);
+    if (elapsed !== undefined) ev.elapsed_ms = elapsed;
     return ev;
   }
   if (type === "turn_end") {
@@ -308,6 +351,19 @@ function optionalOrigin(raw: Record<string, unknown>, name: string, errors: stri
   }
 }
 
+/**
+ * computer-use M2-B2b: validate a REQUIRED field against a closed set.
+ *
+ * Unlike [optionalOrigin] (W888) this one is REQUIRED, so an absent value is an
+ * error too — the whole point of the row is the reason/outcome it carries.
+ */
+function requireClosed(raw: Record<string, unknown>, name: string, allowed: readonly string[], errors: string[]): void {
+  const v = raw[name];
+  if (typeof v !== "string" || !allowed.includes(v)) {
+    errors.push("field '" + name + "' must be one of: " + allowed.join(", "));
+  }
+}
+
 /** W888: a valid origin, or undefined (absent/null/invalid -> omitted). */
 function originValue(v: unknown): SessionEventOrigin | undefined {
   return typeof v === "string" && SESSION_EVENT_ORIGINS.includes(v) ? (v as SessionEventOrigin) : undefined;
@@ -402,6 +458,21 @@ export function serializeSessionEvent(ev: SessionEvent): string {
       parts.push(`"id":${JSON.stringify(ev.id)}`);
       parts.push(`"answers":${serdeJsonString(ev.answers)}`);
       if (ev.timed_out !== undefined) parts.push(`"timed_out":${JSON.stringify(ev.timed_out)}`);
+      break;
+    // computer-use M2-B2b: tag first, then the fields in declaration order; the
+    // optional ones are omitted when absent (never written as null).
+    case "desktop_confirm":
+      parts.push(`"id":${JSON.stringify(ev.id)}`);
+      parts.push(`"method":${JSON.stringify(ev.method)}`);
+      parts.push(`"app":${JSON.stringify(ev.app)}`);
+      if (ev.title !== undefined) parts.push(`"title":${JSON.stringify(ev.title)}`);
+      parts.push(`"reason":${JSON.stringify(ev.reason)}`);
+      if (ev.timeout_ms !== undefined) parts.push(`"timeout_ms":${JSON.stringify(ev.timeout_ms)}`);
+      break;
+    case "desktop_confirm_answer":
+      parts.push(`"id":${JSON.stringify(ev.id)}`);
+      parts.push(`"outcome":${JSON.stringify(ev.outcome)}`);
+      if (ev.elapsed_ms !== undefined) parts.push(`"elapsed_ms":${JSON.stringify(ev.elapsed_ms)}`);
       break;
     // W2018 (B1): the tag is the entire row — no fields to append.
     case "compaction_start":

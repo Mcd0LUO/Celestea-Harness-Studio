@@ -29,6 +29,7 @@
 
 import type { AskUserQuestionItem } from "@celestea/core";
 import { UserQuestionError } from "@celestea/core";
+import type { SessionEvent } from "@celestea/core";
 import { bounded, type AttachmentStore } from "@celestea/tools";
 import type { GrantAppScope } from "../store/grants.js";
 import {
@@ -42,6 +43,7 @@ import {
   type DesktopGateGrant,
 } from "@celestea/runtime";
 import { PendingQuestion, type QuestionRegistry } from "../question-registry.js";
+import { desktopConfirmAnsweredRow, desktopConfirmAskedRow } from "../question-rows.js";
 
 /**
  * 确认卡的固定 id。前端可以据它认出「这是系统发起的确认」并渲染自己的固定文案
@@ -72,6 +74,16 @@ export interface DesktopGateHostOptions {
   registry?: QuestionRegistry | null;
   /** 把挂起的问题发到用户眼前（宿主已有的 `publishQuestion` 回调）。 */
   publish?: (question: PendingQuestion) => void;
+  /**
+   * M2-B2b：把一次确认写进会话日志（desktop_confirm / desktop_confirm_answer 两行）。
+   *
+   * 缺省 = 不写。缺席**不是**降级成别的行类型：闸门照常裁决，只是这次确认不在
+   * 审计轨迹里——所以接线方（session-compose）必须挂上它，见那里的晚绑定。
+   *
+   * 它是**审计**旁路，写失败不许改变已经发生的裁决：一个写不进去的审计行不该把
+   * 一次已经被人点了「允许」的操作翻成拒绝。
+   */
+  record?: (event: SessionEvent) => void;
   /** 本会话的 id（`null` = 分离代；答案端点按它做同会话校验）。 */
   sessionId: string | null;
   /** 限流器表（测试注入；缺省 = 进程级共享表，跨代存活）。 */
@@ -106,6 +118,13 @@ export interface DesktopWiringOptions {
   registry?: QuestionRegistry | null | undefined;
   /** 宿主的发布回调（`question` SSE 帧）。 */
   publishQuestion?: ((sessionId: string | null, question: PendingQuestion) => void) | undefined;
+  /**
+   * M2-B2b：把 desktop_confirm 两行写进会话日志。缺省 = 不写（离线测试没有日志）。
+   *
+   * 形状是「一个函数」而不是「一个 log」：compose 里这代 runtime 还没成形，调用方
+   * 只能递一个**晚绑定**的取数口进来（见 session-compose 的 desktopHolder）。
+   */
+  record?: ((event: SessionEvent) => void) | undefined;
   now?: (() => number) | undefined;
 }
 
@@ -118,8 +137,39 @@ export function desktopWiringOf(opts: DesktopWiringOptions): { attachments: Atta
       grants: () => ({ desktop: opts.grants.desktop, apps: opts.grants.apps }),
       registry: opts.registry ?? null,
       ...(opts.publishQuestion === undefined ? {} : { publish: (question) => opts.publishQuestion?.(opts.sessionId, question) }),
+      ...(opts.record === undefined ? {} : { record: opts.record }),
       ...(opts.now === undefined ? {} : { now: opts.now }),
     }),
+  };
+}
+
+
+/**
+ * M2-B2b: the desktop gate's audit sink, given the session log **by name** rather
+ * than by value.
+ *
+ * Why a getter and not the log itself: compose() builds this wiring BEFORE the
+ * runtime exists (that is the same late binding questionWiring exists for), so
+ * the only thing available here is "the log, if this generation has one".
+ *
+ * Two guards, both deliberate:
+ *   · absent log = no audit for this generation, NOT an error (an offline run
+ *     has no log; a released generation's log now belongs to someone else);
+ *   · a failed append is swallowed, because this channel is an audit SIDE
+ *     channel: a full or unwritable log must not turn a desktop action the
+ *     human already approved into a denial.
+ */
+export function createDesktopAuditSink(
+  sessionOf: () => { append(event: SessionEvent): void } | null,
+): (event: SessionEvent) => void {
+  return (event: SessionEvent): void => {
+    const log = sessionOf();
+    if (log === null) return;
+    try {
+      log.append(event);
+    } catch {
+      /* audit-only row: the log's own degraded channel reports the failure */
+    }
   };
 }
 
@@ -144,7 +194,7 @@ export function createDesktopGateHost(opts: DesktopGateHostOptions): DesktopGate
     // packages/desktop 只依赖 core —— 见 gate.ts::DesktopDeadline 的说明）。闸门只回答
     // 「超时算什么」：resolve 成 "timeout"，由它翻成 desktop_confirm_timeout 的 fail-closed。
     deadline: (work, timeoutMs, onTimeout) => bounded(work, timeoutMs, { mode: "resolve", value: onTimeout }),
-    confirm: registry === null || publish === undefined ? null : channelOver(registry, publish, opts.sessionId, opts.now ?? Date.now),
+    confirm: registry === null || publish === undefined ? null : channelOver(registry, publish, opts.sessionId, opts.now ?? Date.now, opts.record),
     limiter,
     ...(opts.platform === undefined ? {} : { platform: opts.platform }),
     ...(opts.timeoutMs === undefined ? {} : { timeoutMs: opts.timeoutMs }),
@@ -158,6 +208,7 @@ function channelOver(
   publish: ((question: PendingQuestion) => void) | undefined,
   sessionId: string | null,
   now: () => number,
+  record: ((event: SessionEvent) => void) | undefined,
 ): DesktopConfirmChannel {
   return {
     confirm: async (request) => {
@@ -168,18 +219,32 @@ function channelOver(
         expiresAt: now() + request.timeoutMs,
         timeoutMs: request.timeoutMs,
       });
+      // 计时从 park 起算：卡挂了多久 = 人想了多久，而这正是审计里唯一能区分
+      // 「秒答」与「盯着屏幕拖到超时」的数字。
+      const startedAt = now();
+      // M2-B2b：ask 行在 park 的同一拍写。**不**等到结算才一并写，是因为进程死在
+      // 等待途中也是一个要被看见的事实——那时没有 answer 行，恰恰说明这次确认
+      // 没有结论。
+      writeAudit(() => record?.(desktopConfirmAskedRow(question.requestId, askFactsOf(request))));
       registry.add(question);
       // 主动的计时那一半：即使没人读表，挂起的 await 也必须被解开（照
       // user-questions.ts::park 的同一条理由）。
       question.armTimer(now);
       publish?.(question);
       try {
-        return verdictOf(await question.result);
+        const outcome = verdictOf(await question.result);
+        writeAudit(() => record?.(desktopConfirmAnsweredRow(question.requestId, outcome, now() - startedAt)));
+        return outcome;
       } catch (error) {
         // 取消是一条**正常**的终态（用户把卡片关掉了），不是通道故障：如实报 cancelled，
         // 闸门据此给一个与「被拒」不同的原因码。其它异常照原样抛出去，闸门按
         // desktop_confirm_failed（fail-closed）处理——通道坏了与人不答应是两件事。
-        if (error instanceof UserQuestionError && error.code === "ASK_CANCELLED") return "cancelled";
+        if (error instanceof UserQuestionError && error.code === "ASK_CANCELLED") {
+          writeAudit(() => record?.(desktopConfirmAnsweredRow(question.requestId, "cancelled", now() - startedAt)));
+          return "cancelled";
+        }
+        // 通道故障（不是裁决）**没有** answer 行：那四态闭集里没有它的位置，而把一条
+        // 异常伪装成某个裁决是审计最不能犯的错。ask 行仍在，它就是「这次没有结论」。
         throw error;
       } finally {
         // 每一条出口都注销：已结算的问题不再出现在恢复列表里。
@@ -187,6 +252,37 @@ function channelOver(
       }
     },
   };
+}
+
+/**
+ * 审计行里的模型可控字段，在**写日志的这一刻**过一次 asData。
+ *
+ * 为什么在这里再做一次而不是只信确认卡那份：asData 是本文件唯一处理模型可控文本的
+ * 地方，让它同时守住两条出口（卡片与日志），才不会哪天有人给日志加一条不经它的新
+ * 出口 —— 卡片上过了一次净化不等于日志里那份也过了。
+ */
+function askFactsOf(request: DesktopConfirmRequest): Parameters<typeof desktopConfirmAskedRow>[1] {
+  return {
+    method: request.method,
+    app: asData(request.app),
+    ...(request.title === undefined || request.title === "" ? {} : { title: asData(request.title) }),
+    reason: request.reason,
+    timeoutMs: request.timeoutMs,
+  };
+}
+
+/**
+ * 审计是**旁路**：写失败只让它失败，绝不改变已经发生的裁决。
+ *
+ * 一个写不进日志的确认卡不能把「人点了允许」翻成拒绝——那既是可用性事故，也是安全
+ * 事故：fail-closed 的理由是「没人确认过」，不是「日志满了」。
+ */
+function writeAudit(fn: () => void): void {
+  try {
+    fn();
+  } catch {
+    /* audit-only row: the log's own degraded channel reports the failure */
+  }
 }
 
 /** 人的答案 → 闸门的裁决。空答案（超时）与「没点允许」都落在拒绝之外的那两态上。 */

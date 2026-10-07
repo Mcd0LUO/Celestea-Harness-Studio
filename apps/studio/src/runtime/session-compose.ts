@@ -55,7 +55,7 @@ import type { EnginePluginSwitches } from "../plugin-catalog.js";
 import type { PendingQuestion, QuestionRegistry } from "../question-registry.js";
 import { questionAnsweredRow, questionAskedRow } from "../question-rows.js";
 import { EMPTY_GRANTS } from "./engine-grants.js";
-import { desktopWiringOf } from "./desktop-gate-host.js";
+import { createDesktopAuditSink, desktopWiringOf } from "./desktop-gate-host.js";
 import { createEngineLlm, liveEngineLlm } from "./llm-assembly.js";
 import type { FallbackWiring } from "./fallback-host.js";
 import { workerTablePath } from "./worker-table.js";
@@ -380,6 +380,7 @@ export class SessionComposer {
     // append to, so the runtime travels through a holder.
     const runCodeHolder: { runtime: Runtime | null } = { runtime: null };
     const onRunCodeEvent = this.runCodeSink(sessionId, runCodeHolder);
+
     const compression = this.compressionWiring();
     // 插件热插拔（§3.1/§4）：关掉引擎层插件的两条路，各有各的理由。
     //
@@ -525,7 +526,7 @@ export class SessionComposer {
       // M2：写 9 的分级闸门 + 它的确认传输（全部细节在 desktop-gate-host.ts）。
       desktop: switches.desktop
         ? false
-        : desktopWiringOf({ sessionId, grants: read.grants, attachments, registry: this.opts.questionRegistry, publishQuestion: this.opts.publishQuestion, now: this.opts.now }),
+        : desktopWiringOf({ sessionId, grants: read.grants, attachments, registry: this.opts.questionRegistry, publishQuestion: this.opts.publishQuestion, now: this.opts.now, record: createDesktopAuditSink(() => (questionHolder.runtime === null || questionHolder.runtime.isReleased ? null : questionHolder.runtime.session)) }),
       // W9331: `null` = the guard plugin is NOT mounted (the host switched it
       // off, or the environment did), which is what makes `repeatGuard` in the
       // loop factory above genuinely absent rather than defaulted-on.

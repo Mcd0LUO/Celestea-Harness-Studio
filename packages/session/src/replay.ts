@@ -159,6 +159,16 @@ export function deriveSseTranscript(events: readonly SessionEvent[], startTurn =
         // (question-view.ts). The row is the durable record; there is no
         // client-visible frame to rebuild, so it is explicitly skipped.
         break;
+      // computer-use M2-B2b: the desktop gate's pair is skipped on BOTH sides,
+      // deliberately. The asked row is not rebuilt as a live `question` frame
+      // because doing so would render an ALREADY-SETTLED confirmation as an
+      // unanswered, clickable card (the §7.2 "有问无答" terminal state) — a lie
+      // that invites a second click on a decision that is already in the log.
+      // The durable record lives in the Studio transcript (projectMessages),
+      // which renders both rows as inbox audit entries.
+      case "desktop_confirm":
+      case "desktop_confirm_answer":
+        break;
       case "thinking_delta":
         push("thinking", { delta: ev.text });
         break;

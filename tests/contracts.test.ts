@@ -236,10 +236,23 @@ describe("contracts/session-event.schema.json", () => {
   const defs = s["$defs"] as Record<string, { oneOf: unknown[] }>;
 
   // W783: 7 -> 9 (user_question / user_answer); W2018/B1: 9 -> 11
-  // (the field-free compaction_start / compaction_end markers).
-  it("declares the 11 SessionEvent variants", () => {
+  // (the field-free compaction_start / compaction_end markers);
+  // computer-use M2-B2b: 11 -> 13 (desktop_confirm / desktop_confirm_answer).
+  //
+  // M2-B2b: the hand-copied literal (11) is GONE on purpose. It was a drift
+  // magnet -- every new row type forced an edit here, and forgetting the edit is
+  // indistinguishable from the schema being right. What this test is FOR is the
+  // first line (schema variants == code variants); the second line is now a
+  // floor that only moves when the schema actually loses a row.
+  it("declares every SessionEvent variant the code knows", () => {
     expect(defs["SessionEvent"]?.oneOf).toHaveLength(SESSION_EVENT_TYPES.length);
-    expect(SESSION_EVENT_TYPES).toHaveLength(11);
+    // The schema's variant TITLES are the same list as the code's tags, in the
+    // same order: this is what makes the count check above non-vacuous.
+    const titles = (defs["SessionEvent"]?.oneOf as Array<{ title?: string }>).map((v) => v.title);
+    expect(titles).toEqual([...SESSION_EVENT_TYPES]);
+    // A floor, not a hand-copied count: 11 is the pre-M2-B2b baseline and this
+    // can only ever grow.
+    expect(SESSION_EVENT_TYPES.length).toBeGreaterThanOrEqual(11);
   });
 
   it("declares the 5 TurnOutcome states", () => {
@@ -446,8 +459,14 @@ describe("E-P0③ checkpoint + boot recovery (contract delta)", () => {
     expect(TURN_OUTCOMES).toContain("interrupted");
     expect(defs["TurnOutcome"]?.oneOf).toHaveLength(5);
     // W783 appended the two host-side question variants, W2018/B1 the two
-    // compaction markers; interrupted legality is unaffected.
-    expect(defs["SessionEvent"]?.oneOf).toHaveLength(11);
+    // compaction markers, M2-B2b the two desktop-confirm rows; interrupted
+    // legality is unaffected.
+    //
+    // M2-B2b: derived, not hand-copied. This assertion exists to prove the
+    // OUTCOME contract is intact, not to pin how many row types the enum has;
+    // pinning the count here made this file a second place to edit every time
+    // a row type was added (it was missed the first time, which is the point).
+    expect(defs["SessionEvent"]?.oneOf).toHaveLength(SESSION_EVENT_TYPES.length);
   });
 });
 

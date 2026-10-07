@@ -16,7 +16,7 @@
  * types treats them exactly like any other unknown row — a torn tail.
  */
 
-import type { AskUserQuestionAnswerItem, AskUserQuestionItem, SessionEvent } from "@celestea/core";
+import type { AskUserQuestionAnswerItem, AskUserQuestionItem, DesktopConfirmReason, SessionEvent } from "@celestea/core";
 import type { PendingQuestion } from "./question-registry.js";
 
 /** The `user_question` row of one parked request. */
@@ -40,6 +40,62 @@ export function questionAskedRow(question: PendingQuestion): SessionEvent {
  */
 export function questionAnsweredRow(requestId: string, answers: readonly AskUserQuestionAnswerItem[], timedOut: boolean): SessionEvent {
   return { type: "user_answer", id: requestId, answers: [...answers], timed_out: timedOut };
+}
+
+/**
+ * computer-use M2-B2b: the two session-log rows of the desktop gate's
+ * confirmation, and the reason they are NOT the two above.
+ *
+ * `user_question` means "the MODEL asked something". A desktop confirmation
+ * means "the HOST stopped the model and asked on its own authority". Those are
+ * different facts about different initiators, and an audit that cannot tell them
+ * apart cannot answer "who asked, and who decided". So: a dedicated tag, even
+ * though the transport is the same parked-question plumbing.
+ *
+ * Same placement rules as the question rows, for the same reasons: the model
+ * already receives the verdict as the gated tool call's ordinary tool_result, so
+ * both rows are host-side audit records (projection.ts skips them), and both are
+ * pure additions to the log contract.
+ */
+
+/**
+ * The `desktop_confirm` row of one parked desktop confirmation.
+ *
+ * `sanitize` is applied to every model-controlled string (`app`/`title`) by
+ * the CALLER, before this function sees it — this module does not decide what
+ * counts as safe text; it only refuses to invent a field the gate never gave it.
+ */
+export function desktopConfirmAskedRow(
+  requestId: string,
+  request: { method: string; app: string; title?: string; reason: DesktopConfirmReason; timeoutMs: number },
+): SessionEvent {
+  const ev: SessionEvent = {
+    type: "desktop_confirm",
+    id: requestId,
+    method: request.method,
+    app: request.app,
+    reason: request.reason,
+    timeout_ms: request.timeoutMs,
+  };
+  // serde style: absent title is OMITTED, never written as "" (the codec drops a
+  // null title on the way back in, so the two shapes would not round-trip).
+  if (request.title !== undefined && request.title !== "") (ev as { title?: string }).title = request.title;
+  return ev;
+}
+
+/**
+ * The `desktop_confirm_answer` row of one settled desktop confirmation.
+ *
+ * `outcome` keeps all four verdicts distinct (`deny` / `cancelled` /
+ * `timeout`): merging them would turn "nobody was there" into "the user said
+ * no" in the only record that survives a restart.
+ */
+export function desktopConfirmAnsweredRow(
+  requestId: string,
+  outcome: "approve" | "deny" | "cancelled" | "timeout",
+  elapsedMs: number,
+): SessionEvent {
+  return { type: "desktop_confirm_answer", id: requestId, outcome, elapsed_ms: elapsedMs };
 }
 
 /** The questions of a `user_question` row, as the seam's item shape. */
