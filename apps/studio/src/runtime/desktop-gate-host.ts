@@ -40,7 +40,9 @@ import {
   type DesktopConfirmOutcome,
   type DesktopConfirmRequest,
   type DesktopGate,
+  type DesktopGateFactory,
   type DesktopGateGrant,
+  type DesktopTitleResolver,
 } from "@celestea/runtime";
 import { PendingQuestion, type QuestionRegistry } from "../question-registry.js";
 import { desktopConfirmAnsweredRow, desktopConfirmAskedRow } from "../question-rows.js";
@@ -93,6 +95,11 @@ export interface DesktopGateHostOptions {
   /** 单次确认预算（缺省 60s，规划 §4.2）；测试压小它。 */
   timeoutMs?: number;
   now?: () => number;
+  /**
+   * 真实标题的解析器（M2 审查修复④）。由 `desktop-wiring` 建好、经闸门工厂交进来 ——
+   * 它需要 helper 客户端，本层拿不到。缺席 = titles 清单非空时闸门 fail-closed。
+   */
+  titleResolver?: DesktopTitleResolver | undefined;
 }
 
 /**
@@ -128,18 +135,26 @@ export interface DesktopWiringOptions {
   now?: (() => number) | undefined;
 }
 
-/** 装配一代桌面接线（附件仓库 + 闸门）。 */
-export function desktopWiringOf(opts: DesktopWiringOptions): { attachments: AttachmentStore | null; gate: DesktopGate } {
+/**
+ * 装配一代桌面接线（附件仓库 + 闸门）。
+ *
+ * 闸门是**工厂**而不是现成对象（M2 审查修复④）：真实标题只能由 `desktop-wiring`
+ * （唯一持有 helper 客户端的地方）解析，所以它把 `resolveTitle` 递进工厂，我们在这里
+ * 把闸门建起来。不需要标题的宿主照样可以用 `DesktopGate` 形态，两者同字段、按函数判别。
+ */
+export function desktopWiringOf(opts: DesktopWiringOptions): { attachments: AttachmentStore | null; gate: DesktopGateFactory } {
   return {
     attachments: opts.attachments,
-    gate: createDesktopGateHost({
-      sessionId: opts.sessionId,
-      grants: () => ({ desktop: opts.grants.desktop, apps: opts.grants.apps }),
-      registry: opts.registry ?? null,
-      ...(opts.publishQuestion === undefined ? {} : { publish: (question) => opts.publishQuestion?.(opts.sessionId, question) }),
-      ...(opts.record === undefined ? {} : { record: opts.record }),
-      ...(opts.now === undefined ? {} : { now: opts.now }),
-    }),
+    gate: (deps) =>
+      createDesktopGateHost({
+        sessionId: opts.sessionId,
+        grants: () => ({ desktop: opts.grants.desktop, apps: opts.grants.apps }),
+        registry: opts.registry ?? null,
+        titleResolver: deps.resolveTitle,
+        ...(opts.publishQuestion === undefined ? {} : { publish: (question) => opts.publishQuestion?.(opts.sessionId, question) }),
+        ...(opts.record === undefined ? {} : { record: opts.record }),
+        ...(opts.now === undefined ? {} : { now: opts.now }),
+      }),
   };
 }
 
@@ -194,6 +209,7 @@ export function createDesktopGateHost(opts: DesktopGateHostOptions): DesktopGate
     // packages/desktop 只依赖 core —— 见 gate.ts::DesktopDeadline 的说明）。闸门只回答
     // 「超时算什么」：resolve 成 "timeout"，由它翻成 desktop_confirm_timeout 的 fail-closed。
     deadline: (work, timeoutMs, onTimeout) => bounded(work, timeoutMs, { mode: "resolve", value: onTimeout }),
+    ...(opts.titleResolver === undefined ? {} : { titleResolver: opts.titleResolver }),
     confirm: registry === null || publish === undefined ? null : channelOver(registry, publish, opts.sessionId, opts.now ?? Date.now, opts.record),
     limiter,
     ...(opts.platform === undefined ? {} : { platform: opts.platform }),

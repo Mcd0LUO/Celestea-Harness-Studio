@@ -126,6 +126,14 @@ export const DESKTOP_WRITE_METHODS: readonly string[] = [
  */
 export const DESKTOP_SENSITIVE_METHODS: readonly string[] = ["type_text", "set_value", "launch_app"];
 
+/**
+ * 只有「针对某个已存在窗口」的方法才有标题可查。
+ *
+ * `launch_app` 是启动一个新程序，**没有目标窗口**，所以 titles 清单对它不适用
+ * （它的风险面在 exe/`app` 一侧，那里由前缀规范化 + deny/allow.exes 管）。
+ */
+export const DESKTOP_WINDOWLESS_METHODS: readonly string[] = ["launch_app"];
+
 /** 一次确认的等待预算（规划 §4.2：超时 60s = deny，fail-closed）。 */
 export const DESKTOP_CONFIRM_TIMEOUT_MS = 60_000;
 /** 连续几次被拒进入冷却（照 grants-tokens.ts 的反疲劳先例）。 */
@@ -136,6 +144,7 @@ export const DESKTOP_DENIAL_COOLDOWN_MS = 5 * 60_000;
 export const DESKTOP_METHOD_UNKNOWN_CODE = "desktop_method_unknown";
 export const DESKTOP_APP_DENIED_CODE = "desktop_app_denied";
 export const DESKTOP_APP_UNRESOLVED_CODE = "desktop_app_unresolved";
+export const DESKTOP_TITLE_UNRESOLVED_CODE = "desktop_title_unresolved";
 export const DESKTOP_CAP_NOT_GRANTED_CODE = "desktop_cap_not_granted";
 export const DESKTOP_CONFIRM_DENIED_CODE = "desktop_confirm_denied";
 export const DESKTOP_CONFIRM_TIMEOUT_CODE = "desktop_confirm_timeout";
@@ -250,6 +259,18 @@ export interface DesktopConfirmChannel {
  */
 export type DesktopDeadline = <T, R>(work: Promise<T>, timeoutMs: number, onTimeout: () => R) => Promise<T | R>;
 
+/**
+ * 解析目标窗口的**真实**标题（helper 读侧，只读调用不需要授权）。
+ *
+ * 为什么必须是 helper 侧：`window.title` 是模型可控的字符串，而 titles 清单是用户的
+ * 策略 —— 拿被检查方给的字符串去比对用户的策略，等于让它自己写检查结果：省略它就能
+ * 绕过 `deny.titles`，伪造它就能跳过 `allow.titles` 的逐次确认。
+ *
+ * 返回 `null` = 拿不到（窗口已关 / helper 报错 / 该窗口没有标题）。titles 清单非空时
+ * 拿不到就是 **fail-closed**（见 [titleFor]）。
+ */
+export type DesktopTitleResolver = (target: { app: string; windowId: number }) => Promise<string | null>;
+
 /** 反疲劳限流（照 grants-tokens.ts::GrantRateLimiter 的口径）。 */
 export interface DesktopConfirmLimiter {
   /** 冷却剩余毫秒；0 = 不在冷却。 */
@@ -307,6 +328,12 @@ export interface DesktopGateOptions {
   confirm?: DesktopConfirmChannel | null;
   /** 超时原语（宿主注入 `bounded`；见 [DesktopDeadline]）。**必填**：闸门不自己造 race。 */
   deadline: DesktopDeadline;
+  /**
+   * 真实标题的解析器（宿主注入，走 helper 读侧）。缺席 = 拿不到真实标题，于是
+   * **titles 清单非空时一律 fail-closed**（见 [titleFor]）—— 这是刻意的：宁可拒绝，
+   * 也不能拿模型给的标题去比对用户的策略。
+   */
+  titleResolver?: DesktopTitleResolver;
   /** 反疲劳限流器（宿主跨代复用；缺席 = 闸门自建一个）。 */
   limiter?: DesktopConfirmLimiter;
   /** 平台 id，**形参注入**（规划 §7）。只决定应用名/标题比较是否折叠大小写。 */
@@ -316,10 +343,20 @@ export interface DesktopGateOptions {
   now?: () => number;
 }
 
-/** 目标应用（解析结果）。 */
+/** 目标窗口（解析结果）。 */
 interface GateTarget {
+  /** 目标应用，**原始形态**（判定前由 [normalizeAppId] 规范化）。 */
   app: string;
-  title?: string;
+  /** 目标窗口 id（有则可向 helper 取**真实**标题）。 */
+  windowId?: number;
+  /**
+   * 模型声明的标题 —— **只作显示**，永不参与判定。
+   *
+   * 为什么不能参与判定：它是模型可控的字符串，而 titles 清单是用户的策略。信任它等于
+   * 让被检查方自己写检查结果——省略它就绕过 deny.titles，伪造它就跳过 allow.titles 的
+   * 逐次确认。真实标题只能问 helper（见 [DesktopTitleResolver]）。
+   */
+  claimedTitle?: string;
 }
 
 /** 归一化后的应用 scope。 */
@@ -359,8 +396,18 @@ export function createDesktopGate(opts: DesktopGateOptions): DesktopGate {
       }
       const grant = opts.grants.read();
       const scope = scopeOf(grant.apps);
+      // (b0) 标题：titles 清单非空时，判定只能用 **helper 侧的真实标题**。
+      // 模型传的 window.title 从不参与判定（只作卡片显示），见 GateTarget.claimedTitle。
+      const resolvedTitle = await titleFor(method, scope, target, opts.titleResolver);
+      if (!resolvedTitle.ok) {
+        return deny(
+          DESKTOP_TITLE_UNRESOLVED_CODE,
+          `this session restricts desktop apps by window TITLE, but the real title of the target window could not be read, so '${method}' on '${target.app}' cannot be checked and is refused. Re-read desktop_list_windows (or desktop_get_window) and pass the {app, id} pair of a window that is still open.`,
+        );
+      }
+      const title = resolvedTitle.title;
       // (b) apps deny 在「有没有授权」之前判：清单是天花板，命中即拒（deny 永远赢）。
-      const denied = matchList(scope.deny, target, platform);
+      const denied = matchList(scope.deny, target.app, title, platform);
       if (denied !== null) {
         return deny(
           DESKTOP_APP_DENIED_CODE,
@@ -375,8 +422,17 @@ export function createDesktopGate(opts: DesktopGateOptions): DesktopGate {
         );
       }
       // (d) 需要人确认的两条理由。
-      const reason = confirmReasonOf(method, scope, target, platform);
-      if (reason !== null) return confirmOrDeny(channel, limiter, { method, ...target, reason, timeoutMs }, opts.deadline);
+      const reason = confirmReasonOf(method, scope, target.app, title, platform);
+      if (reason !== null) {
+        // 卡片上的标题：**解析到就用真实的那一个**（模型声明的只在没有解析时兜底显示）。
+        const cardTitle = title ?? target.claimedTitle;
+        return confirmOrDeny(
+          channel,
+          limiter,
+          { method, app: target.app, ...(cardTitle === undefined ? {} : { title: cardTitle }), reason, timeoutMs },
+          opts.deadline,
+        );
+      }
       // (e) 放行，并把目标应用交给 helper。
       return { kind: "allow", approvedApp: target.app };
     },
@@ -467,8 +523,14 @@ function targetOf(args: Record<string, unknown>): GateTarget | null {
         ? args["app"].trim()
         : "";
   if (app === "") return null;
-  const title = isRecord(window) && isText(window["title"]) ? window["title"].trim() : "";
-  return title === "" ? { app } : { app, title };
+  const rawId = isRecord(window) ? window["id"] : undefined;
+  const windowId = typeof rawId === "number" && Number.isInteger(rawId) ? rawId : undefined;
+  const claimed = isRecord(window) && isText(window["title"]) ? window["title"].trim() : undefined;
+  return {
+    app,
+    ...(windowId === undefined ? {} : { windowId }),
+    ...(claimed === undefined ? {} : { claimedTitle: claimed }),
+  };
 }
 
 /** 归一化 scope：allow 为空 = 不限制（规划 §4.3）。 */
@@ -479,45 +541,173 @@ function scopeOf(apps: DesktopAppScope | null | undefined): GateScope {
 }
 
 /** 需要人确认的理由，或 null（= 直接放行）。 */
-function confirmReasonOf(method: string, scope: GateScope, target: GateTarget, platform: string): DesktopConfirmReason | null {
+function confirmReasonOf(method: string, scope: GateScope, app: string, title: string | null, platform: string): DesktopConfirmReason | null {
   if (DESKTOP_SENSITIVE_METHODS.includes(method)) return "sensitive_method";
-  if (scope.allowRestricted && matchList(scope.allow, target, platform) === null) return "app_not_allowlisted";
+  if (scope.allowRestricted && matchList(scope.allow, app, title, platform) === null) return "app_not_allowlisted";
   return null;
 }
 
-/** 命中的清单条目，或 null。deny 与 allow 共用同一套比较规则。 */
-function matchList(list: DesktopAppAccessList | null, target: GateTarget, platform: string): string | null {
+/**
+ * 命中的清单条目，或 null。deny 与 allow 共用同一套比较规则。
+ *
+ * `title` 是**已经解析过的真实标题**（或 null = 本次判定不涉及标题）；模型声明的标题
+ * 从不进入这里 —— 见 [GateTarget.claimedTitle]。
+ */
+function matchList(list: DesktopAppAccessList | null, app: string, title: string | null, platform: string): string | null {
   if (list === null) return null;
   for (const entry of list.exes ?? []) {
-    if (sameExe(entry, target.app, platform)) return entry;
+    if (sameApp(entry, app, platform)) return entry;
   }
-  if (target.title !== undefined) {
+  if (title !== null) {
     for (const entry of list.titles ?? []) {
-      if (fold(entry, platform) !== "" && fold(entry, platform) === fold(target.title, platform)) return entry;
+      if (fold(entry, platform) !== "" && fold(entry, platform) === fold(title, platform)) return entry;
     }
   }
   return null;
 }
 
-/**
- * exe 比较：**裸名按 basename 比**，全路径按整串比（都折叠大小写）。
- *
- * 为什么按 basename：契约里 window.app 的说明是「可能是裸进程名，也可能是完整 exe 路径」，
- * 而用户在面板里多半填 `notepad.exe`。只比整串会让 `C:\Windows\System32\notepad.exe`
- * 逃过 `notepad.exe` 这条 deny——对 deny 清单来说那是一个可绕过的规则。
- */
-function sameExe(entry: string, app: string, platform: string): boolean {
-  const left = fold(entry, platform);
-  const right = fold(app, platform);
-  if (left === "" || right === "") return false;
-  if (left === right) return true;
-  return basename(left) === basename(right);
+/** 这一侧清单里有没有 titles 条目（有 ⇒ 判定必须拿到真实标题）。 */
+function hasTitleEntries(list: DesktopAppAccessList | null): boolean {
+  return (list?.titles ?? []).some((entry) => isText(entry));
 }
 
-/** 最后一个路径分隔符之后的部分（两种分隔符都认：清单可能由 Windows 用户手写）。 */
-function basename(value: string): string {
-  const cut = Math.max(value.lastIndexOf("\\"), value.lastIndexOf("/"));
-  return cut === -1 ? value : value.slice(cut + 1);
+/**
+ * 本次判定要用哪个标题。
+ *
+ * 三种结果：`title === null` = 不涉及标题（清单里没有 titles 条目，或方法没有目标窗口）；
+ * `ok: false` = **需要标题但拿不到** ⇒ 调用方必须 fail-closed。
+ *
+ * 为什么拿不到就拒，而不是「退回用模型给的标题」或「升级为确认」：
+ *   · 退回模型标题 = 把检查权交给被检查方，正是这条修复要堵的洞；
+ *   · 升级为确认 = 让人的一次点击**代替一次没做成的检查**。若那个窗口真在 deny 清单上，
+ *     确认就成了绕开「deny 永远赢」的通道；而且用户看到的应用名同样来自模型，
+ *     他并没有能力替系统补上这次判定。
+ * 所以：**拒绝**，并给一个能据此改计划的具名原因。
+ *
+ * 空标题也算拿不到：`WindowRef::to_json` 在标题为空时**不写这个键**，而模型完全可以
+ * 去操作一个没有标题的窗口来制造「解析失败」——那条路必须同样被拒。
+ */
+async function titleFor(
+  method: string,
+  scope: GateScope,
+  target: GateTarget,
+  resolver: DesktopTitleResolver | undefined,
+): Promise<{ ok: true; title: string | null } | { ok: false }> {
+  if (!hasTitleEntries(scope.deny) && !hasTitleEntries(scope.allow)) return { ok: true, title: null };
+  if (DESKTOP_WINDOWLESS_METHODS.includes(method)) return { ok: true, title: null };
+  const windowId = target.windowId;
+  if (resolver === undefined || windowId === undefined) return { ok: false };
+  try {
+    const resolved = await resolver({ app: target.app, windowId });
+    return resolved === null || resolved.trim() === "" ? { ok: false } : { ok: true, title: resolved };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * helper 认得的**全部**标识符前缀（真源是 helper 源码，本表是它的逐字镜像）：
+ *
+ *   · `enum_windows.rs::APP_ID_PREFIXES` —— 5 个官方 AppIdentifier 前缀（CW-5）；
+ *   · `app_catalog.rs::strip_known_prefixes` 额外认的 shell 命名空间形式
+ *     `shell:AppsFolder\` / `shell:AppsFolder/`（`launch_app` 的 app 参数走这一支）。
+ *
+ * 为什么必须照抄而不是「大概剥一下」：模型传 `process:cmd.exe` 时，只做 basename 提取
+ * 会得到 `process:cmd.exe`（没有分隔符），于是**绕过** `deny.exes` 里的 `cmd.exe` 条目，
+ * 而 helper 剥掉前缀后**真的会去点/打字/启动那个 cmd**。少一个前缀就是一条绕过路径。
+ * 漂移由 gate.test.ts 里那条「读 helper 源码逐个比对」的用例机械钉住。
+ */
+export const DESKTOP_APP_ID_PREFIXES: readonly string[] = [
+  "process:",
+  "path:",
+  "registry:",
+  "app-user-model-id:",
+  "window-app:",
+];
+/** `app_catalog.rs::strip_known_prefixes` 在官方前缀之外额外认的两种写法（小写比较）。 */
+export const DESKTOP_SHELL_APPSFOLDER_PREFIXES: readonly string[] = ["shell:appsfolder\\", "shell:appsfolder/"];
+
+/**
+ * 与 helper 同口径的标识符规范化：trim → 去引号 → 去已知前缀（大小写不敏感）→ trim → 去引号。
+ *
+ * 逐字镜像 `enum_windows.rs::strip_app_prefix` + `app_catalog.rs::strip_known_prefixes`：
+ * 官方前缀取**第一个**命中的就停，shell 命名空间形式在其后单独判一次。
+ */
+export function normalizeAppId(raw: string): string {
+  let value = stripQuotes(raw.trim());
+  for (const prefix of DESKTOP_APP_ID_PREFIXES) {
+    if (value.length >= prefix.length && value.slice(0, prefix.length).toLowerCase() === prefix) {
+      value = stripQuotes(value.slice(prefix.length).trim());
+      break;
+    }
+  }
+  const lower = value.toLowerCase();
+  for (const prefix of DESKTOP_SHELL_APPSFOLDER_PREFIXES) {
+    if (lower.startsWith(prefix)) return tidyAppPath(stripQuotes(value.slice(prefix.length).trim()));
+  }
+  return tidyAppPath(value);
+}
+
+/**
+ * Windows 语义的收尾清理。**helper 不做这一步，但闸门必须做** —— 因为 helper 那边
+ * 「同一个程序」是内核解析出来的事实，而闸门这边只有字符串：
+ *
+ *   · **折叠重复分隔符**并把 `/` 归一到 `\`：`C:\\Windows\\notepad.exe` 与
+ *     `C:/Windows/notepad.exe` 在 Win32 下是同一个文件，字符串比较看不出这一点；
+ *   · **去掉每一段末尾的尾随点与空格**：Win32 解析路径时就会丢掉它们，所以
+ *     `notepad.exe.` 与 `notepad.exe` 是同一个程序。不清理的话，模型用 `notepad.exe.`
+ *     就能让 `deny.exes` 里的 `notepad.exe` 条目失效——这正是本轮要堵的那类绕过。
+ *     `.` / `..` 两个目录段保持原样（否则相对路径会被拆掉）。
+ *
+ * **已知限制（不在此处解决）**：8.3 短名（`EXCEL~1.EXE`）与长名是同一个程序，但要
+ * 认出这一点必须调 Win32（`GetLongPathName`），而闸门是**纯计算**、不碰系统。这条
+ * 限制记在 docs/feature/computer-use/01-usage.md 的已知限制节。
+ */
+function tidyAppPath(value: string): string {
+  return value
+    .replace(/[\\/]+/g, "\\")
+    .split("\\")
+    .map((segment) => (segment === "." || segment === ".." ? segment : segment.replace(/[. ]+$/, "")))
+    .join("\\");
+}
+
+/** Rust 的 `trim_matches('"')`：两侧的引号全部去掉，再 trim。 */
+function stripQuotes(value: string): string {
+  return value.replace(/^"+|"+$/g, "").trim();
+}
+
+/**
+ * 应用比较：**与 helper 的 `app_identity_matches` 同口径**（CW-5）。
+ *
+ * 三步，顺序与 helper 一致：① 两侧都规范化后整串比；② 叶名（basename）比；
+ * ③ 叶名那一档**只对裸名一侧生效** —— helper 的原话是「两个同名 exe 在不同目录里
+ * 必须保持可区分，否则 get_window/activate_window 会认错应用」。
+ *
+ * 闸门必须与 helper 同口径，而不是「更宽松地按 basename 比」：更宽松会让 `allow.exes`
+ * 里的 `C:\A\msedge.exe` 放行 `C:\B\msedge.exe`（那是**放宽**），而同口径既不会
+ * 放过 deny，也不会把两个不同目录的同名程序混为一谈。
+ */
+function sameApp(entry: string, app: string, platform: string): boolean {
+  const found = normalizeAppId(app);
+  const expected = normalizeAppId(entry);
+  if (found === "" || expected === "") return false;
+  if (fold(found, platform) === fold(expected, platform)) return true;
+  const foundBase = appBaseName(found);
+  const expectedBase = appBaseName(expected);
+  if (foundBase === "" || fold(foundBase, platform) !== fold(expectedBase, platform)) return false;
+  return isBareApp(found) || isBareApp(expected);
+}
+
+/** 叶名：`\` 与 `/` 都当分隔符（helper 的 `app_base_name` 先把 `/` 换成 `\`）。 */
+function appBaseName(value: string): string {
+  const normalized = value.replace(/\//g, "\\");
+  const cut = normalized.lastIndexOf("\\");
+  return cut === -1 ? normalized : normalized.slice(cut + 1);
+}
+
+/** 裸名（不含任何路径分隔符）—— helper 的叶名兜底只对裸名一侧生效。 */
+function isBareApp(value: string): boolean {
+  return !value.includes("\\") && !value.includes("/");
 }
 
 /**

@@ -2,7 +2,6 @@
 import { describe, expect, it } from "vitest";
 import {
   createDesktopConfirmLimiter,
-  createDesktopGate,
   DESKTOP_APP_DENIED_CODE,
   DESKTOP_APP_UNRESOLVED_CODE,
   DESKTOP_CAP_NOT_GRANTED_CODE,
@@ -18,114 +17,24 @@ import {
   DESKTOP_WRITE_METHODS,
   type DesktopConfirmChannel,
   type DesktopConfirmOutcome,
-  type DesktopConfirmRequest,
   type DesktopDeadline,
-  type DesktopGate,
-  type DesktopGateGrant,
-  type DesktopGateGrantSource,
-  type DesktopGateVerdict,
 } from "./gate.js";
+import { NOTEPAD, denied, gateWith, testDeadline } from "./gate.test-util.js";
 
 /**
- * M2 闸门矩阵（规划 §4.4 真值表）。
+ * M2 闸门矩阵（规划 §4.4 真值表）—— 十态真值表这一片。
  *
- * 全部用**假授权源 + 假确认通道**（它们是本文件声明的结构化端口，是外部边界），
- * 不碰真桌面、不跑真机、不起 helper —— 闸门是纯判定，所以它就该能被这样钉死。
+ * 夹具（假授权源 + 假确认通道）在 gate.test-util.ts；审查修复的用例（标识符前缀、
+ * 双路径、尾随点、标题信任）在 gate-apps.test.ts —— 两片共用同一套夹具，分开只是因为
+ * 450 行的文件预算。
  *
  * 矩阵覆盖的每一态都在下面的 describe 标题里点名，测试名里带原因码，便于对着真值表核对。
  *
  * 不在本文件的两态（preset deny / session deny）：那两层跑在闸门**之前**
  * （packages/tools/src/plugin.ts:174 的 toolDenyGuard 挂在 ToolRegistryImpl.dispatch
  * 的 guard 链上），所以断言是「闸门根本没被调用」——它需要真 registry + 真守卫，
- * 落在 apps/studio/src/runtime/desktop-gate-order.test.ts。
+ * 落在 packages/runtime/src/desktop-gate-order.test.ts。
  */
-
-/** 一个只按脚本回答的授权源（每次 read 现取，所以测试能中途改授权）。 */
-function grantsOf(initial: DesktopGateGrant): { source: DesktopGateGrantSource; set: (next: DesktopGateGrant) => void } {
-  let current = initial;
-  return { source: { read: () => current }, set: (next) => (current = next) };
-}
-
-/** 一个按脚本回答的确认通道；记下每一次请求，便于断言「闸门把什么交给了人」。 */
-function channelOf(answer: (request: DesktopConfirmRequest) => Promise<DesktopConfirmOutcome> | DesktopConfirmOutcome): {
-  channel: DesktopConfirmChannel;
-  seen: DesktopConfirmRequest[];
-} {
-  const seen: DesktopConfirmRequest[] = [];
-  return {
-    seen,
-    channel: {
-      confirm: (request) => {
-        seen.push(request);
-        return Promise.resolve(answer(request));
-      },
-    },
-  };
-}
-
-const NOTEPAD = { window: { app: "notepad.exe", id: 7 } };
-const granted: DesktopGateGrant = { desktop: true };
-
-/**
- * 测试用的超时原语（W2014）。
- *
- * 生产实现是 `packages/tools` 的 `bounded`，由宿主注入；而 `packages/desktop` 只依赖
- * `core`，**这个测试文件也解析不到 tools** —— 所以这里写一份最小实现。棘轮的口径是
- * 「整行含 test 即排除」（它拦的是产品代码里的各自为政），测试文件本就允许自己造竞态；
- * 而本文件要验的是**闸门怎么用这个端口**：超时到了它算什么、通道不守约时会不会挂死。
- * 原语自身的语义（三种策略、计时器清理、迟到的 rejection）由 tools 侧自己的测试钉住。
- */
-const testDeadline: DesktopDeadline = (work, timeoutMs, onTimeout) =>
-  new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(onTimeout()), Math.max(0, timeoutMs));
-    timer.unref?.();
-    void work.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      () => {
-        clearTimeout(timer);
-        resolve(onTimeout());
-      },
-    );
-  });
-
-/**
- * 一个「授权齐备、通道说批准」的基准闸门（各用例只覆盖自己关心的那一维）。
- *
- * `answer` 是「人怎么答」的脚本，`seen` 永远取自**闸门真正用过的那条通道**；
- * `channel` 只给三种特殊通道用（永不 settle / 抛错 / 缺席），那三种下 `seen` 为空。
- */
-function gateWith(over: {
-  grants?: DesktopGateGrant;
-  answer?: (request: DesktopConfirmRequest) => Promise<DesktopConfirmOutcome> | DesktopConfirmOutcome;
-  channel?: DesktopConfirmChannel | null;
-  limiter?: Parameters<typeof createDesktopGate>[0]["limiter"];
-  timeoutMs?: number;
-  now?: () => number;
-  platform?: string;
-  /** 覆盖超时原语（用于证明端口真的被用上）。 */
-  deadline?: DesktopDeadline;
-} = {}): { gate: DesktopGate; set: (next: DesktopGateGrant) => void; seen: DesktopConfirmRequest[] } {
-  const store = grantsOf(over.grants ?? granted);
-  const c = over.channel === undefined ? channelOf(over.answer ?? (() => "approve")) : { channel: over.channel, seen: [] as DesktopConfirmRequest[] };
-  const gate = createDesktopGate({
-    grants: store.source,
-    confirm: c.channel,
-    deadline: over.deadline ?? testDeadline,
-    platform: over.platform ?? "win32",
-    ...(over.limiter === undefined ? {} : { limiter: over.limiter }),
-    ...(over.timeoutMs === undefined ? {} : { timeoutMs: over.timeoutMs }),
-    ...(over.now === undefined ? {} : { now: over.now }),
-  });
-  return { gate, set: store.set, seen: c.seen };
-}
-
-const denied = (verdict: DesktopGateVerdict): { code: string; reason: string } => {
-  expect(verdict.kind).toBe("deny");
-  return verdict as { code: string; reason: string };
-};
 
 describe("M2 gate · the two method tables are the frozen contract shape", () => {
   it("names exactly the read-only four, the write nine and the sensitive three", () => {
@@ -337,12 +246,18 @@ describe("M2 gate · 态 9 apps deny 命中（deny 永远赢）", () => {
     expect(code).toBe(DESKTOP_APP_DENIED_CODE);
   });
 
-  it("matches a title entry against window.title, and leaves other apps alone", async () => {
-    const { gate } = gateWith({ grants: { desktop: true, apps: { deny: { titles: ["Secret Notes"] } } } });
-    expect(denied(await gate.check({ method: "click", arguments: { window: { app: "notepad.exe", id: 1, title: "secret notes" } } })).code).toBe(
+  it("matches a title entry against the HELPER's title (the model's window.title is display-only)", async () => {
+    const realTitles: Record<number, string> = { 1: "secret notes", 2: "Docs" };
+    const { gate } = gateWith({
+      grants: { desktop: true, apps: { deny: { titles: ["Secret Notes"] } } },
+      titleResolver: (t) => Promise.resolve(realTitles[t.windowId] ?? null),
+    });
+    // 真标题命中 ⇒ 拒（大小写按平台折叠）。
+    expect(denied(await gate.check({ method: "click", arguments: { window: { app: "notepad.exe", id: 1, title: "随便写的" } } })).code).toBe(
       DESKTOP_APP_DENIED_CODE,
     );
-    expect((await gate.check({ method: "click", arguments: { window: { app: "chrome.exe", id: 2, title: "Docs" } } })).kind).toBe("allow");
+    // ★ 模型**声明**了被禁的标题，而真标题不是它 ⇒ 放行（证明声明不参与判定）。
+    expect((await gate.check({ method: "click", arguments: { window: { app: "chrome.exe", id: 2, title: "secret notes" } } })).kind).toBe("allow");
   });
 });
 

@@ -32,6 +32,7 @@ import {
   helperBinPath,
   type DesktopAttachmentStore,
   type DesktopGate,
+  type DesktopTitleResolver,
 } from "@celestea/desktop";
 
 // ── computer-use M2：把闸门的**宿主面向 surface** 从本模块转发出去 ──
@@ -61,6 +62,7 @@ export {
   DESKTOP_CONFIRM_UNAVAILABLE_CODE,
   DESKTOP_DENIAL_COOLDOWN_MS,
   DESKTOP_DENIAL_THRESHOLD,
+  DESKTOP_TITLE_UNRESOLVED_CODE,
 } from "@celestea/desktop";
 export type {
   DesktopAppAccessList,
@@ -70,11 +72,13 @@ export type {
   DesktopConfirmOutcome,
   DesktopConfirmReason,
   DesktopConfirmRequest,
+  DesktopDeadline,
   DesktopGate,
   DesktopGateCall,
   DesktopGateGrant,
   DesktopGateGrantSource,
   DesktopGateVerdict,
+  DesktopTitleResolver,
 } from "@celestea/desktop";
 
 const DEFAULT_DESKTOP_PLUGIN = 'celestea.runtime.desktop';
@@ -95,8 +99,11 @@ export interface DesktopWiring {
    * 还要有一条问人的通道（进程级挂起问题表 + SSE 发布）——那些都在 apps/studio 一侧。
    * runtime 是装配层，拿不到也不该拿到它们（ARCHITECTURE §1 的分层）；它只负责把
    * 「有没有闸门」原样交给插件。
+   *
+   * 两种形态：已经建好的 `DesktopGate`，或 [DesktopGateFactory]（当会话的 apps scope
+   * 里出现 titles 清单时**必须**用后者 —— 真实标题只能由本层解析，见 titleResolverOver）。
    */
-  gate?: DesktopGate;
+  gate?: DesktopGate | DesktopGateFactory;
   /** 单次调用超时（缺省 20s，规划 §5）。 */
   timeoutMs?: number;
   /** Mount name (auto-named when omitted). */
@@ -176,6 +183,37 @@ export interface DesktopMountCheckOptions {
  * 都返回 null（什么都没挂），不是抛错——工具面缺席是一种合法状态（D7 默认开，但
  * 「没构建 helper」的用户看到的就是一个安静的缺席，而不是四个必然失败的名字）。
  */
+/**
+ * 闸门工厂（M2 审查修复④）：宿主把「建闸门」交出来，由**本层**把 `resolveTitle`
+ * 交给它 —— 只有这里能建出真解析器（它需要 helper 客户端）。
+ *
+ * 与 `gate` 是同一个字段的两种形态：`DesktopGate` 是对象、本类型是函数，
+ * `typeof === "function"` 即可判别。需要 titles 清单时宿主**必须**用这一种。
+ */
+export type DesktopGateFactory = (deps: { resolveTitle: DesktopTitleResolver }) => DesktopGate;
+
+/**
+ * helper 读侧的标题解析器。
+ *
+ * `desktop_get_window` 是**只读**方法（不需要授权，也不落任何状态），契约里它的参数是
+ * 扁平的 `{id, app?}`、结果就是一条 window 记录。任何失败（helper 没起来、窗口已关、
+ * 超时、协议错）都返回 `null` —— 闸门那边对「拿不到真实标题 + titles 清单非空」
+ * 是 fail-closed 的，所以这里的兜底方向必须是 null 而不是空串或猜测值。
+ */
+function titleResolverOver(client: DesktopHelperClient): DesktopTitleResolver {
+  return async ({ app, windowId }) => {
+    try {
+      const result = await client.callTool("get_window", { id: windowId, app });
+      const value = result.value;
+      if (typeof value !== "object" || value === null) return null;
+      const title = (value as Record<string, unknown>)["title"];
+      return typeof title === "string" ? title : null;
+    } catch {
+      return null;
+    }
+  };
+}
+
 export function ensureDesktopWiring(
   ctx: Context,
   wiring: DesktopWiring | false | undefined,
@@ -196,11 +234,14 @@ export function ensureDesktopWiring(
     ...(wiring.timeoutMs === undefined ? {} : { timeoutMs: wiring.timeoutMs }),
   });
   const name = wiring.name ?? DEFAULT_DESKTOP_PLUGIN;
+  // M2 审查修复④：titles 清单的判定必须用 helper 侧的真实标题，而**本层是唯一持有
+  // 客户端的地方** —— 所以解析器在这里建，通过工厂交给闸门（宿主自己建不出它）。
+  const gate = typeof wiring.gate === "function" ? wiring.gate({ resolveTitle: titleResolverOver(client) }) : wiring.gate;
   mountPlugins(ctx, [
     desktopPlugin({
       client,
       attachments: wiring.attachments ?? null,
-      ...(wiring.gate === undefined ? {} : { gate: wiring.gate }),
+      ...(gate === undefined ? {} : { gate }),
       name,
     }),
   ]);

@@ -53,3 +53,5 @@ node scripts/lease-manual-check.mjs       # 租约：30 秒，提示出现时请
 - 「取消」按钮在确认卡上还没有——取消语义已实现（fail-closed），UI 触发路径在 M2-B2。
 - 桌面驱动不进沙箱（Windows 本就没有 OS 级隔离可用）；它操作的就是你真实的桌面。
 - 无障碍树超 32KB 会按字符边界截断（uia.rs，2026-10-07 修复过 UTF-8 截断 panic）。
+- apps scope 的 exe 匹配按规范化后的文件名比较（剥离 process:/path:/registry: 等前缀与引号、折叠大小写、双端皆路径时整串相等）；**8.3 短文件名（如 EXCEL~1.EXE）不做等价识别**——清单里请写标准文件名（gate 保持无状态纯计算，不调 Win32 路径 API）。
+- 配置了 titles 清单时，窗口标题一律取 helper 侧真实值判定（模型传入的 title 只作显示）；title 解析失败按 fail-closed 处理。

@@ -110,11 +110,14 @@ export type {
   DesktopConfirmOutcome,
   DesktopConfirmReason,
   DesktopConfirmRequest,
+  DesktopDeadline,
   DesktopGate,
   DesktopGateCall,
+  DesktopGateFactory,
   DesktopGateGrant,
   DesktopGateGrantSource,
   DesktopGateVerdict,
+  DesktopTitleResolver,
 } from "./desktop-wiring.js";
 export * from "./watchdog-mount.js";
 export * from "./repeat-guard-mount.js";
