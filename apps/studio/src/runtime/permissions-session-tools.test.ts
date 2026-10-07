@@ -24,6 +24,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { getJson, type StudioHarness } from "../harness.test-util.js";
 import type { RealRuntimeAdapter } from "./real-runtime-adapter.js";
 import { engineOf, makeEngineHarness } from "./test-util.js";
+import { checkDesktopMount } from "@celestea/runtime";
 
 /**
  * The frozen standard face of the production registry (W791/W804/W7/W884/F4/B2:
@@ -68,8 +69,10 @@ const STANDARD_FACE: readonly string[] = [
  */
 const DESKTOP_FACE: readonly string[] = ["desktop_activate_window", "desktop_click", "desktop_drag", "desktop_get_window", "desktop_get_window_state", "desktop_launch_app", "desktop_list_apps", "desktop_list_windows", "desktop_press_key", "desktop_scroll", "desktop_secondary_action", "desktop_set_value", "desktop_type_text"];
 
+/** 可选面挂没挂，用 plugins-inventory 的同一真实判据（win32 + helper 产物，静态检查）。 */
+const DESKTOP_MOUNTED = checkDesktopMount().ok;
 /** 本机默认面 = 无条件面 + 已挂载的可选面（见 DESKTOP_FACE 的理由）。 */
-const MOUNTED_STANDARD_FACE: readonly string[] = [...STANDARD_FACE, ...DESKTOP_FACE].sort();
+const MOUNTED_STANDARD_FACE: readonly string[] = [...STANDARD_FACE, ...(DESKTOP_MOUNTED ? DESKTOP_FACE : [])].sort();
 
 /** `read-only` (W9) = the mounted standard face minus the preset's `toolDeny` (`write_file`). */
 const READ_ONLY_FACE: readonly string[] = MOUNTED_STANDARD_FACE.filter((name) => name !== "write_file");

@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { SSE_EVENT_NAMES } from "@celestea/core";
 import { DEFAULT_RETRY_POLICY } from "@celestea/llm";
 import { parseSessionJsonl } from "@celestea/session";
+import { checkDesktopMount } from "@celestea/runtime";
 import { getJson, jsonRequest, type StudioHarness } from "../harness.test-util.js";
 import type { OfflineStep } from "./offline-llm.js";
 import {
@@ -443,7 +444,9 @@ describe("GET /api/sessions/{id}/context over the real engine", () => {
     // They are an OPTIONAL face: `ensureDesktopWiring` mounts them only on win32 with a
     // built helper (规划 §5), so this number is "the default face ON THIS HOST" — the
     // unconditional face is still the 22 the comment chain above describes.
-    expect(toolViews).toHaveLength(35);
+    // 计数按真实挂载判据条件化（与 plugins-inventory 同一 checkDesktopMount）：
+    // 没有 helper 产物的主机（CI、未自编译的机器）看到的是 22。
+    expect(toolViews).toHaveLength(22 + (checkDesktopMount().ok ? 13 : 0));
     expect(tools).toContain("ask_user_question");
     expect(tools).toContain("read_image");
     // 这条循环钉的是**内置工具**的 `desc` 参数约定（`packages/tools` 手写 schema 的那批）。

@@ -18,6 +18,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { checkDesktopMount } from "@celestea/runtime";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ModelRequest } from "@celestea/core";
@@ -47,8 +48,10 @@ const DEFAULT_STANDARD_FACE = ["ask_user_question", "browser_act", "browser_open
  * property the M7 case below asserts.)
  */
 const DESKTOP_FACE = ["desktop_activate_window", "desktop_click", "desktop_drag", "desktop_get_window", "desktop_get_window_state", "desktop_launch_app", "desktop_list_apps", "desktop_list_windows", "desktop_press_key", "desktop_scroll", "desktop_secondary_action", "desktop_set_value", "desktop_type_text"];
+/** 可选面挂没挂，用 plugins-inventory 的同一真实判据（win32 + helper 产物，静态检查）。 */
+const DESKTOP_MOUNTED = checkDesktopMount().ok;
 /** 本机默认面 = 无条件面 + 已挂载的可选面（见 DESKTOP_FACE 的理由）。 */
-const MOUNTED_STANDARD_FACE = [...DEFAULT_STANDARD_FACE, ...DESKTOP_FACE].sort();
+const MOUNTED_STANDARD_FACE = [...DEFAULT_STANDARD_FACE, ...(DESKTOP_MOUNTED ? DESKTOP_FACE : [])].sort();
 const EXECUTION_MARK = "Execution mode — prefer one program over many round trips";
 
 /** W9331: the swarm capability, named once so the case below cannot drift from it. */

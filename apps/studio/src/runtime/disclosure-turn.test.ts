@@ -22,6 +22,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { ModelRequest } from "@celestea/core";
 import { TOOL_UNAVAILABLE_CODE } from "@celestea/tools";
+import { checkDesktopMount } from "@celestea/runtime";
 import { getJson, jsonRequest, type StudioHarness } from "../harness.test-util.js";
 import { activate, makeEngineHarness, readSessionLog, waitIdle } from "./test-util.js";
 import type { OfflineStep } from "./offline-llm.js";
@@ -76,8 +77,10 @@ const DESKTOP_FACE = [
   "desktop_type_text",
 ];
 
+/** 可选面挂没挂，用 plugins-inventory 的同一真实判据（win32 + helper 产物，静态检查）。 */
+const DESKTOP_MOUNTED = checkDesktopMount().ok;
 /** 本机默认面 = 无条件面 + 已挂载的可选面（见 DESKTOP_FACE 的理由）。 */
-const MOUNTED_FACE = [...STANDARD_FACE, ...DESKTOP_FACE].sort();
+const MOUNTED_FACE = [...STANDARD_FACE, ...(DESKTOP_MOUNTED ? DESKTOP_FACE : [])].sort();
 
 /** The one name withheld at compose time; everything else is offered. */
 const WITHHELD = "read_file";
