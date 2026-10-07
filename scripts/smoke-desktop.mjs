@@ -14,7 +14,7 @@
  *   b) desktop_list_windows 真调用：非空数组，且每项都带 app + id；
  *   c) desktop_get_window_state 对一个真实窗口返回 attachment（bytes>0、image/*、
  *      宽高为 >=1 整数、attachment_id 是 64 位小写 hex）；
- *   d) attachments 落在 value 的**顶层**——core 的 projection 认的位置（core/src/projection.ts:132）。
+ *   d) attachments 落在 value 的**顶层**——core 的 projection 认的位置（core/src/projection.ts）。
  *
  * 用法：node scripts/smoke-desktop.mjs [--target <app-substring>]
  * 退出码：0 全过；非 0 = 有断言没过（原因原样打印，不吞）。

@@ -417,12 +417,6 @@ function isRetryable(e: unknown): boolean {
   return e.code === "helper_crashed" || e.code === "spawn_failed" || e.code === "handshake_failed";
 }
 
-function asText(chunk: unknown): string {
-  if (typeof chunk === "string") return chunk;
-  if (Buffer.isBuffer(chunk)) return chunk.toString("utf8");
-  return String(chunk);
-}
-
 /**
  * The raw bytes of one stdio chunk (what a StringDecoder needs).
  *

@@ -16,9 +16,9 @@
  *
  * ## 修法：照 W9206-03 的 HttpOnly nonce
  *
- * 与「授予令牌」同一个形状、同一条理由（store/grants-tokens.ts:26-34）：nonce 只经
+ * 与「授予令牌」同一个形状、同一条理由（store/grants-tokens.ts）：nonce 只经
  * `Set-Cookie` 下发，而 `http_request` 的响应视图是 HEADER_SUBSET——它**不含**
- * `set-cookie`（packages/tools/src/http/headers.ts:7 写明了为什么），而且它没有
+ * `set-cookie`（packages/tools/src/http/headers.ts 写明了为什么），而且它没有
  * cookie jar（每次调用新建请求）⇒ 工具既读不到、也带不上这个值；浏览器对同源请求
  * 则自动保存与回送。
  *

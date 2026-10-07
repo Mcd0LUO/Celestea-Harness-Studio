@@ -6,16 +6,16 @@
  * NOT in this package. The chain is:
  *
  *   1. a tool returns a `value` whose `attachments` is a top-level ImageRef array
- *      (browser: packages/tools/src/browser/session.ts:417-427, spread into the
- *      result at line 411);
+ *      (browser: packages/tools/src/browser/session.ts, spread into the
+ *      result 的截图分支);
  *   2. THE LOOP writes that `value` into the `tool_result` log row
- *      (packages/agent-loop/src/loop.ts:894-900) — this package's only link;
+ *      (packages/agent-loop/src/loop.ts) — this package's only link;
  *   3. core projects the row: `deriveMessagesFrom` → `toolResultOf`
- *      (packages/core/src/projection.ts:99-103, 128-134) reads
- *      `attachmentRefsOfValue(value)` (packages/core/src/message.ts:302-312) and
- *      builds `toolResultWithImages` (packages/core/src/message.ts:152-156);
+ *      (packages/core/src/projection.ts 的 toolResultOf) reads
+ *      `attachmentRefsOfValue(value)` (packages/core/src/message.ts) and
+ *      builds `toolResultWithImages` (packages/core/src/message.ts);
  *   4. the loop puts the projection in front of the model
- *      (loop.ts:501-518, `buildRequest` → `seams.session.deriveMessages()`).
+ *      (loop.ts, `buildRequest` → `seams.session.deriveMessages()`).
  *
  * The assertion here is deliberately an END-TO-END CONSEQUENCE check over that
  * whole chain, not a mechanism check on step 3: step 3 is core's, and re-typing
@@ -26,7 +26,7 @@
  * STEP 3 IS REAL, NOT MOCKED: [ProjectingSessionLog] delegates to core's exported
  * `deriveMessagesFrom`. The mock rule ("never mock the object under test") is why
  * the default `FakeSessionLog` — whose `deriveMessages()` returns a PRE-BAKED
- * array (fakes.test-util.ts:156-172) and is therefore `[]` for this scenario —
+ * array (fakes.test-util.ts) and is therefore `[]` for this scenario —
  * is not used for the projection. `pinned to the real projector` below proves it.
  */
 
@@ -49,7 +49,7 @@ function done(message: Message): StreamEvent {
   return { kind: "done", message };
 }
 
-/** What the attachment store hands back for a screenshot (browser session.ts:422-425). */
+/** What the attachment store hands back for a screenshot (browser session.ts). */
 const SHOT: ImageRef = {
   attachment_id: "b".repeat(64),
   media_type: "image/png",
@@ -60,7 +60,7 @@ const SHOT: ImageRef = {
 
 /**
  * The value `BrowserSessionManager.capture()` really produces
- * (packages/tools/src/browser/session.ts:393-414). The screenshot descriptor and
+ * (packages/tools/src/browser/session.ts). The screenshot descriptor and
  * the reference array are TOP-LEVEL siblings, not nested: `capture()` spreads
  * the `screenshot()` result (`...shot`, line 411) straight into the
  * BrowserResult. This shape is the contract the projection is pinned against;
@@ -141,7 +141,7 @@ describe("tool result image projection (T1b / M1④)", () => {
   it("delivers the screenshot reference as an image block on the tool message", async () => {
     const tool = toolMessageOf(await secondRequestMessages(browserValue()));
 
-    // text FIRST, image AFTER — message.ts:152-155 ordering (section 3.5).
+    // text FIRST, image AFTER — message.ts ordering (section 3.5).
     expect(tool.content.map((block) => block.type)).toEqual(["text", "image"]);
     expect(imagesOf(tool)).toEqual([SHOT]);
     expect(tool.tool_call_id).toBe("c1");
@@ -157,7 +157,7 @@ describe("tool result image projection (T1b / M1④)", () => {
   });
 
   it("reads attachments at the TOP level, not nested under the result", async () => {
-    // The browser spreads `...shot` into the result (session.ts:411); this pins
+    // The browser spreads `...shot` into the result (session.ts); this pins
     // that the projection and the producer agree on the nesting depth.
     const nested = {
       ok: true,
@@ -177,7 +177,7 @@ describe("tool result image projection (T1b / M1④)", () => {
   });
 
   it("drops a malformed reference instead of smuggling it into the prompt", async () => {
-    // attachment_id is not 64-hex here: isImageRef (message.ts:252-267) rejects it.
+    // attachment_id is not 64-hex here: isImageRef (message.ts) rejects it.
     const bad = { attachment_id: "nope", media_type: "image/png", width: 1, height: 1 };
     const tool = toolMessageOf(await secondRequestMessages({ ...browserValue(), attachments: [bad] }));
 
@@ -186,7 +186,7 @@ describe("tool result image projection (T1b / M1④)", () => {
 
   it("is pinned to the real projector: the default fake would project nothing", async () => {
     // Guards the mock rule from the other side. FakeSessionLog.deriveMessages()
-    // returns a PRE-BAKED array (fakes.test-util.ts:156-172) and is therefore []
+    // returns a PRE-BAKED array (fakes.test-util.ts) and is therefore []
     // for this scenario — so a swap back to it would silently blank every image
     // block above. This asserts the real projector is the thing producing them.
     const llm = new ScriptedLlm([[done(toolCallMessage(["c1"]))], [done(assistantText("done"))]]);

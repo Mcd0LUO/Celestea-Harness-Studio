@@ -206,7 +206,7 @@ describe("desktop client · helper images land on the value TOP level", () => {
     expect(out.error).toBeNull();
     const value = out.value as { ok: boolean; attachments: unknown[]; window: unknown };
     expect(value.ok).toBe(true);
-    // 顶层 attachments —— core/src/projection.ts:132 扫的正是这里。
+    // 顶层 attachments —— core/src/projection.ts 扫的正是这里。
     expect(value.attachments).toEqual([{ attachment_id: "a".repeat(64), media_type: "image/jpeg", width: 2, height: 2 }]);
     expect(value.window).toEqual({ app: "notepad.exe", id: 7 });
     expect(seenBytes[0]).toBeGreaterThan(0);

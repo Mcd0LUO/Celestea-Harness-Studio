@@ -208,7 +208,7 @@ export type DesktopConfirmReason = "sensitive_method" | "app_not_allowlisted";
  * 一次确认请求。
  *
  * **刻意不带任何面向用户的文案**：确认卡上的每一句话都由宿主用**固定常量**拼出
- * （文案纪律见 apps/web/src/ui/grants.ts:11-14），闸门只提供事实。模型可控的字符串
+ * （文案纪律见 apps/web/src/ui/grants.ts），闸门只提供事实。模型可控的字符串
  * （应用名、窗口标题）只能作为**数据**出现在宿主固定句式里。
  */
 export interface DesktopConfirmRequest {
@@ -252,7 +252,7 @@ export interface DesktopConfirmChannel {
  *
  * 所以这里声明**结构化端口**，形状就是 `bounded` 的 resolve 策略签名；宿主
  * （apps/studio，本来就依赖 tools）注入真身。于是全仓仍然只有**一处** race
- * （packages/tools/src/sandbox/async.ts:88），而闸门的超时语义一字未变。
+ * （packages/tools/src/sandbox/async.ts），而闸门的超时语义一字未变。
  *
  * 它是**必填**的：少了它，闸门就失去「通道不守约也照样 fail-closed」那条兜底，
  * 而那正是这个端口存在的理由——让「忘了注入」在编译期就红，而不是在慢路径上静默挂死。

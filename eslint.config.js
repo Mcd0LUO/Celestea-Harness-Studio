@@ -261,6 +261,9 @@ export default tseslint.config(
       // lint 本来也不该扫它们 —— 它们不是本仓源码。
       "tmp/**",
       "results/**",
+      // .dsh-tmp/ 是编排会话的草稿树（证据、克隆的参考仓），gitignored、非本仓源码，
+      // 且与 tmp/ 同理：并发增删会让 eslint 扫到半途文件假红。
+      ".dsh-tmp/**",
       "fixtures/**",
       "contracts/**",
       "**/*.json",

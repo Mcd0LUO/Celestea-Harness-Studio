@@ -15,7 +15,7 @@ import {
  *
  * 这两层**不在闸门里**，而且必须不在：它们是「按工具名禁用」的既有机制，
  * 落在 `packages/tools/src/plugin.ts` 的 `toolDenyGuard` 上，由
- * `ToolRegistryImpl.dispatch()` 在「schema 校验之后、执行之前」跑（registry.ts:74-78）；
+ * `ToolRegistryImpl.dispatch()` 在「schema 校验之后、执行之前」跑（registry.ts）；
  * 而桌面闸门在 `tool.execute` **内部**（tool.ts::callWrite 的第一行）。两者是
  * 前后两道，不是一道的两半。
  *
@@ -25,7 +25,7 @@ import {
  *
  * 为什么 preset 与 session 各写一行：它们进 guard 的路径不同（前者来自权限档位的
  * `toolDeny`，后者来自会话 tools.json 的纯减法），但**汇合点相同**——engine-grants.ts
- * 的 `toolDeny` 是两者的并集（该并集本身已由 permissions-all-paths.test.ts:255 钉住）。
+ * 的 `toolDeny` 是两者的并集（该并集本身已由 permissions-all-paths.test.ts 钉住）。
  * 两行因此各自证明「这条来源的名字到得了 guard」，而顺序由第一行之后的控制组证明。
  */
 

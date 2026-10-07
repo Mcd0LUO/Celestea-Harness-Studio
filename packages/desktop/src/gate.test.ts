@@ -31,7 +31,7 @@ import { NOTEPAD, denied, gateWith, testDeadline } from "./gate.test-util.js";
  * 矩阵覆盖的每一态都在下面的 describe 标题里点名，测试名里带原因码，便于对着真值表核对。
  *
  * 不在本文件的两态（preset deny / session deny）：那两层跑在闸门**之前**
- * （packages/tools/src/plugin.ts:174 的 toolDenyGuard 挂在 ToolRegistryImpl.dispatch
+ * （packages/tools/src/plugin.ts 的 toolDenyGuard 挂在 ToolRegistryImpl.dispatch
  * 的 guard 链上），所以断言是「闸门根本没被调用」——它需要真 registry + 真守卫，
  * 落在 packages/runtime/src/desktop-gate-order.test.ts。
  */

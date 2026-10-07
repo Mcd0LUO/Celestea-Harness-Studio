@@ -359,7 +359,7 @@ export function compose(config: ComposeConfig): Runtime {
     llm,
     tools,
     agentLoop,
-    plugins: pluginNamesOf(plugins, workerHost, mounted, swarmHost, guardSettings !== null, desktopHost),
+    plugins: pluginNamesOf(plugins, workerHost, mounted, swarmHost, { repeatGuardMounted: guardSettings !== null, desktopHost }),
     // 规划 §5 的回收：helper 进程挂在引擎这一代的生命周期上，所以它随 shutdownHooks
     // 一起死。（core 的 Plugin 没有 unmount 原语，Context 也没有 effect，所以这里是
     // 本仓唯一真实的回收 seam，而不是规划 §5 字面写的 ctx.effect。）
@@ -388,9 +388,9 @@ export function pluginNamesOf(
   workerHost: WorkerHost | null,
   mounted: MountedWatchdog | null = null,
   swarmHost: SwarmHost | null = null,
-  repeatGuardMounted: boolean = false,
-  desktopHost: DesktopHost | null = null,
+  extras: { repeatGuardMounted?: boolean; desktopHost?: DesktopHost | null } = {},
 ): string[] {
+  const { repeatGuardMounted = false, desktopHost = null } = extras;
   const names = pluginNames(plugins);
   if (workerHost !== null && workerHost.mountedPlugin !== null) names.push(workerHost.mountedPlugin);
   if (swarmHost !== null && swarmHost.mountedPlugin !== null) names.push(swarmHost.mountedPlugin);
