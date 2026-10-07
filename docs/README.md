@@ -15,6 +15,7 @@
 | [`feature/multimodal-attachments/`](./feature/multimodal-attachments/README.md) | 设计（已实现 P0） | **多模态附件**设计（分册）：图片/文本附件的三入口、能力位探测、降级提示、objectURL 生命周期 | [`README.md`](./feature/multimodal-attachments/README.md)；`apps/web/src/ui/attachments.ts` |
 | [`feature/display-components.md`](./feature/display-components.md) | 设计（**P0 已实现**，W895） | **可选显示组件**：把「渲染后增强」与「markdown 扩展」变成可注册的缝，显示能力做成可开关组件（构建期装配，不做运行时下载） | 本文；缝的现有先例见 `apps/web/src/ui/hint/registry.ts` 的取舍注释 |
 | [`feature/`](./feature/README.md) | 当前 | **特性文档索引**（分册）：本目录放特性级文档，文件名即主题名 | [`README.md`](./feature/README.md) |
+| [`feature/computer-use/`](./feature/computer-use/README.md) | 已实现 | **Computer Use 桌面操控**（分册）：13 个 desktop_* 工具、分级闸门、观察租约、自编译 Rust helper | [`README.md`](./feature/computer-use/README.md)；`packages/computer-use/` |
 | [`feature/desktop-packaging.md`](./feature/desktop-packaging.md) | 决定（2026-10-04：暂缓） | **桌面端打包**：评估外部 PR #5（已关闭）后暂缓——实测数据、4 条理由、替代方案代价、将来要做的三件前置工作，含未验证部分的诚实声明 | 本文 |
 | [`deployment.md`](./deployment.md) | 当前 | **部署与安全模型**：生产 systemd + nginx、隧道访问、安全模型（含 Windows 差异表） | 本文；登录门见 [`archive/decisions/feature-studio-auth.md`](./archive/decisions/feature-studio-auth.md) |
 | [`configuration.md`](./configuration.md) | 当前 | **配置**：`CELESTEA_HOME` 解析顺序与目录布局、环境变量全表、模型接入、权限档位 | 本文；数据文件 schema 见 [`data-files.md`](./data-files.md) |

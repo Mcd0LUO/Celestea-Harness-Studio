@@ -85,7 +85,11 @@ function activeDocs(): string[] {
 }
 /** 需要在总索引登记的：根文档 + 分册索引（`docs/<名字>/README.md`）。 */
 function registeredDocs(): string[] {
-  return activeDocs().filter((p) => !relDocs(p).includes('/') || p.endsWith('/README.md'));
+  // ★ 判据必须打在 relDocs（POSIX 化）上：直接判原始路径 p 的 '/README.md' 后缀，
+  //   在 Windows（分隔符是 \）上恒 false —— ①② 对全部分册索引静默失明，
+  //   2026-10-07 由 ubuntu CI 抓到（feature/computer-use/README.md 漏登记漏状态行，
+  //   本机全绿）。这与 doc-visibility 模块头记录的是同一类「恰好没被扫到」盲区。
+  return activeDocs().filter((p) => !relDocs(p).includes('/') || relDocs(p).endsWith('/README.md'));
 }
 function archiveDocs(): string[] {
   return walkMd(ARCHIVE);
