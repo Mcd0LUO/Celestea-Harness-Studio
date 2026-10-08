@@ -81,6 +81,7 @@ describe("contracts/endpoints.json", () => {
     // W870: 21 -> 22 (PUT /api/sessions/{id}/model); G5: 22 -> 23 (GET /api/fs/list).
     // W1528: 23 -> 26 (the terminal's open / input / close).
     // W9209: 26 -> 27 (POST /api/sessions/{id}/goal, the persistent session goal); W9322: 27 -> 28 (PUT /api/plugins); W9348: 28 -> 29 (GET /api/sessions/{id}/goal, the goal's READ side).
+    // M2-B2c: 29 -> 30 (POST /api/questions/{id}/cancel, the question card's cancel button).
     // W9213: both numbers are DERIVED -- the delta is "contract minus the frozen
     // 39 API routes", and the snapshot's own declared counts are checked against
     // the contract by checkRouteSnapshot (which the store runs on every read).

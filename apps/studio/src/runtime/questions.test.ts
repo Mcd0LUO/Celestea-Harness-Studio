@@ -360,6 +360,66 @@ describe("W783 · validation and the sub-agent guard", () => {
   });
 });
 
+
+describe("M2-B2c · the card's cancel button settles the parked call as a dismissal", () => {
+  it("cancel wakes the tool with ASK_CANCELLED (not an answer) and the turn continues", async () => {
+    const h = asker(OPTIONS);
+    await activate(h, "sample-ws/s1");
+    const turned = await h.app.request("/api/turn", jsonRequest("POST", { input: "问一下", session: "sample-ws/s1" }));
+    expect(turned.status).toBe(202);
+    const id = await waitForQuestion(h);
+    expect(h.runtime.isBusy("sample-ws/s1")).toBe(true);
+
+    const cancelled = await cancelAsBrowser(h, id, { session: "sample-ws/s1" });
+    expect(cancelled.status).toBe(200);
+    expect(await cancelled.json()).toEqual({ ok: true, id, session: "sample-ws/s1" });
+    await waitIdleOf(h);
+
+    // 取消不是作答：工具以 ASK_CANCELLED 收场，模型被告知「用户取消了」，
+    // 然后回合照常走完（脚本第二步的「继续了」必须出现）。
+    const log = messagesOf(h);
+    const result = log.find((m) => m["kind"] === "result");
+    expect(String(result?.["tool_error"] ?? "")).toContain("cancelled");
+    expect(log.filter((m) => m["role"] === "assistant").map((m) => m["content"])).toContain("继续了");
+    // 结算即出表：恢复列表不再摆出这张已取消的卡。
+    const still = (await (await h.app.request("/api/questions")).json()) as { questions: unknown[] };
+    expect(still.questions).toHaveLength(0);
+  });
+
+  it("a cancel without the browser nonce is refused; a stranger session gets 409; a second cancel 404s", async () => {
+    const h = asker(OPTIONS);
+    await activate(h, "sample-ws/s1");
+    await h.app.request("/api/turn", jsonRequest("POST", { input: "问一下", session: "sample-ws/s1" }));
+    const id = await waitForQuestion(h);
+
+    // 与 answer 同一道 nonce 防线：会话自己的 http_request 伪造不了。
+    const forged = await h.app.request(`/api/questions/${id}/cancel`, jsonRequest("POST", { session: "sample-ws/s1" }));
+    expect(forged.status).toBe(403);
+    expect(await forged.json()).toEqual({ ok: false, error: QUESTION_NONCE_REQUIRED });
+    // 防串答守卫对取消同样生效。
+    const stranger = await cancelAsBrowser(h, id, { session: "sample-ws/other" });
+    expect(stranger.status).toBe(409);
+    // 两次拒止都不该结算：问题仍可取消。
+    const real = await cancelAsBrowser(h, id, { session: "sample-ws/s1" });
+    expect(real.status).toBe(200);
+    // 取消即出表：第二次取消按「未知」404（与 answer 的已结算语义一致）。
+    const again = await cancelAsBrowser(h, id, { session: "sample-ws/s1" });
+    expect(again.status).toBe(404);
+    await waitIdleOf(h);
+  });
+});
+
+/** Cancel the way the BROWSER does — same nonce dance as [answerAsBrowser]. */
+async function cancelAsBrowser(h: StudioHarness, id: string, body: unknown): Promise<Response> {
+  const listed = await h.app.request("/api/questions");
+  const cookie = (listed.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+  return h.app.request(`/api/questions/${id}/cancel`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify(body),
+  });
+}
+
 /** Wait until the session reports idle again. */
 async function waitIdleOf(h: StudioHarness, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

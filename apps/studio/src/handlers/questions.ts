@@ -1,8 +1,9 @@
 /**
- * The two user-question endpoints (W783 §9 item 7).
+ * The user-question endpoints (W783 §9 item 7; M2-B2c added cancel).
  *
  *   GET  /api/questions                  → every question still answerable
  *   POST /api/questions/{id}/answer      → the human's answer
+ *   POST /api/questions/{id}/cancel      → the human dismissed the card
  *
  * WHY THE ANSWER IS NOT `POST /api/turn`: while the model's `ask_user_question`
  * call is parked, the session's turn slot is occupied. A message posted to
@@ -116,6 +117,30 @@ function refuse(c: Parameters<typeof failJson>[0], requestId: string, reason: st
   return failJson(c, 404, `unknown or already settled question '${requestId}'`);
 }
 
+/** POST /api/questions/{id}/cancel — the card's 取消 button (M2-B2c). */
+function registerCancel(app: Hono, deps: Deps, table: RouteTable): string {
+  const route = table.get("post_question_cancel");
+  app.on(route.method, route.honoPath, async (c) => {
+    const requestId = c.req.param("id") ?? "";
+    const read = await readJsonBody(c);
+    if (!read.ok) return read.response;
+    const guard = strField(c, read.body, "session");
+    if (!guard.ok) return guard.response;
+    const cancel = deps.runtime.cancelQuestion;
+    if (cancel === undefined) return failJson(c, 404, `unknown or already settled question '${requestId}'`);
+    // Same nonce guard as answer, and BEFORE the settle for the same reason:
+    // the cancel call IS the settle (lookup + guard + cancel in one step), so a
+    // check placed after it would be a check that the dismissal already happened.
+    if (!questionNonceMatches(cookieValue(c.req.header("cookie"), QUESTION_NONCE_COOKIE))) {
+      return failJson(c, 403, QUESTION_NONCE_REQUIRED);
+    }
+    const outcome = cancel.call(deps.runtime, requestId, guard.value);
+    if (!outcome.ok) return refuse(c, requestId, outcome.reason);
+    return c.json({ ok: true, id: requestId, session: outcome.session });
+  });
+  return route.id;
+}
+
 /** GET /api/questions — the §7 recovery list (pending questions only). */
 function registerList(app: Hono, deps: Deps, table: RouteTable): string {
   const route = table.get("get_questions");
@@ -142,7 +167,7 @@ function registerList(app: Hono, deps: Deps, table: RouteTable): string {
   return route.id;
 }
 
-/** The two question routes, in contract order. */
+/** The three question routes, in contract order. */
 export function registerQuestions(app: Hono, deps: Deps, table: RouteTable): string[] {
-  return [registerList(app, deps, table), registerAnswer(app, deps, table)];
+  return [registerList(app, deps, table), registerAnswer(app, deps, table), registerCancel(app, deps, table)];
 }

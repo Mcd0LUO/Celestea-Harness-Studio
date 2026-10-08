@@ -43,6 +43,11 @@ export class QuestionHost {
     return this.view.answer(requestId, answers, sessionId);
   }
 
+  /** Cancel one pending question (`POST /api/questions/{id}/cancel`, M2-B2c). */
+  cancel(requestId: string, sessionId?: string): QuestionAnswerOutcome {
+    return this.view.cancel(requestId, sessionId);
+  }
+
   /** Every question still answerable (`GET /api/questions`, §7 recovery). */
   list(sessionId?: string | null): PendingQuestionView[] {
     return this.view.list(sessionId);

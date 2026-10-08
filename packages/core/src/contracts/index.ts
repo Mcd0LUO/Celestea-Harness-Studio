@@ -186,8 +186,9 @@ export const FROZEN_COUNTS = {
   // workbench terminal's real-PTY face (open/input/close), the persistent session
   // goal (its POST, and since W9348 the GET that reads it back), and the plugin
   // hot-swap enabled table (docs/archive/decisions/feature-plugin-hotswap.md;
-  // its GET side already existed before that switch was added).
-  endpoints: 72,
+  // its GET side already existed before that switch was added). M2-B2c: the
+  // question cancel endpoint (the card's 取消 button) joined the questions group.
+  endpoints: 73,
   // `sseEvents` covers the frame vocabulary: `question` is the first event that is
   // neither a turn event nor a host status frame, and `terminal` is the raw pty
   // byte channel (opaque output, produced by the terminal handler).
@@ -207,7 +208,7 @@ export const FROZEN_COUNTS = {
   //   attachment chain, the tools are registered by compose()'s 4e step only when
   //   this host is win32 AND a built helper exists, and the helper adds no endpoint),
   //   and the nine desktop WRITE tools, each of which passes the tiered gate
-  //   (packages/desktop/src/gate.ts) before anything reaches the helper.
+  //   (packages/computer-use/src/gate.ts) before anything reaches the helper.
   tools: 36,
 } as const;
 

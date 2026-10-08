@@ -164,6 +164,33 @@ describe("W784 question card in a real DOM", () => {
   });
 });
 
+  it("M2-B2c: cancel POSTs to /cancel and lands in the closed terminal", async () => {
+    const pane = makePane();
+    card.renderQuestionCard(pane, FRAME);
+    click(sel(pane, ".q-cancel"));
+    // 乐观终态同帧落下（与 submit 同一条纪律）。
+    expect(sel(pane, ".q-card")?.dataset.state).toBe("closed");
+    await until(() => calls.length === 1, "the cancel POST to fire");
+    expect(calls[0]?.url).toContain("/api/questions/q-1/cancel");
+    expect(JSON.parse(calls[0]?.body ?? "")).toEqual({ session: "sample-ws/s1" });
+    expect(sel(pane, ".q-result")?.textContent).toContain("已取消");
+    // 终态后两个按钮都不可用。
+    expect(sel(pane, ".q-cancel")?.disabled).toBe(true);
+    expect(sel(pane, ".q-submit")?.disabled).toBe(true);
+  });
+
+  it("M2-B2c: a cancel that lost the race (409) keeps the closed terminal with the generic text", async () => {
+    status = 409;
+    payload = { ok: false, error: "question 'q-1' already settled" };
+    const pane = makePane();
+    card.renderQuestionCard(pane, FRAME);
+    click(sel(pane, ".q-cancel"));
+    // 等精确的通用终态文案——乐观帧先写「已取消」，409 回滚后必须被它顶掉。
+    // （「已取消 · 该提问已结束…」本身含「已结束」，子串等待会在乐观帧就放行。）
+    await until(() => sel(pane, ".q-result")?.textContent === "该提问已结束，无需再作答（时限已到或已在别处作答）", "the 409 catch to revert the optimistic text");
+    expect(sel(pane, ".q-card")?.dataset.state).toBe("closed");
+  });
+
 describe("W784 question card history terminals", () => {
   const host = (): El => { const d = dom.createElement("div"); dom.body.append(d); return d; };
   const row = (extra: Record<string, unknown>): Record<string, unknown> => ({ id: "q-9", questions: FRAME.questions, settled: false, timedOut: false, answerText: "", ...extra });

@@ -51,7 +51,7 @@ npx tsx scripts/lease-manual-check.mjs --auto  # 租约：无印章注入替代�
 ## 已知限制（本期）
 
 - 仅 Windows x64；macOS/Linux 未实现（协议与 platform 注入点已留）。
-- 「取消」按钮在确认卡上还没有——取消语义已实现（fail-closed），UI 触发路径在 M2-B2。
+- 「取消」按钮（M2-B2c 起）：确认卡与所有提问卡上都有——取消是第三种终态（不算拒绝、不进冷却），挂起的调用立刻以 ASK_CANCELLED 解开，不用等 60 秒倒计时。
 - 桌面驱动不进沙箱（Windows 本就没有 OS 级隔离可用）；它操作的就是你真实的桌面。
 - 无障碍树超 32KB 会按字符边界截断（uia.rs，2026-10-07 修复过 UTF-8 截断 panic）。
 - apps scope 的 exe 匹配按规范化后的文件名比较（剥离 process:/path:/registry: 等前缀与引号、折叠大小写、双端皆路径时整串相等）；**8.3 短文件名（如 EXCEL~1.EXE）不做等价识别**——清单里请写标准文件名（gate 保持无状态纯计算，不调 Win32 路径 API）。

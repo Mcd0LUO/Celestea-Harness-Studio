@@ -331,6 +331,9 @@ class RealEngine implements RealRuntimeAdapter {
   answerQuestion(requestId: string, answers: AskUserQuestionAnswerItem[], sessionId?: string): QuestionAnswerOutcome {
     return this.questions.answer(requestId, answers, sessionId);
   }
+  cancelQuestion(requestId: string, sessionId?: string): QuestionAnswerOutcome {
+    return this.questions.cancel(requestId, sessionId);
+  }
   pendingQuestions(sessionId?: string | null): PendingQuestionView[] {
     return this.questions.list(sessionId);
   }
