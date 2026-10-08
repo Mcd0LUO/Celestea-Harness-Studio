@@ -165,7 +165,7 @@ export interface UserAnswerEvent {
  *
  * WHY A CLOSED SET (and not a free string): this value is the audit answer to
  * "why was I interrupted?". A typo would read back as a reason nobody acted on.
- * It mirrors `DesktopConfirmReason` in packages/desktop (which only depends on
+ * It mirrors `DesktopConfirmReason` in packages/computer-use (which only depends on
  * core, so the enum is re-declared here and the gate's own type is assignable
  * to it — one set of spellings, two declarations).
  */
