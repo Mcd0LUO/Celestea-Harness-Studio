@@ -119,6 +119,7 @@ GET /api/events（无竞态，question 帧同流）与 GET /api/questions 下发
 - 上游合并摩擦面（2026-10-07 审查，时点快照）：冻结契约（tools.json 23→36、
   FROZEN_COUNTS、grants 6→7 位门禁）与 compose 4e 挂载是单点真理，上游演进时需并集
   求和式语义仲裁；engine-plugins.ts 的 liveModeFold 动态折叠修复合并时严禁丢失；
-  上游 desktop-packaging.md 有「零 .py/.rs 刻意同质」决定（针对桌面打包 PR #5），
-  本特性引入 Rust helper + Python 注入器，上游化前需就此对齐，必要时评估
-  packages/computer-use → packages/computer-use 更名以避开俗名 add/add 撞车。
+  上游 desktop-packaging.md 有「零 .py/.rs 刻意同质」决定（针对桌面打包 PR #5）。
+  **2026-10-08 已裁决（maintainer，合并 PR #6 时）**：该条约束的是**打包面**，不适用于能力面 ⇒
+  Rust helper 接受（纯 TS 无可达路径；exe 不进 git/npm，本机自编译），`scripts/desktop-inject-input.py`
+  按现状保留（本机验收工具，不进产物、不进日常门禁）。裁决原文见 desktop-packaging.md 第 3 节第 1 条。
