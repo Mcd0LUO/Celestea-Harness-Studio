@@ -94,7 +94,9 @@ describe("contracts/scope-hash-vectors.json — scope_hash 冻结向量", () => 
     // 注意口径：服务端的白名单/收敛发生在 validateScope，而 canonicalScopeJson 只是
     // 序列化器（直接喂给它 {roots:[…]} 会原样保留该键）。前端把两步折进了同一个纯函数。
     // 线上契约比的是**端到端管线**，所以这里必须走 validateScope。
-    for (const cap of ["network", "unsandboxed"]) {
+    // M2: `desktop` 也在此列 —— 它的 scope 键（apps）是可选的，未提交时同样收敛成 {}，
+    // 而前端的 scopeKeyOf 对它是 null，两条管线必须给出同一个哈希。
+    for (const cap of ["network", "unsandboxed", "desktop"]) {
       const validated = validateScope(cap as never, { roots: ["/ignored"] }, NO_KNOWN_SECRETS);
       expect(validated.ok).toBe(true);
       if (!validated.ok) return;

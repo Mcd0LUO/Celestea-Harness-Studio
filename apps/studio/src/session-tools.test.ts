@@ -17,6 +17,7 @@ import { effectiveGrantsOf } from "./runtime/engine-grants.js";
 import type { RealRuntimeAdapter } from "./runtime/real-runtime-adapter.js";
 import { engineOf, makeEngineHarness } from "./runtime/test-util.js";
 import { FILE_MODES_MEANINGFUL } from "@celestea/tools";
+import { checkDesktopMount } from "@celestea/runtime";
 
 const S1 = "sample-ws/s1";
 const S2 = "sample-ws/s2";
@@ -65,6 +66,33 @@ const DEFAULT_STANDARD_FACE: readonly string[] = [
   "worker_status",
   "write_file",
 ].sort();
+
+/**
+ * computer-use M2 · the thirteen `desktop_*` tools are an **optional face**, exactly
+ * like `read_image` — `ensureDesktopWiring` mounts them only when the host is win32
+ * AND a built helper exists (规划 §5：静态检查决定挂不挂).
+ *
+ * WHY THEY ARE NOT IN THE CONSTANT ABOVE: that one is the UNCONDITIONAL face. Writing
+ * an optional mount into it would turn "optional" into "required" on paper — a reader
+ * on Linux or on a machine without the helper would take all thirteen for granted, and
+ * the constant's whole value is that it describes what is there whatever the host.
+ * (Same reasoning that keeps `agent_swarm` out of it, from the other direction: that one
+ * is default OFF, these are default ON but conditionally mounted.)
+ *
+ * What THIS machine sees is the optional face MOUNTED (win32 + helper built), so every
+ * "the real face" assertion below is the unconditional face plus this one named delta.
+ */
+const DESKTOP_FACE: readonly string[] = [
+  "desktop_activate_window", "desktop_click", "desktop_drag", "desktop_get_window",
+  "desktop_get_window_state", "desktop_launch_app", "desktop_list_apps", "desktop_list_windows",
+  "desktop_press_key", "desktop_scroll", "desktop_secondary_action", "desktop_set_value",
+  "desktop_type_text",
+];
+
+/** 可选面挂没挂，用 plugins-inventory 的同一真实判据（win32 + helper 产物，静态检查）。 */
+const DESKTOP_MOUNTED = checkDesktopMount().ok;
+/** 本机默认面 = 无条件面 + 已挂载的可选面（见 DESKTOP_FACE 的理由）。 */
+const MOUNTED_STANDARD_FACE: readonly string[] = [...DEFAULT_STANDARD_FACE, ...(DESKTOP_MOUNTED ? DESKTOP_FACE : [])].sort();
 
 /**
  * The execution-mode face at its DEFAULTS (W791 M7; W884 load_skill, B2
@@ -206,7 +234,7 @@ describe("W860 /api/sessions/{id}/tools", () => {
     if (FILE_MODES_MEANINGFUL) expect(statSync(path).mode & 0o777).toBe(0o600);
 
     // Composed instance = HTTP report = adapter seam, and all three dropped it.
-    const expected = DEFAULT_STANDARD_FACE.filter((name) => name !== "write_file");
+    const expected = MOUNTED_STANDARD_FACE.filter((name) => name !== "write_file");
     expect(await agree(h, S1)).toEqual(expected);
     expect(await httpFace(h, S1)).not.toContain("write_file");
 
@@ -215,7 +243,7 @@ describe("W860 /api/sessions/{id}/tools", () => {
     expect(cleared.status).toBe(200);
     expect(cleared.body["disabled"]).toEqual([]);
     expect(cleared.body["effective"]).toEqual({ toolDeny: [] });
-    expect(await agree(h, S1)).toEqual(DEFAULT_STANDARD_FACE);
+    expect(await agree(h, S1)).toEqual(MOUNTED_STANDARD_FACE);
   });
 
   it("③ unions the preset deny with the session deny, preset first", async () => {
@@ -231,7 +259,7 @@ describe("W860 /api/sessions/{id}/tools", () => {
     expect(get.body["disabled"]).toEqual(["http_request"]);
     expect(get.body["effective"]).toEqual({ toolDeny: ["write_file", "http_request"] });
 
-    const expected = DEFAULT_STANDARD_FACE.filter((name) => name !== "write_file" && name !== "http_request");
+    const expected = MOUNTED_STANDARD_FACE.filter((name) => name !== "write_file" && name !== "http_request");
     expect(await agree(h, S1)).toEqual(expected);
   });
 
@@ -240,7 +268,17 @@ describe("W860 /api/sessions/{id}/tools", () => {
     writePermission(h, "exec", "read-only");
 
     // The execution face first (no tools.json).
+    //
+    // M2-B: `agree()` 同时断言三件东西相等 —— 组合实例的 `sessionContext().tools`（**就是
+    // loop 发给模型的 tool 数组**）、`GET /api/tools` 与 adapter 的 sessionTools 面。
+    // 修复前它们在这里就已经不一致（组合面 29 名 vs 报告面 16 名），根因是 execution 的
+    // 折叠名单是构造时的**快照**，而 desktop（4e）与 swarm（4c）都是晚挂的插件。
     expect(await agree(h, EXEC)).toEqual(DEFAULT_EXECUTION_FACE);
+    // 把那 13 个名字显式点名：只比「等于 16 名」的话，一个把 desktop_* 换掉别的工具的实现
+    // 也能通过。execution 模式的承诺是「按名字折叠」，所以这里按名字断言。
+    const execFace = await agree(h, EXEC);
+    expect(execFace.filter((name) => name.startsWith("desktop_"))).toEqual([]);
+    expect(execFace).not.toContain(SWARM_TOOL);
 
     // read_file is folded by the mode AND denied by the preset AND disabled by
     // the session: the intersection stays the execution face.
@@ -263,7 +301,7 @@ describe("W860 /api/sessions/{id}/tools", () => {
     }
     // None of the rejected bodies wrote a file: the session still runs untouched.
     expect(await getJson(h.app, S1_URL)).toMatchObject({ body: { disabled: [] } });
-    expect(await agree(h, S1)).toEqual(DEFAULT_STANDARD_FACE);
+    expect(await agree(h, S1)).toEqual(MOUNTED_STANDARD_FACE);
   });
 
   it("⑤ disables per session: a neighbour is unaffected", async () => {
@@ -272,8 +310,8 @@ describe("W860 /api/sessions/{id}/tools", () => {
 
     const neighbour = await getJson(h.app, "/api/sessions/" + encodeURIComponent(S2) + "/tools");
     expect(neighbour.body).toEqual({ ok: true, session: S2, disabled: [], effective: { toolDeny: [] } });
-    expect(await httpFace(h, S2)).toEqual(DEFAULT_STANDARD_FACE);
-    expect(await httpFace(h, S1)).toEqual(DEFAULT_STANDARD_FACE.filter((name) => name !== "write_file"));
+    expect(await httpFace(h, S2)).toEqual(MOUNTED_STANDARD_FACE);
+    expect(await httpFace(h, S1)).toEqual(MOUNTED_STANDARD_FACE.filter((name) => name !== "write_file"));
   });
 
   it("⑥ a void tools.json is fail-closed: 200, one warning, the session runs as if nothing were disabled", async () => {
@@ -296,12 +334,12 @@ describe("W860 /api/sessions/{id}/tools", () => {
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toContain("tools_unreadable");
       expect(warnings[0]).toContain("the session runs with no tools disabled");
-      expect(await agree(h, S1)).toEqual(DEFAULT_STANDARD_FACE);
+      expect(await agree(h, S1)).toEqual(MOUNTED_STANDARD_FACE);
     }
     // A later PUT repairs the file by overwriting it.
     const put = await getJson(h.app, S1_URL, jsonRequest("PUT", { disabled: ["write_file"] }));
     expect(put.status).toBe(200);
-    expect(await httpFace(h, S1)).toEqual(DEFAULT_STANDARD_FACE.filter((name) => name !== "write_file"));
+    expect(await httpFace(h, S1)).toEqual(MOUNTED_STANDARD_FACE.filter((name) => name !== "write_file"));
   });
 });
 
@@ -327,7 +365,7 @@ describe("W9331 · the swarm tool is default OFF and composes with the session s
     expect(face).not.toContain(SWARM_TOOL);
     // The rest of the frozen face is intact: this is a switch, not a teardown, and
     // asserting the WHOLE set is what keeps this from being a one-name check.
-    expect(face).toEqual(DEFAULT_STANDARD_FACE);
+    expect(face).toEqual(MOUNTED_STANDARD_FACE);
   });
 
   it("⑦b turning the plugin ON in the plugin store puts agent_swarm back on the offered face", async () => {
@@ -335,7 +373,7 @@ describe("W9331 · the swarm tool is default OFF and composes with the session s
     const face = await agree(h, S1);
     expect(face).toContain(SWARM_TOOL);
     // Exactly the default face plus the one tool — nothing else moved.
-    expect(face).toEqual([...DEFAULT_STANDARD_FACE, SWARM_TOOL].sort());
+    expect(face).toEqual([...MOUNTED_STANDARD_FACE, SWARM_TOOL].sort());
     // Both report faces and the composed instance agree (the `agree` helper asserts
     // that), so the tool the model is offered is the tool GET reports.
   });
@@ -352,7 +390,7 @@ describe("W9331 · the swarm tool is default OFF and composes with the session s
     // face case ⑤'s neighbour assertion uses (`httpFace`), and the reason it is the
     // right one here: it is derived from the stored deny on every read, so it does
     // not depend on which generation happens to be cached.
-    expect(await httpFace(h, S1)).toEqual([...DEFAULT_STANDARD_FACE].sort());
+    expect(await httpFace(h, S1)).toEqual([...MOUNTED_STANDARD_FACE].sort());
     expect(await httpFace(h, S1)).not.toContain(SWARM_TOOL);
 
     // The neighbour is untouched — case ⑤'s intent, now checked in the state where
@@ -360,12 +398,12 @@ describe("W9331 · the swarm tool is default OFF and composes with the session s
     // everywhere would prove nothing about per-session isolation).
     const neighbour = await httpFace(h, S2);
     expect(neighbour).toContain(SWARM_TOOL);
-    expect(neighbour).toEqual([...DEFAULT_STANDARD_FACE, SWARM_TOOL].sort());
+    expect(neighbour).toEqual([...MOUNTED_STANDARD_FACE, SWARM_TOOL].sort());
 
     // ...and clearing the session deny brings it back.
     const cleared = await getJson(h.app, S1_URL, jsonRequest("PUT", { disabled: [] }));
     expect(cleared.status).toBe(200);
-    expect(await httpFace(h, S1)).toEqual([...DEFAULT_STANDARD_FACE, SWARM_TOOL].sort());
+    expect(await httpFace(h, S1)).toEqual([...MOUNTED_STANDARD_FACE, SWARM_TOOL].sort());
   });
 });
 

@@ -315,13 +315,35 @@ export function engineTools(opts: EnginePluginInput): EngineTools {
   // them out — the universe still lists them, which is what makes `hidden()`
   // and therefore `exposedRegistry` drop them from the face.
   const universe = assembly.registry.schemas().map((spec) => spec.name);
-  const blocked = [
-    ...(mode === "execution" ? universe.filter((name) => !EXECUTION_TOOL_NAMES.includes(name)) : []),
-    ...grants.toolDeny,
-  ];
+  /**
+   * M2-B（真缺陷修复）：execution 模式的折叠名单必须**现读**，不能是快照。
+   *
+   * 原实现把 `universe`（此刻注册表里的名字）过滤一次就定下了，而 `universe` 是**那一刻**的
+   * 快照；可注册表在那之后还会长 —— compose 的 4e 才挂 desktop 插件（13 个名字），
+   * swarm 插件（agent_swarm）同样是晚挂的。那些名字既不在快照里，就既不进 `hidden()`
+   * （于是 `schemas()` 不过滤、`dispatch()` 也不拒），而 `sessionTools` / `faceForMode`
+   * 那条路每次现读名字 ⇒ 正确折叠。两条路对同一会话给出不同答案：实测 execution 模式下
+   * `sessionContext().tools` 29 名 vs `GET /api/tools` 16 名，差的正是那 13 个 desktop_*。
+   *
+   * 修法就是把它做成 provider：`ExposureOptions.hidden` 本来就支持 `() => readonly string[]`，
+   * 且 `ExposedRegistry` 每次 `schemas()` / `dispatch()` 各读一次 —— 于是模式折叠对晚挂的
+   * 工具立刻生效，两条路自动一致。（顺带根治了 agent_swarm 在 execution 模式下的同类泄漏。）
+   */
+  const liveModeFold = (): string[] =>
+    mode === "execution" ? assembly.registry.names().filter((name) => !EXECUTION_TOOL_NAMES.includes(name)) : [];
+  const blocked = [...liveModeFold(), ...grants.toolDeny];
   const disclosure = new DisclosurePolicy({ universe, initial: opts.disclosure?.initial ?? universe, blocked });
   const wrapped = mode === "execution" || opts.disclosure !== undefined || grants.toolDeny.length > 0;
-  const exposed: ToolRegistry = wrapped ? exposedRegistry(assembly.registry, disclosureExposure(disclosure)) : assembly.registry;
+  // 策略的 `hidden()` 只能看见它构造时的 universe，所以晚挂的名字要在这里补上（只补那些
+  // 不在 universe 里的：universe 内的名字策略已经自己折叠过了，重复列出没有意义）。
+  const hiddenLive = (): readonly string[] => {
+    const policyHidden = disclosure.hidden();
+    const late = liveModeFold().filter((name) => !universe.includes(name));
+    return late.length === 0 ? policyHidden : [...policyHidden, ...late];
+  };
+  const exposed: ToolRegistry = wrapped
+    ? exposedRegistry(assembly.registry, { ...disclosureExposure(disclosure), hidden: hiddenLive })
+    : assembly.registry;
   const plugin = definePlugin("studio.engine.tools", (ctx: Context) => {
     ctx.provide(TOOL_REGISTRY_SERVICE, exposed);
     ctx.provide(SANDBOX_SERVICE, assembly.sandbox);

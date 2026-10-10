@@ -161,6 +161,88 @@ export interface UserAnswerEvent {
 }
 
 /**
+ * computer-use M2-B2b: the closed set of reasons the desktop gate stops for a human.
+ *
+ * WHY A CLOSED SET (and not a free string): this value is the audit answer to
+ * "why was I interrupted?". A typo would read back as a reason nobody acted on.
+ * It mirrors `DesktopConfirmReason` in packages/computer-use (which only depends on
+ * core, so the enum is re-declared here and the gate's own type is assignable
+ * to it — one set of spellings, two declarations).
+ */
+export type DesktopConfirmReason = "sensitive_method" | "app_not_allowlisted";
+
+/** The closed set, for validation. Same shape as [SESSION_EVENT_ORIGINS]. */
+export const DESKTOP_CONFIRM_REASONS: readonly string[] = ["sensitive_method", "app_not_allowlisted"];
+
+/**
+ * computer-use M2-B2b: the four verdicts a human (or the clock, or a closed
+ * card) can produce on a desktop confirmation.
+ *
+ * `cancelled` is deliberately NOT folded into `deny`, and `timeout` is
+ * deliberately not folded into either: "someone said no", "nobody was there" and
+ * "the user closed the card" are three different audit facts, and an audit that
+ * merges them misreports what happened. Same closed-set discipline as
+ * [DesktopConfirmReason].
+ */
+export type DesktopConfirmOutcome = "approve" | "deny" | "cancelled" | "timeout";
+
+/** The closed set, for validation. */
+export const DESKTOP_CONFIRM_OUTCOMES: readonly string[] = ["approve", "deny", "cancelled", "timeout"];
+
+/**
+ * computer-use M2-B2b: the SYSTEM asked the human to confirm a desktop action.
+ *
+ * WHY A ROW TYPE OF ITS OWN, not a `user_question`: the two rows mean
+ * different things. `user_question` says "the MODEL asked something"; this says
+ * "the HOST stopped the model and asked on its own authority". A reader (and an
+ * auditor, and the model's own history) must be able to tell those apart, so the
+ * tag is the distinction — merging them would be a semantic stretch that makes
+ * the audit trail unreadable exactly where it matters.
+ *
+ * WHAT IT IS NOT: model-visible history. The model already receives the verdict
+ * as the ordinary `tool_result` of the gated tool call, so projecting this row
+ * would invent a second copy of the same decision (same argument as
+ * UserQuestionEvent, and the same rule enforced in projection.ts).
+ *
+ * THE STRING FIELDS ARE DATA, NOT PROSE: `method`, `app` and `title` are
+ * model-controlled (the app name comes from the window the model aimed at).
+ * The host collapses control characters and bidirectional overrides and
+ * truncates BEFORE they get here — a log row must never be a place where a
+ * crafted app name can forge a sentence.
+ */
+export interface DesktopConfirmEvent {
+  type: "desktop_confirm";
+  /** Request id (the `q-<n>` of the parked card), echoed by the answer row. */
+  id: string;
+  /** The helper method being confirmed, e.g. `type_text`. */
+  method: string;
+  /** The resolved target application (already collapsed + truncated by the host). */
+  app: string;
+  /** The window title, when there was one. Omitted when absent. */
+  title?: string;
+  /** Why the gate stopped: a sensitive method, or an app outside the allow list. */
+  reason: DesktopConfirmReason;
+  /** The wait budget in ms (how long the card stayed up). */
+  timeout_ms?: number;
+}
+
+/**
+ * computer-use M2-B2b: the desktop confirmation was settled.
+ *
+ * `elapsed_ms` is the time the human actually took, measured by the host at the
+ * settlement point — it is what makes "sat there for 58s then hit deny" visible
+ * in an audit, and it is separate from the timeout budget on the asked row.
+ */
+export interface DesktopConfirmAnswerEvent {
+  type: "desktop_confirm_answer";
+  /** The request id this row answers. */
+  id: string;
+  outcome: DesktopConfirmOutcome;
+  /** Host-measured wait, in ms. Omitted when absent. */
+  elapsed_ms?: number;
+}
+
+/**
  * W2018 (B1): a compaction BEGAN — a PURE MARKER row; the tag is the payload.
  *
  * It is written as the FIRST row of the NEW log, inside the same atomic rename
@@ -195,6 +277,8 @@ export type SessionEvent =
   | ToolResultEvent
   | UserQuestionEvent
   | UserAnswerEvent
+  | DesktopConfirmEvent
+  | DesktopConfirmAnswerEvent
   | CompactionStartEvent
   | CompactionEndEvent;
 
@@ -208,6 +292,14 @@ export const SESSION_EVENT_TYPES = [
   "tool_result",
   "user_question",
   "user_answer",
+  // computer-use M2-B2b: the desktop gate's own audit pair. ADDITIVE like the
+  // W783 question rows, and additive for the same reason: a reader that does not
+  // know these types stops at that row (torn tail) instead of inventing
+  // content. They are NOT user_question/user_answer under another name — the
+  // initiator differs (the host, not the model), which is the whole point of a
+  // separate tag.
+  "desktop_confirm",
+  "desktop_confirm_answer",
   // W2018 (B1): the two field-free compaction markers (9 -> 11). Additive, like
   // the W783 question rows: a reader that does not know them stops at that row
   // (torn tail) instead of inventing content.

@@ -356,6 +356,84 @@
           "additionalProperties": true
         },
         {
+          "title": "desktop_confirm",
+          "type": "object",
+          "required": [
+            "type",
+            "id",
+            "method",
+            "app",
+            "reason"
+          ],
+          "properties": {
+            "type": {
+              "const": "desktop_confirm"
+            },
+            "id": {
+              "type": "string",
+              "description": "M2-B2b: the request id ('q-<n>') of the parked confirmation card, echoed by the matching desktop_confirm_answer row."
+            },
+            "method": {
+              "type": "string",
+              "description": "M2-B2b: the helper method being confirmed. DATA, not prose -- the host never concatenates it into a sentence."
+            },
+            "app": {
+              "type": "string",
+              "description": "M2-B2b: the resolved target application, ALREADY collapsed (control chars + bidi overrides) and truncated by the host before it is written. DATA, not prose."
+            },
+            "title": {
+              "type": "string",
+              "description": "M2-B2b: the window title when there was one, sanitized by the same host pass as app. Omitted when absent."
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "sensitive_method",
+                "app_not_allowlisted"
+              ],
+              "description": "M2-B2b: WHY the gate stopped. A closed set -- an unknown value is a parse error, never a silent default, because this is the field an audit reads."
+            },
+            "timeout_ms": {
+              "type": "integer",
+              "description": "M2-B2b: the wait budget in ms (how long the card stayed up). Omitted when absent."
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "title": "desktop_confirm_answer",
+          "type": "object",
+          "required": [
+            "type",
+            "id",
+            "outcome"
+          ],
+          "properties": {
+            "type": {
+              "const": "desktop_confirm_answer"
+            },
+            "id": {
+              "type": "string",
+              "description": "M2-B2b: the request id this row answers."
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "approve",
+                "deny",
+                "cancelled",
+                "timeout"
+              ],
+              "description": "M2-B2b: the verdict. Four values, deliberately not collapsed: 'someone said no', 'nobody was there' and 'the user closed the card' are three different audit facts. Spellings match DesktopConfirmOutcome in packages/computer-use (no second vocabulary)."
+            },
+            "elapsed_ms": {
+              "type": "integer",
+              "description": "M2-B2b: host-measured wait in ms at the settlement point. Omitted when absent."
+            }
+          },
+          "additionalProperties": true
+        },
+        {
           "title": "compaction_start",
           "type": "object",
           "required": [
@@ -382,7 +460,7 @@
           "additionalProperties": true
         }
       ],
-      "note": "W783 added user_question/user_answer (7 -> 9 variants); W2018 (B1) added the field-free compaction_start/compaction_end markers (9 -> 11). Both are ADDITIVE rows: the engine never emits them, the host does, and a reader that does not know them treats the row as a torn tail exactly as before. The markers carry NO fields -- the tag is the payload."
+      "note": "W783 added user_question/user_answer (7 -> 9 variants); W2018 (B1) added the field-free compaction_start/compaction_end markers (9 -> 11); computer-use M2-B2b added desktop_confirm/desktop_confirm_answer (11 -> 13). All are ADDITIVE rows: the engine never emits them, the host does, and a reader that does not know them treats the row as a torn tail exactly as before. The markers carry NO fields -- the tag is the payload. M2-B2b's two rows are deliberately NOT user_question/user_answer under new names: those say 'the MODEL asked', these say 'the HOST stopped the model and asked on its own authority', and an audit has to be able to tell the two apart."
     }
   },
   "type": "object",
@@ -416,6 +494,18 @@
     },
     {
       "$ref": "#/$defs/SessionEvent/oneOf/8"
+    },
+    {
+      "$ref": "#/$defs/SessionEvent/oneOf/9"
+    },
+    {
+      "$ref": "#/$defs/SessionEvent/oneOf/10"
+    },
+    {
+      "$ref": "#/$defs/SessionEvent/oneOf/11"
+    },
+    {
+      "$ref": "#/$defs/SessionEvent/oneOf/12"
     }
   ],
   "projections": {
@@ -467,9 +557,21 @@
         "content": "<answers>",
         "question_id": "<id>",
         "timed_out": "<timed_out> (when present)"
+      },
+      "desktop_confirm": {
+        "role": "inbox",
+        "kind": "receipt",
+        "content": "key=value audit facts (method/app[/title]/reason[/budget_ms]) -- DATA, never prose; the projection does not assemble a sentence out of a window title",
+        "source": "<fixed constant label>"
+      },
+      "desktop_confirm_answer": {
+        "role": "inbox",
+        "kind": "receipt",
+        "content": "key=value audit facts (outcome[/elapsed_ms])",
+        "source": "<same fixed constant label>"
       }
     },
-    "engineDeriveMessages": "model-visible history: turn_start/turn_end/thinking_delta are SKIPPED; tool rows carrying parent_id are SKIPPED (run_code sub-calls); everything else is projected in log order. W783: user_question/user_answer are host-side audit rows about a PAUSED turn — they are SKIPPED too (the answer reaches the model as the ordinary tool_result of ask_user_question, never as invented history).",
+    "engineDeriveMessages": "model-visible history: turn_start/turn_end/thinking_delta are SKIPPED; tool rows carrying parent_id are SKIPPED (run_code sub-calls); everything else is projected in log order. W783: user_question/user_answer are host-side audit rows about a PAUSED turn — they are SKIPPED too (the answer reaches the model as the ordinary tool_result of ask_user_question, never as invented history). M2-B2b: desktop_confirm/desktop_confirm_answer are SKIPPED for the SAME reason — the model already receives the verdict as the ordinary tool_result of the gated tool call, so projecting them would invent a second copy of a decision the model was never party to (and cost two lines of context per confirmation, forever).",
     "orphanRule": "an orphan tool_result (no preceding tool_call) is still emitted by the Studio projection; nothing is paired or filtered.",
     "questionRecovery": "W783 §7: user_question/user_answer exist so a client that reconnects can rebuild the card and so a replay shows how a parked turn ended. The pending TABLE is in-memory: after a restart a question is unanswerable, and the row reads as an unanswered/expired question instead of blocking the model."
   },

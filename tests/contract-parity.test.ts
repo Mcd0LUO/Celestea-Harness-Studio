@@ -78,6 +78,32 @@ const READ_IMAGE_TOOL = "read_image";
 const COMPRESSION_TOOLS = ["compress", "context_status", "decompress"];
 /** agent_swarm: mounted only when the host supplied a loopFactory (see swarm-wiring.test.ts). */
 const SWARM_TOOL = "agent_swarm";
+/**
+ * computer-use M1: the four read-only desktop tools.
+ *
+ * OPTIONAL in the same sense as agent_swarm, and for a sharper reason: compose()
+ * mounts the desktop plugin only when a STATIC check passes (win32 AND a built
+ * helper binary — packages/runtime/src/desktop-wiring.ts). A host without the
+ * build genuinely has no such tools, so they are excluded here rather than
+ * asserted present; the contract is still the source of truth for their shape
+ * (tests/desktop-tool-contract.test.ts) and desktop-wiring.test.ts asserts the
+ * mount/absence rule itself.
+ */
+const DESKTOP_TOOLS = [
+  "desktop_activate_window",
+  "desktop_click",
+  "desktop_drag",
+  "desktop_get_window",
+  "desktop_get_window_state",
+  "desktop_launch_app",
+  "desktop_list_apps",
+  "desktop_list_windows",
+  "desktop_press_key",
+  "desktop_scroll",
+  "desktop_secondary_action",
+  "desktop_set_value",
+  "desktop_type_text",
+];
 
 /** The golden fixtures are exported on demand (`pnpm golden:export`). */
 const HAS_FIXTURES = existsSync(fixturePath("index.json"));
@@ -226,8 +252,9 @@ describe("W744 · all 8 builtin tool specs match the implementation registry", (
     // no member turn can be built), so it is excluded here for the same reason the
     // compression trio is — but it is covered by swarm-wiring.test.ts, which
     // asserts the tool really lands in a composed registry.
-    expect(CONTRACT.tools).toHaveLength(23);
-    expect(uncoveredTools(CONTRACT, specs, [...WORKER_TOOLS, ...QUESTION_TOOLS, READ_IMAGE_TOOL, ...BROWSER_TOOLS, ...COMPRESSION_TOOLS, SWARM_TOOL])).toEqual([]);
+    // computer-use M1: 23 -> 27, M2: 27 -> 36, the same treatment (conditional mount).
+    expect(CONTRACT.tools).toHaveLength(36);
+    expect(uncoveredTools(CONTRACT, specs, [...WORKER_TOOLS, ...QUESTION_TOOLS, READ_IMAGE_TOOL, ...BROWSER_TOOLS, ...COMPRESSION_TOOLS, SWARM_TOOL, ...DESKTOP_TOOLS])).toEqual([]);
   });
 
   /**

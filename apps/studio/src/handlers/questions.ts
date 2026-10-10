@@ -1,8 +1,9 @@
 /**
- * The two user-question endpoints (W783 §9 item 7).
+ * The user-question endpoints (W783 §9 item 7; M2-B2c added cancel).
  *
  *   GET  /api/questions                  → every question still answerable
  *   POST /api/questions/{id}/answer      → the human's answer
+ *   POST /api/questions/{id}/cancel      → the human dismissed the card
  *
  * WHY THE ANSWER IS NOT `POST /api/turn`: while the model's `ask_user_question`
  * call is parked, the session's turn slot is occupied. A message posted to
@@ -19,9 +20,20 @@
 
 import type { Hono } from "hono";
 import type { AskUserQuestionAnswerItem } from "@celestea/core";
+import { cookieValue } from "../auth/token.js";
 import { errText } from "../store/result.js";
+import { QUESTION_NONCE_COOKIE, questionNonce, questionNonceCookie, questionNonceMatches, secureCookieFor } from "../store/question-nonce.js";
 import type { RouteTable } from "../routes.js";
 import { failJson, readJsonBody, strField, type Deps, type JsonObject } from "./common.js";
+
+/**
+ * M2: the refusal of an answer that did not come from the Studio browser.
+ *
+ * The whole sentence is a fixed constant: an attacker learns nothing they can
+ * use from it, and a legitimate client (which always carries the cookie) never
+ * sees it.
+ */
+export const QUESTION_NONCE_REQUIRED = "the answer must carry the Studio browser's question nonce";
 
 /** One answer as the request body carries it. */
 type AnswerRead = { ok: true; answers: AskUserQuestionAnswerItem[] } | { ok: false; error: string };
@@ -72,6 +84,21 @@ function registerAnswer(app: Hono, deps: Deps, table: RouteTable): string {
     if (!guard.ok) return guard.response;
     const answer = deps.runtime.answerQuestion;
     if (answer === undefined) return failJson(c, 404, `unknown or already settled question '${requestId}'`);
+    // M2: the answer must come from the Studio browser, not from the session's
+    // own `http_request`. See store/question-nonce.ts for the full reasoning.
+    //
+    // WHY THIS SITS BEFORE `answer.call` AND NOT AFTER: that call IS the settle —
+    // there is no "check the question first, settle later" seam here
+    // (`answerQuestion` does lookup + session guard + settle in one step), so a
+    // check placed after it would be a check that the action already happened.
+    // The cost of checking first is that a caller WITHOUT the cookie gets 403 for
+    // every id, existing or not — which is the better trade: it also stops the
+    // endpoint from confirming which ids are live to a caller who cannot answer
+    // them. A legitimate client (which has the cookie) keeps the documented
+    // 404/409 outcomes untouched.
+    if (!questionNonceMatches(cookieValue(c.req.header("cookie"), QUESTION_NONCE_COOKIE))) {
+      return failJson(c, 403, QUESTION_NONCE_REQUIRED);
+    }
     const outcome = answer.call(deps.runtime, requestId, answers.answers, guard.value);
     if (!outcome.ok) return refuse(c, requestId, outcome.reason);
     // `timed_out:false` is a fact, not a placeholder: a REAL answer arrived, so
@@ -90,6 +117,30 @@ function refuse(c: Parameters<typeof failJson>[0], requestId: string, reason: st
   return failJson(c, 404, `unknown or already settled question '${requestId}'`);
 }
 
+/** POST /api/questions/{id}/cancel — the card's 取消 button (M2-B2c). */
+function registerCancel(app: Hono, deps: Deps, table: RouteTable): string {
+  const route = table.get("post_question_cancel");
+  app.on(route.method, route.honoPath, async (c) => {
+    const requestId = c.req.param("id") ?? "";
+    const read = await readJsonBody(c);
+    if (!read.ok) return read.response;
+    const guard = strField(c, read.body, "session");
+    if (!guard.ok) return guard.response;
+    const cancel = deps.runtime.cancelQuestion;
+    if (cancel === undefined) return failJson(c, 404, `unknown or already settled question '${requestId}'`);
+    // Same nonce guard as answer, and BEFORE the settle for the same reason:
+    // the cancel call IS the settle (lookup + guard + cancel in one step), so a
+    // check placed after it would be a check that the dismissal already happened.
+    if (!questionNonceMatches(cookieValue(c.req.header("cookie"), QUESTION_NONCE_COOKIE))) {
+      return failJson(c, 403, QUESTION_NONCE_REQUIRED);
+    }
+    const outcome = cancel.call(deps.runtime, requestId, guard.value);
+    if (!outcome.ok) return refuse(c, requestId, outcome.reason);
+    return c.json({ ok: true, id: requestId, session: outcome.session });
+  });
+  return route.id;
+}
+
 /** GET /api/questions — the §7 recovery list (pending questions only). */
 function registerList(app: Hono, deps: Deps, table: RouteTable): string {
   const route = table.get("get_questions");
@@ -101,7 +152,14 @@ function registerList(app: Hono, deps: Deps, table: RouteTable): string {
       // An ABSENT filter is not the same as filtering by `null`: the latter would
       // return only the detached generation's questions. Passing `undefined`
       // keeps the whole table, which is what a reconnecting client needs.
-      return c.json({ ok: true, questions: pending.call(deps.runtime, asked === "" ? undefined : asked) });
+      const body = { ok: true, questions: pending.call(deps.runtime, asked === "" ? undefined : asked) };
+      // M2: this GET is one of the two places the browser picks up the answer
+      // nonce (the other is `GET /api/events`). It is the recovery path — the
+      // frontend calls it on every SSE reconnect (ui/question/sse.ts), i.e.
+      // BEFORE any card it rebuilds can be answered, which is what makes the
+      // delivery ordering safe rather than lucky.
+      c.header("set-cookie", questionNonceCookie(questionNonce(), secureCookieFor(c.req.header("x-forwarded-proto"))));
+      return c.json(body);
     } catch (e) {
       return failJson(c, 500, errText(e));
     }
@@ -109,7 +167,7 @@ function registerList(app: Hono, deps: Deps, table: RouteTable): string {
   return route.id;
 }
 
-/** The two question routes, in contract order. */
+/** The three question routes, in contract order. */
 export function registerQuestions(app: Hono, deps: Deps, table: RouteTable): string[] {
-  return [registerList(app, deps, table), registerAnswer(app, deps, table)];
+  return [registerList(app, deps, table), registerAnswer(app, deps, table), registerCancel(app, deps, table)];
 }

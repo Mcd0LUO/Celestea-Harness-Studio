@@ -82,7 +82,9 @@ describe("W9348 A · the contract registers the route (the frozen table is not o
   it("moves all four counts by exactly one, and the snapshot registers the TS-only route", () => {
     // ① the frozen anchor, ② the file's count + its array length, ③ the constant
     // the boot assertion reads, ④ the snapshot's own two derived counts.
-    expect(FROZEN_COUNTS.endpoints).toBe(72);
+    // 这条钉的是「四个数永远一致」，常数随每次端点新增顺移：W9348 定稿时是 72，
+    // M2-B2c 的 POST /api/questions/{id}/cancel 把它带到 73。
+    expect(FROZEN_COUNTS.endpoints).toBe(73);
     expect(c.count).toBe(FROZEN_COUNTS.endpoints);
     expect(c.endpoints).toHaveLength(FROZEN_COUNTS.endpoints);
     expect(API_ENDPOINT_COUNT).toBe(FROZEN_COUNTS.endpoints);

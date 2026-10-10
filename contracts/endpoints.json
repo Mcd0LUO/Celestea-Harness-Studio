@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Celestea Studio HTTP API contract (72 endpoints)",
+  "title": "Celestea Studio HTTP API contract (73 endpoints)",
   "generatedAt": "2026-09-10T01:20:00Z",
   "phase": "P0 contract freeze",
   "source": {
@@ -8,7 +8,7 @@
     "routes": "frozen from the retired backend implementation (original source file deleted 2026-09-15); kept as contracts/route-table.snapshot.json (38 route() declarations = 43 method+path, minus 4 static = 39 API endpoints)",
     "liveServer": "http://127.0.0.1:3777 (read-only probes only)",
     "routeSnapshot": "contracts/route-table.snapshot.json",
-    "routeTable": "W725 added GET /api/sessions/{id}/context (43 -> 44); W516 added 4 TypeScript-only endpoints (GET|POST|DELETE /api/sessions/{id}/grants + GET /api/sessions/{id}/grants/confirm-token); the retired backend has no counterpart (see contracts/route-table.snapshot.json tsOnlyRoutes). W783 added GET /api/questions + POST /api/questions/{id}/answer (47 -> 49). W785 added GET /api/usage/ledger (49 -> 50). W791 added POST /api/sessions/{id}/mode (50 -> 51; P1 session working mode, TS-only). W9 added the six permission endpoints (51 -> 57). W860 added GET|PUT /api/sessions/{id}/tools and GET /api/plugins (57 -> 60). W870 added PUT /api/sessions/{id}/model (60 -> 61; the session-scoped model switch the statusline picker targets, TS-only). W881 removed the retired backend's archived HTTP contract (docs/archive/frontend/api-contract.md) from the public repo, so the endpoints it documented now reference their own frozen entry here. W1528 added POST /api/terminal + POST /api/terminal/{id}/input + POST /api/terminal/{id}/close (66 -> 69; the workbench terminal's real-PTY face, TS-only). W9209 added POST /api/sessions/{id}/goal (69 -> 70; the persistent session goal the /goal slash command and the statusline badge have always called, TS-only). W9322 added PUT /api/plugins (70 -> 71; the plugin hot-swap enabled table — docs/feature-plugin-hotswap.md). W9348 added GET /api/sessions/{id}/goal (71 -> 72; the READ side of the persistent goal — the /goal command only ever learned the goal from a POST echo, so a page refresh showed nothing, TS-only)."
+    "routeTable": "W725 added GET /api/sessions/{id}/context (43 -> 44); W516 added 4 TypeScript-only endpoints (GET|POST|DELETE /api/sessions/{id}/grants + GET /api/sessions/{id}/grants/confirm-token); the retired backend has no counterpart (see contracts/route-table.snapshot.json tsOnlyRoutes). W783 added GET /api/questions + POST /api/questions/{id}/answer (47 -> 49). W785 added GET /api/usage/ledger (49 -> 50). W791 added POST /api/sessions/{id}/mode (50 -> 51; P1 session working mode, TS-only). W9 added the six permission endpoints (51 -> 57). W860 added GET|PUT /api/sessions/{id}/tools and GET /api/plugins (57 -> 60). W870 added PUT /api/sessions/{id}/model (60 -> 61; the session-scoped model switch the statusline picker targets, TS-only). W881 removed the retired backend's archived HTTP contract (docs/archive/frontend/api-contract.md) from the public repo, so the endpoints it documented now reference their own frozen entry here. W1528 added POST /api/terminal + POST /api/terminal/{id}/input + POST /api/terminal/{id}/close (66 -> 69; the workbench terminal's real-PTY face, TS-only). W9209 added POST /api/sessions/{id}/goal (69 -> 70; the persistent session goal the /goal slash command and the statusline badge have always called, TS-only). W9322 added PUT /api/plugins (70 -> 71; the plugin hot-swap enabled table — docs/feature-plugin-hotswap.md). W9348 added GET /api/sessions/{id}/goal (71 -> 72; the READ side of the persistent goal — the /goal command only ever learned the goal from a POST echo, so a page refresh showed nothing, TS-only). M2-B2c added POST /api/questions/{id}/cancel (72 -> 73; the question card's cancel button — a first-class settlement distinct from refuse/timeout, TS-only)."
   },
   "conventions": {
     "responseBody": "JSON (application/json) except SSE and static assets",
@@ -28,7 +28,7 @@
     "500": "persist failure / compose failure / IO failure",
     "502": "worker tool hard dispatch failure ONLY (src/api.rs:419-433)"
   },
-  "count": 72,
+  "count": 73,
   "endpoints": [
     {
       "id": "get_health",
@@ -230,7 +230,7 @@
             "name": "tools",
             "type": "array<{name:string,description:string}>",
             "required": false,
-            "note": "schemas() of the queried session's generation; sorted by name; up to 23 tools in standard mode (read_image is mounted only when the session has an attachment store), the 17 execution-mode names in execution mode"
+            "note": "schemas() of the queried session's generation; sorted by name; up to 36 tools in standard mode (read_image is mounted only when the session has an attachment store; the thirteen desktop_* tools only when the host is win32 and a built helper exists), the 17 execution-mode names in execution mode"
           }
         ]
       },
@@ -3901,6 +3901,54 @@
       "probe": {
         "checked": false,
         "reason": "TypeScript-only endpoint: the retired backend (127.0.0.1:3777) has no /api/questions route"
+      }
+    },
+    {
+      "id": "post_question_cancel",
+      "method": "POST",
+      "path": "/api/questions/{id}/cancel",
+      "group": "questions",
+      "rustHandler": "(none - TypeScript-only, M2-B2c)",
+      "docRef": "docs/archive/decisions/feature-ask-user.md#42-数据流关键答案直接-resolve",
+      "request": {
+        "kind": "json",
+        "fields": [
+          {
+            "name": "session",
+            "type": "string",
+            "required": false,
+            "note": "Same optional guard as answer: when present it must match the session that asked, so a stale tab cannot cancel another session's question by guessing an id."
+          }
+        ]
+      },
+      "response": {
+        "status": 200,
+        "shape": "object",
+        "fields": [
+          { "name": "ok", "type": "boolean", "required": true },
+          { "name": "id", "type": "string", "required": true, "note": "the request id that was cancelled" },
+          { "name": "session", "type": "string|null", "required": true }
+        ]
+      },
+      "errors": [
+        {
+          "status": 404,
+          "error": "unknown or already settled question '<id>'",
+          "note": "same in-memory table semantics as answer (design 7.2 rule 4)"
+        },
+        {
+          "status": 409,
+          "error": "question '<id>' already settled",
+          "note": "the cancel lost the race against an answer, a timeout, or an earlier cancel"
+        }
+      ],
+      "notes": [
+        "M2-B2c: the question card's 取消 button. Cancel is a first-class settlement (question-registry.ts QuestionSettlement 'cancelled'): the parked call is rejected with ASK_CANCELLED instead of waiting out the timeout, and it is distinct from a refusal — the desktop gate maps it to desktop_confirm_cancelled, which never counts toward the deny cooldown.",
+        "Same browser-nonce guard as answer (M2): the request must carry the Studio browser's question nonce cookie, so a session's own http_request cannot settle its own confirms."
+      ],
+      "probe": {
+        "checked": false,
+        "reason": "TypeScript-only endpoint"
       }
     },
     {

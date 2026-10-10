@@ -95,6 +95,14 @@ export function transcriptLine(ev: SessionEvent): string {
     case "user_question":
     case "user_answer":
       return "";
+    // computer-use M2-B2b: the desktop gate's audit rows. Same rule as the
+    // question rows — the transcript already carries the gated tool call and its
+    // verdict, so a summary line here would describe the same decision twice.
+    // Returning "" (not a note) keeps the summary prompt byte-identical to a log
+    // that never had a confirmation in it.
+    case "desktop_confirm":
+    case "desktop_confirm_answer":
+      return "";
     // W2018 (B1): markers are not transcript content. Returning "" (not a note)
     // keeps the summary prompt for a given log byte-identical whether or not an
     // earlier interrupted compaction left a marker behind.

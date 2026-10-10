@@ -549,6 +549,12 @@ export interface RuntimeAdapter {
    * not implement it, and the handler then reports the question as unknown.
    */
   answerQuestion?(requestId: string, answers: AskUserQuestionAnswerItem[], sessionId?: string): QuestionAnswerOutcome;
+  /**
+   * M2-B2c: cancel one pending user question (`POST /api/questions/{id}/cancel`).
+   * Same optional seam as [answerQuestion]; same refusal vocabulary (a cancel that
+   * lost the race is just "settled").
+   */
+  cancelQuestion?(requestId: string, sessionId?: string): QuestionAnswerOutcome;
   /** W783: every question still answerable (`GET /api/questions`, §7 recovery). */
   pendingQuestions?(sessionId?: string | null): PendingQuestionView[];
 }

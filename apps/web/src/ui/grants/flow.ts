@@ -30,7 +30,7 @@ import { confirmDialog } from '../confirm';
 import { pickDirectory } from '../fsbrowser';
 import { flashStatus } from '../statusbar';
 import { capByName, markFromEffective, nowSec, permanentText, type CapDef } from './caps';
-import { t } from '../../i18n';
+import { t, type Key } from '../../i18n';
 import {
   confirmMessageFor,
   presetConfirmMessage,
@@ -43,8 +43,10 @@ import { phraseFor, renderShield } from './panel';
 import { presetTtlSec, type GrantPreset, type PresetStep } from './presets';
 import { maxTtlOf, reqFor, ttlOf } from './request';
 import { validateHosts, validateTools } from './scope';
+import { desktopScopeOf, validateAppsDraft } from './apps';
 import {
   drafts,
+  getAppsDraft,
   getData,
   getPresetRun,
   inlineError,
@@ -96,6 +98,18 @@ export async function startGrant(host: GrantsHost, def: CapDef): Promise<void> {
       return;
     }
     scope = { tools: v.values };
+  } else if (def.kind === 'apps') {
+    // M2-B2a：desktop 的应用清单。四个框全空 ⇒ scope 是 {}（不限制，与升级前逐字
+    // 相同）；任一框有内容 ⇒ { apps: { allow/deny: { exes/titles } } }，空的一侧不提交
+    // （服务端 validateAppScope 会拒「有 apps 但没有条目」的形状）。
+    const draft = getAppsDraft(def.cap);
+    const bad = validateAppsDraft(draft);
+    if (bad !== null) {
+      inlineError.set(def.cap, t(bad.key as Key, bad.params));
+      host.renderPanel();
+      return;
+    }
+    scope = desktopScopeOf(draft);
   }
 
   const ttl = ttlOf(def);

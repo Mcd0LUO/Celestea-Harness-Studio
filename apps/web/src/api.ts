@@ -263,6 +263,15 @@ export const api = {
       '/api/questions/' + encodeURIComponent(id) + '/answer',
       session ? { answers, session } : { answers },
     ),
+  /**
+   * POST /api/questions/{id}/cancel —— M2-B2c：用户**关掉**这张卡（不是作答）。
+   * 与超时的区别：取消立刻解开挂起的工具调用（ASK_CANCELLED），不用等倒计时走完。
+   */
+  cancelQuestion: (id: string, session?: string) =>
+    postJson<QuestionAnswerResp>(
+      '/api/questions/' + encodeURIComponent(id) + '/cancel',
+      session ? { session } : {},
+    ),
   // ---- 工作区 / 会话管理（W236；缺失时 404 优雅降级） ----
   workspaces: () => requestJson<WorkspacesResp>('/api/workspaces'),
   /** W243 任务2：纯文件管理器建工作区——仅按目录注册（name 由后端取文件夹 basename）。 */

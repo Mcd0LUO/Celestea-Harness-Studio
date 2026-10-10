@@ -26,6 +26,9 @@
       "@celestea/runtime": [
         "./packages/runtime/src/index.ts"
       ],
+      "@celestea/computer-use": [
+        "./packages/computer-use/src/index.ts"
+      ],
       "@celestea/contracts": [
         "./packages/core/src/contracts/index.ts"
       ],

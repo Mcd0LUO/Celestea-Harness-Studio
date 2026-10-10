@@ -81,6 +81,7 @@ describe("contracts/endpoints.json", () => {
     // W870: 21 -> 22 (PUT /api/sessions/{id}/model); G5: 22 -> 23 (GET /api/fs/list).
     // W1528: 23 -> 26 (the terminal's open / input / close).
     // W9209: 26 -> 27 (POST /api/sessions/{id}/goal, the persistent session goal); W9322: 27 -> 28 (PUT /api/plugins); W9348: 28 -> 29 (GET /api/sessions/{id}/goal, the goal's READ side).
+    // M2-B2c: 29 -> 30 (POST /api/questions/{id}/cancel, the question card's cancel button).
     // W9213: both numbers are DERIVED -- the delta is "contract minus the frozen
     // 39 API routes", and the snapshot's own declared counts are checked against
     // the contract by checkRouteSnapshot (which the store runs on every read).
@@ -208,10 +209,11 @@ describe("contracts/tools.json", () => {
   // W884: 13 -> 14 (`load_skill`); F4: 14 -> 16 (browser pair); B2: 16 -> 18
   // (`remember` + `forget`, the workspace-memory write pair); W1533: 18 -> 19
   // (`update_tasks`, the model's todo list); W1900 (Phase 2): 19 -> 22
-  // (`compress` + `decompress` + `context_status`); W-swarm: 22 -> 23 (`agent_swarm`).
-  it("holds the 23 engine tools with parameters", () => {
-    expect(t.count).toBe(23);
-    expect(t.tools).toHaveLength(23);
+  // (`compress` + `decompress` + `context_status`); W-swarm: 22 -> 23 (`agent_swarm`);
+  // computer-use M2: 23 -> 36 (M1 只读 4 + M2 写 9，同 desktopDelta，optionalMount).
+  it("holds the 36 engine tools with parameters", () => {
+    expect(t.count).toBe(36);
+    expect(t.tools).toHaveLength(36);
     for (const tool of t.tools) {
       expect(tool.name).toMatch(/^[a-z_]+$/);
       expect(tool.description.length).toBeGreaterThan(10);
@@ -225,7 +227,7 @@ describe("contracts/tools.json", () => {
   // 有效行上限，而一条门禁不该逼着别的文件超线。断言一字未改。
   it("matches the live /api/tools name set", () => {
     expect(t.tools.map((x) => x.name).sort()).toEqual(
-      ["agent_swarm", "ask_user_question", "browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "list_dir", "load_skill", "process_control", "read_file", "read_image", "remember", "run_code", "run_shell", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status", "write_file"],
+      ["agent_swarm", "ask_user_question", "browser_act", "browser_open", "compress", "context_status", "decompress", "desktop_activate_window", "desktop_click", "desktop_drag", "desktop_get_window", "desktop_get_window_state", "desktop_launch_app", "desktop_list_apps", "desktop_list_windows", "desktop_press_key", "desktop_scroll", "desktop_secondary_action", "desktop_set_value", "desktop_type_text", "forget", "http_request", "list_dir", "load_skill", "process_control", "read_file", "read_image", "remember", "run_code", "run_shell", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status", "write_file"],
     );
   });
 });
@@ -235,10 +237,23 @@ describe("contracts/session-event.schema.json", () => {
   const defs = s["$defs"] as Record<string, { oneOf: unknown[] }>;
 
   // W783: 7 -> 9 (user_question / user_answer); W2018/B1: 9 -> 11
-  // (the field-free compaction_start / compaction_end markers).
-  it("declares the 11 SessionEvent variants", () => {
+  // (the field-free compaction_start / compaction_end markers);
+  // computer-use M2-B2b: 11 -> 13 (desktop_confirm / desktop_confirm_answer).
+  //
+  // M2-B2b: the hand-copied literal (11) is GONE on purpose. It was a drift
+  // magnet -- every new row type forced an edit here, and forgetting the edit is
+  // indistinguishable from the schema being right. What this test is FOR is the
+  // first line (schema variants == code variants); the second line is now a
+  // floor that only moves when the schema actually loses a row.
+  it("declares every SessionEvent variant the code knows", () => {
     expect(defs["SessionEvent"]?.oneOf).toHaveLength(SESSION_EVENT_TYPES.length);
-    expect(SESSION_EVENT_TYPES).toHaveLength(11);
+    // The schema's variant TITLES are the same list as the code's tags, in the
+    // same order: this is what makes the count check above non-vacuous.
+    const titles = (defs["SessionEvent"]?.oneOf as Array<{ title?: string }>).map((v) => v.title);
+    expect(titles).toEqual([...SESSION_EVENT_TYPES]);
+    // A floor, not a hand-copied count: 11 is the pre-M2-B2b baseline and this
+    // can only ever grow.
+    expect(SESSION_EVENT_TYPES.length).toBeGreaterThanOrEqual(11);
   });
 
   it("declares the 5 TurnOutcome states", () => {
@@ -445,8 +460,14 @@ describe("E-P0③ checkpoint + boot recovery (contract delta)", () => {
     expect(TURN_OUTCOMES).toContain("interrupted");
     expect(defs["TurnOutcome"]?.oneOf).toHaveLength(5);
     // W783 appended the two host-side question variants, W2018/B1 the two
-    // compaction markers; interrupted legality is unaffected.
-    expect(defs["SessionEvent"]?.oneOf).toHaveLength(11);
+    // compaction markers, M2-B2b the two desktop-confirm rows; interrupted
+    // legality is unaffected.
+    //
+    // M2-B2b: derived, not hand-copied. This assertion exists to prove the
+    // OUTCOME contract is intact, not to pin how many row types the enum has;
+    // pinning the count here made this file a second place to edit every time
+    // a row type was added (it was missed the first time, which is the point).
+    expect(defs["SessionEvent"]?.oneOf).toHaveLength(SESSION_EVENT_TYPES.length);
   });
 });
 
@@ -477,11 +498,14 @@ describe("W729 session modes (P0 contract delta)", () => {
     // W729 changed no tool count; W783 took it to 11; W804 added read_image (12); W7 renamed + added stop_worker (13);
     // W1533 took it to 19 (update_tasks).
     // W884 added load_skill (14); F4 added browser_open + browser_act (16).
-    expect(tools.count).toBe(23);
+    // computer-use M2: 23 -> 36 (the thirteen desktop_* tools).
+    expect(tools.count).toBe(36);
     // B2 added remember + forget (18); W1533 added update_tasks (19);
     // W1900 (Phase 2) added compress + decompress + context_status (22);
-    // W-swarm added agent_swarm (23).
-    expect(tools.tools).toHaveLength(23);
+    // W-swarm added agent_swarm (23); computer-use M2 added the thirteen
+    // desktop_* tools (36, optionalMount: the registry only mounts them when the
+    // host is win32 and a built helper exists).
+    expect(tools.tools).toHaveLength(36);
   });
 
   it("freezes the session.json mode enum and the W779 title, unknown keys tolerated", () => {

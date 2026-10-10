@@ -55,6 +55,7 @@ import type { EnginePluginSwitches } from "../plugin-catalog.js";
 import type { PendingQuestion, QuestionRegistry } from "../question-registry.js";
 import { questionAnsweredRow, questionAskedRow } from "../question-rows.js";
 import { EMPTY_GRANTS } from "./engine-grants.js";
+import { createDesktopAuditSink, desktopWiringOf } from "./desktop-gate-host.js";
 import { createEngineLlm, liveEngineLlm } from "./llm-assembly.js";
 import type { FallbackWiring } from "./fallback-host.js";
 import { workerTablePath } from "./worker-table.js";
@@ -338,7 +339,7 @@ export class SessionComposer {
     // 当前的开关。`compose()` 是「一代」的构造点，所以「开关变更在下一 turn 边界
     // 生效」不需要任何额外机制——`invalidateAll()` 把实例标脏，下一次 `ensure()`
     // 走到这里，读到的就是新值。
-    const switches = this.opts.pluginSwitches?.() ?? { tools: false, workers: false, swarm: false, watchdog: false, repeatGuard: false };
+    const switches = this.opts.pluginSwitches?.() ?? { tools: false, workers: false, swarm: false, watchdog: false, repeatGuard: false, desktop: false };
     // W804 (multimodal P0 section 5): the session's attachment store. It lives
     // INSIDE the session directory, so trash/archive/delete carry it along. The
     // DETACHED generation (dir === null, the face /api/tools and the default
@@ -379,6 +380,7 @@ export class SessionComposer {
     // append to, so the runtime travels through a holder.
     const runCodeHolder: { runtime: Runtime | null } = { runtime: null };
     const onRunCodeEvent = this.runCodeSink(sessionId, runCodeHolder);
+
     const compression = this.compressionWiring();
     // 插件热插拔（§3.1/§4）：关掉引擎层插件的两条路，各有各的理由。
     //
@@ -512,6 +514,19 @@ export class SessionComposer {
       // without a loopFactory (a member turn cannot be built), so omitting this
       // line silently produced "unknown tool: agent_swarm" in production.
       swarm: switches.swarm ? false : this.swarmWiring(),
+      // computer-use M1: the four read-only desktop tools. Same shape as the swarm
+      // line above — the switch turns the plugin off and everything else is the
+      // wiring's own business. `attachments` is the session's own store, so a
+      // screenshot rides the SAME W804 chain read_image and the browser tools use
+      // (a screenshot in a second store would be invisible to the projection).
+      // Whether THIS machine can run it is not decided here: ensureDesktopWiring
+      // does a static win32 + built-helper check at mount time and mounts nothing
+      // when it fails, so a host without the build never advertises four tools
+      // that would always fail.
+      // M2：写 9 的分级闸门 + 它的确认传输（全部细节在 desktop-gate-host.ts）。
+      desktop: switches.desktop
+        ? false
+        : desktopWiringOf({ sessionId, grants: read.grants, attachments, registry: this.opts.questionRegistry, publishQuestion: this.opts.publishQuestion, now: this.opts.now, record: createDesktopAuditSink(() => (questionHolder.runtime === null || questionHolder.runtime.isReleased ? null : questionHolder.runtime.session)) }),
       // W9331: `null` = the guard plugin is NOT mounted (the host switched it
       // off, or the environment did), which is what makes `repeatGuard` in the
       // loop factory above genuinely absent rather than defaulted-on.
@@ -607,6 +622,12 @@ export class SessionComposer {
     };
   }
 
+  /**
+   * computer-use M2: the desktop gate of ONE session generation.
+   *
+   * Two things are deliberately NOT decided here:
+   *   · **whether this machine can run desktop tools at all** — that is the mount-time
+   *     static check in `ensureDesktopWiring` (win32 + built helper), and a gate that is
   /**
    * W783: the user-question wiring of ONE session generation, or null when the
    * host mounted no table (the tool is then not offered to the model at all).

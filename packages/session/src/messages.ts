@@ -35,6 +35,38 @@ export function originLabel(origin: SessionEventOrigin): string {
   return origin === "user" ? "用户" : ORIGIN_LABEL[origin];
 }
 
+/**
+ * computer-use M2-B2b: the block label for a desktop confirmation audit row.
+ *
+ * A CONSTANT, for the same reason the confirmation card's own strings are: the
+ * words must come from the code, never from the object being confirmed.
+ * Nothing model-controlled is concatenated into it.
+ */
+const DESKTOP_CONFIRM_AUDIT_LABEL = "桌面确认";
+
+/**
+ * computer-use M2-B2b: the audit facts of one `desktop_confirm` row, as one
+ * line of `key=value` pairs.
+ *
+ * key=value (not prose) on purpose: a projection that assembled a sentence out
+ * of `app` would let a crafted window title choose where the sentence breaks.
+ * The values are data; the shape around them is not.
+ */
+function desktopConfirmFacts(ev: Extract<SessionEvent, { type: "desktop_confirm" }>): string {
+  const parts = [`method=${ev.method}`, `app=${ev.app}`];
+  if (ev.title !== undefined) parts.push(`title=${ev.title}`);
+  parts.push(`reason=${ev.reason}`);
+  if (ev.timeout_ms !== undefined) parts.push(`budget_ms=${ev.timeout_ms}`);
+  return parts.join(" ");
+}
+
+/** computer-use M2-B2b: the verdict line, paired with its asked row by `id`. */
+function desktopConfirmVerdict(ev: Extract<SessionEvent, { type: "desktop_confirm_answer" }>): string {
+  const parts = [`outcome=${ev.outcome}`];
+  if (ev.elapsed_ms !== undefined) parts.push(`elapsed_ms=${ev.elapsed_ms}`);
+  return parts.join(" ");
+}
+
 /** Studio projection of a single event; null for structural markers. */
 export function sessionEventToMessage(ev: SessionEvent): StudioMessage | null {
   switch (ev.type) {
@@ -115,6 +147,18 @@ export function sessionEventToMessage(ev: SessionEvent): StudioMessage | null {
       if (ev.timed_out !== undefined) out.question_timed_out = ev.timed_out;
       return out;
     }
+    // computer-use M2-B2b: the desktop gate's audit pair lands on the INBOX
+    // channel, not the question one — and that choice is the semantics. The
+    // question channel means "the MODEL asked the human something"; these rows
+    // mean "the HOST stopped the model and asked on its own authority". Rendering
+    // them as question cards would show the user's own gate as a model request,
+    // which is the exact misreading the dedicated log tag exists to prevent.
+    // `receipt` is the existing non-user origin whose UI block means "the system
+    // recorded this"; the desktop confirmation IS such a record.
+    case "desktop_confirm":
+      return { role: "inbox", kind: "receipt", content: desktopConfirmFacts(ev), source: DESKTOP_CONFIRM_AUDIT_LABEL };
+    case "desktop_confirm_answer":
+      return { role: "inbox", kind: "receipt", content: desktopConfirmVerdict(ev), source: DESKTOP_CONFIRM_AUDIT_LABEL };
   }
 }
 
