@@ -123,7 +123,9 @@ describe("W9350 A · the contract registers the route (the frozen table is not o
   it("moves all four counts by exactly one, and the snapshot registers the TS-only route", () => {
     // ① the frozen anchor, ② the file's count + its array length, ③ the constant
     // the boot assertion reads, ④ the snapshot's own two derived counts.
-    expect(FROZEN_COUNTS.endpoints).toBe(73);
+    // main 的 M2-B2c（POST /api/questions/{id}/cancel）与本 PR 的 W9350（GET /api/sessions/{id}/skills）
+    // 撞号在 73 ⇒ 并集是 74。
+    expect(FROZEN_COUNTS.endpoints).toBe(74);
     expect(c.count).toBe(FROZEN_COUNTS.endpoints);
     expect(c.endpoints).toHaveLength(FROZEN_COUNTS.endpoints);
     expect(API_ENDPOINT_COUNT).toBe(FROZEN_COUNTS.endpoints);

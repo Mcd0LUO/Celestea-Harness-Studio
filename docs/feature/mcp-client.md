@@ -183,7 +183,7 @@ P0 的契约数字**一处不动**：`contracts/endpoints.json` 的 `count` 保�
 - **`approval`**：`"ask"`（默认，每次调用要人点头）| `"never"`（无人值守的**显式**出口）。server 级可被工具级覆盖；语义见 §7.1。
 - **`path_access`**（可选，逐 server / 逐工具）：`read` / `write` / `self`。MCP 工具默认落 `write` 地板，这里是把真实语义补上的地方（§7.1）。
 - **凭据**：`env` / `headers` 的值写 `$VAR` 引用进程环境——**默认 MCP 配置里没有明文凭据**，凭据住在环境里。任何响应/日志**永不回显** `env`/`headers`（日志只留 server 名与工具名）。
-- **只走引用式（D3 定稿）**：不为明文凭据开字段。若哪天要开，它要连带改一条现成不变量——`tests/contracts.test.ts:280` 断言「`providers.json` 是唯一含密钥的数据文件」，新增含密钥文件必须同时改那条断言与 `docs/data-files.md`；更重要的理由在 §7.2。
+- **只走引用式（D3 定稿）**：不为明文凭据开字段。若哪天要开，它要连带改一条现成不变量——`tests/contracts.test.ts:298` 断言「`providers.json` 是唯一含密钥的数据文件」，新增含密钥文件必须同时改那条断言与 `docs/data-files.md`；更重要的理由在 §7.2。
 - **复杂度对照**（按项目契约的引用式是**更少**的机制，不是更多）：引用式只需要「解析 + 缺引用就响亮失败」两件事，`mcp.json` 保持 0644，而且**不需要对外投影**——里面本来就没有要藏的东西。明文式则要把 `providers.json` 的四件机制复制一份：`0600`、原子写（tmp → 0600 → fsync → rename）、畸形 JSON 硬错误、**白名单构造的对外视图**（`ProviderPublicView` 连 `api_key` 这个键都不存在，见 `docs/data-files.md:170`），外加「日志与响应永不回显」的纪律和那条「唯一含密钥文件」断言的改动。
 - 本仓的引用式先例已经存在：`Profile` 用 `api_key_env` / `api_key_file` 两个字段表达凭据（`packages/runtime/src/profile.ts:11`）。
   启动时把 key **只注入内存**（先例见 `docs/data-files.md:194`）。
@@ -337,7 +337,7 @@ MCP 工具**不折叠**：`execution` 模式只折叠「`run_code` 程序里够�
 ### 7.2 凭据
 
 - **`mcp.json` 里只有引用**（D3 定稿）：`env` / `headers` 的值写 `$VAR`（从进程环境解析）或一个 key-file 路径。**凭据本体不在这份文件里。**
-- 于是文件保持 **0644、`data-files/index.json` 里不标 `secret`**，「`providers.json` 是唯一含密钥的数据文件」那条断言**原样成立**（`tests/contracts.test.ts:280`），`docs/data-files.md` 不用改；状态面可以**整份回显** `mcp.json`（里面没有要藏的东西），因此**不需要** `ProviderPublicView` 那样的白名单投影。
+- 于是文件保持 **0644、`data-files/index.json` 里不标 `secret`**，「`providers.json` 是唯一含密钥的数据文件」那条断言**原样成立**（`tests/contracts.test.ts:298`），`docs/data-files.md` 不用改；状态面可以**整份回显** `mcp.json`（里面没有要藏的东西），因此**不需要** `ProviderPublicView` 那样的白名单投影。
 - 解析失败要**响亮**：引用的环境变量不存在、或 key-file 读不到 → 该 server 进失败状态并写明**缺哪个引用**，不是静默拿空串去连。
 - **绝不**写入会话日志（日志里只出现 server 名与工具名）。
 - 状态面（`GET /api/plugins` 的那一行、以及任何 health 输出）不返回 `env` / `headers`。
@@ -367,7 +367,7 @@ stdio server 由 SDK 的传输层直接 spawn，**不经过会话沙箱**。理�
 | 文件 / 目录 | 性质 |
 |---|---|
 | `packages/mcp/**` | **新增 L1 包**：配置解析、连接管理、工具适配、结果适配、状态面 |
-| `contracts/data-files/mcp.schema.json` + `contracts/data-files/index.json` | 新增 schema **并登记进 `files[]`**（现 13 条）；连带 `tests/contracts.test.ts` 的「13 个 schema」断言（`tests/contracts.test.ts:274`）与 round-trip 要求（`tests/contracts.test.ts:285`），以及 `docs/data-files.md` 总览表 |
+| `contracts/data-files/mcp.schema.json` + `contracts/data-files/index.json` | 新增 schema **并登记进 `files[]`**（现 13 条）；连带 `tests/contracts.test.ts` 的「14 个 schema」断言（`tests/contracts.test.ts:292`）与 round-trip 要求（`tests/contracts.test.ts:303`），以及 `docs/data-files.md` 总览表 |
 | `eslint.config.js` | `TIER1` 加 `"mcp"` |
 | `.dependency-cruiser.cjs` | `TIER1` 加 `"mcp"` |
 | `docs/ARCHITECTURE.md` | §1.1 层级表 + §2.1 每包一句话职责 |
