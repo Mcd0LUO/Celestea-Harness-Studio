@@ -18,7 +18,7 @@
  */
 
 import type { AfterInputRow } from "@celestea/agent-loop";
-import { listSkills, memoryContextOf, readLayers, renderSkillCatalog } from "@celestea/core";
+import { listSkills, memoryContextOf, readLayers, renderSkillCatalog, type SkillListing } from "@celestea/core";
 import type { TurnContextRow } from "@celestea/runtime";
 import { consumePending, readGoalState } from "../handlers/session-goal.js";
 
@@ -45,6 +45,31 @@ export function goalTurnContext(sessionId: string | null, dir: string | null): (
 }
 
 /**
+ * W9350: the ONE skill read of a workspace — shared by the per-turn catalog row
+ * ([turnContextFor]) and by `GET /api/sessions/{id}/skills` (the real adapter's
+ * [sessionSkills]). Both call THIS, so the `readLayers` input (the workspace path
+ * AND the env that resolves `$CELESTEA_HOME`) is written down once.
+ *
+ * **Why that matters more than it looks.** ZCode shipped the bug this exists to
+ * prevent: its UI discovered skills by scanning disk itself, and a skill that
+ * loaded in the session was invisible in the box (and the reverse). Two reads of
+ * the same concept drift the moment one of them is edited. The frontend does NOT
+ * get a second read either — it asks this endpoint, which asks this function.
+ *
+ * `null` workspace = a generation with no workspace (the detached one): the
+ * honest answer is an EMPTY listing, never a throw and never a fallback path —
+ * the same rule the catalog row follows (it simply contributes nothing).
+ *
+ * It lives here rather than in a new module because this file is already the
+ * owner of "the workspace rows a turn reads"; the skill WIRING proper (loading a
+ * body, injecting it) is a later slice's `skill-wiring.ts`.
+ */
+export function skillListingOf(workspacePath: string | null, env: NodeJS.ProcessEnv | undefined): SkillListing {
+  if (workspacePath === null) return { skills: [], rejected: [] };
+  return listSkills(readLayers(workspacePath, { env }));
+}
+
+/**
  * W884 + F3 + W9346: the engine-owned TURN CONTEXT of one session generation.
  *
  * The skill catalog (name + description ONLY) and the workspace MEMORY.md are
@@ -66,7 +91,7 @@ export function turnContextFor(
   if (workspacePath === null) return goal;
   return (): readonly TurnContextRow[] => {
     const rows: TurnContextRow[] = [];
-    const catalog = renderSkillCatalog(listSkills(readLayers(workspacePath, { env })));
+    const catalog = renderSkillCatalog(skillListingOf(workspacePath, env));
     if (catalog !== null) rows.push({ text: catalog, origin: "skill" });
     const memory = memoryContextOf(workspacePath, { env });
     if (memory !== null) rows.push({ text: memory, origin: "memory" });

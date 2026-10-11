@@ -82,7 +82,7 @@ describe("W9348 A · the contract registers the route (the frozen table is not o
   it("moves all four counts by exactly one, and the snapshot registers the TS-only route", () => {
     // ① the frozen anchor, ② the file's count + its array length, ③ the constant
     // the boot assertion reads, ④ the snapshot's own two derived counts.
-    expect(FROZEN_COUNTS.endpoints).toBe(72);
+    expect(FROZEN_COUNTS.endpoints).toBe(73);
     expect(c.count).toBe(FROZEN_COUNTS.endpoints);
     expect(c.endpoints).toHaveLength(FROZEN_COUNTS.endpoints);
     expect(API_ENDPOINT_COUNT).toBe(FROZEN_COUNTS.endpoints);

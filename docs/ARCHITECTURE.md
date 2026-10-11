@@ -27,7 +27,8 @@
 
 | 层 | 包 | 允许依赖 | 说明 |
 |---|---|---|---|
-| **L0** | `packages/core` | **无**（仅 `node:` 标准库） | 语义内核：契约类型 + seam 定义。零 `@celestea/*` 依赖 |
+| **L0** | `packages/core` | **无**（仅 `node:` 标准库 + 同层的共享叶子 `gesture`） | 语义内核：契约类型 + seam 定义。除共享叶子外零 `@celestea/*` 依赖 |
+| **L0** | `packages/gesture` | **无**（零 `@celestea/*`，且禁 Node API） | core 级**共享叶子**：`/` 手势的识别与规范化（纯函数、零 IO）。与 core 同层而非并进 core，因为 `apps/web`（Vite 打包的纯前端）要消费它，而 core 顶层带 `node:fs` —— 见 §1.4 |
 | **L1** | `packages/session`、`packages/llm`、`packages/tools`、`packages/agent-loop`、`packages/workers`、`packages/swarm` | `core` | 每个包实现 core 的一组 seam；**彼此之间不得互相依赖** |
 | **L2** | `packages/runtime` | `core` + 全部 L1 | 装配层：把插件挂进 `Context`，对外只给「已装配的引擎」 |
 | **L3** | `apps/studio` | 任意 `packages/*` | 宿主应用：Hono 路由 / 进程入口 / 输出渲染 |
@@ -65,6 +66,10 @@
 2. **走 `Context` 服务解析**：装配期由 `runtime` 把实现 `provide` 进 `Context`，消费方按类型取，编译期不产生包依赖。
 3. **显式登记依赖矩阵**（最后手段）：同时改三处——`eslint.config.js` 的 `TIER1` 分组、`.dependency-cruiser.cjs` 的 `tier1-no-peer-deps-*` 规则、本文档 §1.1 表格，并在评审说明理由与撤除条件。**三处缺一视为未登记**。
 
+**共享叶子的出口（不是第四种横向依赖）**：纯函数**语法**（字符集、正则、解析）不属于任何 seam，
+却要同时被前端消费时，落到零依赖的共享叶子包（`packages/gesture`），而不是 core——
+core 顶层带 `node:fs`，Vite 打包进浏览器即炸。它与 core 同层，两边都可以依赖它。
+
 ### 1.5 检查器落点
 
 | 规则 | ESLint（`pnpm lint`） | dependency-cruiser（`pnpm lint:arch`） |
@@ -86,6 +91,7 @@
 | 包 | 一句话职责 | 公开入口 |
 |---|---|---|
 | `packages/core` | 冻结契约类型 + 六个 seam 定义 + 事件总线 + JSON/脱敏/路径工具；**零实现、零依赖** | `src/index.ts` |
+| `packages/gesture` | `/` 手势的识别与规范化：`parseSlashGesture`（带 kind 的纯函数）+ 三种 kind 的名字字符集（`SKILL_NAME_PATTERN` 的唯一定义处）；**零依赖、零 Node API**，前端与后端共用同一份 | `src/index.ts` |
 | `packages/session` | `SessionLog` 的实现（内存/JSONL 持久化）、日志回放与修复、`turn-<n>` 单调计数、两套消息投影 | `src/index.ts` |
 | `packages/llm` | `Llm` 的实现：OpenAI 兼容传输、SSE 帧解析、usage 归一、三档超时、provider profile 解析 | `src/index.ts` |
 | `packages/tools` | `Tool` 与 `ToolGuard` 的实现与注册表：工具 spec、guard 链、dispatch | `src/index.ts` |

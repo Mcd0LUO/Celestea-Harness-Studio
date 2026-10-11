@@ -121,7 +121,7 @@ if (lastInjectedText(events, row.origin) !== row.text) { selected.push(row); con
 
 ### 3.2 触发解析：一份纯函数，两端共用
 
-新增 `packages/core/src/skill-gesture.ts`：
+手势解析函数已建在 `packages/gesture`（`@celestea/gesture`，composer-surface §7 的最终落点：core 顶层引用 node API，前端依赖会炸）：
 
 - **只认行首**的 `/{名字}`。与 `commands/index.ts` 的 `isCommand`（`line.startsWith('/')`）语义一致。**不采用 DSH 的"词边界可命中句中任意位置"**——那个正则在聊天文本里会误吃路径与分数（`3/4`、`a/b`），而本仓 `/` 的既有语义就是行首（`@` 才是任意位置）。
 - 名字按本仓既有的 `SKILL_NAME_PATTERN` 校验（`packages/core/src/skills.ts` 已导出）。
@@ -221,7 +221,7 @@ Relative paths in this skill are relative to this base directory.
 
 | 步骤 | 文件 |
 |---|---|
-| 1. 手势解析 | 新增 `packages/core/src/skill-gesture.ts` + `packages/core/src/index.ts` 导出（**切片 3、4 都要用它，所以在这里建**） |
+| 1. 手势解析 | **已由 composer-surface §7 先行交付**：`packages/gesture` 的 `parseSlashGesture` / `canonicalSlash`（切片 3、4 都消费它） |
 | 2. 技能清单缓存 | 新增 `apps/web/src/ui/commands/skills.ts`（按 session 拉取 + 缓存，形态照 `commands/files.ts`） |
 | 3. 技能组接入 | `apps/web/src/ui/commands/index.ts` 的 `commandProvider`——把技能数组并入，带 `group` 标记（分组能力见方案一 §1） |
 | 4. 放行判断 | `apps/web/src/ui/commands/index.ts` 的 `dispatchCommand` 未知分支改成"先查技能清单"（放行缝见方案一 §2） |
@@ -235,14 +235,14 @@ Relative paths in this skill are relative to this base directory.
 两者都没有        → renderInfoBlock 报错   → 消费（保持现有行为）
 ```
 
-放行判断用**切片 2 第 1 步建的 `matchSkillGesture`**，不用 `parseLine`（理由见 §3.2）。
+放行判断用**切片 2 第 1 步建的 `matchSkillGesture`**（= `parseSlashGesture` + 技能清单裁决；裸 token 的语法 kind 一律是 `command`，`/review` 与 `/help` 语法不可区分，清单裁决在调用方——这是 gesture 包的既定语义），不用 `parseLine`（理由见 §3.2）。
 
 **同步性纪律（审计发现）**：放行判定**只读同步缓存**，缓存 miss 按「未命中」处理——`clearInput` 在 `dispatchCommand` resolve 之前执行，若放行判定等网络拉清单，会出现「输入框已清空、消息还没发出去」的可见间隙。清单的新近性由 host 侧再校验兜底（§3.2 未命中注入失败行），技能的识别可靠性不依赖前端这一次判断。
 
 **清单缓存时效**：`commandProvider` 是同步函数会读到过期清单。做法是**在 `onPaneChange`（会话切换）时失效重拉**，并在补全首次打开且缓存为空时异步补拉一次；`PopupProvider` 本来就允许返回 Promise，`showCompletion` 已经 `await`，popup 引擎自带 seq 竞态守卫，不需要为异步额外改造。
 
 **测试**：
-- `skill-gesture` 解析矩阵：正常 / 无参 / 名字非法（大写、下划线、路径穿越）/ 多行 task / 非行首的 `/xxx` 不匹配。
+- `parseSlashGesture` 解析矩阵已在 `packages/gesture/src/slash-gesture.test.ts` 交付（正常 / 无参 / 名字非法 / 多行 / 非行首）；本切片只补「技能清单裁决」一侧的用例。
 - 命令矩阵：`/run`（命令，消费）/ `/review`（技能，放行）/ `/ghost`（都不是，报错）/ 既有四条命令不回归。
 - 技能组渲染：技能项出现在"技能"组下、带描述（渲染本身的断言在方案一 §1.5）。
 - 变异负控制：把放行改成 `return true` → 端到端测试必须红（技能正文永远进不了日志）。

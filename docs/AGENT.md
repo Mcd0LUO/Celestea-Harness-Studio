@@ -176,7 +176,7 @@ check:comment-refs → check:json-dup-keys → test → check:web`。
 ```bash
 # 1) 干净树 + 全量门禁绿
 pnpm check
-# 2) 11 个 manifest 一起升版本（root + 10 个可发布包）
+# 2) 12 个 manifest 一起升版本（root + 11 个可发布包）
 sed -i 's/"version": "2.7.2"/"version": "2.7.3"/' package.json apps/*/package.json packages/*/package.json
 git commit -m 'chore(release): 2.7.3'
 # 3) 先打 tag，再构建 —— 版本号由 git describe --tags 派生

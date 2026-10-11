@@ -185,7 +185,8 @@ P0 的契约数字**一处不动**：`contracts/endpoints.json` 的 `count` 保�
 - **凭据**：`env` / `headers` 的值写 `$VAR` 引用进程环境——**默认 MCP 配置里没有明文凭据**，凭据住在环境里。任何响应/日志**永不回显** `env`/`headers`（日志只留 server 名与工具名）。
 - **只走引用式（D3 定稿）**：不为明文凭据开字段。若哪天要开，它要连带改一条现成不变量——`tests/contracts.test.ts:280` 断言「`providers.json` 是唯一含密钥的数据文件」，新增含密钥文件必须同时改那条断言与 `docs/data-files.md`；更重要的理由在 §7.2。
 - **复杂度对照**（按项目契约的引用式是**更少**的机制，不是更多）：引用式只需要「解析 + 缺引用就响亮失败」两件事，`mcp.json` 保持 0644，而且**不需要对外投影**——里面本来就没有要藏的东西。明文式则要把 `providers.json` 的四件机制复制一份：`0600`、原子写（tmp → 0600 → fsync → rename）、畸形 JSON 硬错误、**白名单构造的对外视图**（`ProviderPublicView` 连 `api_key` 这个键都不存在，见 `docs/data-files.md:170`），外加「日志与响应永不回显」的纪律和那条「唯一含密钥文件」断言的改动。
-- 本仓的引用式先例已经存在：`Profile` 用 `api_key_env` / `api_key_file` 两个字段表达凭据，启动时把 key **只注入内存**（`packages/runtime/src/profile.ts:11`、`docs/data-files.md:194`）。
+- 本仓的引用式先例已经存在：`Profile` 用 `api_key_env` / `api_key_file` 两个字段表达凭据（`packages/runtime/src/profile.ts:11`）。
+  启动时把 key **只注入内存**（先例见 `docs/data-files.md:194`）。
 - 引用式的代价不在代码而在**产品**：应用内没有地方存一个新的 token，得由用户自己在环境变量或密钥文件里放——这是一个可陈述的限制，不是一个隐藏的坑。
 
 ### 4.2 作用域与合并

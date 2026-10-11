@@ -33,7 +33,7 @@
  * `createStudioApp({ runtime })` — no handler changes, no route changes.
  */
 
-import type { AskUserQuestionAnswerItem, AskUserQuestionItem, ImageRef, InjectionPlacement, Statusline } from "@celestea/core";
+import type { AskUserQuestionAnswerItem, AskUserQuestionItem, ImageRef, InjectionPlacement, SkillListing, Statusline } from "@celestea/core";
 // W2066: `EngineProfile.request_format` is typed by the runtime Profile, so the host
 // view and providers.json can never disagree about which protocols are declarable.
 import type { Profile } from "@celestea/runtime";
@@ -524,6 +524,22 @@ export interface RuntimeAdapter {
    * while composing that very session — peeking keeps that non-recursive).
    */
   sessionTools?(session: string | null): ToolInfo[];
+  /**
+   * W9350: the skills ONE session can load (`GET /api/sessions/{id}/skills`) —
+   * the frontend needs the list to offer `/{skill}`, and it may only get it from
+   * the engine's own read, never from a host-side disk scan (that is how "the UI
+   * sees it, the session can't load it" happens).
+   *
+   * Returns core's own `SkillListing` rather than a second view type: the
+   * handler projects the four wire keys, so the discovery contract stays
+   * `packages/core/src/skills.ts`’s and nothing here can drift from it.
+   *
+   * Optional, for the same reason [sessionTools] is: an adapter that owns no
+   * workspace resolution (the fake engine) has nothing to enumerate, and the
+   * handler then answers the empty listing rather than inventing a session's
+   * skills. `null` session = the detached generation, which likewise has none.
+   */
+  sessionSkills?(session: string | null): SkillListing;
   /**
    * W725: the session's OWN model-visible context (`GET /api/sessions/{id}/
    * context`). The instance is composed on demand, exactly like activate does;

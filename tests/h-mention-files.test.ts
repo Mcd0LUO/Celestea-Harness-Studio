@@ -85,6 +85,18 @@ describe('H · @提及工作区文件（只传路径）', () => {
     expect(cmdCss(), '目录行有独立样式').toContain('.cmd-row.dir');
   });
 
+  // composer-surface §1.5③：@ 模式的 items **不传 group** ⇒ 弹层里不得出现任何组头。
+  // 为什么钉在**真实路径**上（而不是引擎级单测）：只有走真 listMentions/files.ts，
+  // 「哪天有人给 @ 模式也传了 group」才会真的把这条断言打红。
+  it('打 @ 不出现任何组头（@ 模式不传 group）', async () => {
+    const { input } = await boot();
+    input.value = '@';
+    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    await flush();
+    expect(rowLabels(), '前置：@ 行照常渲染').toEqual(['src/', 'README.md']);
+    expect(doc.querySelectorAll('#cmdPopup .cmd-group').length, '★ @ 模式不得出现任何组头').toBe(0);
+  });
+
   it('逐级进入：@src/ 列出该目录内容', async () => {
     const { input } = await boot();
     input.value = '@src/';

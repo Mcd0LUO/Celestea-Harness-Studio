@@ -21,6 +21,12 @@ export interface PopupItem {
   meta?: string;
   /** 目录项：视觉区分（文件/目录不同样式）。 */
   isDir?: boolean;
+  /**
+   * 分组名（composer-surface §1）：**渲染装饰**，不进 `items` 索引。
+   * renderList() 遍历时，若当前项的 group 与上一项不同 ⇒ 先插一个 `.cmd-group` 组头。
+   * 不传（@ 文件模式）⇒ 不出现任何组头。
+   */
+  group?: string;
   /** 选中时交给调用方的值。 */
   value: string;
 }
@@ -76,7 +82,17 @@ function alreadyConsumed(e: CompletionKeyLike): boolean {
 function renderList(): void {
   if (!box) return;
   const off = document.createElement('div');
+  let prevGroup: string | undefined;
   items.forEach((item, i) => {
+    // ★ composer-surface §1.3：分组头是**渲染装饰**，不进 items ⇒ active 索引、
+    //   (active ± 1) % items.length、choose(active)、.cmd-row.active 四处全都不用动，
+    //   ↑↓ 因此只能逐项移动、不可能「跳组」。空串当作「没分组」（否则画出一个空盒）。
+    if (item.group !== undefined && item.group !== '' && item.group !== prevGroup) {
+      prevGroup = item.group;
+      const head = el('div', 'cmd-group', item.group);
+      head.setAttribute('role', 'presentation'); // listbox 里它不是 option：别让 AT 念成一个候选
+      off.appendChild(head);
+    }
     const row = el('div', 'cmd-row' + (i === active ? ' active' : '') + (item.isDir ? ' dir' : ''));
     row.appendChild(el('span', 'cmd-name', item.label));
     row.appendChild(el('span', 'cmd-desc', item.desc));

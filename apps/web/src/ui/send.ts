@@ -63,12 +63,34 @@ export function dispatchSend(text: string, mode: SubmitMode = 'steer'): void {
   // 命令消费后输入框必须像正常发送一样清空（否则 `!echo hi` 会留在框里；
   // 命令路径在下面的 ctx.draft='' / clearInput() 之前 return，所以在这里自己做）。
   // 附件/引用**不动**：命令与它们无关，误清会丢用户已挂的文件。
+  //
+  // 「发送前变换缝」（设计 docs/feature/composer-surface.md §2）：dispatchCommand 的
+  // Promise<boolean> 从此**参与发送决策** —— 返回 false（放行）时，这一行原样交给
+  // 正常发送路径，不再被无声吞掉。接口早就设计了这个返回值，此前没人用。
+  //
+  // 已知取舍（文档已记，此处不消除）：清空输入框发生在命令**跑完之前**，而放行是
+  // **异步**发生的。所以 `t` 与 `pending` 都必须是决策那一刻的**闭包快照** ——
+  // 不能回读输入框（已被清空），也不在放行时刻重算待发条数。
   if (isCommandLike(t)) {
     clearInput();
     ctx.draft = '';
-    void dispatchCommand(t, ctx);
+    void dispatchCommand(t, ctx).then((consumed) => {
+      if (!consumed) sendNormal(ctx, t, mode, pending);
+    });
     return;
   }
+  sendNormal(ctx, t, mode, pending);
+}
+
+/**
+ * 正常发送 —— `isCommandLike` 分支之后的**全部**逻辑，逐字搬运、不改语义：
+ * worker 专线 → 运行中带附件拒绝 → 插话/排队 → 空闲开新轮。
+ *
+ * `pending` 由 dispatchSend 传入（决策那一刻的待发条数）而不是在这里重算：
+ * 放行路径中间隔着一个 await，重算会把「这条发不发」与「等一会儿还剩几个附件」
+ * 耦在一起，而搬运前的原实现用的就是同一个值。
+ */
+function sendNormal(ctx: SessionPane, t: string, mode: SubmitMode, pending: number): void {
   // W866：worker 会话是**可对话**的（不再是只读面板）。它有自己的串行收件箱，
   // 没有「本会话的 busy 槽」，所以这里不看 ctx.streaming：一律走 worker 专线。
   if (ctx.kind === 'worker') {

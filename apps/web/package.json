@@ -20,6 +20,7 @@
     "check:version": "node tools/check-version.mjs"
   },
   "dependencies": {
+    "@celestea/gesture": "workspace:*",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "6.0.0",
     "highlight.js": "^11.11.1",

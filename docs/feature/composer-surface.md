@@ -162,19 +162,23 @@ if (isCommandLike(t)) {
 | 解析者 | 位置 | 对「什么算 `/` 触发」的定义 |
 |---|---|---|
 | `isCommand` / `parseLine` | `apps/web/src/ui/commands/index.ts` | 补全条件 `line.startsWith('/') && !/\s/.test(line.slice(1))`；`parseLine` **不校验字符集**（`name = body.slice(0, sp)`） |
-| 技能侧计划的 `matchSkillGesture` | `packages/core/src/skill-gesture.ts`（见 [`skill-command.md`](./skill-command.md) §3.2） | 行首 `/{名字}` + `SKILL_NAME_PATTERN` |
+| 技能侧计划的 `matchSkillGesture` | 并入本节的 `parseSlashGesture`（[`skill-command.md`](./skill-command.md) §3.2 只消费 `kind === "skill"` 那一支） | 行首 `/{名字}` + `SKILL_NAME_PATTERN` |
 
 再加 MCP 就是第三份。**这不是洁癖**：规范形态（`/skill:<name>`、`/mcp:<server>`）必须由**同一个函数**产出，否则补全框写出的形状与 host 认的形状会分叉——就是「亮了却没注入」那种失效形状（[skill-command.md](./skill-command.md) §1.4）。
 
 **设计**：
 
-- **一份纯函数，放 `core`**（前后端唯一共同下层；`apps/web` 不经过 `runtime`）。签名 `parseSlashGesture(line) → { kind, raw, canonical, name, rest, end } | null`，`kind ∈ { "command" | "skill" | "mcp" }`。
+- **一份纯函数，放 `packages/gesture`（`@celestea/gesture`）**——零依赖的共享叶子包，**不是 core**（落地原因见本节末「落地」）。签名 `parseSlashGesture(line) → { kind, raw, canonical, name, rest, end } | null`，`kind ∈ { "command" | "skill" | "mcp" }`。
 - **只认行首**：句中 `/` 会误吃路径与分数（`3/4`、`a/b`）；`@` 才是任意位置。
 - **它不知道清单**：「这个名字是不是真技能 / 真 server」仍由调用方用各自清单判断——函数零依赖、可单测。这条性质来自技能侧的设计，保留。
 - **字符集按 kind 查表**：命令名 / `SKILL_NAME_PATTERN` / server 名（`^[a-z0-9][a-z0-9_-]{0,31}$`，见 [mcp-client.md](./mcp-client.md) §4.1）。**一张表 + 一份实现**。
 - **规范形态由它产出**：补全框选中时调用方用 `canonical` 改写草稿（技能 `/skill:<name>`、MCP `/mcp:<server>`、命令保持 `/name`）。
 - **迁移与记账**：既有 `isCommand` / `parseLine` 要么并入、要么显式登记豁免（照 `ARCH_EXCEPTIONS` 的记账风格逐个写明理由）。结构断言从「不得有第二份 `/{name}` 正则」升级为「**不得有第二份 `/` 触发解析**（豁免清单除外）」。
-- **落地注意（审计发现）**：`apps/web` 今天对 `@celestea/*` **零依赖**——解析函数放 `core` 意味着新增一条 `apps/web → @celestea/core` 依赖边。实施前先验证 `lint:arch` 允许该边、且 core 不引用 Node API（否则前端打包即炸）；若 core 不干净，备选是把这一个纯函数放进极小的共享包，而不是为它拖进整个 core。
+- **落地（已定，不再是备选）**：这份纯函数住在 **`packages/gesture`（`@celestea/gesture`）**——一个**零 `@celestea/*` 依赖、零 Node API 的共享叶子包**，而不是 `core`。
+  - **为什么不能放 core**：`packages/core` 顶层 import `node:fs` / `node:path`（`celestea-sources.ts`、`skills.ts` 等），而 `apps/web` 不经过 `runtime`、由 Vite 打包成浏览器产物——前端一旦依赖 core，`node:fs` 就跟着进了浏览器包，**打包即炸**。
+  - **连带迁移**：`SKILL_NAME_PATTERN` 的唯一定义从 `packages/core/src/skills.ts` 迁到 `gesture`；`skills.ts` 从 `gesture` 导入后再原样导出，`@celestea/core` 的公开面与既有 `import { SKILL_NAME_PATTERN } from "@celestea/core"` 的写法一字不变（否则「技能名长什么样」会有两份正则，正是本节要消灭的分叉）。
+  - **登记三处**（与 `ARCHITECTURE.md` §1.4 的「三处缺一视为未登记」同纪律）：`eslint.config.js` 的 `SHARED_LEAVES`、`.dependency-cruiser.cjs` 的 `SHARED_LEAVES`、`ARCHITECTURE.md` §1.1 层级表 + §2.1 职责。
+  - **结构性后果**：新增 `apps/web → @celestea/gesture` 这一条边（此前 `apps/web` 对 `@celestea/*` 零依赖）。它的合法性由 `tests/slash-gesture-single-source.test.ts` 兜底——该门禁同时断言「apps/web 只依赖 gesture 一个 `@celestea` 包」与「全仓只许有一份 `/` 触发解析（豁免逐条记账）」。
 
 **验收**：
 

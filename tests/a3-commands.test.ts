@@ -239,3 +239,80 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
     expect(doc.querySelector('.msg.info')?.textContent ?? '').toContain('没有这个命令');
   });
 });
+
+/**
+ * 「发送前变换缝」（设计 docs/feature/composer-surface.md §2）：dispatchCommand 的
+ * Promise<boolean> 从此**参与发送决策** —— 返回 false（放行）时这一行走完整正常
+ * 发送路径，不再被命令分支的无条件 return 吞掉。
+ *
+ * 主场景只有一个：**放行的命令，那一行真的到达 host**。判据全落在后果上
+ * （发了没有 / 发的什么 / 屏幕上看得见什么），不钉「怎么发的」。
+ *
+ * 两条临时命令（`eat` 只消费 / `reheat` 放行）走**真实注册缝**登记：被测的是
+ * dispatchSend 拿到返回值之后的分派决策，不该靠改内置命令表来制造场景。
+ */
+describe('A3 · 发送前变换缝（放行 / 只消费 的分派决策）', () => {
+  interface RegistryMod {
+    registerCommand(cmd: { name: string; desc: string; args: string; run(): boolean | Promise<boolean> }): void;
+  }
+  interface Sent { input: string }
+
+  beforeEach(() => { resetHarness(); });
+  afterEach(() => { vi.unstubAllGlobals(); doc.body.replaceChildren(); });
+
+  /** 装会话 + 两条临时命令，并记录每一次 POST /api/turn 真正带出去的文本与命令被调用的名字。 */
+  async function boot(): Promise<{ sent: Sent[]; ran: string[]; send: SendMod }> {
+    const ctxMod = (await import(/* @vite-ignore */ at('ui/viewctx.ts'))) as ViewCtxMod;
+    ctxMod.initViewCtx();
+    ctxMod.ensurePane('ws/s1', 'session', '甲会话');
+    ctxMod.activatePane('ws/s1', 'session', '甲会话');
+    const sent: Sent[] = [];
+    vi.stubGlobal('fetch', async (url: unknown, init?: { body?: unknown }) => {
+      if (String(url).includes('/api/turn')) {
+        let input = '';
+        try {
+          input = String((JSON.parse(String(init?.body ?? '{}')) as { input?: unknown }).input ?? '');
+        } catch {
+          input = '<body 解析失败>';
+        }
+        sent.push({ input });
+        return reply(200, { ok: true, turn: 1 });
+      }
+      return reply(200, { ok: true });
+    });
+    const ran: string[] = [];
+    const reg = (await import(/* @vite-ignore */ at('ui/commands/registry.ts'))) as RegistryMod;
+    reg.registerCommand({ name: 'eat', desc: '只消费这一行', args: '', run: () => { ran.push('eat'); return true; } });
+    reg.registerCommand({ name: 'reheat', desc: '放行这一行', args: '', run: () => { ran.push('reheat'); return false; } });
+    const send = (await import(/* @vite-ignore */ at('ui/send.ts'))) as SendMod;
+    return { sent, ran, send };
+  }
+
+  it('放行（run 返回 false）的命令走完整正常发送路径：原样到达 host，且只发一次', async () => {
+    const { sent, ran, send } = await boot();
+    send.dispatchSend('/reheat 放行我');
+    await flush(12);
+    expect(ran, '命令本身必须真的跑了（否则这条断言会空转）').toEqual(['reheat']);
+    expect(sent, '放行必须真的发出去，不能被命令分支无声吞掉').toHaveLength(1);
+    // 发出去的是**闭包捕获的原值**：此刻输入框早已被 clearInput() 清空，
+    // 回读输入框只会拿到空串。
+    expect(sent[0]?.input).toBe('/reheat 放行我');
+    expect(doc.querySelector('.msg.user .content')?.textContent).toBe('/reheat 放行我');
+  });
+
+  it('只消费（run 返回 true）的命令不发 /api/turn', async () => {
+    const { sent, ran, send } = await boot();
+    send.dispatchSend('/eat 别发我');
+    await flush(12);
+    expect(ran).toEqual(['eat']);
+    expect(sent, '已消费的命令不许再走一遍正常发送').toHaveLength(0);
+  });
+
+  it('非命令行照旧同步走正常发送路径（分派改造不牵连普通发送）', async () => {
+    const { sent, ran, send } = await boot();
+    send.dispatchSend('普通一句话');
+    await flush(12);
+    expect(ran, '普通文本不经过任何命令').toEqual([]);
+    expect(sent.map((s) => s.input)).toEqual(['普通一句话']);
+  });
+});

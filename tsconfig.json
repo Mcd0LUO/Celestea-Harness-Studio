@@ -5,6 +5,9 @@
       "@celestea/core": [
         "./packages/core/src/index.ts"
       ],
+      "@celestea/gesture": [
+        "./packages/gesture/src/index.ts"
+      ],
       "@celestea/session": [
         "./packages/session/src/index.ts"
       ],
