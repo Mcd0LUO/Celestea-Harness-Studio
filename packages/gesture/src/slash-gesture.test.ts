@@ -75,6 +75,48 @@ describe("parseSlashGesture · 只认行首", () => {
   });
 });
 
+describe("parseSlashGesture · 行首锚点（判的是「行首」，不是「行里有 /」）", () => {
+  /**
+   * 为什么单列一组：`3/4` / `a/b` 这类既有用例在 `startsWith` 被换成 `includes` 的
+   * 变异下**仍然返回 null**（`readToken` 从 index 1 起读，`a/b` 的尾巴 `b` 不是合法命令名），
+   * 于是那批用例对「锚点写错」完全失明——B3 实测：16 条全绿。
+   *
+   * 下面这批的共同形状：**首个 token 不是 `/`，但句中有一模一样的合法命令形态**。
+   * 锚点一旦从「行首」松成「行内」，它们会立刻被解析成手势。
+   *
+   * ⚠️ **哪几条真正承载这个变异（实测 startsWith→includes 逐条探过，别删这几条）**：
+   * `"see a/b for details"`、`"ask /run this"`、`"to /mcp:memory"`、`"foo /skill:review"`、
+   * `"foo /mcp:memory"` —— 共同点是**去掉首字符后剩下的 token 本身就是个合法名字**
+   * （`ee` / `sk` / `o` / `oo`）。其余各条（`"x/help"`、`"x /help"`、`"run/help"`、
+   * `"docs/mcp:memory"`、行首空白那三条）在该变异下**仍然绿**——它们守的是别的变异
+   * （例如把 readToken 改成从 index 0 起读、或让解析先 trim），不是这条。
+   */
+  it("首个 token 不是 / 时一律 null，哪怕句中有一模一样的合法命令形态", () => {
+    for (const line of [
+      "x/help",              // 无空格的紧贴形态
+      "x /help",             // 有空格：斜杠跟在词后，首 token 是 "x"
+      "run/help",            // 合法命令前缀 + 斜杠
+      "see a/b for details", // 句中分数/路径；"ee" 恰是合法命令名（承载锚点变异）
+      "ask /run this",       // 同上，"sk" 是合法命令名
+      "to /mcp:memory",      // 同上，"o" 是合法命令名
+    ]) {
+      expect(parseSlashGesture(line), line).toBeNull();
+    }
+  });
+
+  it("句中出现规范形态（/skill: /mcp:）也不是手势", () => {
+    for (const line of ["foo /skill:review", "foo /mcp:memory", "docs/mcp:memory", "prefix/skill:review"]) {
+      expect(parseSlashGesture(line), line).toBeNull();
+    }
+  });
+
+  it("行首空白之后的 / 同样不是行首（调用方先 trim，end 才等于原行下标）", () => {
+    for (const line of [" /help", "\t/help", "\n/help"]) {
+      expect(parseSlashGesture(line), line).toBeNull();
+    }
+  });
+});
+
 describe("parseSlashGesture · 字符集按 kind 查表", () => {
   it("命令名只收小写字母开头的词（内置四条与将来注册的同一形状）", () => {
     for (const line of ["/Help", "/_help", "/1help", "/help!"]) {

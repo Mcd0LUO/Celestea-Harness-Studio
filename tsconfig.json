@@ -26,6 +26,9 @@
       "@celestea/swarm": [
         "./packages/swarm/src/index.ts"
       ],
+      "@celestea/mcp": [
+        "./packages/mcp/src/index.ts"
+      ],
       "@celestea/runtime": [
         "./packages/runtime/src/index.ts"
       ],

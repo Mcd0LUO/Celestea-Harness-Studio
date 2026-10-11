@@ -7,7 +7,7 @@
  *
  * 分层（详见 docs/ARCHITECTURE.md §1）：
  *   L0 core（零依赖）+ SHARED_LEAVES（core 级共享叶子：零依赖、零 Node API）
- *   L1 session / llm / tools / agent-loop / workers   → 许依赖 core + 共享叶子
+ *   L1 session / llm / tools / agent-loop / workers / swarm / mcp → 许依赖 core + 共享叶子
  *   L2 runtime（装配层）                              → 许依赖 core + 共享叶子 + L1
  *   L3 apps/studio                                    → 许依赖任意 packages
  *   scripts/ 与 tests/ 是工具链，不受分层约束
@@ -16,7 +16,7 @@
  * 而 apps/web（Vite 打包的纯前端）要消费 gesture —— 依赖 core 会把 node:fs 拖进浏览器产物。
  * 它们不出现在 tier1-no-peer-deps-* 与 core-is-leaf 的禁止组里，即「core 与 L1 可以依赖它」。
  */
-const TIER1 = ["session", "llm", "tools", "agent-loop", "workers", "swarm"];
+const TIER1 = ["session", "llm", "tools", "agent-loop", "workers", "swarm", "mcp"];
 const TIER2 = ["runtime"];
 /** core 级共享叶子包（零依赖、零 Node API）：不在 tier1-no-peer-deps-* 与 core-is-leaf 的禁止组里。 */
 const SHARED_LEAVES = ["gesture"];

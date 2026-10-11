@@ -28,6 +28,10 @@ const ORIGIN_LABEL: Record<Exclude<SessionEventOrigin, "user">, string> = {
   // matches the shipped i18n key the frontend already renders for `goal`
   // (apps/web/src/i18n/locales/*/chat.ts `chat.inbox.goal`).
   goal: "目标",
+  // W9351: a skill body the human explicitly asked for (`/review …`). It must
+  // read as an INJECTION rather than as the user's own words — but it is not the
+  // catalog either, hence its own label instead of a reuse of `skill`.
+  "skill-invocation": "技能调用",
 };
 
 /** The label of a non-user origin ('user' never reaches here). */

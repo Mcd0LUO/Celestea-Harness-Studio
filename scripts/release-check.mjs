@@ -11,9 +11,9 @@
  * Checks:
  *   1. webdist freshness — build-meta sha/commits/version of the staged webdist
  *      must equal apps/web/dist's;
- *   2. manifests — the 11 publishable packages: private:false, publishConfig
+ *   2. manifests — the 12 publishable packages: private:false, publishConfig
  *      access public, non-empty files, and every bin target exists + is +x;
- *   3. versions — root and all 11 packages share one version;
+ *   3. versions — root and all 12 packages share one version;
  *   4. tarball inspection — `pnpm pack` each package and assert no `workspace:`
  *      dependency survives, no source/test/secret paths ship, no credential
  *      pattern appears in any member, AND every REQUIRED path plus every
@@ -31,7 +31,7 @@ import { readTarball, readText } from "./lib/tar.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** The 11 independently published packages (dir relative to the repo root). */
+/** The 12 independently published packages (dir relative to the repo root). */
 const PACKAGES = [
   { dir: "apps/cli", name: "celestea-agent" },
   { dir: "packages/gesture", name: "@celestea/gesture" },
@@ -42,6 +42,7 @@ const PACKAGES = [
   { dir: "packages/agent-loop", name: "@celestea/agent-loop" },
   { dir: "packages/workers", name: "@celestea/workers" },
   { dir: "packages/swarm", name: "@celestea/swarm" },
+  { dir: "packages/mcp", name: "@celestea/mcp" },
   { dir: "packages/runtime", name: "@celestea/runtime" },
   { dir: "apps/studio", name: "@celestea/studio" },
 ];
@@ -265,7 +266,7 @@ function main() {
   checkVersions();
   checkTarballs();
   if (failures.length === 0) {
-    console.log("[release-check] OK — webdist fresh, 11 manifests publishable, versions aligned, tarballs clean");
+    console.log("[release-check] OK — webdist fresh, 12 manifests publishable, versions aligned, tarballs clean");
     return 0;
   }
   console.error(`[release-check] FAILED (${failures.length})`);

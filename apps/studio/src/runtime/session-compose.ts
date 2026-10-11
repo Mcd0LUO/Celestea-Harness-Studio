@@ -72,7 +72,8 @@ import {
 } from "@celestea/tools";
 import { createImageDowngradeLlm, resolveLlmMode, type ImageDowngradeInfo, type Llm as ProviderLlm } from "@celestea/llm";
 import { withAttachments } from "./attachments-llm.js";
-import { goalNotice, goalTurnContext, turnContextFor } from "./goal-wiring.js";
+import { goalNotice, goalTurnContext, mergeAfterInputs, turnContextFor } from "./goal-wiring.js";
+import { skillInvocation } from "./skill-wiring.js";
 
 /** W510 resource caps (overridable through the adapter options or the env). */
 export const MAX_LIVE_SESSIONS = 4;
@@ -360,7 +361,12 @@ export class SessionComposer {
     // rebuilt at every turn start (goal-wiring.ts holds the reasoning — the
     // composer sits exactly at its 450-line cap). A detached generation has no
     // session directory and no workspace, so it contributes nothing.
-    const notice = goalNotice(sessionId, dir);
+    // W9351: the after-input lane is ONE source, so the goal notice and the
+    // `/skill:<name>` body cannot order themselves (skill-wiring.ts holds that half).
+    const afterInput = mergeAfterInputs(
+      goalNotice(sessionId, dir),
+      skillInvocation(workspace === null ? null : workspace.path, this.opts.env),
+    );
     const turnContext = turnContextFor(workspace === null ? null : workspace.path, goalTurnContext(sessionId, dir), this.opts.env);    const reader = this.opts.grants;
     const read = reader?.read(sessionId, dir) ?? { grants: EMPTY_GRANTS, warnings: [] };
     // W728: the ledger must exist before the Llm wrapper (every step books).
@@ -453,10 +459,10 @@ export class SessionComposer {
       inbox: hooks.inbox ?? createSessionInbox(),
       ...(hooks.onInjected === undefined ? {} : { onInjected: hooks.onInjected }),
       ...(turnContext === undefined ? {} : { turnContext }),
-      // W9346: the change notice reaches the model AFTER the turn's input row,
-      // which is inside the loop — so it is a compose-level option, not a loop
-      // binding this factory sets by hand.
-      ...(notice === undefined ? {} : { afterInput: notice }),
+      // W9346 + W9351: the change notice and the skill body both reach the model
+      // AFTER the turn's input row, which is inside the loop — so it is a
+      // compose-level option, not a loop binding this factory sets by hand.
+      ...(afterInput === undefined ? {} : { afterInput }),
       ...(extraction === undefined ? {} : { extraction }),
       loopFactory: (bindings) => {
         // W806: the turn boundary is the ONLY place the disclosed set may move.

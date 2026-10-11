@@ -47,6 +47,8 @@ const EXEMPT: Record<string, string> = {
   "apps/web/src/ui/enhance/file-link.ts": "文件链接的绝对路径判定，与输入行的 / 手势无关",
   "apps/studio/src/store/workspaces.ts": "工作区路径的平台判定（win32 / POSIX），与输入行的 / 手势无关",
   "apps/studio/src/handlers/fs.ts": "同上（注释里记着 W885 那条 startsWith('/') 的历史坑）",
+  "apps/studio/src/runtime/skill-wiring.ts":
+    "parseSlashGesture 的消费方（切片 3 的 host 注入）；命中的那段文本是注释里对 isCommand 形态的引用，不是第二份解析",
 };
 
 /** 扫描范围：产品源码。不含 tests/（断言自己会写这些字面量）与 *.test.ts。 */

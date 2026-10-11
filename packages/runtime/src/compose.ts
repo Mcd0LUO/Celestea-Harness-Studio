@@ -57,7 +57,7 @@ import {
   type ToolRegistry,
 } from "@celestea/core";
 import type { WorkerDrivers } from "@celestea/workers";
-import { RETENTION_SERVICE, type AfterInputRow, type ToolResultRetention } from "@celestea/agent-loop";
+import { RETENTION_SERVICE, type AfterInputSource, type ToolResultRetention } from "@celestea/agent-loop";
 import { agentConfigFromProfile } from "./agent-config.js";
 import { createToolResultRetention, retentionSettingsFromEnv } from "./retention.js";
 import { ComposeError } from "./errors.js";
@@ -188,8 +188,12 @@ export interface ComposeConfig {
    *
    * The provider is the HOST's because only the host owns the session directory
    * the notice is stored in (studio: `<session-dir>/goal.json`).
+   *
+   * W9351: the same lane also carries the `/skill:<name>` body, so the host hands
+   * over ONE [AfterInputSource] that answers with a plan instead of two narrower
+   * callbacks — two callbacks on one lane would be two orderings to keep in sync.
    */
-  afterInput?: () => AfterInputRow | null | undefined;
+  afterInput?: AfterInputSource;
   /** Host teardown hooks (process kills) — run once, in order, by `shutdown`. */
   shutdownHooks?: readonly ShutdownHook[];
   /** Injectable clock (status tracker rate window). */

@@ -79,6 +79,11 @@ pnpm audit 是**诊断**，不是门禁。
 - apps/studio：hono、@hono/node-server。
 - apps/web（出货）：highlight.js、katex（动态 chunk）、marked。
 - packages/tools：无外部运行时依赖（W0 移除了头解析第三方库，改仓内 attachments/image-header.ts）。
+- packages/mcp：`@modelcontextprotocol/sdk`（C1a，见 [feature/mcp-client.md](feature/mcp-client.md) D2）。**本仓第一个 L1 包的外部运行时依赖**，理由与边界：
+  1. 协议面（initialize / `tools/list` 分页 / `tools/call` / `tools/list_changed` / Streamable HTTP / stdio 子进程）自己重写一遍不现实，且必然漂移；
+  2. 它**只出现在 `packages/mcp/src/sdk-transport.ts` 一个文件里**，关在 `McpTransport` 缝（`packages/mcp/src/transport.ts`）后面 —— 生命周期、退避与工具适配因此能用 fake transport 测试，不起进程、不开 socket；
+  3. 它的传递依赖（zod / express / hono / jose 等）只有 SDK 自己 import 的路径才会被加载；本包不直接依赖其中任何一个。
+  **升级验证协议**：本包的测试全部用 fake transport（不起真进程），所以升级 SDK 的机械判据是 ① `pnpm --dir packages/mcp run typecheck` 与根 `pnpm typecheck` 绿；② `packages/mcp/src/*.test.ts` 全绿；③ 对着一个**真实** stdio server 做一次人工冒烟（与 §6 同源，不进 `pnpm check`：那类验证需要活体服务，不确定性不属于门禁面）。
 - packages/core、session、llm、agent-loop、workers、runtime：无外部运行时依赖。
 - 开发工具：typescript、vite、esbuild、vitest、jsdom、eslint、typescript-eslint、dependency-cruiser、
   tsx、@types/node、@types/marked、@vitest/coverage-v8。

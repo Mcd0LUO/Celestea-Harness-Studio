@@ -14,6 +14,7 @@ import {
 import { activePane, onPaneChange, type SessionPane } from '../viewctx';
 import { renderInfoBlock } from '../messages';
 import { listMentions } from './files';
+import { isSkillGesture, refreshSkills, reloadSkills, skillItems, skillsCached } from './skills';
 import { t } from '../../i18n';
 
 export { onGoalChange, goalOf, renderGoalBar, syncGoalOnActivate } from './goal';
@@ -60,6 +61,13 @@ export function mentionToken(line: string, caret: number): { start: number; afte
 /**
  * 执行一条命令（由 send 入口在发送前调用）。
  * 返回 true = 已消费（调用方**不要**再发消息）；'@' 提及不是命令，返回 false。
+ *
+ * ★ 三路判定表（skill-command.md §4 切片 2；顺序即优先级）：
+ *     命令表命中 → cmd.run(...)      → 消费（撞名时**命令优先**，与 DSH 一致）
+ *     技能清单命中 → return false    → 放行给 host（发出去的是**原文**，不改写）
+ *     两者都没有 → 未知命令提示      → 消费（保持现有行为，不静默）
+ *   技能的裁决只读**同步缓存**（见 ui/commands/skills.ts 的文件头纪律）：
+ *   缓存未到 ⇒ 按未命中处理 ⇒ 走那条**可见的**未知命令提示，host 侧还有一层兜底。
  */
 export async function dispatchCommand(line: string, ctx?: SessionPane): Promise<boolean> {
   const pane = ctx ?? activePane();
@@ -70,6 +78,7 @@ export async function dispatchCommand(line: string, ctx?: SessionPane): Promise<
   if (name === '') return false;
   const cmd = listCommands().find((c) => c.name === name);
   if (!cmd) {
+    if (isSkillGesture(line)) return false;
     renderInfoBlock(pane, t('chat.command.unknown', { name }), 'warn');
     return true;
   }
@@ -120,12 +129,33 @@ async function fileProvider(after: string): Promise<PopupItem[]> {
   return out.items;
 }
 
-/** 命令提供者：注册表同步过滤。 */
-function commandProvider(prefix: string): PopupItem[] {
+/** 命令候选（命令组）：注册表同步过滤。 */
+function commandItems(prefix: string): PopupItem[] {
   const p = prefix.toLowerCase();
   return listCommands()
     .filter((c: Command) => c.name.toLowerCase().startsWith(p))
-    .map((c) => ({ label: '/' + c.name, desc: c.desc, meta: c.args, value: '/' + c.name }));
+    .map((c) => ({
+      label: '/' + c.name,
+      desc: c.desc,
+      meta: c.args,
+      value: '/' + c.name,
+      group: t('chat.command.group'),
+    }));
+}
+
+/**
+ * 命令提供者：**命令组在前、技能组在后**（composer-surface §1.3 的分组能力）。
+ *
+ * 技能项只来自**同步缓存**（缓存纪律见 ui/commands/skills.ts）；缓存为空时顺手
+ * 异步补拉一次——这一次的列表仍是命令，下次打开补全就有技能了。拉取**不 await**：
+ * popup 引擎自带 seq 竞态守卫，晚到的旧结果不会覆盖新前缀。
+ */
+async function commandProvider(prefix: string): Promise<PopupItem[]> {
+  const pane = activePane();
+  // 只在**缓存为空**时补拉；refreshSkills 自带「同会话在飞不重复打」的去重，
+  // 所以连着敲 /sk… 也不会每键一发。失效重拉是 onPaneChange 那条路（reloadSkills）。
+  if (pane !== null && !skillsCached()) void refreshSkills(pane.id);
+  return [...commandItems(prefix), ...skillItems(prefix)];
 }
 
 /** 按当前输入行与光标刷新补全框（'/' 命令 / '@' 文件）。 */
@@ -160,6 +190,9 @@ export function installCommands(): void {
     // W9349：会话被激活时读回**已存在**的目标（刷新/切换后胶囊不消失的那一半）。
     // 与胶囊同一个 onPaneChange 入口；回声落地后由 onGoalChange 走同一条渲染路径重画。
     syncGoalOnActivate(pane);
+    // 技能清单时效：会话切换 = 换了一份工作区 ⇒ 旧清单作废、失效重拉。
+    // 这是补全首次打开那条补拉之外的**主路径**：切完会话清单通常已经就绪。
+    reloadSkills(pane.id);
   });
   onGoalChange(() => refreshGoalBar());
   setProvider(null);

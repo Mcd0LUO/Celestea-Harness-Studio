@@ -71,10 +71,35 @@ export interface UserMessageEvent {
  * one-shot change notice are both appended as `origin: "goal"` user rows, so
  * the transcript can label them as system injections instead of showing them
  * as something the human typed.
+ *
+ * W9351: `skill-invocation` joined the set, and it exists for EXACTLY the reason
+ * `docs/feature/skill-command.md` §2.1 names: a body injected because the HUMAN
+ * typed `/review` must NOT reuse `"skill"`. The resident turn-context dedup keys
+ * on origin (turn-context-dedup.ts), so sharing the value would make the
+ * catalog and the body knock each other out — the catalog would then be
+ * re-appended every turn, which is exactly the cost regression the dedup exists
+ * to stop.
  */
-export type SessionEventOrigin = "user" | "skill" | "memory" | "receipt" | "steering" | "compact" | "goal";
+export type SessionEventOrigin =
+  | "user"
+  | "skill"
+  | "memory"
+  | "receipt"
+  | "steering"
+  | "compact"
+  | "goal"
+  | "skill-invocation";
 
-export const SESSION_EVENT_ORIGINS: readonly string[] = ["user", "skill", "memory", "receipt", "steering", "compact", "goal"];
+export const SESSION_EVENT_ORIGINS: readonly string[] = [
+  "user",
+  "skill",
+  "memory",
+  "receipt",
+  "steering",
+  "compact",
+  "goal",
+  "skill-invocation",
+];
 export interface AssistantMessageEvent {
   type: "assistant_message";
   text: string;
