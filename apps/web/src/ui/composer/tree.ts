@@ -133,21 +133,44 @@ export function $insertChip(
   //   「当前有一个 active editor」（Lexical 的硬前置）。放外面既拿不到 active editor，
   //   又能让「拼不出规范形态」这条失败路径**不产生任何更新**。
   if (chipText(kind, name) === null) return false;
+  /** 实际手术：返回是否真的插进去了（只在写事务里调用）。 */
+  const apply = (): boolean => {
+    const chip = $createChipNode(kind, name);
+    const p = paragraphAt(start, end);
+    if (chip === null || p === null) return false;
+    const nodes: LexicalNode[] = [chip];
+    if (trailing !== '') nodes.push($createTextNode(trailing));
+    const last = spliceInParagraph(p, start, end, nodes);
+    // caret 落在插入内容之后：尾随文本存在就进它的末尾，否则停在 chip 之后（元素点）。
+    const tail = trailing === '' ? null : (last as TextNode | null);
+    if (tail !== null && $isTextNode(tail)) tail.select(tail.getTextContentSize(), tail.getTextContentSize());
+    else if (last !== null) last.selectNext(0, 0);
+    else p.select();
+    return true;
+  };
+  // ★ W9399：editor.update() 在**已经处于 update 事务里**时会**排队**
+  //   （Lexical 的 updateEditor：editor._updating 为真时把 [fn, options] 推进 _updates），
+  //   回调要等这次外层事务收尾才跑 —— 于是「在回调里置的 done」恒为 false，调用方
+  //   （applyGesture）会误判「chip 插不进去」而退回纯文本，chip 就永远插不成。
+  //
+  //   触发场景就是**键盘选中补全项**：KEY_DOWN_COMMAND 的监听器由 Lexical 用
+  //   updateEditorSync 包在一次 update 里跑，我们的 Enter 车道 / 补全拦截都在其中
+  //   （鼠标 mousedown 选中不在事务里，所以既有测试没暴露它）。
+  //
+  //   修法：已在事务里时**先就地只读判定**（读活动状态是安全的，且与排队回调看到的是
+  //   同一份待提交状态），成立就把手术排进同一次提交、同步返回 true；不成立才返回
+  //   false 让调用方走纯文本兜底。非事务上下文没有这个歧义，照旧同步执行。
+  if (editor._updating === true) {
+    if (paragraphAt(start, end) === null) return false;
+    editor.update(() => {
+      apply();
+    }, { discrete: true });
+    return true;
+  }
   let done = false;
   editor.update(
     () => {
-      const chip = $createChipNode(kind, name);
-      const p = paragraphAt(start, end);
-      if (chip === null || p === null) return;
-      const nodes: LexicalNode[] = [chip];
-      if (trailing !== '') nodes.push($createTextNode(trailing));
-      const last = spliceInParagraph(p, start, end, nodes);
-      // caret 落在插入内容之后：尾随文本存在就进它的末尾，否则停在 chip 之后（元素点）。
-      const tail = trailing === '' ? null : (last as TextNode | null);
-      if (tail !== null && $isTextNode(tail)) tail.select(tail.getTextContentSize(), tail.getTextContentSize());
-      else if (last !== null) last.selectNext(0, 0);
-      else p.select();
-      done = true;
+      done = apply();
     },
     { discrete: true },
   );

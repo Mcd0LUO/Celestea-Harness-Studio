@@ -103,12 +103,24 @@ pnpm audit 是**诊断**，不是门禁。
 
 ## 7.2 A4a 批次记录（输入栏迁 Lexical）
 
-- 新增出货依赖：`lexical@0.52.0`（apps/web）。**没有**新增 `@lexical/*` 子包：
-  本仓只用核心包就够（createEditor / 段落与文本节点 / PASTE_COMMAND / KEY_DOWN_COMMAND），
-  富文本 React 组件与 headless 都不需要。原 §9.4 设想的 `@lexical/headless`（node 里单测编辑器
-  核心）也**刻意没加**：草稿的编解码（`apps/web/src/ui/composer/draft.ts`）是纯函数、不 import
-  lexical，E3 的三条纪律在 node 里直接钉（`tests/a4a-composer-adapter.test.ts` ① 组），
-  「为了测试而加一个 devDependency」在这里没有对应收益。
+- 新增出货依赖：`lexical@0.52.0`（apps/web）；**只加** `@lexical/rich-text@0.52.0`
+  （必须与 `lexical` 同版本，`apps/web/package.json` 两处都精确钉 0.52.0）：
+  core 不含 DOM 输入层（打字 / IME 上屏 / 退格 / 换行 / 粘贴），这些能力由
+  `registerRichText(editor)` 注册的命令处理器提供 —— 只 `createEditor` + `setRootElement`
+  的编辑器能聚焦但**一个字都敲不进去**：core 的 beforeinput 会 `preventDefault` 掉浏览器
+  默认动作，却没有人接 `CONTROLLED_TEXT_INSERTION_COMMAND` / `DELETE_*_COMMAND` /
+  `INSERT_PARAGRAPH_COMMAND`（这些处理器在 `@lexical/rich-text`，不在 core）。
+  它是**唯一必需**的那个子包。**刻意不手搓** beforeinput 监听器：中文组合输入上极易翻车
+  （compositionstart/end 与 `insertCompositionText` 的交错顺序因引擎而异，本仓
+  `apps/web/src/ui/ime.ts` 的 `isImeKey` 就是为 WebKit 那条 bug 立的）。
+  富文本 React 组件（`@lexical/react`）与 headless 都不需要。原 §9.4 设想的 `@lexical/headless`
+  （node 里单测编辑器核心）也**刻意没加**：草稿的编解码
+  （`apps/web/src/ui/composer/draft.ts`）是纯函数、不 import lexical，E3 的三条纪律在 node 里
+  直接钉（`tests/a4a-composer-adapter.test.ts` ① 组），「为了测试而加一个 devDependency」在这里
+  没有对应收益。
+  · 传递依赖（+11 包，全部为 `@lexical/*` 子包）：`a11y` / `clipboard` / `dragon` /
+    `extension` / `html` / `selection` / `utils`（`@lexical/internal` 与 `list` 随 `html` 进来）。
+    它们都是同一版本的纯前端库，无服务 / 进程 / 端口 / 数据目录。
 - 性质：纯前端 JS 库（与 marked / highlight.js 同性质），无服务 / 进程 / 端口 / 数据目录。
 - 动机：`docs/feature/composer-surface.md` §9 的形态升级（输入栏富文本化是 chip 的前置）。
 

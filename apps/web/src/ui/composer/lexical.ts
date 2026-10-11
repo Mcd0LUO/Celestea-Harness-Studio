@@ -30,6 +30,9 @@ import {
   createEditor,
   type LexicalEditor,
 } from 'lexical';
+// ★ W9394：DOM→模型的**输入层**必须由 @lexical/rich-text 提供，core 没有。
+//   见下方 registerRichText 调用点的长注释（为什么不是手搓 beforeinput）。
+import { registerRichText } from '@lexical/rich-text';
 import { enterAction } from '../inputbar/newline';
 import { isImeKey } from '../ime'; // W2036：组合中的按键不属于编辑器（W2033 的回归面）
 import { decodeDraft, encodeDraft } from './draft';
@@ -154,6 +157,37 @@ export function createLexicalComposer(o: LexicalComposerOptions): ComposerAdapte
     },
   });
 
+  // ==========================================================================
+  // ★ W9394：接上 **DOM→模型的输入层**（这就是「一个字都敲不进去」的根因）。
+  // --------------------------------------------------------------------------
+  // 症状：contenteditable 能聚焦，但敲键盘 / Input.insertText / execCommand insertText
+  //   全部留不下字，DOM 立刻被 reconciler 按空模型抹平，且 console 无任何报错。
+  //
+  // 根因：core 的 beforeinput 处理（registerDefaultCommandHandlers → $handleBeforeInput）
+  //   在算出「这次按键该插字」之后，event.preventDefault() 掉浏览器默认动作，然后
+  //   **dispatch CONTROLLED_TEXT_INSERTION_COMMAND / DELETE_*_COMMAND / INSERT_PARAGRAPH_COMMAND**
+  //   这些命令 —— 但这些命令的**处理器**不在 core 里，而在 @lexical/rich-text。
+  //   本仓此前只 createEditor + setRootElement，一个处理器都没注册 ⇒ 每次按键都是
+  //   「默认动作被吃掉 + 命令无人接」，字既没进 DOM 也没进模型。core 不含 DOM 输入层，
+  //   registerRichText 是那个唯一必需的子包（见 docs/DEPENDENCY-POLICY.md §7.2）。
+  //
+  // 为什么**不手搓** beforeinput / input 监听器：
+  //   · 打字（insertText / insertReplacementText / 输入法上屏）、退格（deleteContentBackward /
+  //     deleteWordBackward / deleteByComposition）、换行（insertParagraph / insertLineBreak）、
+  //     粘贴 / 剪切 / 拖放，全部要在这里各写一条分支，还要处理 selection 的 DOM 归一化；
+  //   · **中文 IME 是硬伤**：compositionstart/end 与 beforeinput 的 insertCompositionText
+  //     交错顺序在不同引擎里不一致（WebKit 会把 compositionend 提前交给脚本，本仓
+  //     ui/ime.ts 的 isImeKey 就是为这条 bug 立的），手搓输入层极易把「组合中的半截拼音」
+  //     当成已提交文本插进模型，或在 compositionend 时重复插入一次。
+  //   · registerRichText 把上述全部收敛成一份经上游真机验证的实现，且它注册的命令
+  //     与我们已注册的 KEY_DOWN_COMMAND（CRITICAL）/ PASTE_COMMAND（LOW）**优先级不冲突**：
+  //     命令按优先级从高到低派发（4→0），我们的 Enter 车道与纯文本粘贴都在它（EDITOR=0）
+  //     之前消费；退格 chip 的原子删除同样在 KEY_DOWN 这一层先跑。
+  //
+  // 注意：registerRichText 不注册任何 node，也不碰 COMPOSER_NODES（草稿指纹契约不变）。
+  // ==========================================================================
+  const unregisterRichText = registerRichText(editor);
+
   const root = o.mount;
   const changeCbs: ((c: ComposerChange) => void)[] = [];
   let interceptor: ((e: KeyboardEvent) => boolean) | null = null;
@@ -205,8 +239,11 @@ export function createLexicalComposer(o: LexicalComposerOptions): ComposerAdapte
     (event: KeyboardEvent) => {
       if (interceptor && interceptor(event)) return true; // 补全框先消费这次按键
       // ★ Backspace 的 chip 原子删除走**这一条**路（E2），不走 KEY_BACKSPACE_COMMAND：
-      //   那条命令由 Lexical 内部的快捷键表派发，而本仓不依赖 @lexical/rich-text，
-      //   派发链不在这条路径上 ⇒ 挂在它上面等于挂在一个不会响的钩子上（实测：按了没反应）。
+      //   KEY_BACKSPACE_COMMAND 由 core 的 KEY_DOWN（EDITOR=0）派发，而这里在 CRITICAL=4
+      //   —— 命令按优先级从高到低派发，所以这条**先于**它跑，能在字符被删掉之前把 chip
+      //   整块吃掉；吃到就 preventDefault + return true，core 的 KEY_DOWN 不再执行，
+      //   rich-text 的 KEY_BACKSPACE_COMMAND 也就不会被派发（否则 chip 后面的字先没了）。
+      //   W9394 之前这里挂 KEY_DOWN 是因为没有任何输入层；现在输入层有了，顺序理由仍然成立。
       //   位置在补全框之后、Enter 判定之前：补全框开着时按键归它，其余按键归这里。
       if (event.key === 'Backspace' && !isImeKey(event)) {
         let ate = false;
@@ -221,8 +258,29 @@ export function createLexicalComposer(o: LexicalComposerOptions): ComposerAdapte
           return true;
         }
       }
+      // ★ W9399：非 Enter 键**完全不碰**。enterAction 对非 Enter 一律回 'native'，
+      //   若在这里统一 return true，方向键 / 空格 / 字符键都会被我们从 Lexical 的
+      //   快捷键链上截断（KEY_DOWN_COMMAND 返回 true = 「这次按键我处理了」，
+      //   core 的 $handleKeyDown 不再执行，方向键、空格、Ctrl+C 全哑）。
+      if (event.key !== 'Enter') return false;
       const act = enterAction(event, o.isTouch());
-      if (act === 'native') return false; // Shift+Enter / 触摸组合中：让编辑器插换行
+      if (act === 'native') {
+        // ★ W9399：Shift+Enter 与「触摸端 IME 组合中的 Enter」是**交回浏览器**的车道。
+        //   真源：ui/ime.ts 的 isImeKey + ui/inputbar/newline.ts 的 enterAction。
+        //
+        //   为什么必须在这里就截住：@lexical/rich-text 的 registerRichText 在
+        //   KEY_ENTER_COMMAND（EDITOR=0）上注册了处理器，它 preventDefault + 自己在模型里
+        //   插换行/段落。而 core 只在 **KEY_DOWN_COMMAND 的处理器**（$handleKeyDown）里
+        //   派发 KEY_ENTER_COMMAND；我们在 CRITICAL=4 先跑，return true 把这次按键消费掉
+        //   ⇒ $handleKeyDown 不执行 ⇒ rich-text 的处理器永远看不到这次 Enter。
+        //
+        //   为什么**不** preventDefault：这正是本仓契约（W2028/W2032 真机结论）。
+        //   浏览器默认动作照旧发生，Chrome 对 contenteditable 的 Shift+Enter 会发
+        //   beforeinput(insertLineBreak)，Lexical 的输入层接住它并在模型里插换行
+        //   —— 换行仍然进得来，但 keydown 的 defaultPrevented 保持 false（契约可测）。
+        //   触摸端组合中的 Enter 同理：归 IME / 浏览器，我们不抢。
+        return true;
+      }
       // ★ Lexical 的 onKeyDown **不看** KEY_DOWN_COMMAND 的返回值（它只是 dispatch，
       //   不会替我们 preventDefault），所以「吃掉默认动作」必须在这里显式写。
       if (act === 'swallow') {
@@ -354,6 +412,7 @@ export function createLexicalComposer(o: LexicalComposerOptions): ComposerAdapte
       if (destroyed) return;
       destroyed = true;
       unregisterUpdate();
+      unregisterRichText(); // W9394：输入层的命令处理器也要随编辑器一起摘掉
       editor.setRootElement(null);
       changeCbs.length = 0;
       interceptor = null;
