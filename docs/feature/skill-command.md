@@ -18,6 +18,8 @@
 
 **实施分两段**：方案一先把分组能力与放行缝做好并**独立验收**（既有四条命令与 `@` 零回归），本设计再在其上加技能语义。这样"改了所有命令公共路径"的风险与"技能链路对不对"的风险分开暴露。
 
+**前置更新**：方案一已扩入富文本迁移（composer-surface §9：`#input` 换成 Lexical）。切片 1–3 与编辑器无关、可并行；切片 4 依赖迁移完成。
+
 ## 1. 形态决策
 
 ### 1.1 两个参考实现在这一点上分歧
@@ -55,11 +57,22 @@ if (line.startsWith('/') && !/\s/.test(line.slice(1))) { /* 弹补全 */ }
 
 ### 1.4 决策 D3：命中确认，以及"两端必须同源"
 
-用户需要**看得见命中**。承担它的是两件事：补全框分组（方案一 §1，发送前）与草稿期高亮（本设计切片 4，打字时）。
+用户需要**看得见命中**。承担它的是两件事：补全框分组（方案一 §1，发送前）与 chip 化命中确认（本设计切片 4，打字时）。
 
 **贯穿两者的硬约束**：识别 `/{技能名}` 的**纯函数只能有一份**，前端与服务端共用。理由不是洁癖——若前端自己写一份宽松解析（比如接受大写、或扫描句中任意位置），就会出现**高亮亮了、host 却不认**的情形，用户以为技能已加载。这比不做高亮更坏。
 
 ZCode 在这个形状上踩过两次：`disable-model-invocation` 在目录构建与加载两处语义不一致成了装饰品；桌面端与 CLI 各扫一遍磁盘导致"界面看得见、会话调不到"。本仓 `styles/tokens.css` 里的 W895-C 是同一形状的第三种：**"生效了但看不见 / 看得见但没生效"，两头都是事故。**
+
+### 1.5 决策 D4：规范形态 `/skill:<name>`（选中即改写）
+
+**问题**：`/{名字}` 直呼时，用户**看不出**这一行最终是「命令」还是「技能」——两者共用一个 `/` 面。（历史上本仓输入框是纯文本 `<textarea>`，没有参考实现那种富文本 chip 可看；该限制已由 composer-surface §9 的 Lexical 迁移解除，chip 成为命中确认的最终形态。但「选中即改写规范形态」**仍然保留**——它同时是 chip 的文本投影与手打入口。）
+
+**做法**：从补全框**选中技能行**时，把草稿改写成**规范形态** `/skill:<name>`。用户一眼就知道自己选的是技能命名空间。
+
+- **不推翻 D1**：D1 拒绝的是 `/skill <name>`（**空格**形态）——它会让 `refresh()` 在第一个空格处关掉补全，参数位没有补全（§1.2）。`/skill:<name>` **没有空格**，`line.startsWith('/') && !/\s/.test(line.slice(1))` 仍成立，补全路径全通。
+- **字符串契约**：`/skill:<name>` 是**规范形态**，由 [`composer-surface.md`](./composer-surface.md) §7 那个函数产出与接受；**裸 `/{名字}` 仍然等价可用**（既有习惯，且 §1.2 已拍板撞名时命令优先）。与之相对，MCP 的 `/mcp:<server>` 是**唯一**形态（裸名永不代表 MCP，见 [`mcp-client.md`](./mcp-client.md) §5.6）——差别在于 MCP 是第三个命名空间、名字由用户配置，撞上四条内建命令的概率远高于技能。
+- **代价与归属**：文字改写便宜，落在既有的 `onPick` 缝上（`choose()` 只调 `onPick(item)`，`apps/web/src/ui/commands/popup.ts:99`；Lexical 迁移后「写回草稿」改由 composer-surface §9.2 的适配缝承担，缝的语义不变）。**chip 化**按 [`composer-surface.md`](./composer-surface.md) §8/§9 属于**输入栏整体能力**——本设计的切片 4 是**第一个 chip 消费者**（技能先上），规则归 §8，本设计不单独实现编辑器机制。
+- **顺带解决的问题**：撞名时技能不再「不可直呼」（见 §5 与 §6）。
 
 ## 2. 技能侧现状与障碍
 
@@ -92,7 +105,7 @@ if (lastInjectedText(events, row.origin) !== row.text) { selected.push(row); con
 ```
 用户：/review 帮我看看这个 PR
   ↓ 前端 commandProvider（技能组，消费方案一的分组能力）
-  ↓ 打字时草稿期高亮命中的 /review（切片 4）
+  ↓ 打字时 chip 化命中的 /review（切片 4）
   ↓ 发送时 dispatchCommand：查命令表没有 → 查技能清单命中 → return false
   ↓ （方案一的发送前变换缝把它放行给正常发送路径）
   ↓ POST /api/turn { text: "/review 帮我看看这个 PR" }
@@ -114,6 +127,8 @@ if (lastInjectedText(events, row.origin) !== row.text) { selected.push(row); con
 - 名字按本仓既有的 `SKILL_NAME_PATTERN` 校验（`packages/core/src/skills.ts` 已导出）。
 - 剩余文本即 task，原样留在用户输入行里，**不单独提取、不注入**——模型看得到用户的原话。
 - 返回 `{ name, task, end } | null`，纯函数，零 IO。`end` 供高亮层定位区间。
+- **接受两种形态**：规范形态 `/skill:<name>`（§1.5）与裸 `/{名字}` **等价接受**，并产出 `canonical` 供调用方改写草稿。
+- **函数要通用化**：识别归 [`composer-surface.md`](./composer-surface.md) §7 那份**带 `kind`** 的实现（`kind ∈ { "command" | "skill" | "mcp" }`），本设计只消费 `kind === "skill"` 那一支——避免同端出现第二、第三份 `/` 解析。函数名与落地文件由那一节定，本文其余处仍称 `matchSkillGesture`（技能侧视角）。
 
 **它不知道清单**（只做语法解析）；"这个名字是不是真技能"由两端各自用清单判断。这样函数零依赖、可单测。
 
@@ -222,6 +237,8 @@ Relative paths in this skill are relative to this base directory.
 
 放行判断用**切片 2 第 1 步建的 `matchSkillGesture`**，不用 `parseLine`（理由见 §3.2）。
 
+**同步性纪律（审计发现）**：放行判定**只读同步缓存**，缓存 miss 按「未命中」处理——`clearInput` 在 `dispatchCommand` resolve 之前执行，若放行判定等网络拉清单，会出现「输入框已清空、消息还没发出去」的可见间隙。清单的新近性由 host 侧再校验兜底（§3.2 未命中注入失败行），技能的识别可靠性不依赖前端这一次判断。
+
 **清单缓存时效**：`commandProvider` 是同步函数会读到过期清单。做法是**在 `onPaneChange`（会话切换）时失效重拉**，并在补全首次打开且缓存为空时异步补拉一次；`PopupProvider` 本来就允许返回 Promise，`showCompletion` 已经 `await`，popup 引擎自带 seq 竞态守卫，不需要为异步额外改造。
 
 **测试**：
@@ -258,44 +275,39 @@ Relative paths in this skill are relative to this base directory.
   2. 把注入行的 origin 换成 `"skill"` → 目录去重测试必须红（这条正好钉住 §2.1 的陷阱）；
   3. 破坏 goal 的 suppression（`peekAfterInput` 不看 origin）→ goal 测试必须红。
 
-### 切片 4：草稿期高亮（"变蓝"）
+### 切片 4：命中确认 = chip（消费 Lexical 迁移）
 
-**目标**：打字时，命中的 `/{技能名}` 在输入框里就有可见标记——DSH 那种"草稿期命中确认"。
+**归属更新（二次）**：本切片原为「草稿期高亮（镜像层）」。composer-surface §9 决定输入栏整体迁移到 Lexical 后，镜像层路线**作废**——本切片改为**第一个 chip 消费者**：技能 token 的 chip 化。编辑器机制（decorator node、适配缝、原子删除、草稿序列化）全部由 composer-surface §9 交付，这里只接技能语义。
 
-**技术方案**：`#input` 是 `<textarea>`，**里面插不了 DOM**（方案一 §3 有完整结论）。只能上**镜像高亮层**：
+**目标**：打字时，命中的 `/{技能名}`（含规范形态 `/skill:<name>`）在输入框内渲染为 chip——与参考实现同形态。
 
-- textarea 背后放一个绝对定位的 `<div>`，内容 = 把命中的 `/{name}` 包进 `<mark>`、其余文本转义。
-- textarea 自身 `background: transparent`（保留光标与选区）。
-- 镜像层必须逐项复刻 textarea 的排版：`font-family` / `font-size` / `line-height` / `letter-spacing` / `padding` / `border` / `white-space` / `word-break`。
+**技能侧只做三件事**：
 
-**硬约束：判定必须与 host 同源。** 高亮用的扫描是**切片 2 建的 `matchSkillGesture`**，前端**不许另写一份**（§1.4 说了理由：高亮亮了却没注入，比不做高亮更坏）。
+- **chip 化触发**：行首 token 命中技能清单（切片 2 的缓存）→ 调适配缝把文本节点替换为 chip 节点；失配（技能被卸载）→ chip 退化为普通文本。判定仍是同一个解析函数（composer-surface §7），前端**不许另写一份**（§1.4）。
+- **chip 的文本投影**：`/skill:<name>`——发送时编辑器导出即规范形态，host 注入路径零改动。
+- **草稿**：按 composer-surface §9.1 E3 存编辑器序列化状态；恢复失败时**回退纯文本**（宁可丢 chip，不丢字）。
 
-**三类必须处理的偏差**：
-
-1. **换行位置**：镜像层与 textarea 换行不一致 → 高亮错位。这是覆盖层最经典的坑。同字体同宽 + `white-space: pre-wrap; word-break: break-word`。
-2. **滚动同步**：textarea 滚动时镜像层跟随 `scrollTop` 偏移。
-3. **IME 组合期**：组合期间**不更新**镜像层（组合文本尚未定稿，更新会闪烁/错位）。本仓已有 `apps/web/src/ui/ime.ts` 的 `isImeKey` 判据可复用。
-
-**降级路径（重要）**：若对齐的投入产出比不划算，退化成**输入框下方一行状态提示**（如「识别为技能：review」）——零对齐风险、成本低一个数量级，仍提供"命中确认"。做之前先量一下镜像层的实际偏差，再决定走哪条。落点见方案一 §3 的提示行。
-
-**测试**：
-- 高亮区间产出是纯函数：草稿 + 清单 → 区间数组，可在 node 里直接断言。
-- 端到端 DOM：命中 → 镜像层出现 `<mark>`；未命中 → 无标记。
-- IME 组合期不更新（组合中输入的草稿不触发重绘）。
-- **结构断言（同源防线）**：`apps/web/src/**` 里不得出现第二份解析 `/{name}` 的正则字面量（除 import `matchSkillGesture` 外）。这条不是形式主义——它钉的正是 §1.4 那个"两端分叉"的失效形状。
+**测试**（走 `@lexical/headless`，node 里跑、不依赖 jsdom）：
+- chip 化：输入 `/review` 且清单命中 → 断言出现 skill chip 节点；未命中 → 纯文本。
+- 文本投影：含 chip 的编辑器状态导出 → 断言等于 `/skill:review …` 规范字符串。
+- 原子删除：Backspace 触及 chip → 整体删除，无 `skill:rev` 残肢。
+- 退化：清单移除该技能后重解析 → chip 变回文本。
+- 草稿 round-trip：序列化 → 恢复 → chip 仍在；损坏的序列化 → 回退纯文本。
+- **结构断言（同源防线）**：`apps/web/src/**` 里不得出现第二份解析 `/{name}` 的正则字面量（除 import 那份函数外）。这条不是形式主义——它钉的正是 §1.4 那个"两端分叉"的失效形状。
 
 ### 验收标准
 
 1. `/` 补全框里技能项出现在"技能"组下、带描述（分组本身的行为由方案一验收）。
 2. `/review 帮我看看` 一轮后，会话日志里的 `<skill_content>` 紧跟用户输入行。
 3. `/ghost` 有可见反馈，不静默、不假装加载。
-4. 打字时命中的 `/{技能名}` 有可见标记，未命中无标记；且标记的判定与 host 注入的判定**是同一个函数**。
+4. 打字时命中的 `/{技能名}` 在输入框内呈现为 chip，未命中无 chip；chip 化的判定与 host 注入的判定**是同一个函数**，且 chip 的文本投影等于规范形态 `/skill:<name>`。
 5. goal 行为零变化（现有测试全绿）。
 6. 全量 `pnpm check` 通过。
+7. 从补全框选中技能行后，草稿变为规范形态 `/skill:<name>`；`/skill:review` 与裸 `/review` 走**同一条**注入路径（判定与注入仍是同一个函数）。
 
 ## 5. 明确不做
 
-- **`/skill <name>` 逃逸口**：见 §1.2。撞名时命令优先、技能不可直呼（与 DSH 一致）。
+- **`/skill <name>` 逃逸口**：见 §1.2。撞名时命令优先、裸名直呼不可达（与 DSH 一致）。**规范形态 `/skill:<name>`（§1.5）不是这条路**：它没有空格、不受补全引擎限制，而且**顺带把撞名解掉了**——撞名时技能仍可通过规范形态被显式调用。
 - **句子中间的 `/{名字}`**：见 §3.2。只认行首；句中命中会误吃路径与分数，且与 `isCommand` 的既有语义冲突。
 - **MCP**：本仓没有 MCP 实现（设计见 `docs/feature/mcp-client.md`，代码尚未开始），且那份设计明确不做 prompts 模板——所以"MCP prompt 变斜杠命令"不在任何计划里。这是独立工程，不进本设计。
 - **技能调用策略**（`disable-model-invocation` 这类）：本仓 frontmatter 白名单目前没有这个字段。ZCode 有字段但**没有消费点**——它只把一个展示用的布尔值改掉，标了"仅用户可调用"的技能照样进模型目录、照样能被加载。若将来要做，必须在**目录构建**与**加载**两处同时过滤，只过滤一处必然产生"看得见调不动"或"调得动看不见"的错配。
@@ -307,9 +319,9 @@ Relative paths in this skill are relative to this base directory.
 | 风险 | 说明 | 缓解 |
 |---|---|---|
 | 清单缓存过期 | 新装的技能在旧缓存里不存在，直呼会被判"未知命令" | 会话切换时失效重拉；报错文案提示可切换会话刷新 |
-| 撞名 | 技能名与内建命令相同 ⇒ 技能不可直呼 | 补全框分组把两个同名项**都显示出来**（不静默消失）；四选一的撞名概率极低 |
+| 撞名 | 技能名与内建命令相同 ⇒ 裸名直呼不可达 | 补全框分组把两个同名项**都显示出来**（不静默消失）；要显式指定技能就用规范形态 `/skill:<name>`（§1.5） |
 | 两端判定分叉 | 前端高亮认了、host 不认（或反之） | 只此一份 `matchSkillGesture`；切片 4 的结构断言钉住 |
-| 镜像层错位 | 换行/滚动不同步会让高亮落在错误的字上 | 同字体同宽 + `pre-wrap`；IME 组合期不更新；不划算就走状态提示降级 |
+| Lexical 迁移回归面 | 输入栏 8 处耦合（值读写 / Enter / IME / 粘贴 / 草稿 / 补全锚点 / 增高 / 假光标）同时改道 | composer-surface §9.2 适配缝收口 + headless 测试矩阵 + 中文 IME 真机回归（W2033 面） |
 | `afterInput` 泛化 | 动 `@celestea/agent-loop` 的公开接口，且 goal 是唯一现有生产者 | goal 回归测试是主要防线；`peekAfterInput` 的 suppression 语义要有专门断言 |
 | 契约变更两处 | origin 闭集与端点表都要对拍 | `pnpm contracts:verify` + `tests/contracts.test.ts` |
 | 技能目录的成本纪律 | 新 origin 若与目录共用会打穿去重 | §2.1 的陷阱 + 变异负控制 2 |

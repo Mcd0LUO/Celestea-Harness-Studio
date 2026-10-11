@@ -12,13 +12,14 @@
 |---|---|---|
 | D1 | 边界 | **只做 MCP 客户端**（连外部 server）。服务端（把本仓工具以 MCP 形态暴露）P0/P1 都不做 |
 | D2 | 协议实现 | 引入官方 SDK（`@modelcontextprotocol/client`），关在一个 `McpTransport` 缝后面；按 `DEPENDENCY-POLICY.md` §7 登记新的外部运行时依赖 |
-| D3 | 配置面 | `<CELESTEA_HOME>/mcp.json`（全局）+ `<CELESTEA_HOME>/workspaces/<ws>/mcp.json`（每工作区覆盖）；schema 进 `contracts/data-files/` |
+| D3 | 配置面 | `<CELESTEA_HOME>/mcp.json`（全局）+ `<CELESTEA_HOME>/workspaces/<ws>/mcp.json`（每工作区覆盖）；schema 进 `contracts/data-files/`；**凭据只写引用**（`$VAR` / key-file），文件 0644 非密钥，「`providers.json` 是唯一含密钥文件」的不变量不动（§7.2） |
 | D4 | 契约 | MCP 工具名 `mcp__<server>__<tool>`，**不进** `contracts/tools.json`、**不动** `FROZEN_COUNTS`；豁免本身由一条新断言守住 |
 | D5 | 模型可见面 | 常驻（enabled 即披露）+ 走 `DisclosurePolicy` 的 turn 边界/只增/尾部追加；`execution` 模式**不折叠** |
-| D6 | 权限 | 与内置工具**同一条 guard 链**（`PathGuard` / `toolDeny` / 权限档位一律生效）；配置即信任，不额外加审批——**与参考实现的方向性分歧**，理由与代价见 §7.1 / §11 |
+| D6 | 权限 | 与内置工具**同一条 guard 链**；**MCP 工具默认需要审批**：新增一个 approval guard，复用已有的挂起通道与端点（零新端点、零新 SSE 事件），无应答者时 fail-closed 回落到 `ask` 拒绝；`mcp.json` 可逐 server / 逐工具豁免（§7.1） |
 | D7 | 运行模型 | 每会话一代独立连接，随会话 release 回收；配置热更在**换代**时生效 |
 | D8 | P0 切法 | tools 面 + `stdio` 与 Streamable HTTP；P1：resources 与 server instructions；明确不做：prompts 模板、elicitation、tasks、resource 订阅、OAuth |
-| D9 | 交付 | 本文 + 分期 + 改动面 + 验收标准；代码留给后续波次 |
+| D9 | 命令面 | `/{server}` 直呼：**注入**该 server 的工具清单（P1 接上 `instructions`），**不改工具面**；走补全框独立分组，选中后草稿改写为规范形态 `/mcp:<server>`（`/mcp:` 是 MCP 的唯一形态，裸名永不代表 MCP）；与技能直呼同一条通道（§5.6） |
+| D10 | 交付 | 本文 + 分期 + 改动面 + 验收标准；代码留给后续波次 |
 
 P0 的契约数字**一处不动**：`contracts/endpoints.json` 的 `count` 保持 72（`contracts/endpoints.json:31`）、
 `FROZEN_COUNTS.endpoints` 72 / `sseEvents` 10 / `tools` 23（`packages/core/src/contracts/index.ts:175`）。
@@ -93,7 +94,8 @@ P0 的契约数字**一处不动**：`contracts/endpoints.json` 的 `count` 保�
 | 单 server 一连接、无中心服务 | ✅ | — |
 | 工具名带 server 名 | ✅（换成 `mcp__<server>__<tool>`） | DSH 的 `server.tool` 形态 |
 | 失败刷新保留上一代 | ✅ | — |
-| instructions 进提示词、带字节上限 | ✅（P1） | 进 system prompt 的方式（本仓的 system 在 tools 之前，改它会从 token 0 打断缓存——见 §5.4） |
+| instructions 进提示词、带字节上限 | ✅（P1） | 进 system prompt 的方式（本仓的 system 在 tools 之前，改它会从 token 0 打断缓存——见 §5.4）；本仓改成**点名才注入**，见下行 |
+| 用户点名用哪个 server | ❌ **不来自参考实现** | 本仓**自有**：与技能直呼同构（`docs/feature/skill-command.md`）。参考实现的 MCP 是「配好就常驻」，未遍历到对应物——**未验证**，不写成「他们没有」（§5.6） |
 | 图片走附件系统 | ✅（P1） | — |
 | 富内容降级为显式文本诊断 | ✅ | — |
 | 配置作用域 | ✅（全局 + 工作区两层） | 三层的 `common` 层（本仓没有第三个承载物） |
@@ -105,7 +107,7 @@ P0 的契约数字**一处不动**：`contracts/endpoints.json` 的 `count` 保�
 | 断连后调用前先重连一次 | ✅ P0 照做 | — |
 | inputSchema 强制归一为 object | ✅ P0 照做 | 但不采纳「静默补空对象就算合法」——本仓对**不受支持的关键字**仍拒绝注册（§5.3） |
 | 连接池 `isolation`（session 默认 / workspace 复用） | P1 旋钮 | P0 只做会话隔离（§6.2） |
-| 每个 MCP 工具 `needsApproval = true` | ❌ **有意偏离**（D6 配置即信任） | 这是本方案与两个参考实现**唯一的方向性分歧**，代价见 §7.1 与 §11 |
+| 每个 MCP 工具默认需要审批 | ✅ **采纳**，但用本仓的形状 | 不建权限服务；用「一个异步 guard + 已有的挂起通道」（§7.1）——参考实现是一整套权限服务，这里的机制更少而语义等价（无应答者即 fail-closed） |
 | 子代理借用父连接 | P1 再定 | 本仓 worker/swarm 的工具面是**显式装配**的，不能默认继承 |
 | 插件/作用域框架（cordis、loader、profile） | ❌ | 本仓的对应物是 `Context` + `Plugin.mount` + `compose`、以及 plugin-hotswap 的「换代」 |
 | 桌面端 store / TUI / 自有协议 | ❌ | 本仓的前端是 `apps/web`，宿主是 `apps/studio` |
@@ -125,6 +127,7 @@ P0 的契约数字**一处不动**：`contracts/endpoints.json` 的 `count` 保�
 | 权限 | guard 链（`ARCHITECTURE.md:156`）、`PermissionBaseline.toolDeny`（`apps/studio/src/runtime/engine-permissions.ts:27`） | 复用，不加第二套 |
 | 装配 | `compose`（`packages/runtime/src/compose.ts:5`）、`engine-plugins.ts`（`apps/studio/src/runtime/engine-plugins.ts:322`） | 复用；MCP 插件与 `celestea.tools` 同层装配 |
 | 插件开关 | `ENGINE_POLICY`（`apps/studio/src/plugin-catalog.ts:210`）+ `plugins.json` | MCP 作为**一行引擎插件**，开关复用 `PUT /api/plugins` |
+| 设置页承载物 | `apps/web/index.html` 的 `#settingsPage`（modal：`.settings-nav` 9 个 pane + `.settings-pane` 分节） | 加 `data-page="mcp"` 导航项 + 对应 `<section>`；内容模块照 `ui/plugins/` 模式新建 `ui/mcp/`；受前端铁律 7（pane 切换零重建、首载缓存）约束；文案走 `data-i18n`（zh/en 各一条） |
 | 会话级工具子集 | `apps/studio/src/store/session-tools.ts:28` | 复用 `GET|PUT /api/sessions/{id}/tools` |
 | 配置数据文件 | `contracts/data-files/` + `docs/data-files.md` | 新增 `mcp.schema.json` 与对应一节 |
 | 出站 HTTP 策略 | `packages/tools/src/http/ssrf.ts` | **不引用**（L1 包之间禁止互相依赖，`ARCHITECTURE.md:54`）；理由见 §7.3 |
@@ -157,13 +160,15 @@ P0 的契约数字**一处不动**：`contracts/endpoints.json` 的 `count` 保�
       "args": ["-y", "@modelcontextprotocol/server-memory"],
       "env": { "MEMORY_DIR": "~/.celestea/memory" },
       "enabled": true,
+      "approval": "ask",
       "timeout_ms": 20000
     },
     "remote": {
       "transport": "http",
       "url": "https://mcp.example.com/mcp",
       "headers": { "Authorization": "Bearer $EXAMPLE_TOKEN" },
-      "enabled": false
+      "enabled": false,
+      "approval": "never"
     }
   }
 }
@@ -175,8 +180,10 @@ P0 的契约数字**一处不动**：`contracts/endpoints.json` 的 `count` 保�
 - **`enabled`**：默认 `true`。关掉的 server **不连**，也不出现在模型面。
 - **工具级过滤** `tool_allow` / `tool_deny`（可选数组）：server 粒度之外的收窄；两者同时给出时先 allow 后 deny。
 - **`timeout_ms`**：单次调用与 discovery 各自的上限，默认值写在 schema 的 `default` 里（不在散文里重复数字）。
+- **`approval`**：`"ask"`（默认，每次调用要人点头）| `"never"`（无人值守的**显式**出口）。server 级可被工具级覆盖；语义见 §7.1。
+- **`path_access`**（可选，逐 server / 逐工具）：`read` / `write` / `self`。MCP 工具默认落 `write` 地板，这里是把真实语义补上的地方（§7.1）。
 - **凭据**：`env` / `headers` 的值写 `$VAR` 引用进程环境——**默认 MCP 配置里没有明文凭据**，凭据住在环境里。任何响应/日志**永不回显** `env`/`headers`（日志只留 server 名与工具名）。
-- 需要明文时（例如某 server 的 token 不便进环境变量）：在条目上显式标 `"secret": true`，该文件才落 `0600` 并按密钥文件对待。**这条会动一条现成不变量**：`tests/contracts.test.ts` 断言「`providers.json` 是唯一含密钥的数据文件」（`tests/contracts.test.ts:280`）——新增含密钥文件必须同时改那条断言与 `docs/data-files.md`。**推荐默认走 `$VAR`，让不变量原样成立。**
+- **只走引用式（D3 定稿）**：不为明文凭据开字段。若哪天要开，它要连带改一条现成不变量——`tests/contracts.test.ts:280` 断言「`providers.json` 是唯一含密钥的数据文件」，新增含密钥文件必须同时改那条断言与 `docs/data-files.md`；更重要的理由在 §7.2。
 - **复杂度对照**（按项目契约的引用式是**更少**的机制，不是更多）：引用式只需要「解析 + 缺引用就响亮失败」两件事，`mcp.json` 保持 0644，而且**不需要对外投影**——里面本来就没有要藏的东西。明文式则要把 `providers.json` 的四件机制复制一份：`0600`、原子写（tmp → 0600 → fsync → rename）、畸形 JSON 硬错误、**白名单构造的对外视图**（`ProviderPublicView` 连 `api_key` 这个键都不存在，见 `docs/data-files.md:170`），外加「日志与响应永不回显」的纪律和那条「唯一含密钥文件」断言的改动。
 - 本仓的引用式先例已经存在：`Profile` 用 `api_key_env` / `api_key_file` 两个字段表达凭据，启动时把 key **只注入内存**（`packages/runtime/src/profile.ts:11`、`docs/data-files.md:194`）。
 - 引用式的代价不在代码而在**产品**：应用内没有地方存一个新的 token，得由用户自己在环境变量或密钥文件里放——这是一个可陈述的限制，不是一个隐藏的坑。
@@ -236,6 +243,32 @@ P0 的契约数字**一处不动**：`contracts/endpoints.json` 的 `count` 保�
 - **工具消失**分两种：**短暂断连不动面**（每次崩溃抖一次 schema 前缀没有任何信息增益，失败的调用本身就说明了故障）；只有**最终放弃**（重连预算耗尽）或 server **明确删除**了工具，才从下一个 turn 的面上移除，代价是一次缓存重热。正确性优先于缓存——留着一个**确定**不存在的工具名是提示词在撒谎。
 - **系统提示词不动**：`{{tools}}` 渲染的是**模式的静态可披露全集**（`faceForMode`，`packages/tools/src/exposure.ts:204`），不是每 turn 的实际披露集。system 在 tools 之前序列化，让它跟随 MCP 变化会从 token 0 打断缓存——这是本仓已拍板的口径，MCP 不改它。
 
+### 5.5 规模：server 一多，压力在工具面而不在列表
+
+MCP 的常态是**装很多个 server**（memory / filesystem / github / postgres / playwright…），所以规模要一开始就算，而不是等列表变长才想。
+
+- **列表**：**滚动容器已经存在，不需要新造**——`.settings-layout` 被 `max-height: 72vh` 夹住、`.settings-content` 自己 `overflow-y: auto`（`apps/web/src/styles/settings.css:71`），MCP 面板放进去就继承它；而 `.plug-list` / `.plug-host-list` 只是 flex 列、**不是**滚动容器（`apps/web/src/styles/plugins.css:84`），也不该变成。列表长起来的读法是**分组 + 计数**：server 行按**作用域 + 连接态分组**、行上给工具数徽标；详情页**工具面默认折叠**，复用已有的 `.plug-expand` 折叠机制（`max-height: 0 ↔ max-content`，`apps/web/src/styles/plugins.css:229` 起）。**不做虚拟列表**：server 量级是几十不是几万，虚拟化会把「可被浏览器搜索、可被读屏读到的 DOM」换成自己实现的滚动几何，收益为负——这条登记进「不做」。
+- **真正会爆的是工具面**：每个 server 的工具都要进模型面（`tools` 数组 + 静态 `{{tools}}`），一个 github server 自己就能推几十个工具。于是 **server 数 × 每 server 工具数** 直接决定三件事：tools 数组的 token 量、尾部追加时的**缓存失效范围**、以及**名字冲突面**（归一化 + sha256 后缀、重复 raw 名整批拒绝）。
+- 所以 `tool_allow` / `tool_deny`（§4.1）**不是可选装饰，而是默认要用的收窄口**；P0 的 UI 必须把「这个 server 往模型面推了几个工具」显示在 server 行上——**让规模可见**，而不是等模型被工具名淹没。
+- P0 **不设自动收窄、也不设硬预算**：哪个工具该进面是用户的判断，自动裁剪会在模型侧制造「工具有时无」的不确定性。要不要设上限、上限怎么暴露，是 U10。
+
+### 5.6 命令面接入（`/{server}` 直呼：注入，不是收窄）
+
+用户侧形态与技能直呼一致（`docs/feature/skill-command.md`：直呼，不用 `/skill <name>`）：输入栏打 `/`，补全框里出现 MCP 的 server 行，选中并发送后由 **host 侧确定性注入**内容。
+
+- **注入什么**：`/{server}` → 该 server 的**工具清单**（名字 + 一行描述）+ 被点名时的 schema 摘要；`instructions` 按 D8 属 P1，接上后并入同一份载荷。`/{server}/{tool}`（补全框第二层，`isDir` 行已存在，`apps/web/src/ui/commands/popup.ts:80`）→ 该工具的完整描述与参数 schema。**叶子级只在「面上是压缩版」时才有收益**，故 P0 只做 server 级。
+- **不改工具面**：把面收窄到某个 server 会撞 `DisclosurePolicy` 的三条不变量（只增 / 尾部追加 / turn 边界，`packages/tools/src/disclosure.ts:13`）并付一次缓存重热；而**注入走消息侧**（`afterInput` 车道、独立 origin）是纯 append-only——与技能同路。理由与 §5.4「system 提示词不动」是同一条。
+- **命名空间与消歧**：技能用 `/{技能名}`、MCP 用 `/{server名}`，两者在**同一个扁平命名空间**里。口径四条：
+  - **分组隔离**：MCP 走 `PopupItem.group`，在补全框里与命令、技能各自成组（`docs/feature/composer-surface.md` §1.3）。但组头**只解决视觉**——`↑/↓` 逐项移动、不跳组，`items` 里根本没有「组」这个概念。
+  - **选中即改写**：从补全框选中 MCP 行时，把草稿改写成**规范形态** `/mcp:<server>`，用户一眼就知道自己选的是哪个命名空间。这落在既有的 `onPick` 缝上：`choose()` 只调 `onPick(item)`（`apps/web/src/ui/commands/popup.ts:99`），**写回输入栏本就是调用方的决定**——引擎零改动。
+  - **字符串契约（两端必须同源）**：`/mcp:<server>` 是 MCP 的**唯一**形态，手打同形必须与「选中」完全等价；反过来**裸 `/server名` 永不代表 MCP**（有同名技能就是技能，都没有就是普通文本放行）。这条是确定性的、不随「装了什么」变化——否则同一个字符串会因为环境不同而指两样东西，正是技能 D3 要避免的那种不确定性。
+  - **识别只能有一份，而且应当是通用的**：技能那条硬约束（`docs/feature/skill-command.md` §1.4）防的是**两端**分叉，但本仓今天已经有两份 `/` 解析——`apps/web/src/ui/commands/index.ts` 的 `isCommand` / `parseLine`（不校验字符集），以及计划的 `matchSkillGesture`（校验技能名集）。MCP 接进来就是第三份。**立场：识别与规范化合并成一份带 `kind` 的纯函数**（`{ kind: "command" | "skill" | "mcp", raw, canonical, name, rest, end }`，放 `core`、前端与 host 共用；清单校验仍留在调用方），MCP 只往 kind 表里加一行并提供自己的载荷。上一条的规范形态 `/mcp:<server>` 必须由**同一个函数**产出，否则补全框写出的形状与解析器认的形状会分叉——正是 D3 要避的那个失效形状。
+  - **命中确认是输入栏的能力，不是某个 kind 的私产**：参考实现三种 kind 都有 chip，是因为它的输入框是富文本编辑器——**本仓已决定跟进**（`docs/feature/composer-surface.md` §9：`#input` 整体迁移到 Lexical）。三种 kind 的 chip 是**同一笔投入**（一个 decorator node 体系，加一种 kind 的边际成本≈0），归 composer-surface；MCP **不单开一条，也不接受「技能先有、MCP 以后再说」**。提示行 `noteEl` 保留，承担**失败原因**（未连接的 server、未命中）——chip 化不了不存在的东西。
+  - **准入**：`docs/feature/composer-surface.md` §0 的判据是「技能与第二个消费者是否都需要」——第二个消费者（MCP）**已经出现**，条件成立；但在出现第三个之前，仍不要把「任意 `/` 触发源」做成注册表（那正是当初把它挡在外面的理由）。
+- **MCP 侧要提供的三件东西**：行提供者（server 两层 + 可用性）、载荷生成器（需要连接态）、availability 谓词。缝合接口只需 `{ name, group, description, payload? }`，`payload` 由提供方生成——所以 surface 那边把「命令来源」做成**来源列表**（技能是第一个来源），MCP 才是第二个来源而不是第二个特例。
+- **降级**：server 未连接 / 插件未启用 → 该行**不出现或出现并说明原因**，不允许出现「点了没反应」的第三种状态。
+- **排期与边界**：机制（分组头 + 放行 + `afterInput` 多 origin + 独立 origin）跟 composer-surface / skill-command 一起做，**不写 MCP 特例**；行提供者与载荷跟着 MCP 一起做。两边不交叉实现。
+
 ---
 
 ## 6. 运行时语义
@@ -269,6 +302,8 @@ P0 的契约数字**一处不动**：`contracts/endpoints.json` 的 `count` 保�
 
 「加字段」而不是「加端点」是本仓已有的先例：端点数被 `FROZEN_COUNTS.endpoints`（72）冻结，而**纯增量的字段**不算新端点。
 
+**规模**：server 一多，插件行上**唯一**需要一眼看到的数是「N 个 server · M 个工具」；逐 server 明细随详情页走，不再在插件行上摊开（§5.5）。
+
 ### 6.4 execution 模式（D5 的第二半）
 
 MCP 工具**不折叠**：`execution` 模式只折叠「`run_code` 程序里够得着」的工具，而 `run_code` 的 SDK 面只有四个文件工具，
@@ -285,16 +320,28 @@ MCP 工具**不折叠**：`execution` 模式只折叠「`run_code` 程序里够�
 - **PathGuard 对 MCP 工具的真实行为**（这条我按源码复核后改过口径）：`PATH_ACCESS` 只声明**已知工具**的访问级别，**不在表里的一律按 `write` 处理**——那是 fail-closed 地板，不是放行（`packages/tools/src/guard/path-guard.ts:75` 的注释原文）；而路径仲裁是**按参数名**做的（`PATH_ARG_KEYS` = `path`/`paths`/`dir`/`workspace`…，`packages/tools/src/guard/path-guard.ts:91`），**新工具不需要任何注册步骤就会被仲裁**。所以 MCP 工具默认落 `write` 地板：在 `read-only` 档位下，一个**只读**的 MCP 工具只要参数叫 `path` 就会被拒。
 - 这需要一个**声明口**，而且不需要新机制：`PathGuard` 的构造函数本来就收一个 `access` map（`packages/tools/src/guard/path-guard.ts:426`），装配时把它换成「内置表 + 配置声明的 MCP 条目」即可。配置里逐 server/逐工具允许写 `path_access: read | write | self`。
 - `PathGuard`、`toolDeny`（`apps/studio/src/runtime/engine-permissions.ts:27` 的 `toolDeny` 字段）、`run_code` 子调用放行语义**全部照旧**。
+- **guard 顺序语义（审计补记）**：guard 链按**注册顺序**执行（`packages/tools/src/registry.ts:143` 注释「guards run in the given order」）。审批 guard 必须注册在 PathGuard **之后**——先做确定性的路径仲裁、再挂起等人点头；反过来会出现「等了 30 秒点了允许、然后被 PathGuard 拒」的最差体验。装配处的顺序断言要有变异负控制（对调顺序 → 红）。
 - MCP 工具名可以被 `toolDeny` 禁用（配置面与权限档位两条路都能关它）。
-- 不新增审批流：配置即信任。**这是与参考实现的方向性分歧**，理由是本仓的 `ask` **今天没有应答者**：`ToolDecision` 确实有 `ask` 这一档（`packages/core/src/types.ts:535`），但 `dispatch` 一遇到非 allow 就把它变成失败结果（`packages/tools/src/registry.ts:74`，`error: "ask: <reason>"`），**仓内没有任何组件会去回答它**（生产代码里没有一个 guard 返回 `ask`，只有测试在用）。参考实现那边是一整套子系统：权限服务按模式与 risk 决定 allow/ask（build 模式先放行 `readOnly && !destructive && !needsApproval`，critical 与 high risk 一律 ask），`alwaysAsk` 还能穿透 yolo 与 plan 模式的放行，并且「记住这个决定」分**持久规则**与**会话内规则**两档。
+- **MCP 工具默认需要审批**（D6 修订后）。实现不是新建一套权限服务，而是**一个普通的异步 guard**——因为 `runGuards` 本来就 `await guard.check(input)`（`packages/tools/src/registry.ts:101`），「等你点头再放行」天然就是一个 guard，注册表语义一行不用改。
+- 它复用的挂起通道早已成体系：`UserQuestionService.ask()`（`packages/core/src/question.ts:102`）就是「挂起一个 promise、由 `POST /api/questions/{id}/answer` 唤醒、等待有上限、**超时返回空答案且不替任何人做决定**」的机制（`packages/core/src/question.ts:76`），而且它**按会话组成**（每次换代一个实例）——与 D7 同构。服务实例现成：`ToolsPluginOptions.questions`（`packages/tools/src/plugin.ts:99`）已经在装配时注入了这个服务，审批 guard 只是多一个消费者。
+- 于是 `ask` 这个档位终于有了它唯一的正确归宿：**没有应答者时的兜底**。服务为 `null`、或抛 `NO_PROVIDER`（无人认领）、或抛 `DELEGATED_CALLER`（子代理提问被拒，`packages/core/src/question.ts:106`）——三种情况 guard 都返回 `{kind:"ask"}`，落到今天那条终端失败路径（`packages/tools/src/registry.ts:74`）。**三处都是 fail-closed。**
+- 审批问题的形状：选项 =「拒绝 / 允许一次 / 本会话总是允许」，默认项是**拒绝**；超时（默认 300000ms，上限 3600000ms）返回空答案 → **按拒绝处理**。
+- 复用不产生契约改动：事件仍是 `USER_QUESTION_REQUEST_EVENT`、端点仍是 `POST /api/questions/{id}/answer`——**不加 SSE 事件（冻结 10）、不加端点（冻结 72）**。P1 可给问题加一个 `intent`（现在只有 `plan-review` 一种，`packages/core/src/question.ts:40`）让卡片更像审批界面，但那只是呈现。
+- 配置面留豁免：`mcp.json` 逐 server / 逐工具写 `approval: "ask" | "never"`；`never` 是给无人值守场景的**显式**出口（此时回到「配置即信任」），默认不是它。
+- **两个必须说清的后果**：① 子代理 / worker turn 的提问会被 `DELEGATED_CALLER` 拒（`packages/core/src/question.ts:106`），所以默认审批下 MCP 工具**在 worker 面里不可用**——要用就显式豁免；② 一轮内的并发批次是 `Promise.all`，会**同时挂起多个待批**，P1 要么串行化需审批的调用，要么在 UI 上排队呈现。
+- risk 等级与 side-effect scope 照旧显示在工具卡片与状态面上：审批与可见不是二选一。
 - 真要引入审批，形状只有两个，都不是小改：**guard 级**要新建「谁在等 / 等到什么时候 / 超时算拒绝还是算通过」一整条链（`ask` 目前是终端决策，不是待办）；**工具级**可以复用本仓已有的挂起机制——`ask_user_question` 的请求与应答走 `USER_QUESTION_REQUEST_EVENT` 与 `POST /api/questions/{id}/answer` 直接 resolve 被挂起的 promise（`packages/core/src/question.ts:122`、`packages/session/src/replay.ts:158`），但代价是**每次调用都挂起**。
 - 折中方案（P0 就做，成本近零）：**把 risk 等级与 side-effect scope 显示在工具卡片与状态面上**，把「审批」换成「可见」。真要收紧时，`toolDeny` 与权限档位已经在链上，不需要新增机制。
 
 ### 7.2 凭据
 
-- 只从 `mcp.json` 或进程环境读；**绝不**写入会话日志（日志里只出现 server 名与工具名）。
+- **`mcp.json` 里只有引用**（D3 定稿）：`env` / `headers` 的值写 `$VAR`（从进程环境解析）或一个 key-file 路径。**凭据本体不在这份文件里。**
+- 于是文件保持 **0644、`data-files/index.json` 里不标 `secret`**，「`providers.json` 是唯一含密钥的数据文件」那条断言**原样成立**（`tests/contracts.test.ts:280`），`docs/data-files.md` 不用改；状态面可以**整份回显** `mcp.json`（里面没有要藏的东西），因此**不需要** `ProviderPublicView` 那样的白名单投影。
+- 解析失败要**响亮**：引用的环境变量不存在、或 key-file 读不到 → 该 server 进失败状态并写明**缺哪个引用**，不是静默拿空串去连。
+- **绝不**写入会话日志（日志里只出现 server 名与工具名）。
 - 状态面（`GET /api/plugins` 的那一行、以及任何 health 输出）不返回 `env` / `headers`。
-- 与 `providers.json` 同一条纪律：含密钥文件 `0600`、永不进仓（`docs/configuration.md:81` 的先例）。
+- **为什么不用明文**（这不只是「复杂度」问题）：`0600` 防的是**其他用户**，防不了**模型自己**——默认档位 `full-access` 就是「整盘可读写、允许联网、允许非沙箱执行」（`docs/configuration.md:91`），`read_file` 因此够得到本盘任何位置。把 token 明文写进 `mcp.json`，等于**把它放进模型的读取范围**（`providers.json` 今天已在同一条暴露面上，这是仓库既有的取舍）。引用式下这个风险不存在：文件里没有秘密。
+- 若将来仍要「在界面上填」，那就是明文式，代价清单如下（工程上可以付，但要付全）：`secret: true` + `0600` + 原子写（tmp → 0600 → fsync → rename）+ 畸形 JSON 硬错误 + **白名单构造的对外视图**（`ProviderPublicView` 连 `api_key` 这个键都不存在，见 `docs/data-files.md:170`）+ 日志与响应永不回显的纪律 + 那条「唯一含密钥文件」断言与 `docs/data-files.md` 的改动。
 
 ### 7.3 HTTP transport 与 SSRF
 
@@ -328,7 +375,10 @@ stdio server 由 SDK 的传输层直接 spawn，**不经过会话沙箱**。理�
 | `docs/DEPENDENCY-POLICY.md` | §7 运行时依赖清点新增一条（SDK），附升级验证协议 |
 | `docs/configuration.md` | 环境变量/数据根一节补 `mcp.json` 的位置与权限 |
 | `docs/data-files.md` | 新增 `mcp.json` 一节 |
-| `apps/studio/src/runtime/engine-plugins.ts` | 装配 MCP 插件（与工具插件同层，顺序即语义） |
+| `apps/studio/src/runtime/engine-plugins.ts` | 装配 MCP 插件（与工具插件同层，顺序即语义）；并把审批策略传给 tools 插件 |
+| `packages/tools/src/guard/approval.ts` | **新增 approval guard**：调 `UserQuestionService.ask()`，超时/拒绝/无应答者一律 fail-closed |
+| `packages/tools/src/plugin.ts` | 把已有的 `questions` 选项多喂一个消费者（guard），并接受「哪些工具需要审批」的策略 |
+| 前端问题卡 | P0 **复用**现有渲染（审批就是一道带选项的问题）；P1 再加 `intent` 做审批专用呈现 |
 | `apps/studio/src/plugin-catalog.ts` | 引擎层清单加一行（`disable` 策略与理由） |
 | `tests/lib/builtin-plugins.ts` | `BUILTIN_MOUNTS` 加对应的 plugin/provide 行 |
 | `apps/studio/src/store/session-tools.ts` | 无需改（复用已有的会话工具子集端点）；只在工具名空间里出现 MCP 名字 |
@@ -369,6 +419,10 @@ P1 的 instructions 位置**不能**抄 DSH（它进 system prompt 的一节）�
 | A10 | 坏配置不静默 | 损坏 JSON → 硬失败；单条非法 → 跳过并出现在状态面 |
 | A11 | 不支持 schema 的工具不注册且被记录 | fixture 提供外部 `$ref` 的工具 → 不在面里，状态面有原因 |
 | A12 | 取消可传递 | 取消后 MCP 请求中止，且结果如实报告「可能已执行」 |
+| A13 | 无应答者 = 拒绝 | 不接问题服务时，需审批的 MCP 调用以 `ask` 失败告终（**不是**放行）；变异：让 guard 在无服务时返回 allow → 红 |
+| A14 | 超时 = 拒绝 | 超时返回空答案后调用**未执行**（副作用可断言），且结果说明是未决而非被拒 |
+| A15 | 拒绝不执行 | 选「拒绝」后 `execute` 未被调用；选「允许一次」后只放行该次，同 turn 的第二次仍要问 |
+| A16 | 规模可用且数字不撒谎 | 12 个 server × 平均 8 个工具的 fixture 下：设置页可分组浏览、详情页工具面默认折叠、插件行计数**与实际注册数一致**；变异：注册数 +1 而计数不更新 → 必须变红 |
 
 **门禁影响（全量 10 道，见 `docs/AGENT.md` §3）**：
 
@@ -384,9 +438,14 @@ P1 的 instructions 位置**不能**抄 DSH（它进 system prompt 的一节）�
 
 1. **缓存重热**：工具集任何变化（尾部追加或工具消失）都会让该点之后的缓存失效一次。本仓已实测的相对序是「稳定态 ≫ 尾部追加 > 中段删 > 首工具移尾」，所以设计只允许尾部追加。
 2. **stdio server 不在沙箱内**：第三方 MCP server 以本机用户权限运行（§7.4）。
-3. **配置即信任**：装了 server 就等于把它当本机命令执行。没有二次审批，只有「关掉它 / 用 `toolDeny` 禁用它」两条路。**这是与参考实现唯一的方向性分歧**（ZCode 默认每个 MCP 工具都要审批），我们换来的东西是「无人值守也能跑」，代价是「配错了就等于授权了」——所以配置面要 fail-loud（§4.3），状态面要显示 risk 与 side-effect。
-4. **不做的四类**（prompts / elicitation / tasks / 订阅）：有 server 依赖它们时**明确报不可用**，不假装降级成功。
-5. **未验证项**：跨平台子进程回收、真实远端 Streamable HTTP server 的端到端行为——P0 的 fixture 用本地 stub server 覆盖协议面，真机对远端 server 的验证单列为一项，不写成「已支持」。
+   - **连带规模事实（审计补记）**：D7 的「每会话一代连接」意味着 **N 个并行会话 = N 个 stdio 子进程**——memory/filesystem 这类常驻 server 会按会话数复制内存与句柄开销。跨会话复用是 U5（P1）；P0 至少在状态面如实显示每会话的连接数，不让这个现象变成「找不到解释的资源上涨」。
+3. **审批会挂起**：默认每个 MCP 工具第一次调用都要人点头，等待上限默认 300 秒。无人值守场景必须显式写 `approval: "never"`，否则回落到「等」——这是 D6 修订后**新增的主要代价**，换来的是「模型不会在你不知情时动外部系统」。
+4. **worker 面默认拿不到 MCP 工具**：子代理 turn 的提问被 `DELEGATED_CALLER` 拒，于是审批 guard fail-closed。要让它可用就逐 server 豁免（§7.1）。
+5. **审批与并发**：一轮内的并发批次会同时挂起多个待批（P1 再收敛呈现）。
+6. **审批可能被忽略不计**：`approval: "never"` 是配置面给的显式出口——**说「永不审批」就等于说「配置即信任」**，那时候 §7.1 的整条链都退化成不生效。
+7. **不做的四类**（prompts / elicitation / tasks / 订阅）：有 server 依赖它们时**明确报不可用**，不假装降级成功。
+8. **未验证项**：跨平台子进程回收、真实远端 Streamable HTTP server 的端到端行为——P0 的 fixture 用本地 stub server 覆盖协议面，真机对远端 server 的验证单列为一项，不写成「已支持」。
+9. **规模没有上限**：P0 不给工具面设预算，几十个 server 全开会让 tools 数组明显变长（token 与缓存双重代价），而且**没有任何机制替你收窄**——只能靠配置里的 `tool_deny`。状态面会如实显示每个 server 推了几个工具（§5.5）。
 
 ---
 
@@ -394,9 +453,14 @@ P1 的 instructions 位置**不能**抄 DSH（它进 system prompt 的一节）�
 
 | # | 待定项 | 为什么现在不定 |
 |---|---|---|
-| U1 | server instructions 的注入位置与**超限语义** | 位置：唯一不打断缓存的地方要单独设计（§9）；超限：参考实现是「超限即拒绝连接」，也可以考虑「截断 + 明说截了多少」——两者都诚实，后果不同，P1 一起定 |
+| U1 | `instructions` 的**点名注入**与超限语义 | 位置已定（§5.6：点名才注入、走消息侧，不碰 system 前缀）；只剩超限：参考实现是「超限即拒绝连接」，也可以「截断 + 明说截了多少」——两者都诚实，P1 定 |
 | U2 | resources 的工具面（共享工具 vs 每 server 一对） | 取决于 P0 的 provider 语义实证 |
 | U3 | 子代理/worker 是否继承父会话的 MCP 连接 | 本仓 worker 面是显式装配的，继承=安全与缓存的复合决定 |
 | U4 | 配置 watcher（真热更） | 现在「换代即生效」，先看实际需求 |
 | U5 | 跨会话复用连接（`isolation: workspace` 那类旋钮） | P0 只做会话隔离；复用要先把「权限档位/凭据不串」说清楚 |
 | U6 | 官方 SDK 的替换/降级缝（`McpTransport`）的边界 | 先按 SDK 落地，把替换点留在一个文件里，用够一轮再定形状 |
+| U7 | 审批的**持久记忆**（「总是允许这个工具」跨会话记住）放哪 | P0 只有「本次 / 本会话」；持久规则要选一个落盘位置（权限配置还是 `mcp.json`），且要能被撤销——没想清楚之前不做 |
+| U8 | 并发批次里多个待批的呈现 | 先接受「同时挂起」；串行化还是排队展示是 UI 决定 |
+| U9 | 审批问题的 `intent`（现在只有 `plan-review`） | 呈现问题，不影响安全语义，P1 跟着 UI 一起做 |
+| U10 | 工具面要不要设**上限/自动收窄** | P0 让规模**可见**（§5.5）但不替用户裁；上限一旦设错就会变成「模型看不见某个工具」这种极难诊断的故障，先看真实用量 |
+| U11 | **MCP 管理面**（UI 上增 / 删 / 启停 server） | P0 状态面刻意只读（复用 `GET /api/plugins` 加字段，不动冻结端点数）。管理面需要写端点（如 `PUT/DELETE /api/mcp/servers/{name}`）→ 冻结端点数变动，走 skill-command 切片 1 那张六处契约清单。形态已原型验证：传输只有 stdio / http 两种，表单按传输切字段即可覆盖；凭据字段只接受 `$VAR` 引用；改动仍在**换代**时生效（U4 之前不做真热更）。**落点已查明**：设置页 nav + pane 结构见 §3「设置页承载物」行——加菜单项 + `ui/mcp/` 模块即可，状态面与 U11 管理面共用同一个 pane（P0 只读、U11 加写）。P1 立项 |
