@@ -59,7 +59,7 @@ describe("JSON 重复键门禁（端到端跑真 CLI）", () => {
     expect(runOn('{"a":"}{ \\" b","c":1}').code).toBe(0);
   });
 
-  // 变异负控制（铁律 2）：把重复键改名 ⇒ 同一条断言必须不再成立。
+  // 把重复键改名 ⇒ 同一条断言必须不再成立（永久负控制：证明它真的在比键名）。
   it("变异负控制：把重复键改名后 exit 0（证明它真的在比键名）", () => {
     expect(runOn('{"note35":"jia","note35":"yi"}').code).toBe(1);
     expect(runOn('{"note35":"jia","note63":"yi"}').code).toBe(0);

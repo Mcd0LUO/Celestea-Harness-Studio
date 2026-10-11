@@ -1,5 +1,5 @@
 /**
- * executor 的三铁律专测 + 成员隔离证据（AGENT.md 铁律 2：每条断言配变异负控制）。
+ * executor 的三铁律专测 + 成员隔离证据。
  *
  * 覆盖：
  *   - 铁律 1 resolve=成功 / throw=失败（含「成员没产出任何 assistant 消息」这一支）

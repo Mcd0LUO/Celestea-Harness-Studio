@@ -14,7 +14,7 @@
  *
  * 为什么必须机械：这两条都是「改一个数字就悄悄回退」的形态约束 —— 真机截图看得出，
  * 但只在提交时跑一次；后续任何一次样式微调都可能把它们改回去而没人发现（AGENT.md
- * 铁律 2/3：只数 DOM 节点会让不可见的 bug 全绿通过）。
+ * 铁律 3：只数 DOM 节点会让不可见的 bug 全绿通过）。
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
