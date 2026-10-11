@@ -465,3 +465,38 @@ P1 的 instructions 位置**不能**抄 DSH（它进 system prompt 的一节）�
 | U9 | 审批问题的 `intent`（现在只有 `plan-review`） | 呈现问题，不影响安全语义，P1 跟着 UI 一起做 |
 | U10 | 工具面要不要设**上限/自动收窄** | P0 让规模**可见**（§5.5）但不替用户裁；上限一旦设错就会变成「模型看不见某个工具」这种极难诊断的故障，先看真实用量 |
 | U11 | **MCP 管理面**（UI 上增 / 删 / 启停 server） | P0 状态面刻意只读（复用 `GET /api/plugins` 加字段，不动冻结端点数）。管理面需要写端点（如 `PUT/DELETE /api/mcp/servers/{name}`）→ 冻结端点数变动，走 skill-command 切片 1 那张六处契约清单。形态已原型验证：传输只有 stdio / http 两种，表单按传输切字段即可覆盖；凭据字段只接受 `$VAR` 引用；改动仍在**换代**时生效（U4 之前不做真热更）。**落点已查明**：设置页 nav + pane 结构见 §3「设置页承载物」行——加菜单项 + `ui/mcp/` 模块即可，状态面与 U11 管理面共用同一个 pane（P0 只读、U11 加写）。P1 立项 |
+
+---
+
+## 13. 落地记录（P0 交付面、实现期偏差与延后项）
+
+> §11 是**设计层**风险、§12 是**设计层**待定；本节记**落地层**：P0 实际交付了什么、与设计不同的地方、以及落地后才看得见的延后项。
+
+### 13.1 P0 交付落点
+
+| 设计节 | 落点 |
+|---|---|
+| §4/§5 工具面 | `packages/mcp/`（`@celestea/mcp`，L1）：连接、重连监督器、调度、资源、会话各一模块；`contracts/data-files/mcp.schema.json`（数据文件 13 → 14）；`@modelcontextprotocol/sdk@1.32.1` |
+| §5.4 装配 | `apps/studio/src/runtime/engine-mcp.ts`（一代连接 + `manifest()` 投影）、`engine-plugins.ts` 装配、`plugin-catalog.ts` 的 `studio.engine.mcp` 行（含 inline `mcp` 字段）、`plugin-hotswap.ts` 的 `PluginSwitchOptions.mcp` |
+| §5.5 状态面 | `apps/studio/src/runtime/mcp-status.ts`（host）+ `apps/web/src/ui/mcp/`（只读 pane，设置页第十格）+ i18n zh/en 各 34 键 |
+| §5.6 命令面 | `apps/studio/src/runtime/mcp-wiring.ts` + `packages/gesture` 的第二层 `/mcp:<server>/<tool>` + 前端 `isMcpGesture` 放行 |
+| §7 审批 guard | `packages/tools/src/guard/approval.ts`（只认 `mcp__*`；复用 `UserQuestionService.ask()`；**从不 allow**，fail-closed 判 `{kind:"ask"}` 未决）+ `path-guard.ts` 的 `PathGuardGrants.pathAccess` / `accessMapWith()` |
+| 契约 | 端点冻结数 72 不动（状态面复用 `GET /api/plugins` 加字段）；origin 新增 `mcp-invocation`（六处登记）；SSE 冻结数不动 |
+
+### 13.2 与设计不同的地方
+
+1. **`Promise.race` 收口到 core**：新增 `packages/core/src/deadline.ts`（`TIMED_OUT` + 三策略 + `bounded` / `idle` / `withTimeout` / `delay`），`packages/tools/src/sandbox/async.ts` 改为委托，MCP 连接用 `bounded(..., { mode: "throw" })`。理由是既有棘轮 `tests/w2014-timeout-ratchet.test.ts` 禁止散落的裸 race。
+2. **`manifest()` 是投影、不是第二份来源**：直呼注入读的是 `session.bindings() + statuses()` 的投影，没有第二次 `loadMcpConfig`、没有第二次连接。
+3. **装配层 JSON 损坏降级为「响亮报告」**：硬失败仍留在 `loadMcpConfig`；装配层读到坏配置如实报错，不静默丢弃。
+4. **`path_access` P0 只到 server 级**：`accessMapWith()` 按「有没有视图」分支而不是按 `size`——按 size 会让 `path_access: read` 变成谎话（实现期抓到的真 bug）。
+5. **设置页 `paneEl` / `navEl` 由抛错改可空**：加第十格会让 11 个写死九格骨架的共用 jsdom 夹具在 `initSettingsPage()` 抛错；那条「`index.html` 必须为 `PANES` 每项注册」的不变量改由 `tests/w-c2-mcp-static.test.ts` 读 `index.html` 真源**双向**比对来守（删任一项即红）。
+6. **前端 `isMcpGesture` 刻意不查清单**（与技能 `isSkillGesture` 不同）：D9 要求同一字符串的含义不随装了什么变化，裁决在 host 并响亮回答；前端按缓存拦一次会把「缓存还没到」变成假否决。
+7. **状态面的「命令」字段不在线上契约里**：`get_plugins` 行类型只有 `server/session/transport/state/toolCount/failure*`，所以如实显示 **transport**，并对将来的 `command`/`url` 做宽容读取（出现就显示，不出现不编）。
+8. **gesture 第二层改了既有断言**：原「token 内部不许有 `/`」断言 `/mcp:a/b ⇒ null`，现在它合法（server=a / tool=b）；守的不变量**保留并加强**——两段各过各的字符集，`/mcp:-lead/x`、`/mcp:<33 字>/x`、`/mcp:memory/a/b` 仍全部 null。
+
+### 13.3 落地后才看得见的延后项
+
+- **真机 CDP 探针未做**：设置页与输入栏的验收停在 jsdom 状态断言 + 变异负控制 + `check:web`；几何 / 可见性 / 截图建议收口时补一次。
+- **补全框第二层工具行**未做：`/mcp:<server>/<tool>` 的**语法与注入**都已支持，缺的是补全框里的行提供者（P0 只到 server 级）。
+- **server 未连接时补全框的呈现**未做：该行不出现、还是出现并说明原因，设计只到「状态面如实显示」。
+- **未验证项照 §11 第 8 条**：远端真实 Streamable HTTP server 的端到端行为、跨平台子进程回收——P0 的 fixture 只用本地 stub 覆盖协议面。

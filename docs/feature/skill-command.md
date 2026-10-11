@@ -309,7 +309,7 @@ Relative paths in this skill are relative to this base directory.
 
 - **`/skill <name>` 逃逸口**：见 §1.2。撞名时命令优先、裸名直呼不可达（与 DSH 一致）。**规范形态 `/skill:<name>`（§1.5）不是这条路**：它没有空格、不受补全引擎限制，而且**顺带把撞名解掉了**——撞名时技能仍可通过规范形态被显式调用。
 - **句子中间的 `/{名字}`**：见 §3.2。只认行首；句中命中会误吃路径与分数，且与 `isCommand` 的既有语义冲突。
-- **MCP**：本仓没有 MCP 实现（设计见 `docs/feature/mcp-client.md`，代码尚未开始），且那份设计明确不做 prompts 模板——所以"MCP prompt 变斜杠命令"不在任何计划里。这是独立工程，不进本设计。
+- **MCP prompt 变斜杠命令**：MCP 客户端本身**已实现**（[`mcp-client.md`](./mcp-client.md) 的 P0；`/mcp:<server>` 直呼与技能直呼同构、共用本设计 §3.4 泛化出的同一条 afterInput 车道），但那份设计**明确不做 prompts 模板**——所以「MCP prompt 变斜杠命令」不在任何计划里。这是独立工程，不进本设计。
 - **技能调用策略**（`disable-model-invocation` 这类）：本仓 frontmatter 白名单目前没有这个字段。ZCode 有字段但**没有消费点**——它只把一个展示用的布尔值改掉，标了"仅用户可调用"的技能照样进模型目录、照样能被加载。若将来要做，必须在**目录构建**与**加载**两处同时过滤，只过滤一处必然产生"看得见调不动"或"调得动看不见"的错配。
 - **技能参数替换**（`$ARGUMENTS` 之类）：ZCode 的 `Skill` 工具 schema 声明了 `args` 却从不读，是死参数。本设计不重复这个错误——task 就是用户输入行的原文，不另做占位符替换。
 - **补全框引擎与发送入口的改动**：见 [`composer-surface.md`](./composer-surface.md)。
@@ -338,3 +338,30 @@ Relative paths in this skill are relative to this base directory.
 
 - **技能目录超预算时降级而非丢弃**：本仓 `skill-catalog.ts` 现在超出上限会直接丢弃并报 `+N more`，ZCode 的做法是降级成"只列名字"（预算 20k 字符），保证每个技能**仍可见可加载**。
 - **目录里带技能目录绝对路径**：`load_skill` 不可用时模型能退化成 `read_file` 读那份 SKILL.md。
+
+## 8. 落地记录（实现期偏差与延后项）
+
+> §5 是**设计层**的「明确不做」；本节记**落地层**：交付落点、与设计不同的地方、以及落地后才看得见的延后项。切片 1–4 全部落地。
+
+### 8.1 交付落点
+
+| 切片 | 落点 |
+|---|---|
+| 1 技能清单端点 | `apps/studio/src/handlers/skills.ts`（`GET /api/sessions/{id}/skills`，W9350）+ `runtime/goal-wiring.ts` 的 `skillListingOf`；六处契约清单登记，端点冻结数 72 → 73 |
+| 2 技能侧接入 | 前端 `ui/commands/skills.ts`（同步缓存 + `isSkillGesture`）、`ui/commands/index.ts`（命令 / 技能分组）、`api.ts` 的 `sessionSkills`；host `packages/agent-loop/src/after-input.ts`（`AfterInputPlan` / `AfterInputRow` / `AfterInputSource`）+ `apps/studio/src/runtime/skill-wiring.ts` |
+| 3 afterInput 泛化 + host 注入 | `packages/agent-loop/src/loop.ts` 的 afterInput 泛化、`runtime/turn-runner.ts` 的 `peekAfterInput`、`goal-wiring.ts` 的 `mergeAfterInputs`（生产顺序 goal → skill → mcp） |
+| 4 chip | `ui/composer/chip.ts`（kind `skill`）+ `ui/commands/skills.ts` 的 `barePrefix` |
+
+### 8.2 与设计不同的地方
+
+1. **`AfterInputPlan` 是 `{ input?, rows[] }`，不是「可改写输入」**：追加型日志不能改写已写入的 input 行，失败行因此走独立标签而不是把原文改掉。
+2. **成功注入与失败各用一个标签**（`skill_content` / `skill_invoke`）：一个标签只表示一件事，模型与日志读者都不会把「这里有一份正文」和「用户点了名但我们没给出来」混起来。
+3. **`rejected[]` 承载真实拒绝**：清单端点里被拒的技能如实出现，不是静默过滤。
+4. **`barePrefix` 是落地后才需要的**：补全前缀带命名空间（`skill:review`）时写回草稿的名字是裸名，不剥前缀则「选完再开补全框」一条都匹配不上（W4 实测的真 bug）。
+5. **前端 inboxKind 补了 `skill-invocation` 分支**（默认展开）：origin 闭集扩了，渲染侧必须同步，否则事件在界面上没有落点。
+6. **单源结构断言登记了两条豁免**：`skill-wiring.ts` 与 `mcp-wiring.ts` 的注释引用了 `isCommand` 的 `startsWith("/")` 形态，逐条登记理由（`tests/slash-gesture-single-source.test.ts` 的 `EXEMPT` 表）。
+
+### 8.3 落地后才看得见的延后项
+
+- **撞名可见性只到补全框**：规范形态 `/skill:<name>` 解了**调用**，但「同名命令 + 技能」并排显示之后没有再做人眼验收。
+- **§7 末的两条 ZCode 低成本改进**（目录超预算降级、目录里带绝对路径）：仍在，未做。

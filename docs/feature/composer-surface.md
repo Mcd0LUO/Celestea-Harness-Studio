@@ -254,3 +254,34 @@ if (isCommandLike(t)) {
 ### 9.5 与既有工单的关系
 
 §4 工单（放行缝 → 分组）与编辑器无关，**照原顺序先做**；§7 解析函数先行（chip 化与手打识别都消费它）；富文本迁移插在其后、技能切片之前。技能切片 4（见 skill-command.md）不再是「镜像层」，而是「消费本节迁移产物的第一个 chip 消费者」。**E2 的 `@文件` chip 化**与逐级进入（applyMention 的目录续列）一并落在迁移波次内。
+
+## 10. 落地记录（实现期偏差与延后项）
+
+> §5 是**设计层**的「明确不做」；本节记**落地层**的两件事：与设计不同的地方（每条都有实测理由），以及落地后才看得见的延后项。波次：W1（§1/§2/§7）→ W3（§9 迁移）→ W4（§8 chip）。
+
+### 10.1 交付落点
+
+| 设计节 | 落点 |
+|---|---|
+| §1 分组 | `apps/web/src/ui/commands/popup.ts`（`PopupItem.group` + `.cmd-group` 头）+ `apps/web/src/styles/commands.css` |
+| §2 放行缝 | `apps/web/src/ui/send.ts` 的 `sendNormal()`；`ui/commands/index.ts` 的 `dispatchCommand` 返回 `false` 即放行 |
+| §7 解析 | `packages/gesture`（`parseSlashGesture` / `canonicalSlash`），全仓唯一 `SKILL_NAME_PATTERN`；两端不分叉由 `tests/slash-gesture-single-source.test.ts` 的结构断言钉住 |
+| §8 chip | `ui/composer/chip.ts`（`ComposerChipNode`，kind = command / skill / mcp / mention）+ `ui/composer/tree.ts`（区间手术、原子 Backspace、光标前文本、E5 重判） |
+| §9 迁移 | `ui/composer/{adapter,draft,lexical,index}.ts`；`index.html` 的 `#input` 由 `<textarea>` 改 `<div>` |
+
+### 10.2 与设计不同的地方
+
+1. **chip 进 `COMPOSER_NODES` ⇒ 旧草稿按 E3 降级为纯文本**：指纹变化是注册表变化的必然结果，没有另写迁移器。
+2. **chip 的投影是唯一真源**：`getTextContent()` 覆写为规范形态、`isTextContent()` 返回 `false`（原子）。变异负控制：投影改成裸 name → 9 条断言红；对 skill 自拼 `/skills:` 绕开 `canonicalSlash` → 5 条红。
+3. **失配 chip 只改外观、不改投影**（E5）：基类恒在、`-stale` 只管样式——否则「是不是 chip」会出现两个判据。
+4. **Backspace 挂在 `KEY_DOWN`，不是 `KEY_BACKSPACE_COMMAND`**：后者由 Lexical 内部快捷键表派发，本仓不依赖 `@lexical/rich-text`，挂上去按了没反应（实测）。
+5. **IME 组合期 Enter 的 `defaultPrevented` 由 `false` 变 `true`**（W2036 断言语义随之改）：有意变更，不是回归。
+6. **`@lexical/headless` 未引入**：草稿编解码是纯函数，不需要 headless 环境；§9.4 那条 devDependency 未落地。
+7. **placeholder 走 `data-empty::before`**：Lexical root 永远有一个空段落，`:empty` 永不匹配。
+8. **退役物比 §9.3 多两项**：`styles/caret.css`、`styles/field-sizing.css` 与对应两份测试（W1525 / W2016）一并删除。
+9. **bundle 实测 670.07 → 849.67 kB min（207.21 → 264.09 kB gzip）**：登记在 `DEPENDENCY-POLICY.md` §7.2；本仓无棘轮机制，只记实数与归因。
+
+### 10.3 落地后才看得见的延后项
+
+- **补全框第二层工具行**未做：MCP `/mcp:<server>/<tool>` 的补全行提供者（P0 只到 server 级）。因此 `canonicalSlash` **没有** `tool` 参数——加一个没人调用的参数等于新开一条未验证形状。
+- **真机 CDP 探针未做**：输入栏与 MCP 设置页的验收停在 jsdom 状态断言 + 变异负控制 + `check:web` 七门；几何 / 可见性 / 截图建议收口时补一次。
