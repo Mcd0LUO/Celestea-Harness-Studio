@@ -50,7 +50,7 @@ Celestea Agent 把「一个能读写文件、执行命令、跑代码、并行�
 
 ### 1. 安装
 
-已发布到 npm（`celestea-agent` 及其 8 个 `@celestea/*` 依赖包）。需要 **Node.js ≥ 24 < 27**。
+已发布到 npm（`celestea-agent` 及其 11 个 `@celestea/*` 依赖包）。需要 **Node.js ≥ 24 < 27**。
 
 ```bash
 npm install -g celestea-agent      # 或 pnpm add -g celestea-agent

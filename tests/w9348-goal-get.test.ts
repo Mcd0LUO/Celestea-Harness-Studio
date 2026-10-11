@@ -83,8 +83,9 @@ describe("W9348 A · the contract registers the route (the frozen table is not o
     // ① the frozen anchor, ② the file's count + its array length, ③ the constant
     // the boot assertion reads, ④ the snapshot's own two derived counts.
     // 这条钉的是「四个数永远一致」，常数随每次端点新增顺移：W9348 定稿时是 72，
-    // M2-B2c 的 POST /api/questions/{id}/cancel 把它带到 73。
-    expect(FROZEN_COUNTS.endpoints).toBe(73);
+    // M2-B2c 的 POST /api/questions/{id}/cancel 把它带到 73，W9350 的
+    // GET /api/sessions/{id}/skills 带到 74。
+    expect(FROZEN_COUNTS.endpoints).toBe(74);
     expect(c.count).toBe(FROZEN_COUNTS.endpoints);
     expect(c.endpoints).toHaveLength(FROZEN_COUNTS.endpoints);
     expect(API_ENDPOINT_COUNT).toBe(FROZEN_COUNTS.endpoints);

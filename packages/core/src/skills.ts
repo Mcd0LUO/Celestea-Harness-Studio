@@ -10,7 +10,7 @@
  * Frontmatter contract (mirrors anthropics/skills):
  *   - whitelist: name / description / license / allowed-tools / compatibility /
  *     metadata. ANY unknown key REJECTS the skill with a readable reason.
- *   - name must equal the directory name, match ^[a-z0-9-]+$ and be <= 64 chars.
+ *   - name must equal the directory name, match SKILL_NAME_PATTERN (@celestea/gesture) and be <= 64 chars.
  *   - description is REQUIRED, <= 1024 chars, and must not contain < or >.
  *     Write it as a TRIGGER sentence ("Use this skill whenever ...").
  *   - compatibility <= 500 chars.
@@ -25,9 +25,19 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { SKILL_FILE_NAME, SKILLS_SUBDIR, type SourceLayer, type SourceName } from "./celestea-sources.js";
+import { SKILL_NAME_PATTERN } from "@celestea/gesture";
 
-/** Allowed name shape. */
-export const SKILL_NAME_PATTERN = /^[a-z0-9-]+$/;
+/**
+ * Allowed name shape —— **唯一定义在 `@celestea/gesture`**（原定义在本文件，2026-10 迁走）。
+ *
+ * 为什么迁：本文件顶层 import `node:fs` / `node:path`，前端（apps/web，Vite 打包）一旦
+ * 依赖 core 就打包即炸；而 `/` 手势解析必须与前端共用同一份「技能名长什么样」
+ * （docs/feature/composer-surface.md §7）。所以字符集下沉到零依赖的叶子包 `gesture`，
+ * 这里导入后再原样导出 —— `@celestea/core` 的公开面与既有 `import { SKILL_NAME_PATTERN }
+ * from "@celestea/core"` 的写法一字不变。
+ */
+export { SKILL_NAME_PATTERN };
+
 /** name <= 64 chars. */
 export const SKILL_NAME_MAX = 64;
 /** description <= 1024 chars. */

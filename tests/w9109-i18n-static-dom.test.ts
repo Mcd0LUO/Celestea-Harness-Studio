@@ -141,8 +141,10 @@ describe('W9109 · index.html 静态 DOM（英文界面不得残留中文）', (
     const i18n = (await import(/* @vite-ignore */ at('i18n/index.ts'))) as I18nMod;
     expect(i18n.getLocale()).toBe('en');
     // 先证明遍历真的扫到了东西（否则「没有 CJK」可能只是空跑）。
-    expect(all('.settings-nav-item').length).toBe(9);
-    expect(all('.settings-pane').length).toBe(9);
+    // W-C2 加了第十格（MCP 只读状态面），所以这两个下限跟着长一格 —— 仍是**定值**：
+    // 改成 >= 就把「数量对不上」这条漂移放跑了，而它正是这条断言的本意。
+    expect(all('.settings-nav-item').length).toBe(10);
+    expect(all('.settings-pane').length).toBe(10);
     expect(all('[data-i18n]').length).toBeGreaterThan(30);
     expect(cjkInStaticDom(), '英文界面下的残留中文（逐条列在这里）').toEqual([]);
   });

@@ -38,6 +38,9 @@
  *   usage.ts         W785: GET /api/usage/ledger (the ledger's aggregate view)
  *   permissions.ts   W9: /api/permissions/presets (+{id}) | /api/sessions/{id}/permission
  *   session-tools.ts W860: GET+PUT /api/sessions/{id}/tools (the session's disabled list)
+ *   skills.ts        W9350: GET /api/sessions/{id}/skills (the session's skill
+ *                    listing — the /{skill} surface; HTTP projection only, the
+ *                    read is the engine's)
  *   session-model.ts W870: PUT /api/sessions/{id}/model (the session-level model switch)
  *   session-goal.ts  W9209/W9348: GET+POST /api/sessions/{id}/goal (the
  *                    persistent session goal; the GET reads it back for a
@@ -67,6 +70,7 @@ import { registerPrompts } from "./prompts.js";
 import { registerProviders } from "./providers.js";
 import { registerQuestions } from "./questions.js";
 import { registerSessionMoves } from "./session-move.js";
+import { registerSessionSkills } from "./skills.js";
 import { registerGoal } from "./session-goal.js";
 import { registerSessionModel } from "./session-model.js";
 import { registerSessionTools } from "./session-tools.js";
@@ -113,6 +117,11 @@ export function registerHandlers(app: Hono, deps: Deps, table: RouteTable): stri
     // W870: the session-scoped model switch — the statusline picker's
     // target; POST /api/config keeps meaning "the global default".
     registerSessionModel(app, deps, table),
+    // W9350: the session's skill listing (docs/feature/skill-command.md §4
+    // slice 1). Pure HTTP: it projects what the engine's `sessionSkills` seam
+    // reports, which reads through the same `readLayers` input as the catalog
+    // row injected every turn.
+    ...registerSessionSkills(app, deps, table),
     // W9209: the persistent session goal. The /goal command and the
     // statusline badge have always called this; until now the endpoint did not
     // exist and every call fell through to the /api/* 404 fallback.

@@ -21,6 +21,12 @@ export interface PopupItem {
   meta?: string;
   /** 目录项：视觉区分（文件/目录不同样式）。 */
   isDir?: boolean;
+  /**
+   * 分组名（composer-surface §1）：**渲染装饰**，不进 `items` 索引。
+   * renderList() 遍历时，若当前项的 group 与上一项不同 ⇒ 先插一个 `.cmd-group` 组头。
+   * 不传（@ 文件模式）⇒ 不出现任何组头。
+   */
+  group?: string;
   /** 选中时交给调用方的值。 */
   value: string;
 }
@@ -29,7 +35,7 @@ export interface PopupItem {
 export type PopupProvider = (prefix: string) => PopupItem[] | Promise<PopupItem[]>;
 
 let box: HTMLElement | null = null;
-let input: HTMLTextAreaElement | null = null;
+let input: HTMLElement | null = null;
 let overlay: OverlayHandle | null = null;
 let items: PopupItem[] = [];
 let active = 0;
@@ -76,7 +82,17 @@ function alreadyConsumed(e: CompletionKeyLike): boolean {
 function renderList(): void {
   if (!box) return;
   const off = document.createElement('div');
+  let prevGroup: string | undefined;
   items.forEach((item, i) => {
+    // ★ composer-surface §1.3：分组头是**渲染装饰**，不进 items ⇒ active 索引、
+    //   (active ± 1) % items.length、choose(active)、.cmd-row.active 四处全都不用动，
+    //   ↑↓ 因此只能逐项移动、不可能「跳组」。空串当作「没分组」（否则画出一个空盒）。
+    if (item.group !== undefined && item.group !== '' && item.group !== prevGroup) {
+      prevGroup = item.group;
+      const head = el('div', 'cmd-group', item.group);
+      head.setAttribute('role', 'presentation'); // listbox 里它不是 option：别让 AT 念成一个候选
+      off.appendChild(head);
+    }
     const row = el('div', 'cmd-row' + (i === active ? ' active' : '') + (item.isDir ? ' dir' : ''));
     row.appendChild(el('span', 'cmd-name', item.label));
     row.appendChild(el('span', 'cmd-desc', item.desc));
@@ -229,8 +245,13 @@ function positionBox(): void {
   box.style.bottom = Math.max(8, window.innerHeight - r.top + 6) + 'px';
 }
 
-/** 建出补全框（幂等；index.ts 装配一次）。 */
-export function initCompletion(inputEl: HTMLTextAreaElement, pick: (item: PopupItem) => void): void {
+/**
+ * 建出补全框（幂等；index.ts 装配一次）。
+ *
+ * §9.2：锚元素从 <textarea> 换成 Lexical 的 editor root（contenteditable div）。本模块只
+ * 用它的 getBoundingClientRect 来落位（positionBox），不读它的内容 —— 读写一律走适配缝。
+ */
+export function initCompletion(inputEl: HTMLElement, pick: (item: PopupItem) => void): void {
   if (box) return;
   input = inputEl;
   onPick = pick;

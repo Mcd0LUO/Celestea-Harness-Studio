@@ -73,7 +73,9 @@ import {
 } from "@celestea/tools";
 import { createImageDowngradeLlm, resolveLlmMode, type ImageDowngradeInfo, type Llm as ProviderLlm } from "@celestea/llm";
 import { withAttachments } from "./attachments-llm.js";
-import { goalNotice, goalTurnContext, turnContextFor } from "./goal-wiring.js";
+import { goalTurnContext, turnContextFor } from "./goal-wiring.js";
+import { afterInputPlan } from "./after-input-wiring.js";
+import { generationShutdownHooks } from "./generation-hooks.js";
 
 /** W510 resource caps (overridable through the adapter options or the env). */
 export const MAX_LIVE_SESSIONS = 4;
@@ -357,11 +359,6 @@ export class SessionComposer {
     // system prompt renders (the host's `resolveSession` hook). A session with no
     // resolvable workspace keeps the process env posture — never a failure.
     const workspace = sessionId === null ? null : (this.opts.resolveSession?.(sessionId)?.workspace ?? null);
-    // W9346 + W884: the goal's two halves and the skill/memory context, both
-    // rebuilt at every turn start (goal-wiring.ts holds the reasoning — the
-    // composer sits exactly at its 450-line cap). A detached generation has no
-    // session directory and no workspace, so it contributes nothing.
-    const notice = goalNotice(sessionId, dir);
     const turnContext = turnContextFor(workspace === null ? null : workspace.path, goalTurnContext(sessionId, dir), this.opts.env);    const reader = this.opts.grants;
     const read = reader?.read(sessionId, dir) ?? { grants: EMPTY_GRANTS, warnings: [] };
     // W728: the ledger must exist before the Llm wrapper (every step books).
@@ -437,32 +434,33 @@ export class SessionComposer {
       : repeatGuardDisabled(this.opts.env ?? process.env)
         ? null
         : repeatGuardSettingsOf();
+    // W9346 + W9351 + W-C1b: the after-input lane (goal → skill → mcp). It is
+    // assembled after `enginePlugins()` because the MCP producer reads
+    // `engine.tools.mcp`; the order and its reasoning live in after-input-wiring.ts.
+    const afterInput = afterInputPlan(sessionId, dir, workspace === null ? null : workspace.path, this.opts.env, engine.tools);
     const composed = compose({
       profile,
       plugins: engine.plugins,
       sessionBinding: this.bindingTo(sessionId, dir),
-      // W855 #1: reap detached `run_shell background:true` children on shutdown.
-      // The composer holds the registry from `engine.tools`; runtime is L2 and
-      // may not import @celestea/tools, so the hook is wired HERE (host side).
-      // Phase 1: drain queued extraction too — idle-TTL eviction runs these
-      // same hooks (disposeRuntime awaits runtime.shutdown()).
-      shutdownHooks: [
-        () => engine.tools.processes.dispose(),
-        ...(extraction === undefined ? [] : [() => extraction.drain()]),
-      ],
+      shutdownHooks: generationShutdownHooks(engine.tools, extraction),
       usage,
       ...(ledger === null ? {} : { ledger }),
       inbox: hooks.inbox ?? createSessionInbox(),
       ...(hooks.onInjected === undefined ? {} : { onInjected: hooks.onInjected }),
       ...(turnContext === undefined ? {} : { turnContext }),
-      // W9346: the change notice reaches the model AFTER the turn's input row,
-      // which is inside the loop — so it is a compose-level option, not a loop
-      // binding this factory sets by hand.
-      ...(notice === undefined ? {} : { afterInput: notice }),
+      // W9346 + W9351: the change notice and the skill body both reach the model
+      // AFTER the turn's input row, which is inside the loop — so it is a
+      // compose-level option, not a loop binding this factory sets by hand.
+      ...(afterInput === undefined ? {} : { afterInput }),
       ...(extraction === undefined ? {} : { extraction }),
       loopFactory: (bindings) => {
         // W806: the turn boundary is the ONLY place the disclosed set may move.
         engine.tools.disclosure.beginTurn();
+        // W-C1b: MCP tools land at the SAME boundary, and never earlier — the
+        // names do not exist until discovery answers (§6.1), and the face may
+        // only grow at a boundary (DisclosurePolicy invariant 3). The exposed
+        // registry appends them at the TAIL (§5.4).
+        engine.tools.mcp?.publish(engine.tools.registry);
         // W9228 (W9225 F-09): the repetition guard's diagnostics sink. Until now
         // NOTHING in production passed `repetitionDiagnostics`, so
         // `CollapseDriver.log()` returned on its first line for every conviction
@@ -933,3 +931,4 @@ export class SessionComposer {
     });
   }
 }
+
