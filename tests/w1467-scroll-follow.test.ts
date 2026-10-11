@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // ============================================================================
 // tests/w1467-scroll-follow.test.ts — W1467 问题 1 的机械门禁：
 // **页面必须跟随模型输出向下滚动**。
@@ -8,21 +9,20 @@
 // 25px，那一帧判定为假 ⇒ **从此永久失跟**（实测第一次 +mcol 让 7932→8020，gap 停在
 // 88px，其后 242/495 帧都不贴底，直到轮次结束）。
 //
-// 门禁跑**真实生产代码**（ui/messages/scroll.ts，esbuild 打包），用可控的几何
-// 序列复现那个场景，断言：
+// 门禁跑**真实生产代码**（ui/messages/scroll.ts，真 jsdom 下直接 import），用可控的
+// 几何序列复现那个场景，断言：
 //   A. 内容一次长高远超阈值后，后续 autoscroll 仍然贴底（这是 bug 本体）；
 //   B. 用户主动往上滚 → 解锁（不能把读者拽回去，W12）；
 //   C. 用户滚回底部 → 重新上锁；
 //   D. force 无视闩锁（完成/新消息路径）；
 //   E. 隐藏容器不写布局，只记「期望贴底」（W514）。
+//
+// ★ W9395：原先用 esbuild 打包 + 手搓最小 DOM 垫片（tests/lib/w1467-dom.ts）；
+//   现在改跑**真 jsdom**，生产模块直接 import，垫片已删除。
 // ============================================================================
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { bundleFrontend, El, installDom, restoreDom } from "./lib/w1467-dom.js";
-
+import { describe, expect, it, beforeAll } from "vitest";
+import { at, Ev } from "./lib/w795-dom.js";
+import { domEl, type DomEl } from "./lib/dom-tree.js";
 
 interface ScrollMod {
   autoscroll: (ctx: unknown, force?: boolean) => void;
@@ -30,49 +30,37 @@ interface ScrollMod {
 }
 
 let mod: ScrollMod;
-let tmpDir = "";
 
 beforeAll(async () => {
-  installDom();
-  tmpDir = mkdtempSync(join(tmpdir(), "w1467-scroll-"));
-  const out = join(tmpDir, "scroll.mjs");
-  await bundleFrontend(
-    "export { autoscroll, AT_BOTTOM_PX } from './apps/web/src/ui/messages/scroll.ts';",
-    out,
-  );
-  mod = (await import(pathToFileURL(out).href)) as ScrollMod;
-});
-
-afterAll(() => {
-  // W9219：还原 installDom 覆盖的全局（Node/document/window/navigator）。
-  // 不还原时共享进程下的后续文件会在 chai 的 `instanceof Node` 处整片变红（见 w1467-dom.ts）。
-  restoreDom();
-  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+  mod = (await import(/* @vite-ignore */ at("ui/messages/scroll.ts"))) as ScrollMod;
 });
 
 /**
  * 一个可控几何的会话容器。
  *
- * 浏览器语义由本垫片模拟：写 scrollTop 会被钳到 [0, scrollHeight - clientHeight]，
+ * 真 jsdom **不做布局**：它的 scrollTop/clientHeight/scrollHeight 恒为 0。所以这里在
+ * **实例上**用 Object.defineProperty 定义这三个 own property（遮住原型 getter），
+ * 并自己实现浏览器语义：写 scrollTop 会被钳到 [0, scrollHeight - clientHeight]，
  * 并且**派发 scroll 事件** —— 这正是闩锁与「用户滚动」相互作用的真实通路
  * （不派发事件，B/C 两条就永远测不到）。
+ * 遮住原型 getter 这件事由本文件的第一条用例实测确认（不是口头假设）。
  */
 class Pane {
-  el: El;
-  hint: El;
+  el: DomEl;
+  hint: DomEl;
   stickBottom: boolean;
   private _top: number;
   private _content: number;
   readonly clientHeight: number;
 
   constructor(clientHeight = 300, content = 0) {
-    this.el = new El("div");
-    this.hint = new El("div");
+    this.el = domEl("div");
+    this.hint = domEl("div");
     this.stickBottom = true;
     this.clientHeight = clientHeight;
     this._content = content;
     this._top = 0;
-    // 容器把 clientHeight / scrollHeight 透给 El（生产代码读这两个属性）。
+    // 实例上的 own property 遮住 jsdom Element.prototype 上的 getter。
     Object.defineProperty(this.el, "clientHeight", { get: () => this.clientHeight });
     Object.defineProperty(this.el, "scrollHeight", { get: () => this._content });
     Object.defineProperty(this.el, "scrollTop", {
@@ -83,7 +71,7 @@ class Pane {
         const moved = next !== this._top;
         this._top = next;
         // 浏览器在滚动位置**真的变了**之后才派发 scroll 事件。
-        if (moved) (this.el as unknown as { _fire(k: string): void })._fire("scroll");
+        if (moved) this.el.dispatchEvent(new Ev("scroll"));
       },
     });
   }
@@ -99,6 +87,28 @@ class Pane {
 }
 
 describe("W1467 · the page follows the model output (scroll follow)", () => {
+  it("fake geometry is an own property that really shadows the jsdom prototype getter", () => {
+    const pane = new Pane(300, 1000);
+    // ① 三个几何量都定义在**实例**上（不是原型）。
+    expect(Object.prototype.hasOwnProperty.call(pane.el, "scrollTop")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(pane.el, "clientHeight")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(pane.el, "scrollHeight")).toBe(true);
+    // ② 读到的确实是夹具几何 —— jsdom 原型的 clientHeight 恒为 0，这里必须是 300。
+    expect(pane.el.clientHeight).toBe(300);
+    expect(pane.el.scrollHeight).toBe(1000);
+    // ③ 写入被钳制（jsdom 原型的 scrollTop 写入恒为 0）。
+    pane.el.scrollTop = 12345;
+    expect(pane.el.scrollTop).toBe(700); // 1000 - 300
+    pane.el.scrollTop = -5;
+    expect(pane.el.scrollTop).toBe(0);
+    // ④ 位置真的变化才派发 scroll（浏览器语义）。
+    let fired = 0;
+    pane.el.addEventListener("scroll", () => { fired += 1; });
+    pane.el.scrollTop = 100;
+    pane.el.scrollTop = 100;
+    expect(fired).toBe(1);
+  });
+
   it("keeps following after content grows past the threshold in ONE frame (the bug)", () => {
     const pane = new Pane(300, 1000);
     mod.autoscroll(pane);

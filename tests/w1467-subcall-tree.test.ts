@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // ============================================================================
 // tests/w1467-subcall-tree.test.ts — W1467：run_code 子调用缩进树的**机械门禁**。
 //
@@ -14,19 +15,19 @@
 //      restore.ts 的 renderToolMessage 路径），断言 live 与 replay 的 DOM 树同形，
 //      且子调用不占模型级步数。
 //
-// 为什么用 esbuild 打前端模块：apps/web/src 的相对导入无扩展名，node 不能直接
-// import（与 tools/check-fold-default.mjs 同一手法）。DOM 垫片与 live-replay 门禁
-// **共用** tests/lib/w1467-dom.ts —— 同一规则两份实现迟早分叉。
+// ★ W9395：C 层原先用 esbuild 打包 + 手搓最小 DOM 垫片（tests/lib/w1467-dom.ts）。
+//   垫片只有 parentNode、matches 不认祖先链、textContent 不拼子节点 —— 现在改跑
+//   **真 jsdom**：直接 import 前端源码（与 tests/lib/w795-dom.ts 同一手法），
+//   树形状助手搬到 tests/lib/dom-tree.ts。垫片已删除。
 // ============================================================================
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { describe, expect, it, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { projectMessages } from "@celestea/session";
 import { subCallFrame } from "@celestea/runtime";
-import { bundleFrontend, depthOfCards, El, installDom, restoreDom, treeSkeleton } from "./lib/w1467-dom.js";
+import { at } from "./lib/w795-dom.js";
+import { depthOfCards, domEl, treeSkeleton, type DomEl } from "./lib/dom-tree.js";
 import type { SessionEvent, StudioMessage } from "@celestea/core";
 
 /** StudioMessage 的 tool 行守卫（联合收窄用）。 */
@@ -108,45 +109,28 @@ describe("W1467 B · contracts/sse-events.json declares the two payload extensio
 // ---- C. 前端：live 与 replay 必须同形 ----------------------------------------
 //
 // 跑**真实生产代码**：ui/toolcards.ts 的 buildToolCard / mountToolCard / subCallIndex。
-// DOM 垫片来自 tests/lib/w1467-dom.ts（与 live-replay 门禁共用同一份）—— 共用是
-// 刻意的：同一规则两份实现迟早分叉（W752 的教训）。
+// 真 jsdom 由文件头的 environment 指令提供，生产模块直接 import；树形状助手来自
+// tests/lib/dom-tree.ts（与 live-replay 门禁共用同一份）。
 
 interface TreeMod {
-  buildToolCard: (d: { step: number; name: string; argsText: string; desc?: string; sub?: number }) => { col: El; subs: El; card: El };
-  mountToolCard: (ref: { col: El; subs: El }, parentId: string | undefined, parents: Map<string, { col: El; subs: El }>, fallback: El) => void;
+  buildToolCard: (d: { step: number; name: string; argsText: string; desc?: string; sub?: number }) => { col: DomEl; subs: DomEl; card: DomEl };
+  mountToolCard: (ref: { col: DomEl; subs: DomEl }, parentId: string | undefined, parents: Map<string, { col: DomEl; subs: DomEl }>, fallback: DomEl) => void;
   subCallIndex: (id: string) => number | undefined;
 }
 
 let mod: TreeMod;
-let tmpDir = "";
 
-// ★ W2035：本 hook 跑的是**真的 esbuild 打包**（前端源码 → 可 import 的 ESM），
-//   耗时由宿主争用决定，实测空闲 1.9–2.1s、12 路争用下 **7.3–7.7s** —— 而 vitest 的
-//   hookTimeout 默认 **10s**（本仓从未设过 hookTimeout，故所有 beforeAll 都在这个默认上），
-//   余量 <1.4x ⇒ 负载下会报 `Hook timed out in 10000ms`（W2035 在全量 check 里抓到过）。
-//   ⇒ 只给**这一个 hook** 显式预算 60s（>7x 实测最坏），不动全局 hookTimeout。
+// ★ W2035：本 hook 原先跑真的 esbuild 打包（争用下 >7s），故给了 60s 预算。
+//   W9395 迁到真 jsdom 后只是模块解析，不再有那个耗时；预算保留无害，也不再需要
+//   tmpdir / 打包产物清理。
 beforeAll(async () => {
-  installDom();
-  tmpDir = mkdtempSync(join(tmpdir(), "w1467-tree-"));
-  const out = join(tmpDir, "bundle.mjs");
-  await bundleFrontend(
-    "export { buildToolCard, mountToolCard, subCallIndex } from './apps/web/src/ui/toolcards.ts';",
-    out,
-  );
-  mod = (await import(pathToFileURL(out).href)) as TreeMod;
+  mod = (await import(/* @vite-ignore */ at("ui/toolcards.ts"))) as TreeMod;
 }, 60_000);
 
-afterAll(() => {
-  // W9219：还原 installDom 覆盖的全局（Node/document/window/navigator）。
-  // 不还原时共享进程下的后续文件会在 chai 的 `instanceof Node` 处整片变红（见 w1467-dom.ts）。
-  restoreDom();
-  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
-});
-
 /** 按 live / replay **同一套规则**建树：父卡先建，子项按 parentId 挂。 */
-function buildTree(rows: Array<{ id: string; name: string; parent?: string; sub?: number }>): El {
-  const host = new El("div");
-  const index = new Map<string, { col: El; subs: El }>();
+function buildTree(rows: Array<{ id: string; name: string; parent?: string; sub?: number }>): DomEl {
+  const host = domEl("div");
+  const index = new Map<string, { col: DomEl; subs: DomEl }>();
   for (const row of rows) {
     const ref = mod.buildToolCard({
       step: 1,
@@ -167,11 +151,11 @@ describe("W1467 C · the frontend nests a sub-call under its run_code parent", (
       { id: "rc-1:c1", name: "read_file", parent: "rc-1", sub: 1 },
     ]);
     // 顶层只挂一张卡（父卡）；子项的 .mcol 在父卡的子容器里。
-    expect(host.childNodes).toHaveLength(1);
+    expect(host.children).toHaveLength(1);
     expect(host.querySelectorAll(".mcol")).toHaveLength(2);
-    const subs = host.childNodes[0]!.querySelector(".toolcard-subs")!;
-    expect(subs.childNodes).toHaveLength(1);
-    expect(subs.childNodes[0]!.querySelector(".toolcard")).not.toBeNull();
+    const subs = host.children[0]!.querySelector(".toolcard-subs")!;
+    expect(subs.children).toHaveLength(1);
+    expect(subs.children[0]!.querySelector(".toolcard")).not.toBeNull();
   });
 
   it("keeps the sub-call container OUTSIDE the <details> (folding the parent hides no child)", () => {
@@ -179,7 +163,7 @@ describe("W1467 C · the frontend nests a sub-call under its run_code parent", (
       { id: "rc-1", name: "run_code" },
       { id: "rc-1:c1", name: "read_file", parent: "rc-1", sub: 1 },
     ]);
-    const col = host.childNodes[0]!;
+    const col = host.children[0]!;
     const details = col.querySelector("details")!;
     const subs = col.querySelector(".toolcard-subs")!;
     // subs 不是 details 的后代：CSS 的折叠规则只藏 .toolcard-body。
@@ -194,7 +178,7 @@ describe("W1467 C · the frontend nests a sub-call under its run_code parent", (
     ]);
     const texts = [...host.querySelectorAll(".step-tag")].map((n) => n.textContent);
     expect(texts.includes("c3")).toBe(true);
-    expect(texts.some((t) => t.includes("第"))).toBe(true); // 父卡仍是「第 N 步」
+    expect(texts.some((t) => (t ?? "").includes("第"))).toBe(true); // 父卡仍是「第 N 步」
   });
 
   it("mounts live and replay identically (same row shape -> same tree skeleton)", () => {
@@ -214,8 +198,8 @@ describe("W1467 C · the frontend nests a sub-call under its run_code parent", (
 
   it("falls back to the top level when the parent is missing (never loses content)", () => {
     const host = buildTree([{ id: "rc-1:c1", name: "read_file", parent: "gone", sub: 1 }]);
-    expect(host.childNodes).toHaveLength(1);
-    expect(host.childNodes[0]!.querySelector(".toolcard")).not.toBeNull();
+    expect(host.children).toHaveLength(1);
+    expect(host.children[0]!.querySelector(".toolcard")).not.toBeNull();
   });
 
   it("nests one more level when a sub-call is itself a run_code", () => {
@@ -224,9 +208,9 @@ describe("W1467 C · the frontend nests a sub-call under its run_code parent", (
       { id: "rc-1:c1", name: "run_code", parent: "rc-1", sub: 1 },
       { id: "rc-1:c1:c1", name: "read_file", parent: "rc-1:c1", sub: 1 },
     ]);
-    const outer = host.childNodes[0]!;
-    const inner = outer.querySelector(".toolcard-subs")!.childNodes[0]!;
-    expect(inner.querySelector(".toolcard-subs")!.childNodes).toHaveLength(1);
+    const outer = host.children[0]!;
+    const inner = outer.querySelector(".toolcard-subs")!.children[0]!;
+    expect(inner.querySelector(".toolcard-subs")!.children).toHaveLength(1);
     expect(depthOfCards(host)).toEqual([0, 1, 2]);
   });
 

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // ============================================================================
 // tests/w1542-toolcard-dup.test.ts — W1542：工具卡**行内重复**门禁。
 //
@@ -30,64 +31,41 @@
 //   把 DOM 与历史行都归一成 (工具名, 规范化 args) 的有序序列后**逐元素相等**，
 //   即「每条 call 恰好渲染一次」——D 条专门守着别把它们吃掉。
 //
-// 为什么自己写子节点导航而不是用 `:scope > …` 选择器：本仓共用的最小 DOM 垫片
-// （tests/lib/w1467-dom.ts）只实现「最后一段」匹配，**祖先链不参与判定** ——
-// 用后代选择器写「本行自己的 caption」会静默匹配到嵌套子行的 caption，
-// 门禁就会假绿。这里逐级 childNodes 走，口径与真机度量脚本（results/W1542-audit.mjs）
-// 逐字一致。
+// ★ W9395：原先用 esbuild 打包 + 手搓最小 DOM 垫片（tests/lib/w1467-dom.ts）。
+//   垫片不做祖先链匹配、textContent 不拼子节点，所以当时逐级 childNodes 手走。
+//   现在改跑**真 jsdom**：生产模块直接 import，通用导航（child/deep/textOf）来自
+//   tests/lib/dom-tree.ts。child 仍是「直接子元素里找」，口径与真机度量脚本
+//   （results/W1542-audit.mjs）逐字一致；deep 走真 DOM 的 querySelector。
 // ============================================================================
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { bundleFrontend, El, installDom, restoreDom } from "./lib/w1467-dom.js";
+import { describe, expect, it, beforeAll } from "vitest";
+import { at } from "./lib/w795-dom.js";
+import { child, deep, domEl, textOf, type DomEl } from "./lib/dom-tree.js";
 
 const WIN = globalThis as unknown as Record<string, unknown>;
 
 interface ToolcardsMod {
-  pushToolCard: (ctx: unknown, p: Record<string, unknown>) => El;
-  buildToolCard: (d: Record<string, unknown>) => { col: El; subs: El; card: El };
-  mountToolCard: (ref: unknown, parentId: string | undefined, parents: Map<string, unknown>, fallback: El) => void;
+  pushToolCard: (ctx: unknown, p: Record<string, unknown>) => DomEl;
+  buildToolCard: (d: Record<string, unknown>) => { col: DomEl; subs: DomEl; card: DomEl };
+  mountToolCard: (ref: unknown, parentId: string | undefined, parents: Map<string, unknown>, fallback: DomEl) => void;
 }
 interface RestoreMod { restoreSessionHistory: (ctx: unknown) => Promise<void>; }
 
 let tc: ToolcardsMod;
 let restore: RestoreMod;
-let tmpDir = "";
 
-// ★ W2035：本 hook 跑的是**真的 esbuild 打包**（前端源码 → 可 import 的 ESM），
-//   耗时由宿主争用决定，实测空闲 1.9–2.1s、12 路争用下 **7.3–7.7s** —— 而 vitest 的
-//   hookTimeout 默认 **10s**（本仓从未设过 hookTimeout，故所有 beforeAll 都在这个默认上），
-//   余量 <1.4x ⇒ 负载下会报 `Hook timed out in 10000ms`（W2035 在全量 check 里抓到过）。
-//   ⇒ 只给**这一个 hook** 显式预算 60s（>7x 实测最坏），不动全局 hookTimeout。
+// ★ W2035：本 hook 原先跑真的 esbuild 打包（争用下 >7s），故给了 60s 预算。
+//   W9395 迁到真 jsdom 后只是模块解析，不再有那个耗时；预算保留无害。
 beforeAll(async () => {
-  installDom();
-  tmpDir = mkdtempSync(join(tmpdir(), "w1542-dup-"));
-  const tcOut = join(tmpDir, "toolcards.mjs");
-  await bundleFrontend(
-    "export { pushToolCard, buildToolCard, mountToolCard } from './apps/web/src/ui/toolcards.ts';",
-    tcOut,
-  );
-  tc = (await import(pathToFileURL(tcOut).href)) as ToolcardsMod;
-  const rOut = join(tmpDir, "restore.mjs");
-  await bundleFrontend("export { restoreSessionHistory } from './apps/web/src/ui/restore.ts';", rOut);
-  restore = (await import(pathToFileURL(rOut).href)) as RestoreMod;
+  tc = (await import(/* @vite-ignore */ at("ui/toolcards.ts"))) as ToolcardsMod;
+  restore = (await import(/* @vite-ignore */ at("ui/restore.ts"))) as RestoreMod;
 }, 60_000);
-
-afterAll(() => {
-  // W9219：还原 installDom 覆盖的全局（Node/document/window/navigator）。
-  // 不还原时共享进程下的后续文件会在 chai 的 `instanceof Node` 处整片变红（见 w1467-dom.ts）。
-  restoreDom();
-  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
-});
 
 /** 一个够 pushToolCard / restoreSessionHistory 用的会话容器（SessionPane 的相关字段）。 */
 function fakePane(): Record<string, unknown> {
   return {
     id: "w1542-fixture",
-    el: new El("div"),
-    hint: new El("div"),
+    el: domEl("div"),
+    hint: domEl("div"),
     streaming: false,
     assistant: null,
     lastTextCol: null,
@@ -104,59 +82,43 @@ function fakePane(): Record<string, unknown> {
   };
 }
 
-function elOf(pane: Record<string, unknown>): El { return pane["el"] as El; }
+function elOf(pane: Record<string, unknown>): DomEl { return pane["el"] as DomEl; }
 
-// ---- 逐级子节点导航（垫片不做祖先链匹配，见文件头） ----------------------------
-
-/** 直接子元素里带该 class 的第一个（null = 无）。 */
-function child(node: El | null, cls: string): El | null {
-  if (node === null) return null;
-  for (const c of node.childNodes) if (c.classList.contains(cls)) return c;
-  return null;
-}
+// ---- 逐级子节点导航（child = 直接子元素里找，见文件头） ------------------------
 
 /** 该行（.mcol）自己的卡片：.msg > .bubble > .toolcard。 */
-function cardOf(row: El): El | null { return child(child(child(row, "msg"), "bubble"), "toolcard"); }
+function cardOf(row: DomEl): DomEl | null { return child(child(child(row, "msg"), "bubble"), "toolcard"); }
 /** 该行**自己的** caption（不含嵌套子行）。 */
-function captionOf(row: El): El | null { return child(child(row, "msg"), "msg-caption"); }
+function captionOf(row: DomEl): DomEl | null { return child(child(row, "msg"), "msg-caption"); }
 /** 该行**自己的**卡头。 */
-function headOf(row: El): El | null { return child(cardOf(row), "toolcard-head"); }
+function headOf(row: DomEl): DomEl | null { return child(cardOf(row), "toolcard-head"); }
 /** 卡头里的行容器（.toolcard-head > .toolcard-row1）——名字/步标/状态都在它里面。 */
-function row1Of(row: El): El | null { return child(headOf(row), "toolcard-row1"); }
+function row1Of(row: DomEl): DomEl | null { return child(headOf(row), "toolcard-row1"); }
 /** 该行自己的卡头名字元素。 */
-function nameElOf(row: El): El | null { return child(row1Of(row), "toolcard-name"); }
+function nameElOf(row: DomEl): DomEl | null { return child(row1Of(row), "toolcard-name"); }
 /** 该行自己的 step 标记。 */
-function stepTagOf(row: El): El | null { return child(row1Of(row), "step-tag"); }
+function stepTagOf(row: DomEl): DomEl | null { return child(row1Of(row), "step-tag"); }
 
 /**
  * 该行参数正文块的文本（`.tool-args`），空白归一化。
- * ★ W9348 起它在 `.tool-block` 宿主里（宿主首子节点是标签），故**递归**找后代 ——
- *   垫片的 `matches` 不做祖先链匹配，直接 `childNodes.find` 只会找到空数组。
+ * ★ W9348 起它在 `.tool-block` 宿主里（宿主首子节点是标签），故按**后代**找
+ *   （真 DOM 的 querySelector，与生产代码同一口径）。
  */
-function argsTextOf(row: El): string {
-  const find = (n: El | null): El | null => {
-    if (n === null) return null;
-    for (const c of n.childNodes) {
-      if (c.classList.contains("tool-args")) return c;
-      const hit = find(c);
-      if (hit !== null) return hit;
-    }
-    return null;
-  };
-  const pre = find(cardOf(row));
+function argsTextOf(row: DomEl): string {
+  const pre = deep(cardOf(row), "tool-args");
   return pre === null ? "" : String(pre.textContent ?? "").replace(/\s+/g, "");
 }
 
 /** 一个容器下**直接**挂的工具行（顶层 = pane.el 的直接 .mcol；子行 = subs 的直接 .mcol）。 */
-function rowsUnder(host: El): El[] {
-  return host.childNodes.filter((c) => c.classList.contains("mcol") && cardOf(c) !== null);
+function rowsUnder(host: DomEl): DomEl[] {
+  return Array.from(host.children).filter((c) => c.classList.contains("mcol") && cardOf(c) !== null);
 }
 
 /** 全部工具行（含嵌套）—— 用 .toolcard 反查所属 .mcol 需要父子映射，这里直接递归收集。 */
-function allRows(host: El): El[] {
-  const out: El[] = [];
-  const walk = (n: El): void => {
-    for (const c of n.childNodes) {
+function allRows(host: DomEl): DomEl[] {
+  const out: DomEl[] = [];
+  const walk = (n: DomEl): void => {
+    for (const c of Array.from(n.children)) {
       if (c.classList.contains("mcol") && cardOf(c) !== null) out.push(c);
       walk(c);
     }
@@ -166,41 +128,26 @@ function allRows(host: El): El[] {
 }
 
 /**
- * 节点子树的**全部文本**（递归拼接）。
- * 为什么不用 `textContent`：共用的最小 DOM 垫片（tests/lib/w1467-dom.ts）里
- * `textContent` 只回自己 `_text`，**不拼子节点** —— 而 caption 的文案在 span 里、
- * 卡头的文案在 .toolcard-row1 的 span 里。真机 DOM 的 textContent 是拼的，
- * 直接用垫片的会让「名字次数」恒为 0 而门禁假绿。
- */
-function textOf(n: El | null): string {
-  if (n === null) return "";
-  let s = n.textContent;
-  for (const c of n.childNodes) s += textOf(c);
-  return s;
-}
-
-/**
  * 该行卡头名字元素上的**工具名**。
- * 构建方写的是 `nameEl.title = d.name`（属性赋值，真机 DOM 会反射成 title 属性）；
- * 共用的最小 DOM 垫片不做反射，只认 `.title` 这个属性 —— 所以先读属性、
+ * 构建方写的是 `nameEl.title = d.name`（真 DOM 会反射成 title 属性）—— 先读属性、
  * 再回落 `getAttribute`，两种宿主下取到同一个值。
  */
-function toolNameOf(row: El): string {
-  const nameEl = nameElOf(row) as unknown as { title?: string } | null;
+function toolNameOf(row: DomEl): string {
+  const nameEl = nameElOf(row);
   if (nameEl === null) return "";
   const prop = typeof nameEl.title === "string" ? nameEl.title : "";
-  return prop !== "" ? prop : (nameElOf(row)!.getAttribute("title") ?? "");
+  return prop !== "" ? prop : (nameEl.getAttribute("title") ?? "");
 }
 
 /** 卡头**印出来的**文本（.toolcard-name 的内容 = desc 或工具名）。 */
-function headLabelOf(row: El): string { return textOf(nameElOf(row)); }
+function headLabelOf(row: DomEl): string { return textOf(nameElOf(row)); }
 
 /**
  * 该行自己的头部里工具名出现几次 —— **正是真机度量的那条口径**
  * （caption 文本 + 卡头文本，不含嵌套子行）。
  * 期望恒 ≤1：0 = 卡头印 desc（名字只在 title 里），2 = 用户报障的行内重复。
  */
-function nameOccurrencesInRow(row: El): number {
+function nameOccurrencesInRow(row: DomEl): number {
   const tool = toolNameOf(row);
   if (tool === "") return 0;
   const own = textOf(captionOf(row)) + " " + textOf(headOf(row));
@@ -208,13 +155,13 @@ function nameOccurrencesInRow(row: El): number {
 }
 
 /** 一行是不是子调用（按 step 标记 c<n> 判 —— 与渲染判据同源）。 */
-function isSubRow(row: El): boolean {
+function isSubRow(row: DomEl): boolean {
   const tag = stepTagOf(row);
-  return tag !== null && /^c\d+$/.test(tag.textContent);
+  return tag !== null && /^c\d+$/.test(tag.textContent ?? "");
 }
 
 /** 每行的「行内形状」—— live / replay 必须逐字相同。 */
-function shapeOfRow(row: El): string {
+function shapeOfRow(row: DomEl): string {
   return [
     isSubRow(row) ? "sub" : "top",
     captionOf(row) === null ? "nocap" : "cap",
@@ -245,7 +192,7 @@ const ROWS = [
   { id: "rc-9:c1", name: "list_dir", args: { path: "/y" } },
 ];
 
-function buildLive(): El {
+function buildLive(): DomEl {
   const pane = fakePane();
   for (const row of ROWS) {
     const parent = row.id.includes(":") ? row.id.slice(0, row.id.indexOf(":")) : undefined;
@@ -257,7 +204,7 @@ function buildLive(): El {
   return elOf(pane);
 }
 
-async function buildReplay(): Promise<El> {
+async function buildReplay(): Promise<DomEl> {
   const pane = fakePane();
   WIN["fetch"] = async () => ({
     ok: true,
@@ -278,7 +225,7 @@ async function buildReplay(): Promise<El> {
 }
 
 /** 每行「自己的 caption 里有没有工具名」——C 条的判据。 */
-function captionCarriesToolName(row: El): boolean {
+function captionCarriesToolName(row: DomEl): boolean {
   const cap = captionOf(row);
   const tool = toolNameOf(row);
   return cap !== null && tool !== "" && textOf(cap).includes(tool);
@@ -351,7 +298,7 @@ describe("W1542 · 工具卡行内重复（同一个工具名印两遍）", () =
   });
 
   it("F. 父卡缺失时子调用退回顶层 —— 仍然没有 caption（判据是 id 不是挂载位置）", () => {
-    const host = new El("div");
+    const host = domEl("div");
     const ref = tc.buildToolCard({ step: 1, name: "run_shell", argsText: "{}", sub: 3 });
     tc.mountToolCard(ref, "gone-parent", new Map(), host);
     // 落到了顶层（父卡不在索引里）……
@@ -374,7 +321,7 @@ describe("W1542 · 工具卡行内重复（同一个工具名印两遍）", () =
     await restore.restoreSessionHistory(pane);
     const rows = allRows(elOf(pane));
     expect(rows, "孤立结果行也要有一行").toHaveLength(0); // 它没有 .toolcard（是 .content.restore-tool）
-    const col = elOf(pane).childNodes.find((c) => c.classList.contains("mcol"));
+    const col = Array.from(elOf(pane).children).find((c) => c.classList.contains("mcol"));
     expect(col, "孤立结果行必须仍在").not.toBeUndefined();
     expect(captionOf(col!), "孤立结果行的 caption 是它唯一的「工具」标记，必须保留").not.toBeNull();
   });

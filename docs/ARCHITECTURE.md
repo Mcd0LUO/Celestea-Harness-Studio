@@ -298,7 +298,8 @@ apps/studio → runtime.compose(profile)
 
    **历史（两池白名单，已废弃）**：W9219 曾用 `isolated` + `shared`（`isolate:false` + 283 文件白名单）。
    废弃原因：默认并发下墙钟无收益，却要维护一整套证据 JSON 与平台 fail-closed。
-   它留下的**真实发现**仍然有效并已修复：`tests/lib/w1467-dom.ts` 的 `installDom()` 把
+   它留下的**真实发现**仍然有效并已修复：当时共用的 DOM 垫片（W9395 已删除，树形状判定
+   搬进 `tests/lib/dom-tree.ts`）的 `installDom()` 把
    `globalThis.Node` 设成不可调用对象且从不还原，导致同进程后续文件的 `expect(str).toContain(x)`
    在 chai 的 `actual instanceof Node` 处抛 `TypeError`。
 ### 6.5 口径与豁免（W889 审计补遗）

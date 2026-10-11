@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // ============================================================================
 // tests/w1467-subcall-live-replay.test.ts — W1467：run_code 子调用树的
 // **live 与 replay 一致性**门禁（本仓硬要求）。
@@ -13,18 +14,18 @@
 //
 // replay 一侧跑的是**真实的 restoreSessionHistory**（fetch 打桩喂历史），不是
 // 重写一遍规则 —— 否则门禁只能证明「我抄得对」，证明不了生产代码对。
+//
+// ★ W9395：原先用 esbuild 打包 + 手搓最小 DOM 垫片（tests/lib/w1467-dom.ts）；
+//   现在改跑**真 jsdom**，生产模块直接 import，树形状助手来自 tests/lib/dom-tree.ts。
 // ============================================================================
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { bundleFrontend, depthOfCards, El, installDom, restoreDom, treeSkeleton } from "./lib/w1467-dom.js";
+import { describe, expect, it, beforeAll } from "vitest";
+import { at } from "./lib/w795-dom.js";
+import { depthOfCards, domEl, treeSkeleton, type DomEl } from "./lib/dom-tree.js";
 
 const WIN = globalThis as unknown as Record<string, unknown>;
 
 interface ToolcardsMod {
-  pushToolCard: (ctx: unknown, p: Record<string, unknown>) => El;
+  pushToolCard: (ctx: unknown, p: Record<string, unknown>) => DomEl;
   applyToolResult: (ctx: unknown, p: Record<string, unknown>) => void;
 }
 interface RestoreMod {
@@ -33,40 +34,20 @@ interface RestoreMod {
 
 let tc: ToolcardsMod;
 let restore: RestoreMod;
-let tmpDir = "";
 
-// ★ W2035：本 hook 跑的是**真的 esbuild 打包**（前端源码 → 可 import 的 ESM），
-//   耗时由宿主争用决定，实测空闲 1.9–2.1s、12 路争用下 **7.3–7.7s** —— 而 vitest 的
-//   hookTimeout 默认 **10s**（本仓从未设过 hookTimeout，故所有 beforeAll 都在这个默认上），
-//   余量 <1.4x ⇒ 负载下会报 `Hook timed out in 10000ms`（W2035 在全量 check 里抓到过）。
-//   ⇒ 只给**这一个 hook** 显式预算 60s（>7x 实测最坏），不动全局 hookTimeout。
+// ★ W2035：本 hook 原先跑真的 esbuild 打包（争用下 >7s），故给了 60s 预算。
+//   W9395 迁到真 jsdom 后只是模块解析，不再有那个耗时；预算保留无害。
 beforeAll(async () => {
-  installDom();
-  tmpDir = mkdtempSync(join(tmpdir(), "w1467-lr-"));
-  const tcOut = join(tmpDir, "toolcards.mjs");
-  await bundleFrontend(
-    "export { pushToolCard, applyToolResult } from './apps/web/src/ui/toolcards.ts';",
-    tcOut,
-  );
-  tc = (await import(pathToFileURL(tcOut).href)) as ToolcardsMod;
-  const rOut = join(tmpDir, "restore.mjs");
-  await bundleFrontend("export { restoreSessionHistory } from './apps/web/src/ui/restore.ts';", rOut);
-  restore = (await import(pathToFileURL(rOut).href)) as RestoreMod;
+  tc = (await import(/* @vite-ignore */ at("ui/toolcards.ts"))) as ToolcardsMod;
+  restore = (await import(/* @vite-ignore */ at("ui/restore.ts"))) as RestoreMod;
 }, 60_000);
-
-afterAll(() => {
-  // W9219：还原 installDom 覆盖的全局（Node/document/window/navigator）。
-  // 不还原时共享进程下的后续文件会在 chai 的 `instanceof Node` 处整片变红（见 w1467-dom.ts）。
-  restoreDom();
-  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
-});
 
 /** 一个够 pushToolCard / restoreSessionHistory 用的会话容器（SessionPane 的相关字段）。 */
 function fakePane(): Record<string, unknown> {
   return {
     id: "w1467-fixture",
-    el: new El("div"),
-    hint: new El("div"),
+    el: domEl("div"),
+    hint: domEl("div"),
     streaming: false,
     assistant: null,
     lastTextCol: null,
@@ -83,7 +64,7 @@ function fakePane(): Record<string, unknown> {
   };
 }
 
-function elOf(pane: Record<string, unknown>): El { return pane["el"] as El; }
+function elOf(pane: Record<string, unknown>): DomEl { return pane["el"] as DomEl; }
 
 /** 同一份逻辑数据，两种线格式：SSE 帧（live）与历史行（replay）。 */
 const ROWS = [
@@ -132,7 +113,7 @@ describe("W1467 · live (SSE) and replay (history) render the SAME sub-call tree
     expect(depthOfCards(elOf(livePane))).toEqual([0, 1, 1]);
     expect(depthOfCards(elOf(replayPane))).toEqual([0, 1, 1]);
     // ③ 顶层只挂一张卡（父卡），两个子项都在它的 subs 里。
-    expect(elOf(livePane).childNodes).toHaveLength(1);
+    expect(elOf(livePane).children).toHaveLength(1);
     expect(elOf(replayPane).querySelectorAll(".mcol")).toHaveLength(3);
   });
 

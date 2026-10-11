@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // ============================================================================
 // tests/w9345-toolcard-args-dup.test.ts — W9345：工具卡**参数重复**门禁。
 //
@@ -17,88 +18,43 @@
 // ★ 复制语义不许因删 DOM 而变：复制按钮读的是**闭包里的 `d.argsText`**（不是被删的
 //   节点），所以 `chat.tool.copyHint`「复制参数与结果（JSON）」一字不变 —— 本文件的
 //   「复制不读被删节点」那条就是守这个的。
+//
+// ★ W9395：原先用 esbuild 打包 + 手搓最小 DOM 垫片（tests/lib/w1467-dom.ts）；
+//   现在改跑**真 jsdom**：生产模块直接 import，通用导航（child/deep/textOf）来自
+//   tests/lib/dom-tree.ts（deep 走真 DOM 的 querySelector，与生产代码同一口径）。
 // ============================================================================
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { bundleFrontend, El, installDom, restoreDom } from "./lib/w1467-dom.js";
+import { describe, expect, it, beforeAll } from "vitest";
+import { at } from "./lib/w795-dom.js";
+import { child, deep, textOf, type DomEl } from "./lib/dom-tree.js";
 
 interface ToolcardsMod {
   buildToolCard: (d: Record<string, unknown>) => {
-    col: El; card: El; body: El; label: El;
+    col: DomEl; card: DomEl; body: DomEl; label: DomEl;
   };
   setToolResult: (ref: unknown, text: string, failed: boolean) => void;
-  /** 标签文案（从真 i18n 读，断言不抄字面量）。 */
-  t: (key: string) => string;
 }
 
 let tc: ToolcardsMod;
-let tmpDir = "";
+/** 真 i18n 的 t（标签文案断言读它，不抄字面量 ⇒ 换语言/改文案都不会假红）。 */
+let t: (key: string) => string;
 
-// 与 w1542-toolcard-dup.test.ts 同一手法：真的 esbuild 打包前端源码 ⇒ 跑的是真实现。
+// 与 w1542-toolcard-dup.test.ts 同一手法：直接 import 真前端源码 ⇒ 跑的是真实现。
 // 同样只给这一个 hook 显式 60s 预算（W2035：默认 10s 在争用下不够）。
 beforeAll(async () => {
-  installDom();
-  tmpDir = mkdtempSync(join(tmpdir(), "w9345-argsdup-"));
-  const out = join(tmpDir, "toolcards.mjs");
-  // 顺带导出真 i18n 的 `t`（标签文案断言读它，不抄字面量 ⇒ 换语言/改文案都不会假红）。
-  await bundleFrontend(
-    "export { buildToolCard, setToolResult } from './apps/web/src/ui/toolcards.ts';" +
-    "export { t } from './apps/web/src/i18n/index.ts';",
-    out,
-  );
-  tc = (await import(pathToFileURL(out).href)) as ToolcardsMod;
+  tc = (await import(/* @vite-ignore */ at("ui/toolcards.ts"))) as ToolcardsMod;
+  t = ((await import(/* @vite-ignore */ at("i18n/index.ts"))) as { t: (key: string) => string }).t;
 }, 60_000);
 
-afterAll(() => {
-  restoreDom();
-  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
-});
-
-/** 直接子元素里带该 class 的第一个（null = 无/未挂载）。垫片不做祖先链匹配，见 w1467-dom.ts。 */
-function child(node: El | null | undefined, cls: string): El | null {
-  if (!node) return null;
-  for (const c of node.childNodes) if (c.classList.contains(cls)) return c;
-  return null;
-}
-
-/**
- * 递归找带该 class 的第一个后代。
- * ★ W9348 起正文块住进 `.tool-block` 宿主（标签是它的首子节点），
- *   所以 `.tool-args` / `.tool-out` 不再是 `.toolcard-body` 的**直接**子节点 ——
- *   断言必须按**后代**找（与生产代码 `querySelector` 的口径一致）。
- */
-function deep(node: El | null | undefined, cls: string): El | null {
-  if (!node) return null;
-  for (const c of node.childNodes) {
-    if (c.classList.contains(cls)) return c;
-    const hit = deep(c, cls);
-    if (hit !== null) return hit;
-  }
-  return null;
-}
-
 /** 带标签的正文块：宿主 `.tool-block`（标签 + pre）。 */
-function labeledBlock(body: El | null | undefined, blockCls: string): { host: El | null; label: El | null; block: El | null } {
+function labeledBlock(body: DomEl | null | undefined, blockCls: string): { host: DomEl | null; label: DomEl | null; block: DomEl | null } {
   const block = deep(body, blockCls);
   if (block === null) return { host: null, label: null, block: null };
   // ★ 块**自己**的父节点就是 `.tool-block` 宿主（不是"父节点里再找一个 tool-block"）。
-  //   垫片只有 `parentNode`（没有 `parentElement`，见 w1467-dom.ts 的 El 定义）。
   const host = block.parentNode;
   if (host === null || !host.classList.contains("tool-block")) {
     return { host: null, label: null, block };
   }
   return { host, label: child(host, "tool-block-label"), block };
-}
-
-/** 节点子树的全部文本（递归拼接；垫片的 textContent 不拼子节点，见 w1542 注释）。 */
-function textOf(n: El | null): string {
-  if (n === null) return "";
-  let s = n.textContent;
-  for (const c of n.childNodes) s += textOf(c);
-  return s;
 }
 
 /** 一个参数很长的 read_file 卡 —— 主场景（长参数 ⇒ 摘要必然被截断 + 省略号）。 */
@@ -108,8 +64,10 @@ const LONG_ARGS = JSON.stringify({
   limit: 2000,
 });
 
-function card() {
-  return tc.buildToolCard({ step: 1, name: "read_file", argsText: LONG_ARGS });
+function card(): { col: DomEl; card: DomEl; body: DomEl; label: DomEl } {
+  return tc.buildToolCard({ step: 1, name: "read_file", argsText: LONG_ARGS }) as {
+    col: DomEl; card: DomEl; body: DomEl; label: DomEl;
+  };
 }
 
 describe("W9345 · 工具卡参数不重复", () => {
@@ -124,9 +82,8 @@ describe("W9345 · 工具卡参数不重复", () => {
     const full = deep(ref.body, "tool-args");
     expect(full, "完整参数块必须保留").not.toBeNull();
     // ★ 逐字守「完整」：不是省略号版本，也不是卡头那行的 desc。
-    // 不用 expect(x).toBe(长串) —— 垫片的 El 让 vitest 的 diff 格式化器崩
-    // （`instanceof` not callable），长串失败时连真实值都看不到。改成量长度 + 布尔：
-    const got = full!.textContent;
+    // 不用 expect(x).toBe(长串) —— 长串失败时 diff 会很大；改成量长度 + 布尔：
+    const got = full!.textContent ?? "";
     expect(got.length, "完整参数长度必须等于参数全文长度").toBe(LONG_ARGS.length);
     expect(got === LONG_ARGS, "完整参数逐字等于参数全文（不是截断/不是 desc）").toBe(true);
     expect(got.indexOf("…") === -1, "不许带截断省略号").toBe(true);
@@ -160,7 +117,7 @@ describe("W9345 · 工具卡参数不重复", () => {
     const hasRunning = ref.card.classList.contains("running");
     expect(hasOk && !hasRunning, "成败仍由卡 class 表达（ok）").toBe(true);
     const pill = child(ref.card.querySelector(".toolcard-state"), "ts-label");
-    expect(pill !== null && pill.textContent.length > 0, "状态 pill 仍有可见文案").toBe(true);
+    expect(pill !== null && (pill.textContent ?? "").length > 0, "状态 pill 仍有可见文案").toBe(true);
   });
 
   it("⑥ 复制不读被删的节点 ⇒ chat.tool.copyHint 语义不变（复制内容仍含参数全文）", () => {
@@ -199,7 +156,7 @@ describe("W9348 「参数」/「结果」标签", () => {
     const ref = card();
     const { label, block } = labeledBlock(ref.body, "tool-args");
     expect(label, "参数块必须带标签").not.toBeNull();
-    expect(label!.textContent.length, "标签要有可见文字").toBeGreaterThan(0);
+    expect((label!.textContent ?? "").length, "标签要有可见文字").toBeGreaterThan(0);
     const by = block!.getAttribute("aria-labelledby");
     expect(by, "块必须用 aria-labelledby 指向标签（不只做视觉）").toBeTruthy();
     expect(label!.getAttribute("id"), "aria-labelledby 必须指向这个标签").toBe(by);
@@ -210,7 +167,7 @@ describe("W9348 「参数」/「结果」标签", () => {
     tc.setToolResult(ref, "file body", false);
     const { label, block } = labeledBlock(ref.body, "tool-out");
     expect(label, "结果块必须带标签").not.toBeNull();
-    expect(label!.textContent.length, "标签要有可见文字").toBeGreaterThan(0);
+    expect((label!.textContent ?? "").length, "标签要有可见文字").toBeGreaterThan(0);
     const by = block!.getAttribute("aria-labelledby");
     expect(by).toBeTruthy();
     expect(label!.getAttribute("id")).toBe(by);
@@ -219,12 +176,12 @@ describe("W9348 「参数」/「结果」标签", () => {
   it("③ 标签只有标签本身（不含截断正文 —— 截断行不许复活）", () => {
     const ref = card();
     const { label } = labeledBlock(ref.body, "tool-args");
-    expect(label!.textContent, "标签里不许夹带参数正文").toBe(tc.t("chat.tool.argsLabel"));
-    expect(label!.textContent.indexOf("…") === -1, "标签里不许有省略号").toBe(true);
+    expect(label!.textContent, "标签里不许夹带参数正文").toBe(t("chat.tool.argsLabel"));
+    expect((label!.textContent ?? "").indexOf("…") === -1, "标签里不许有省略号").toBe(true);
     // 两个标签**不相同**（参数 ≠ 结果）：错配了也说明其中一个没接对。
     tc.setToolResult(ref, "file body", false);
     const outLabel = labeledBlock(ref.body, "tool-out").label;
-    expect(outLabel!.textContent).toBe(tc.t("chat.tool.resultLabel"));
+    expect(outLabel!.textContent).toBe(t("chat.tool.resultLabel"));
     expect(label!.textContent).not.toBe(outLabel!.textContent);
   });
 

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // ============================================================================
 // tests/w9300-f3-1-autoscroll-coalesce.test.ts — W9300/F3-1 门禁：
 // 流式期间的贴底写入必须**一帧至多一次**（帧内合并），且闩锁语义一字未变。
@@ -8,20 +9,20 @@
 //   · **读与写代价同阶**（只读 6.8ms / 只写 6.9ms / 读后写 7.2ms @600 列），
 //     所以"不读 scrollHeight"**并不能**省下布局 —— 真正的杠杆是**一帧只写一次**。
 //
-// 本门禁跑**真实生产代码**（ui/messages/scroll.ts，esbuild 打包），断言：
+// 门禁跑**真实生产代码**（ui/messages/scroll.ts，真 jsdom 下直接 import），断言：
 //   A. 同一帧内 N 次 autoscrollSoon ⇒ 只排 1 个 rAF（合并生效）；
 //   B. 跨帧后又能再排（合并窗口是一帧，不是一次）；
 //   C. 闩锁为假时既不排也不写（读者往上滚后不被拽回，W12）；
 //   D. 隐藏容器不排 rAF（W514）；
 //   E. 回调执行前用户解锁 ⇒ 回调里不贴底（合并不能把读者拽回去）；
 //   F. 回归：force=true 的 autoscroll 仍然**同步**写（W1524 的终态保证不变）。
+//
+// ★ W9395：原先用 esbuild 打包 + 手搓最小 DOM 垫片（tests/lib/w1467-dom.ts）；
+//   现在改跑**真 jsdom**，生产模块直接 import，垫片已删除。
 // ============================================================================
 import { describe, expect, it, beforeAll, afterAll, beforeEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { bundleFrontend, El, installDom, restoreDom } from "./lib/w1467-dom.js";
+import { at, Ev } from "./lib/w795-dom.js";
+import { domEl, type DomEl } from "./lib/dom-tree.js";
 
 interface ScrollMod {
   autoscroll: (ctx: unknown, force?: boolean) => void;
@@ -30,31 +31,35 @@ interface ScrollMod {
 }
 
 let mod: ScrollMod;
-let tmpDir = "";
 
 /** 手动推进的 rAF 队列（本门禁要断言"一帧一次"，所以帧由测试自己掌控）。 */
 let rafQueue: Array<() => void> = [];
 
+/** 装 rAF 前的原值（真 jsdom 自带 rAF；afterAll 按原样放回）。 */
+const ORIGINAL_RAF = (globalThis as unknown as Record<string, unknown>)["requestAnimationFrame"];
+
 beforeAll(async () => {
-  installDom();
-  // window === globalThis（见 tests/lib/w1467-dom.ts 的 [installDom]），所以这里装 rAF 即是页面上的 rAF。
-  (globalThis as unknown as Record<string, unknown>)["requestAnimationFrame"] = (cb: () => void): number => {
-    rafQueue.push(cb);
-    return rafQueue.length;
-  };
-  tmpDir = mkdtempSync(join(tmpdir(), "w9300-f3-1-"));
-  const out = join(tmpDir, "scroll.mjs");
-  await bundleFrontend(
-    "export { autoscroll, autoscrollSoon, AT_BOTTOM_PX } from './apps/web/src/ui/messages/scroll.ts';",
-    out,
-  );
-  mod = (await import(pathToFileURL(out).href)) as ScrollMod;
+  // 生产代码读的是全局 rAF；用 defineProperty 覆盖（jsdom 的 window 属性可能是访问器）。
+  Object.defineProperty(globalThis, "requestAnimationFrame", {
+    value: (cb: () => void): number => {
+      rafQueue.push(cb);
+      return rafQueue.length;
+    },
+    configurable: true,
+    writable: true,
+  });
+  mod = (await import(/* @vite-ignore */ at("ui/messages/scroll.ts"))) as ScrollMod;
 });
 
 afterAll(() => {
-  delete (globalThis as unknown as Record<string, unknown>)["requestAnimationFrame"];
-  restoreDom();
-  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+  if (ORIGINAL_RAF === undefined) delete (globalThis as unknown as Record<string, unknown>)["requestAnimationFrame"];
+  else {
+    Object.defineProperty(globalThis, "requestAnimationFrame", {
+      value: ORIGINAL_RAF,
+      configurable: true,
+      writable: true,
+    });
+  }
 });
 
 beforeEach(() => { rafQueue = []; });
@@ -66,10 +71,15 @@ function frame(): void {
   for (const cb of due) cb();
 }
 
-/** 可控几何的会话容器（浏览器语义：写 scrollTop 被钳制并派发 scroll）。 */
+/**
+ * 可控几何的会话容器（浏览器语义：写 scrollTop 被钳制并派发 scroll）。
+ *
+ * 真 jsdom 不做布局，所以三个几何量定义在**实例**上遮住原型 getter —— 这一点由本
+ * 文件第一条用例实测确认（不是口头假设）。
+ */
 class Pane {
-  el: El;
-  hint: El;
+  el: DomEl;
+  hint: DomEl;
   stickBottom: boolean;
   /** scrollTop 被**写**的次数（合并效果的可观测面）。 */
   writes = 0;
@@ -78,8 +88,8 @@ class Pane {
   readonly clientHeight: number;
 
   constructor(clientHeight = 300, content = 0) {
-    this.el = new El("div");
-    this.hint = new El("div");
+    this.el = domEl("div");
+    this.hint = domEl("div");
     this.stickBottom = true;
     this.clientHeight = clientHeight;
     this._content = content;
@@ -94,7 +104,7 @@ class Pane {
         const moved = next !== this._top;
         this._top = next;
         this.writes += 1;
-        if (moved) (this.el as unknown as { _fire(k: string): void })._fire("scroll");
+        if (moved) this.el.dispatchEvent(new Ev("scroll"));
       },
     });
   }
@@ -107,7 +117,21 @@ class Pane {
   userScrollTo(top: number): void { this.el.scrollTop = top; this.writes = 0; }
 }
 
-describe("W9300/F3-1 · stick-to-bottom coalesced to one write per frame", () => {  it("A. coalesces N ticks in one frame into a single write (the fix)", () => {
+describe("W9300/F3-1 · stick-to-bottom coalesced to one write per frame", () => {
+  it("fake geometry really shadows the jsdom prototype getters (own properties + clamping)", () => {
+    const pane = new Pane(300, 1000);
+    expect(Object.prototype.hasOwnProperty.call(pane.el, "scrollTop")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(pane.el, "clientHeight")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(pane.el, "scrollHeight")).toBe(true);
+    // jsdom 原型的 clientHeight 恒为 0；这里必须是夹具值，否则写入计数/贴底全是假的。
+    expect(pane.el.clientHeight).toBe(300);
+    expect(pane.el.scrollHeight).toBe(1000);
+    pane.el.scrollTop = 99999;
+    expect(pane.el.scrollTop).toBe(700);
+    expect(pane.writes).toBe(1);
+  });
+
+  it("A. coalesces N ticks in one frame into a single write (the fix)", () => {
     const pane = new Pane(300, 1000);
     mod.autoscroll(pane); // 先贴一次底，闩锁与 writtenTop 建立
     frame(); // 把那一次同步写之后的队列清空
