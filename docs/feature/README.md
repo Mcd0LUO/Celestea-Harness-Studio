@@ -9,9 +9,12 @@
 
 | 文档 | 状态 | 一句话 |
 |---|---|---|
+| [`composer-surface.md`](./composer-surface.md) | 设计（**已实现**） | 输入栏与命令面：补全框分组能力、发送前变换缝、输入栏扩展点盘点 |
 | [`desktop-packaging.md`](./desktop-packaging.md) | 决定（暂缓） | 桌面端打包：评估外部 PR #5 后**暂缓**，附实测数据与 4 条理由 |
 | [`display-components.md`](./display-components.md) | 设计（**P0 已实现**） | 可选显示组件：把「渲染后增强」与「markdown 扩展」变成显示插件 |
+| [`mcp-client.md`](./mcp-client.md) | 设计（**P0 已实现**） | MCP 客户端：只做客户端、协议走官方 SDK、动态工具不进冻结契约、每会话一代连接 |
 | [`multimodal-attachments/`](./multimodal-attachments/README.md) | 设计（已实现 P0） | 多模态附件（分册）：图片/文本附件的三入口、能力位与降级 |
+| [`skill-command.md`](./skill-command.md) | 设计（**已实现**） | 技能显式调用：`/{技能名}` 直呼，host 侧确定性注入正文 |
 | [`computer-use/`](./computer-use/README.md) | 已实现（M1+M2+M2-B2） | 桌面操控（分册）：13 工具、分级闸门、观察租约、自编译 Rust helper |
 
 分册各页：[`01-evidence.md`](./multimodal-attachments/01-evidence.md) · 

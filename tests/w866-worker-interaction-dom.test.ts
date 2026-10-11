@@ -20,6 +20,10 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// §9.2：输入栏的读取走适配缝（textarea 已退役，#input 上没有 .value）。
+import { loadComposer } from "./lib/composer-dom.js";
+
+const canonicalText = async (): Promise<string> => (await loadComposer()).canonicalText();
 
 interface ClassListLike {
   contains(c: string): boolean;
@@ -235,7 +239,7 @@ describe("W866 ① 用户可以在 worker 会话里发言（真实 dispatchSend 
     expect(net.turns[0]?.session).toBe(WORKER);
     expect(net.turns[0]?.input).toBe("用户对 worker 说话");
     expect(paneEl.querySelector(".interject-note")?.textContent).toContain("已送达");
-    expect((doc.getElementById("input") as ElLike).value).toBe("");
+    expect(await canonicalText()).toBe("");
   });
 
   it("发送失败：撤销气泡 + 文本还原到输入框 + 说明原因", async () => {
@@ -248,7 +252,7 @@ describe("W866 ① 用户可以在 worker 会话里发言（真实 dispatchSend 
 
     expect(net.turns).toHaveLength(1);
     expect(paneEl.querySelector(".msg.user")).toBeNull();
-    expect((doc.getElementById("input") as ElLike).value).toBe("这条会失败");
+    expect(await canonicalText()).toBe("这条会失败");
     expect(paneEl.textContent ?? "").toContain("未送达");
   });
 

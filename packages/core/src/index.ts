@@ -24,6 +24,7 @@
  *   llm.ts           Llm seam + LlmRegistry                        (llm.rs)
  *   tool.ts          Tool / ToolGuard / ToolRegistry seams         (tool.rs)
  *   sandbox.ts       Sandbox seam (execution boundary)             (tools/src/sandbox.rs)
+ *   deadline.ts      the ONE deadline primitive (race + 3 policies)  (W2014, lifted to L0)
  *   agent.ts         AgentLoop seam + AgentConfig                  (agent.rs)
  *   json.ts          JSON helpers + serde-exact text
  *   sse-bus.ts       SDK-side SSE broadcast bus
@@ -54,6 +55,7 @@ export * from "./event-bus.js";
 export * from "./question.js";
 export * from "./llm.js";
 export * from "./tool.js";
+export * from "./deadline.js";
 export * from "./sandbox.js";
 export * from "./agent.js";
 export * from "./json.js";

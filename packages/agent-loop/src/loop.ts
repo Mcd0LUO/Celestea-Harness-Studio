@@ -57,6 +57,7 @@ import {
   isAborted,
   raceAbort,
 } from "./cancel.js";
+import { resolveAfterInput, type AfterInputPlan, type AfterInputSource } from "./after-input.js";
 import { compressionNudgeMessage } from "./compression-nudge.js";
 import { estimateTokens, trimContext } from "./context-trim.js";
 import { doneEvent, toolCallEvent, toolResultEvent, turnEndEvent, type EventSink } from "./events.js";
@@ -161,55 +162,50 @@ export interface AgentLoopBindings {
    */
   contextUsage?: () => ContextUsageFacts | null;
   /**
-   * W9346: the one-shot row appended RIGHT AFTER this turn's user input.
+   * W9351: the host's INPUT TRANSFORMER — everything a turn owes the model
+   * BECAUSE of the text the human just typed, decided at the input row.
    *
-   * Read at the point the input row is written, not at construction: the row it
-   * answers ("[目标] 已更新：…") is produced by a POST that may have happened at
-   * any time since the last turn, and a value captured when this loop was built
-   * would deliver a notice twice or miss it entirely.
+   * W9346 gave this lane exactly one producer (the session goal's change notice,
+   * one row, one hard-coded origin). W9351 generalizes it into what it always
+   * was underneath: a hook that sees this turn's `userInput` and answers with
+   * the user row to write plus the rows to append right after it. Two producers
+   * ship with it — the goal notice (behaviour unchanged) and the `/skill:<name>`
+   * invocation (skill-wiring.ts) — and a second parallel lane would have been the
+   * shape that drifts.
+   *
+   * Read at the point the input row is written, not at construction: the goal
+   * row it answers ("[目标] 已更新：…") is produced by a POST that may have
+   * happened at any time since the last turn, and a value captured when this
+   * loop was built would deliver a notice twice or miss it entirely. For the
+   * same reason the turn runner PEEKS the same source once per turn (see
+   * runtime/turn-runner.ts `peekAfterInput`), which is only safe because a plan
+   * is a pure function of its argument.
    *
    * Why AFTER the input and not with the other injections. The resident turn
    * context (skill catalog, memory, the goal line) and the receipts are appended
    * by the turn runner BEFORE the loop runs, so they precede the input row in the
-   * log. This notice describes something that happened in response to an EARLIER
-   * turn, so it reads as an answer to what the human just said — and the position
-   * is asserted, not incidental.
+   * log. A goal notice describes something that happened in response to an EARLIER
+   * turn and a skill body answers THIS one, so both read as an answer to what
+   * the human just said — and the position is asserted, not incidental.
    *
-   * Returning `null` (or nothing) appends no row, which is also what a host with
-   * no notice channel does — an absent binding is byte-identical to a pre-W9346
-   * loop.
+   * A plan with no rows appends nothing, which is also what a host with no
+   * transformer does — an absent binding is byte-identical to a pre-W9346 loop.
    *
-   * `delivered` is called ONLY after the row is in the log, so a host can empty
+   * `delivered` is called ONLY after a row is in the log, so a host can empty
    * its slot there without ever risking a notice that was never delivered. It is
    * not called when the source throws or the log refuses the append — losing one
    * notice is recoverable, dropping it silently is not.
    */
-  afterInput?: () => AfterInputRow | null | undefined;
-}
-
-/**
- * W9346: one announced row, plus the acknowledgement that ends its life.
- *
- * `delivered` rather than a separate `clearPending` callback: the two can never
- * be called in the wrong order, because the loop only holds this one object.
- */
-export interface AfterInputRow {
-  readonly text: string;
-  readonly delivered: () => void;
+  afterInput?: AfterInputSource;
 }
 
 /** Bound of the "do not close while a steering message waits" extension. */
 export const MAX_STEER_EXTENSIONS = 8;
 
-/**
- * W9346: the origin stamped on the after-input row.
- *
- * It is `goal` because the session goal's change notice is the only producer
- * behind [AgentLoopBindings.afterInput]; the closed origin whitelist
- * (`SESSION_EVENT_ORIGINS`) is what keeps an unlisted value a hard error rather
- * than a row that silently reads as the human's own words.
- */
-export const AFTER_INPUT_ORIGIN = "goal" as const;
+/** The loop's own stderr channel (the resolver stays pure; see after-input.ts). */
+function reportStderr(line: string): void {
+  process.stderr.write(`${line}\n`);
+}
 
 /**
  * B2-02: the turn's terminal state for a value THROWN out of a seam.
@@ -309,8 +305,8 @@ export class DefaultAgentLoop implements AgentLoop {
   private retention: ToolResultRetention | null = null;
   /** W1900 (Phase 2): the water-level reader for the ephemeral nudge. */
   private readonly contextUsage: (() => ContextUsageFacts | null) | undefined;
-  /** W9346: the one-shot row appended right after this turn's user input. */
-  private readonly afterInput: (() => AfterInputRow | null | undefined) | undefined;
+  /** W9351: the host's input transformer (rows appended after this turn's input). */
+  private readonly afterInput: AfterInputSource | undefined;
 
   constructor(config: AgentConfig, bindings: AgentLoopBindings = {}) {
     this.config = config;
@@ -368,17 +364,27 @@ export class DefaultAgentLoop implements AgentLoop {
     // loop instances and process restarts.
     const turnId = seams.session.nextTurnId();
     seams.session.append({ type: "turn_start", id: turnId });
+    // W9351: ONE plan, asked before the input row is written, because a plan may
+    // consume a leading token of it (the `/review` gesture). A throwing source
+    // degrades to "no transform at all" — the same containment the step-boundary
+    // drain applies: a broken host channel must not fail the turn the human
+    // actually asked for.
+    const plan = resolveAfterInput(this.afterInput, userInput, reportStderr);
+    const text = plan.input ?? userInput;
     // W804: the turn's own input carries this turn's attachments. The condition
     // keeps the no-attachment row byte-identical to the pre-W804 shape.
     // W855 (C8): a `null` input with no attachments writes NO row — the turn's
     // user content is whatever the drain already injected (see the AgentLoop
     // seam doc). `null` + attachments still writes the `""`-text image row.
+    // W9351: a plan whose transform consumed the whole line writes no row either
+    // (an empty user bubble would claim the human said nothing when in fact they
+    // typed the gesture that became the injected row below).
     if (attachments !== undefined && attachments.length > 0) {
-      seams.session.append({ type: "user_message", text: userInput ?? "", attachments: [...attachments] });
-    } else if (userInput !== null) {
-      seams.session.append({ type: "user_message", text: userInput });
+      seams.session.append({ type: "user_message", text: text ?? "", attachments: [...attachments] });
+    } else if (text !== null && text !== "") {
+      seams.session.append({ type: "user_message", text });
     }
-    this.appendAfterInput(seams);
+    this.appendAfterInput(seams, plan);
 
     let outcome: TurnOutcome = "interrupted";
     let failure: unknown;
@@ -406,42 +412,30 @@ export class DefaultAgentLoop implements AgentLoop {
   }
 
   /**
-   * W9346: the one-shot host row that belongs AFTER this turn's input, whatever
+   * W9346: the one-shot host rows that belong AFTER this turn's input, whatever
    * the input was.
    *
    * A `null` input (W855 C8) writes NO input row, and the notice must still be
    * delivered — the contract is 「下一轮通知」, not 「下一轮恰好有用户消息才通知」.
-   * The row therefore lands immediately after the input branch: with an input it
-   * directly follows the human's message, and without one it opens the turn's user
+   * The rows therefore land immediately after the input branch: with an input they
+   * directly follow the human's message, and without one they open the turn's user
    * content.
    *
-   * A throwing provider is contained, exactly like the step-boundary drain: the
-   * notice is an announcement, and a host whose notice channel is broken must not
-   * fail the turn the human actually asked for. The host clears its own slot
-   * AFTER this returns, and only on the success path — a notice is never dropped
-   * without having reached the log.
+   * W9351: ONE row per producer, each with its OWN origin (the goal's change
+   * notice and a skill body must never share a label — the catalog dedup keys on
+   * it) and each with its OWN acknowledgement, so a producer with a pending slot
+   * to empty is not coupled to one that has none.
+   *
+   * `delivered()` runs AFTER its own append, and NOT inside a try: if the host's
+   * acknowledgement throws, that is a host bug worth seeing, and the row is
+   * already in the log either way.
    */
-  private appendAfterInput(seams: Seams): void {
-    const afterInput = this.afterInput;
-    if (afterInput === undefined) return;
-    let row: AfterInputRow | null | undefined;
-    try {
-      row = afterInput();
-    } catch (e) {
-      process.stderr.write(`[celestea-agent-loop] afterInput source failed: ${String(e)}\n`);
-      return;
+  private appendAfterInput(seams: Seams, plan: AfterInputPlan): void {
+    for (const row of plan.rows) {
+      if (row.text === "") continue;
+      seams.session.append({ type: "user_message", text: row.text, origin: row.origin });
+      row.delivered();
     }
-    if (row === null || row === undefined || row.text === "") return;
-    // W9346: the ONLY producer behind this channel is the session goal, and its
-    // rows must be labeled as system injections rather than as something the human
-    // typed. The origin is a constant here instead of a binding because the origin
-    // whitelist is a closed set (`SESSION_EVENT_ORIGINS`).
-    //
-    // `delivered()` runs AFTER the append, and NOT inside a try: if the host's own
-    // acknowledgement throws, that is a host bug worth seeing, and the row is
-    // already in the log either way.
-    seams.session.append({ type: "user_message", text: row.text, origin: AFTER_INPUT_ORIGIN });
-    row.delivered();
   }
 
   /**

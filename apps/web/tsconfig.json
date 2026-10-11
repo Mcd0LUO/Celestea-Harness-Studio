@@ -12,12 +12,19 @@
     "noUncheckedIndexedAccess": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
+    // 与 vite.config.ts 的 CELESTEA_ALIASES **成对**：@celestea/gesture 指**源码**，
+    // 不指 packages/gesture/dist —— check:web 不先构建 packages，指 dist 就等于
+    // typecheck 的是上次构建的产物。少这一侧，typecheck:web 与 vite build 会各查各的。
+    "paths": {
+      "@celestea/gesture": ["../../packages/gesture/src/index.ts"]
+    },
     // W772（TS 6.0）：6.0 起不再自动发现 node_modules/@types，且
     // noUncheckedSideEffectImports 默认为 true —— main.ts 里 12 条
     // `import './styles/*.css'` 会报 TS2882。按规矩「优先补声明」：
     // 显式引入 vite/client（它声明了 *.css 等资源模块与 import.meta.env），
     // 而不是关掉这个更严格的检查。
-    "types": ["vite/client"],
+    // node: vite.config.ts 要 import node:url 把 URL 变成路径，src/ 里的前端代码不用。
+    "types": ["vite/client", "node"],
     "noUncheckedSideEffectImports": true,
     "skipLibCheck": true,
     "noEmit": true

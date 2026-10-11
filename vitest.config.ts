@@ -6,6 +6,7 @@ const r = (p: string): string => fileURLToPath(new URL(p, import.meta.url));
 
 const alias = {
   "@celestea/core": r("./packages/core/src/index.ts"),
+  "@celestea/gesture": r("./packages/gesture/src/index.ts"),
   "@celestea/session": r("./packages/session/src/index.ts"),
   "@celestea/llm": r("./packages/llm/src/index.ts"),
   "@celestea/tools": r("./packages/tools/src/index.ts"),
@@ -14,6 +15,7 @@ const alias = {
   "@celestea/runtime": r("./packages/runtime/src/index.ts"),
   "@celestea/studio": r("./apps/studio/src/index.ts"),
   "@celestea/swarm": r("./packages/swarm/src/index.ts"),
+  "@celestea/mcp": r("./packages/mcp/src/index.ts"),
   "@celestea/computer-use": r("./packages/computer-use/src/index.ts"),
 };
 

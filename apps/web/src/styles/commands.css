@@ -34,6 +34,25 @@
 .cmd-desc { font-size: 12px; color: var(--c-text-2); min-width: 0; }
 .cmd-args { font-family: var(--mono); font-size: 11px; color: var(--c-text-3); margin-left: auto; flex: 0 0 auto; }
 
+/* ---- 分组头（composer-surface §1）：**不靠颜色**表达分组 ----
+   mono 是本仓唯一主题：--c-accent 是 #1a1a1a、--c-text-1 是 #111，只差 3%，肉眼不可辨
+   （styles/tokens.css 里躺着同款事故：--hl-title 与正文同为 #111，实测「高亮生效了但看不见」）。
+   所以分组靠三个**非颜色**维度表达：小号文字 + 上方间距 + 上边框；颜色只作加强，
+   且用正文层级 token（对比度由 apps/web/src/styles/cmd-group-style.test.ts 算，不抄期望值）。
+   组头不可选中：光标不用 pointer，免得做出一个点了没反应的可点形状。 */
+.cmd-group {
+  padding: 7px 8px 3px;
+  border-top: 1px solid var(--c-border-subtle);
+  color: var(--c-text-3);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 14px;
+  letter-spacing: .04em;
+  cursor: default;
+}
+/* 只有一个分组时，头顶那条线没有「上一组」可分 ⇒ 去掉，视觉上仍是普通行列表。 */
+.cmd-popup > .cmd-group:first-child { padding-top: 3px; border-top: 0; }
+
 /* ---- 终端输出块（与模型消息视觉上可区分） ---- */
 .msg.exec .bubble { width: 100%; max-width: 100%; }
 .bubble.exec-bubble {
