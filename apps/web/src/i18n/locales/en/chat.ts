@@ -15,6 +15,7 @@ export const chat = {
   'chat.tool.previewHint': 'Preview this file in the side panel',
   'chat.tool.failed': 'Failed',
   'chat.tool.done': 'Done',
+  'chat.tool.noResult': 'No result',
   'chat.tool.denied': 'Denied',
   'chat.tool.ask': 'Needs confirmation',
   'chat.rail.folded': '{n} earlier turns are folded',

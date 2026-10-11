@@ -143,5 +143,26 @@ describe('W9201 · ② 每个终态都真的收尾（走真实 onStatus）', () 
     // （状态 pill 的文案由 setToolResult 统一写死，两条路径因此天然同字，不在这里复述。）
     const i18n = (await import(/* @vite-ignore */ at('i18n/index.ts'))) as { t(k: string): string };
     expect((card.querySelector('.tool-out') as ElLike).textContent).toBe(i18n.t('shell.restore.noResult'));
+    // ★ W9398：状态 pill 说「无结果」—— 这个调用**根本没有结果**，写「完成」是假话。
+    expect((card.querySelector('.ts-label') as ElLike).textContent).toBe(i18n.t('chat.tool.noResult'));
+
+    // 同一份「有调用无结果」的行走**重放**路径：pill 必须是同一句话（W895-R 的实时/重放一致）。
+    const ctxMod = (await import(/* @vite-ignore */ at('ui/viewctx.ts'))) as ViewCtxMod;
+    const restoreMod = (await import(/* @vite-ignore */ at('ui/restore.ts'))) as {
+      restoreSessionHistory(ctx: unknown): Promise<void>;
+    };
+    vi.stubGlobal('fetch', async (url: unknown) => {
+      if (String(url).indexOf('/messages') !== -1) {
+        return { ok: true, status: 200, json: async () => ({ messages: [
+          { role: 'tool', kind: 'call', tool_call_id: 'c9', tool_name: 'run_code', tool_args: {} },
+        ] }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ ok: true, questions: [] }) };
+    });
+    const replay = ctxMod.ensurePane('ws/replay', 'session', '乙会话');
+    await restoreMod.restoreSessionHistory(replay);
+    const card2 = (replay.el as ElLike).querySelector('.toolcard') as ElLike;
+    expect((card2.querySelector('.ts-label') as ElLike).textContent, '重放同字').toBe(i18n.t('chat.tool.noResult'));
+    expect((card2.querySelector('.tool-out') as ElLike).textContent, '重放同正文').toBe(i18n.t('shell.restore.noResult'));
   });
 });

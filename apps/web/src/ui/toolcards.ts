@@ -337,11 +337,12 @@ export function mountToolCard(
  * 用户此时已展开的卡片也不会被这次 DOM 更新折回去（原地更新，不重建节点）。
  * W778：预览行随参数预览一起在 .toolcard-body 内（折叠态不显示），
  * 结果到达照样不改 open、不动 chevron 方向。
+ * W9398：`label` 可覆盖状态 pill 的默认文案 —— 「有调用无结果」的卡说「完成」是假话。
  */
-export function setToolResult(ref: ToolCardRef, resultText: string, failed: boolean, value?: unknown): void {
+export function setToolResult(ref: ToolCardRef, resultText: string, failed: boolean, value?: unknown, label?: string): void {
   ref.card.classList.remove('running');
   ref.card.classList.add(failed ? 'err' : 'ok');
-  ref.label.textContent = failed ? t('chat.tool.failed') : t('chat.tool.done');
+  ref.label.textContent = label ?? (failed ? t('chat.tool.failed') : t('chat.tool.done'));
   // W9345：结果摘要行已删（与 .tool-out 全文重复）。**没有丢掉任何信息** ——
   // 成败由上面的 class（`.toolcard.ok` / `.err`）+ 状态 pill 表达，
   // 结果**内容**由下面的 .tool-out 全文表达；原先挂在摘要行上的成败上色
@@ -443,5 +444,5 @@ export function applyToolResult(ctx: SessionPane, p: ToolResultPayload): void {
 
 /** W9397：把仍在运行的卡收成「无结果」终态（live 轮次终态与重放收尾同一实现、同一文案）。 */
 export function settleRunningCards(refs: Iterable<ToolCardRef>): void {
-  for (const ref of refs) if (ref.card.classList.contains('running')) setToolResult(ref, t('shell.restore.noResult'), false);
+  for (const ref of refs) if (ref.card.classList.contains('running')) setToolResult(ref, t('shell.restore.noResult'), false, undefined, t('chat.tool.noResult'));
 }

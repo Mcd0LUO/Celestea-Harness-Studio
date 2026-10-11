@@ -245,7 +245,8 @@ export async function restoreSessionHistory(
   }
   if (ctx.restoreOps.size) {
     for (const ref of ctx.restoreOps.values()) {
-      setToolResult(ref, t('shell.restore.noResult'), false);
+      // W9398：pill 说「无结果」—— 与 live 轮次终态（settleRunningCards）同字。
+      setToolResult(ref, t('shell.restore.noResult'), false, undefined, t('chat.tool.noResult'));
     }
     ctx.restoreOps.clear();
   }
