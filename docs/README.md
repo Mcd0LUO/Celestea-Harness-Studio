@@ -14,6 +14,7 @@
 | [`pitfalls.md`](./pitfalls.md) | 当前 | **踩坑档案（已清零）**：2026-10-04 主人裁定整篇无用，21 条全删、正文见 git 历史；新坑先问能否变成一条断言（`AGENT.md` §9） | 本文 |
 | [`feature/multimodal-attachments/`](./feature/multimodal-attachments/README.md) | 设计（已实现 P0） | **多模态附件**设计（分册）：图片/文本附件的三入口、能力位探测、降级提示、objectURL 生命周期 | [`README.md`](./feature/multimodal-attachments/README.md)；`apps/web/src/ui/attachments.ts` |
 | [`feature/display-components.md`](./feature/display-components.md) | 设计（**P0 已实现**，W895） | **可选显示组件**：把「渲染后增强」与「markdown 扩展」变成可注册的缝，显示能力做成可开关组件（构建期装配，不做运行时下载） | 本文；缝的现有先例见 `apps/web/src/ui/hint/registry.ts` 的取舍注释 |
+| [`feature/mcp-client.md`](./feature/mcp-client.md) | 设计 | **MCP 客户端**：只做客户端、协议走官方 SDK、动态工具不进冻结契约、每会话一代连接 | 本文 |
 | [`feature/`](./feature/README.md) | 当前 | **特性文档索引**（分册）：本目录放特性级文档，文件名即主题名 | [`README.md`](./feature/README.md) |
 | [`feature/desktop-packaging.md`](./feature/desktop-packaging.md) | 决定（2026-10-04：暂缓） | **桌面端打包**：评估外部 PR #5（已关闭）后暂缓——实测数据、4 条理由、替代方案代价、将来要做的三件前置工作，含未验证部分的诚实声明 | 本文 |
 | [`deployment.md`](./deployment.md) | 当前 | **部署与安全模型**：生产 systemd + nginx、隧道访问、安全模型（含 Windows 差异表） | 本文；登录门见 [`archive/decisions/feature-studio-auth.md`](./archive/decisions/feature-studio-auth.md) |
