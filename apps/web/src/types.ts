@@ -111,6 +111,10 @@ export type {
 
 export type {
   EffectiveGrants,
+  // M2-B2a：应用清单族（desktop 的 scope）—— grants UI 的录入与展示都要用，
+  // 视图层只从 './types' 取类型（与其它 grants 类型同一条路径）。
+  GrantAppList,
+  GrantAppScope,
   GrantCap,
   GrantEntry,
   GrantReq,

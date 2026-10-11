@@ -102,7 +102,7 @@ describe("effectiveGrantsOf — fail-closed reading (§4.3)", () => {
     const dir = sessionDir("void");
     pinPathOnlySession(dir, dir);
     const missing = effectiveGrantsOf(dir, "ws/s1", envOf(dir), NOW);
-    expect(missing.grants).toEqual({ network: true, readRoots: [], writeRoots: [], netHosts: [], toolExtra: [], unsandboxed: false, workspaceWritable: true, toolDeny: [], sources: [] });
+    expect(missing.grants).toEqual({ network: true, readRoots: [], writeRoots: [], netHosts: [], toolExtra: [], unsandboxed: false, workspaceWritable: true, toolDeny: [], desktop: false, apps: {}, sources: [] });
     expect(missing.warnings).toEqual([]);
 
     for (const body of ["{ nope", JSON.stringify({ version: 2, session: "ws/s1", grants: [] }), JSON.stringify({ version: 1, session: "other/x", grants: [] }), JSON.stringify({ version: 1, session: "ws/s1", grants: {} })]) {

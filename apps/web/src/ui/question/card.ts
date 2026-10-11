@@ -65,6 +65,8 @@ interface CardHandle extends PickHost {
   hint: HTMLElement;
   result: HTMLElement;
   submit: HTMLButtonElement;
+  /** M2-B2c：取消按钮（关掉卡片 = 一种结算，不是作答）。 */
+  cancel: HTMLButtonElement;
   questions: QuestionItem[];
   deadline: number | null;
   state: QuestionCardState;
@@ -161,6 +163,7 @@ function setState(h: CardHandle, state: QuestionCardState, resultText?: string):
   const terminal = state !== 'pending';
   for (const c of h.controls) c.disabled = terminal;
   h.submit.disabled = terminal;
+  h.cancel.disabled = terminal;
   h.submit.textContent = t('chat.question.submit');
   h.timer.textContent = terminal ? '' : h.timer.textContent;
   h.result.textContent = terminal ? (resultText ?? stateText(state)) : '';
@@ -208,6 +211,29 @@ async function submit(ctx: SessionPane, h: CardHandle): Promise<void> {
   }
 }
 
+/**
+ * M2-B2c：点取消 = 用户关掉了这张卡。与超时两回事：超时是没人理，取消是明确不收。
+ * 乐观终态同 submit（先画后发、失败回滚）；后端把挂起的工具调用以 ASK_CANCELLED
+ * 解开——桌面确认卡落在闸门上是 desktop_confirm_cancelled（不算拒绝、不进冷却）。
+ */
+function cancelOrRefuse(ctx: SessionPane, h: CardHandle): void {
+  if (h.state !== 'pending') return;
+  const sid = ctx.id === LOCAL_ID ? undefined : ctx.id;
+  setState(h, 'closed', t('chat.question.cancelled'));
+  h.hint.textContent = '';
+  void api.cancelQuestion(h.id, sid).catch((err) => {
+    // 404/409 = 已被别处结算（时限先到 / 已作答）：取消没赶上，终态翻回通用「已结束」。
+    if (err instanceof ApiError && isSettledFailure(err.status)) {
+      setState(h, 'closed');
+      return;
+    }
+    h.settled = false;
+    setState(h, 'pending');
+    h.hint.textContent = t('chat.question.cancelFailed', { reason: userErrorText(err) });
+    paintTimer(h, Date.now());
+  });
+}
+
 // ---- 卡片构建 ------------------------------------------------------------------
 
 function buildHead(h: CardHandle, questions: QuestionItem[]): HTMLElement {
@@ -238,6 +264,8 @@ function buildCard(ctx: SessionPane, info: CardInfo): CardHandle {
   card.dataset.state = 'pending';
   const submitBtn = el('button', 'q-submit btn btn-accent', t('chat.question.submit')) as HTMLButtonElement;
   submitBtn.type = 'button';
+  const cancelBtn = el('button', 'q-cancel btn', t('chat.question.cancel')) as HTMLButtonElement;
+  cancelBtn.type = 'button';
   const h: CardHandle = {
     id: info.id,
     paneId: ctx.id,
@@ -247,6 +275,7 @@ function buildCard(ctx: SessionPane, info: CardInfo): CardHandle {
     hint: el('div', 'q-hint'),
     result: el('div', 'q-result'),
     submit: submitBtn,
+    cancel: cancelBtn,
     controls: [],
     questions: info.questions,
     picks: {},
@@ -263,11 +292,13 @@ function buildCard(ctx: SessionPane, info: CardInfo): CardHandle {
   card.appendChild(items);
   const actions = el('div', 'q-actions');
   actions.appendChild(h.submit);
+  actions.appendChild(h.cancel);
   card.appendChild(actions);
   card.appendChild(h.hint);
   card.appendChild(h.result);
   // 监听器在**构建期**挂（不是在挂载期）：历史卡片被恢复路径放回可作答时也必须有它。
   h.submit.addEventListener('click', () => submitOrRefuse(ctx, h));
+  h.cancel.addEventListener('click', () => cancelOrRefuse(ctx, h));
   bubble.appendChild(card);
   msg.appendChild(bubble);
   root.appendChild(msg);

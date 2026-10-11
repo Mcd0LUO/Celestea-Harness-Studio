@@ -25,6 +25,7 @@ import { ATTACHMENT_MAX_BYTES, ATTACHMENTS_DIRNAME, createAttachmentStore, idle,
 import type { ImageRef } from "@celestea/core";
 import { CapacityError, type TurnDeliveryMode } from "../runtime-adapter.js";
 import type { RouteTable } from "../routes.js";
+import { questionNonce, questionNonceCookie, secureCookieFor } from "../store/question-nonce.js";
 import type { StoreResult } from "../store/result.js";
 import { activeSession, capacityJson, DEFAULT_JSON_BODY_BYTES, errorOnly, failJson, readJsonBody, storeFail, strField, type Deps } from "./common.js";
 
@@ -152,6 +153,16 @@ function registerEvents(app: Hono, deps: Deps, table: RouteTable, keepAliveMs: n
       }
     });
     response.headers.set("cache-control", "no-cache");
+    // M2: the browser picks up the answer nonce here as well, and this is the
+    // RACE-FREE half: a `question` frame travels ON this very stream, so its
+    // response headers (and therefore the cookie) are already processed before
+    // any card can be rendered — let alone answered. `response` is the pre-built
+    // SSE Response, so the header goes on it directly (see B7-04: middleware
+    // headers do not reach this one).
+    response.headers.append(
+      "set-cookie",
+      questionNonceCookie(questionNonce(), secureCookieFor(c.req.header("x-forwarded-proto"))),
+    );
     return response;
   });
   return events.id;

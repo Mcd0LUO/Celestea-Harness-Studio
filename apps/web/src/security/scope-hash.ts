@@ -9,6 +9,11 @@
 // `canonicalScopeJson` / `canonicalScopeHash`，形如：
 //   {"cap":"write_roots","scope":{"roots":["/a","/b"]}}
 //   布尔类 cap（network/unsandboxed）为 {"cap":"network","scope":{}}。
+//   M2-B2a：desktop 的 scope 键是 **apps**（嵌套对象），形如
+//   {"cap":"desktop","scope":{"apps":{"allow":{"exes":["notepad.exe"]},"deny":{"titles":["x"]}}}}；
+//   没有应用清单时为 {"cap":"desktop","scope":{}}（与服务端 OPTIONAL_SCOPE_CAPS 同口径）。
+//   嵌套对象必须按**同一套规范化**收敛（trim/去重/排序/丢空侧），否则前端算的哈希
+//   与服务端 validateScope 之后的形状对不上 —— 那是 692f19c 的同一类事故。
 //
 // 历史事故（commit 692f19c）：这里曾只序列化 scope 字段（{"roots":[…]}，没有
 // cap/scope 包裹），与服务端哈希不同 ⇒ 令牌绑定的是前端哈希、POST 时服务端按
@@ -25,26 +30,46 @@
 // （结构相同即可互相赋值），而不是 import —— 保持本模块可独立加载。
 // ============================================================================
 
-/** 6 项能力位（结构镜像 types.ts:GrantCap / 服务端 store/grants.ts:GrantCap）。 */
+/** 7 项能力位（结构镜像 types.ts:GrantCap / 服务端 store/grants.ts:GrantCap）。 */
 export type ScopeCap =
   | 'network'
   | 'read_roots'
   | 'write_roots'
   | 'net_hosts'
   | 'tool_extra'
-  | 'unsandboxed';
+  | 'unsandboxed'
+  | 'desktop';
+
+/** M2-B2a · 一份应用清单（`desktop` 的 scope，`kind:'apps'` 的两侧之一）。 */
+export interface ScopeAppList {
+  exes?: string[];
+  titles?: string[];
+}
+
+/** M2-B2a · 应用级 scope：`allow` 为空 = 不限制；deny 永远赢。 */
+export interface ScopeApps {
+  allow?: ScopeAppList;
+  deny?: ScopeAppList;
+}
 
 /** 能力范围列表（结构镜像 types.ts:GrantScope；布尔类 cap 用空对象）。 */
 export interface ScopeLists {
   roots?: string[];
   hosts?: string[];
   tools?: string[];
+  /** M2-B2a: `desktop` 能力位的应用清单。 */
+  apps?: ScopeApps;
 }
 
-function scopeKeyOf(cap: string): 'roots' | 'hosts' | 'tools' | null {
+function scopeKeyOf(cap: string): 'roots' | 'hosts' | 'tools' | 'apps' | null {
   if (cap === 'read_roots' || cap === 'write_roots') return 'roots';
   if (cap === 'net_hosts') return 'hosts';
   if (cap === 'tool_extra') return 'tools';
+  // M2-B2a：desktop 的 scope 键是 apps。**在 M2-B2a 之前这里返回 null**，于是
+  // 「desktop + 应用清单」会被序列化成 {"cap":"desktop","scope":{}} —— 服务端按
+  // 自己的公式（validateScope → canonicalScopeJson，apps 原样保留）重算后与前端
+  // 不一致 ⇒ 每次授予 403。这正是文件头注记的 692f19c 同一类形状漂移。
+  if (cap === 'desktop') return 'apps';
   return null;
 }
 
@@ -58,13 +83,48 @@ function normList(v: readonly string[] | undefined): string[] {
   return Array.from(new Set(v.map((x) => x.trim()).filter((x) => x !== ''))).sort();
 }
 
+/**
+ * 规范化一份应用清单（M2-B2a）：逐项 trim / 丢空项 / 去重 / 升序排序；
+ * **整份清单为空 ⇒ 该侧整个丢掉**（服务端的 validateAppScope 不产出空侧）。
+ */
+function normAppList(v: ScopeAppList | undefined): ScopeAppList | null {
+  const out: ScopeAppList = {};
+  const exes = normList(v?.exes);
+  const titles = normList(v?.titles);
+  if (exes.length > 0) out.exes = exes;
+  if (titles.length > 0) out.titles = titles;
+  return out.exes === undefined && out.titles === undefined ? null : out;
+}
+
+/**
+ * 规范化应用级 scope：键序固定 allow → deny（与 `Object.keys(scope).sort()` 对
+ * `{allow,deny}` 的结果一致）。
+ *
+ * 两侧都空 ⇒ 返回 null（**整个 apps 键丢掉**），因为服务端的 validateAppScope 会
+ * 把空侧整个丢掉、且不接受「有 apps 但没有条目」的形状。null 还有一个更细的用处：
+ * 调用方据此区分「输入里根本没有 apps」（`undefined`）与「有 apps 但空」
+ * ——前者必须收敛成 `{}`（服务端白名单会丢掉非本 cap 的键，desktop 的可选 scope
+ * 收敛成 `{}`），后者才是 `{"apps":{}}`。
+ */
+function normApps(v: ScopeApps | undefined): Record<string, ScopeAppList> | null {
+  const out: Record<string, ScopeAppList> = {};
+  const allow = normAppList(v?.allow);
+  const deny = normAppList(v?.deny);
+  if (allow) out['allow'] = allow;
+  if (deny) out['deny'] = deny;
+  return out['allow'] === undefined && out['deny'] === undefined ? null : out;
+}
+
 /** 规范序列化（与服务端 store/grants.ts:canonicalScopeJson 逐字一致，§6.4）。 */
 export function canonicalScopeJson(cap: string, scope: ScopeLists): string {
   const key = scopeKeyOf(cap);
-  const inner: Record<string, string[]> = {};
-  if (key !== null) {
-    const raw = key === 'roots' ? scope.roots : key === 'hosts' ? scope.hosts : scope.tools;
-    inner[key] = normList(raw);
+  const inner: Record<string, unknown> = {};
+  if (key === 'roots') inner['roots'] = normList(scope.roots);
+  else if (key === 'hosts') inner['hosts'] = normList(scope.hosts);
+  else if (key === 'tools') inner['tools'] = normList(scope.tools);
+  else if (key === 'apps' && scope.apps !== undefined) {
+    const apps = normApps(scope.apps);
+    if (apps !== null) inner['apps'] = apps;
   }
   return JSON.stringify({ cap, scope: inner });
 }

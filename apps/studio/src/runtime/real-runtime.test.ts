@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { SSE_EVENT_NAMES } from "@celestea/core";
 import { DEFAULT_RETRY_POLICY } from "@celestea/llm";
 import { parseSessionJsonl } from "@celestea/session";
+import { checkDesktopMount } from "@celestea/runtime";
 import { getJson, jsonRequest, type StudioHarness } from "../harness.test-util.js";
 import type { OfflineStep } from "./offline-llm.js";
 import {
@@ -439,10 +440,21 @@ describe("GET /api/sessions/{id}/context over the real engine", () => {
     // mounted by `compose()`, but `swarm: false` reaches `ensureSwarmWiring`, which
     // registers no tool). The face here is the DEFAULT one, so the tool is absent;
     // `plugin-hotswap.test.ts` ④ turns it on and asserts it appears.
-    expect(toolViews).toHaveLength(22);
+    // computer-use M2: 22 -> 35 — the thirteen `desktop_*` tools (M1 只读 4 + M2 写 9).
+    // They are an OPTIONAL face: `ensureDesktopWiring` mounts them only on win32 with a
+    // built helper (规划 §5), so this number is "the default face ON THIS HOST" — the
+    // unconditional face is still the 22 the comment chain above describes.
+    // 计数按真实挂载判据条件化（与 plugins-inventory 同一 checkDesktopMount）：
+    // 没有 helper 产物的主机（CI、未自编译的机器）看到的是 22。
+    expect(toolViews).toHaveLength(22 + (checkDesktopMount().ok ? 13 : 0));
     expect(tools).toContain("ask_user_question");
     expect(tools).toContain("read_image");
-    for (const view of toolViews) {
+    // 这条循环钉的是**内置工具**的 `desc` 参数约定（`packages/tools` 手写 schema 的那批）。
+    // computer-use 的十三个工具直读 `contracts/tools.json`，没有也不该有 `desc` —— 它们的
+    // 参数形状由 tests/desktop-tool-contract.test.ts 单独钉。所以这里按名字把**可选面**排除
+    // （收窄断言的定义域），而不是把断言放宽到「有没有 desc 都行」——后者会让内置工具漏掉
+    // 这个约定也照样绿。
+    for (const view of toolViews.filter((v) => !v.name.startsWith("desktop_"))) {
       const desc = (view.parameters["properties"] as Record<string, unknown>)["desc"] as { type?: string };
       expect(desc?.type, view.name).toBe("string");
     }

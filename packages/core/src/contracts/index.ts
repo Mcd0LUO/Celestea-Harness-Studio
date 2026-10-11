@@ -186,10 +186,12 @@ export const FROZEN_COUNTS = {
   // workbench terminal's real-PTY face (open/input/close), the persistent session
   // goal (its POST, and since W9348 the GET that reads it back), the plugin
   // hot-swap enabled table (docs/archive/decisions/feature-plugin-hotswap.md;
-  // its GET side already existed before that switch was added), and — since
-  // W9350 — the session's SKILL LISTING (docs/feature/skill-command.md §4 slice 1:
-  // the frontend has to know WHICH skills exist before it can offer `/{name}`).
-  endpoints: 73,
+  // its GET side already existed before that switch was added). M2-B2c: the
+  // question cancel endpoint (the card's 取消 button) joined the questions group;
+  // W9350: the session's SKILL LISTING joined too (docs/feature/skill-command.md
+  // §4 slice 1 — the frontend has to know WHICH skills exist before it can offer
+  // `/{name}`).
+  endpoints: 74,
   // `sseEvents` covers the frame vocabulary: `question` is the first event that is
   // neither a turn event nor a host status frame, and `terminal` is the raw pty
   // byte channel (opaque output, produced by the terminal handler).
@@ -203,8 +205,14 @@ export const FROZEN_COUNTS = {
   //   panel), the model-driven compression trio (its block list lives in a session
   //   sidecar), and `agent_swarm` (a one-call batch of parallel lightweight
   //   subagent turns; members are unregistered and write no receipt, and the roster
-  //   is in-memory on the existing statusline surface).
-  tools: 23,
+  //   is in-memory on the existing statusline surface), and the four read-only
+  //   `desktop_*` tools (computer-use M1: list/get windows, list apps, and a
+  //   window's screenshot + accessibility tree; their pixels ride the existing W804
+  //   attachment chain, the tools are registered by compose()'s 4e step only when
+  //   this host is win32 AND a built helper exists, and the helper adds no endpoint),
+  //   and the nine desktop WRITE tools, each of which passes the tiered gate
+  //   (packages/computer-use/src/gate.ts) before anything reaches the helper.
+  tools: 36,
 } as const;
 
 /** One frozen-count divergence, with everything an operator needs to act. */

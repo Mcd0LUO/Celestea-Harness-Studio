@@ -35,8 +35,10 @@ import {
   hasUnpairedCompactionStart,
   installCompactionEnd,
   parseEventLog,
+  renderTranscript,
   runCompaction,
   serializeEventLog,
+  transcriptLine,
 } from "./index.js";
 
 /** W2020: the end marker is the CALLER's step now — close the pair explicitly. */
@@ -84,8 +86,12 @@ describe("W2018 · the markers are declared by the contract", () => {
   it("names both markers in SESSION_EVENT_TYPES", () => {
     expect(SESSION_EVENT_TYPES).toContain("compaction_start");
     expect(SESSION_EVENT_TYPES).toContain("compaction_end");
-    // 9 pre-existing + the two additive markers.
-    expect(SESSION_EVENT_TYPES).toHaveLength(11);
+    // M2-B2b: the hand-copied 11 was replaced by a floor. This test is about
+    // the MARKERS being declared, not about how many row types the enum has --
+    // the exact count belongs to tests/contracts.test.ts, which checks it
+    // against the schema. Pinning it in two places meant every future row type
+    // had to edit two files to stay green.
+    expect(SESSION_EVENT_TYPES.length).toBeGreaterThanOrEqual(11);
   });
 
   it("round-trips each marker through the log codec, field-free", () => {
@@ -99,6 +105,30 @@ describe("W2018 · the markers are declared by the contract", () => {
   });
 });
 
+
+describe("M2-B2b · the compaction summary must not double-count a desktop confirmation", () => {
+  const asked: SessionEvent = {
+    type: "desktop_confirm",
+    id: "q-7",
+    method: "type_text",
+    app: "notepad.exe",
+    reason: "sensitive_method",
+    timeout_ms: 60_000,
+  };
+  const answered: SessionEvent = { type: "desktop_confirm_answer", id: "q-7", outcome: "approve", elapsed_ms: 1500 };
+
+  it("renderTranscript omits both rows, so a log with a gate summarizes like one without", () => {
+    expect(transcriptLine(asked)).toBe("");
+    expect(transcriptLine(answered)).toBe("");
+    // The gate itself is already visible as the tool_call/tool_result pair, so a
+    // line here would describe the same decision twice.
+    expect(renderTranscript([asked, answered])).toBe(renderTranscript([]));
+  });
+
+  it("and the model-visible projection stays empty for them too", () => {
+    expect(deriveMessagesFrom([asked, answered])).toEqual([]);
+  });
+});
 describe("W2018 · a successful compaction leaves a PAIRED, correctly ordered log", () => {
   it("★ writes start FIRST and end LAST, exactly one of each", async () => {
     const path = writeLog(logOf(12));

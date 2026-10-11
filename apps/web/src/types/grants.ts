@@ -5,20 +5,35 @@
 //   与 types/permission.ts 的区别：那里是「权限档位预设」，这里是「单会话逐条放宽」。
 // ============================================================================
 
-/** 6 项能力位（设计 §2.2）。 */
+/** 能力位（设计 §2.2；M2 起加上 computer-use 的 `desktop`）。 */
 export type GrantCap =
   | 'network'
   | 'read_roots'
   | 'write_roots'
   | 'net_hosts'
   | 'tool_extra'
-  | 'unsandboxed';
+  | 'unsandboxed'
+  | 'desktop';
+
+/** M2 · 一份应用清单（`desktop` 能力位的 scope，`kind:'apps'` 的两侧之一）。 */
+export interface GrantAppList {
+  exes?: string[];
+  titles?: string[];
+}
+
+/** M2 · 应用级 scope：`allow` 为空 = 不限制；deny 永远赢。 */
+export interface GrantAppScope {
+  allow?: GrantAppList;
+  deny?: GrantAppList;
+}
 
 /** 能力范围：布尔类为空对象；目录/站点/工具类为列表。 */
 export interface GrantScope {
   roots?: string[];
   hosts?: string[];
   tools?: string[];
+  /** M2: `desktop` 能力位的应用清单。 */
+  apps?: GrantAppScope;
   [key: string]: unknown;
 }
 
@@ -44,6 +59,10 @@ export interface EffectiveGrants {
   net_hosts?: string[];
   tool_extra?: string[];
   unsandboxed?: boolean;
+  /** M2: computer-use 写工具的能力位。 */
+  desktop?: boolean;
+  /** M2: 应用级 scope（服务端恒返回，空对象 = 不限制）。 */
+  apps?: GrantAppScope;
   [key: string]: unknown;
 }
 

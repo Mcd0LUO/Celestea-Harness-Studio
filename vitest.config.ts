@@ -16,6 +16,7 @@ const alias = {
   "@celestea/studio": r("./apps/studio/src/index.ts"),
   "@celestea/swarm": r("./packages/swarm/src/index.ts"),
   "@celestea/mcp": r("./packages/mcp/src/index.ts"),
+  "@celestea/computer-use": r("./packages/computer-use/src/index.ts"),
 };
 
 /**

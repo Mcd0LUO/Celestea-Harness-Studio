@@ -15,11 +15,15 @@
 | [`mcp-client.md`](./mcp-client.md) | 设计（**P0 已实现**） | MCP 客户端：只做客户端、协议走官方 SDK、动态工具不进冻结契约、每会话一代连接 |
 | [`multimodal-attachments/`](./multimodal-attachments/README.md) | 设计（已实现 P0） | 多模态附件（分册）：图片/文本附件的三入口、能力位与降级 |
 | [`skill-command.md`](./skill-command.md) | 设计（**已实现**） | 技能显式调用：`/{技能名}` 直呼，host 侧确定性注入正文 |
+| [`computer-use/`](./computer-use/README.md) | 已实现（M1+M2+M2-B2） | 桌面操控（分册）：13 工具、分级闸门、观察租约、自编译 Rust helper |
 
 分册各页：[`01-evidence.md`](./multimodal-attachments/01-evidence.md) · 
 [`02-design.md`](./multimodal-attachments/02-design.md) · 
 [`03-frontend.md`](./multimodal-attachments/03-frontend.md) · 
 [`04-appendix.md`](./multimodal-attachments/04-appendix.md)
+
+computer-use 分册各页：[`01-usage.md`](./computer-use/01-usage.md) · 
+[`02-design.md`](./computer-use/02-design.md)
 
 ---
 

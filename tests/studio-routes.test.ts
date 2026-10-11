@@ -87,8 +87,9 @@ describe("apps/studio contract surface", () => {
     // W783: 10 -> 11 (`ask_user_question`); W804: 11 -> 12 (`read_image`);
     // W7: 12 -> 13 (`stop_worker`); W884: 13 -> 14 (`load_skill`);
     // F4: 14 -> 16 (`browser_open` + `browser_act`); W1533: 18 -> 19 (`update_tasks`);
-    // W1900 (Phase 2): 19 -> 22; W-swarm: 22 -> 23 (`agent_swarm`).
-    expect(loadTools().tools).toHaveLength(23);
+    // W1900 (Phase 2): 19 -> 22; W-swarm: 22 -> 23 (`agent_swarm`);
+    // computer-use M2: 23 -> 36 (M1 只读 4 + M2 写 9，同 desktopDelta，optionalMount).
+    expect(loadTools().tools).toHaveLength(36);
   });
 
   it("404s unknown /api/* paths with the JSON envelope (never the SPA)", async () => {

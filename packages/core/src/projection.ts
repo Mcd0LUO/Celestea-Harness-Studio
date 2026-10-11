@@ -112,6 +112,15 @@ export function projectEvent(event: SessionEvent): Message | null {
     case "user_question":
     case "user_answer":
       return null;
+    // computer-use M2-B2b: the desktop gate's audit rows. SAME argument as the
+    // question rows above, and it is a hard rule rather than a taste call: the
+    // model already receives the verdict as the ordinary `tool_result` of the
+    // gated tool call. Projecting these would hand the model a second copy of a
+    // decision it was never party to — and every confirmation would cost two
+    // lines of context forever, in every later turn of the session.
+    case "desktop_confirm":
+    case "desktop_confirm_answer":
+      return null;
     // W2018 (B1): the compaction markers are LOG-STRUCTURAL rows — the model
     // never sees them (they carry no content), so they project to nothing. This
     // is what keeps deriveMessages byte-identical for every existing log.

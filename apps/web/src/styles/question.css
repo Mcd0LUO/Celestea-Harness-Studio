@@ -92,6 +92,8 @@
 
 /* ---- 操作区与终态文案 ---- */
 .q-actions { display: flex; justify-content: flex-end; gap: 8px; }
+/* M2-B2c：取消是次级动作——整宽、无 accent 填充，与「提交作答」视觉分级 */
+.q-cancel { min-height: var(--tap-min); width: 100%; color: var(--c-text-2); }
 .q-hint { color: var(--c-text-2); font-size: 12px; overflow-wrap: anywhere; }
 .q-hint:empty, .q-result:empty { display: none; }
 .q-result {

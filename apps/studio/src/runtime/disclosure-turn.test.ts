@@ -22,6 +22,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { ModelRequest } from "@celestea/core";
 import { TOOL_UNAVAILABLE_CODE } from "@celestea/tools";
+import { checkDesktopMount } from "@celestea/runtime";
 import { getJson, jsonRequest, type StudioHarness } from "../harness.test-util.js";
 import { activate, makeEngineHarness, readSessionLog, waitIdle } from "./test-util.js";
 import type { OfflineStep } from "./offline-llm.js";
@@ -57,6 +58,30 @@ const STANDARD_FACE = [
   "worker_status",
   "write_file",
 ];
+/**
+ * M2-B · the thirteen `desktop_*` tools are an **optional face** — `ensureDesktopWiring`
+ * mounts them only when the host is win32 AND a built helper exists (规划 §5). They are
+ * deliberately NOT written into STANDARD_FACE above: that constant is the UNCONDITIONAL
+ * face, and folding an optional mount into it would turn "optional" into "required" on
+ * paper for every reader on another host.
+ *
+ * They reach the face through `ExposedRegistry.stableProjection`'s tail-append (they are
+ * registered after the disclosure policy's universe snapshot was taken, at compose's 4e),
+ * which is also why the append-only assertions below still hold: they land in `first`
+ * already and never move afterwards.
+ */
+const DESKTOP_FACE = [
+  "desktop_activate_window", "desktop_click", "desktop_drag", "desktop_get_window",
+  "desktop_get_window_state", "desktop_launch_app", "desktop_list_apps", "desktop_list_windows",
+  "desktop_press_key", "desktop_scroll", "desktop_secondary_action", "desktop_set_value",
+  "desktop_type_text",
+];
+
+/** 可选面挂没挂，用 plugins-inventory 的同一真实判据（win32 + helper 产物，静态检查）。 */
+const DESKTOP_MOUNTED = checkDesktopMount().ok;
+/** 本机默认面 = 无条件面 + 已挂载的可选面（见 DESKTOP_FACE 的理由）。 */
+const MOUNTED_FACE = [...STANDARD_FACE, ...(DESKTOP_MOUNTED ? DESKTOP_FACE : [])].sort();
+
 /** The one name withheld at compose time; everything else is offered. */
 const WITHHELD = "read_file";
 
@@ -139,8 +164,8 @@ describe("W806 P0 dynamic tool disclosure across turns (real engine)", () => {
     // ⑤ {{tools}} / GET /api/tools announce the static DISCLOSABLE UNIVERSE, not
     //    the per-turn subset — the prompt must not list a tool it then refuses…
     //    it lists the universe and the refusal prose explains the withholding.
-    expect(await toolsOf(h, "sample-ws/plain")).toEqual(STANDARD_FACE);
-    expect(await renderedTools(h)).toEqual(STANDARD_FACE);
+    expect(await toolsOf(h, "sample-ws/plain")).toEqual(MOUNTED_FACE);
+    expect(await renderedTools(h)).toEqual(MOUNTED_FACE);
   });
 
   it("without activation the face is the byte-identical mode baseline", async () => {
@@ -151,9 +176,9 @@ describe("W806 P0 dynamic tool disclosure across turns (real engine)", () => {
     });
     harnesses.push(h);
     await activate(h, "sample-ws/plain");
-    expect(await toolsOf(h, "sample-ws/plain")).toEqual(STANDARD_FACE);
+    expect(await toolsOf(h, "sample-ws/plain")).toEqual(MOUNTED_FACE);
     expect((await h.app.request("/api/turn", jsonRequest("POST", { input: "t", session: "sample-ws/plain" }))).status).toBe(202);
     await waitIdle(h);
-    expect(names(requests[0] as ModelRequest).sort()).toEqual(STANDARD_FACE);
+    expect(names(requests[0] as ModelRequest).sort()).toEqual(MOUNTED_FACE);
   });
 });

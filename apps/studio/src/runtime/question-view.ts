@@ -73,6 +73,33 @@ export class QuestionView {
   }
 
   /**
+   * Cancel one pending question (`POST /api/questions/{id}/cancel`, M2-B2c).
+   *
+   * Mirrors [answer]: same lookup, same session guard, same race honesty. The
+   * difference is the settlement: `PendingQuestion.cancel()` REJECTS the parked
+   * promise with ASK_CANCELLED — a dismissal, not an answer. The waiting layer
+   * decides what that means (the desktop gate maps it to desktop_confirm_cancelled,
+   * which never counts toward the deny cooldown; the generic ask_user_question
+   * tool surfaces it as an ordinary tool error).
+   *
+   * Registry removal mirrors [answer] — the HTTP layer removes on settle,
+   * because the generic ask_user_question path has no other cleanup owner
+   * (the desktop gate host's finally also removes; `remove` is idempotent).
+   */
+  cancel(requestId: string, sessionId?: string): QuestionAnswerOutcome {
+    const question = this.registry.get(requestId);
+    if (question === undefined) return { ok: false, reason: "unknown" };
+    if ((sessionId ?? null) !== question.sessionId) return { ok: false, reason: "mismatch" };
+    if (question.isSettled) {
+      return { ok: false, reason: question.settlement === "timed_out" ? "timed_out" : "settled" };
+    }
+    const session = question.sessionId;
+    question.cancel();
+    this.registry.remove(requestId);
+    return { ok: true, session };
+  }
+
+  /**
    * Every question still answerable, with the deadline judged AT READ TIME
    * (§6.1) so a reconnecting client rebuilds the card and its countdown without
    * trusting its own clock.

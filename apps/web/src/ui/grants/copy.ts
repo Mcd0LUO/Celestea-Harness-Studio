@@ -11,6 +11,7 @@
 import type { EffectiveGrants, GrantEntry, GrantScope } from '../../types';
 import { t } from '../../i18n';
 import { expiryParen, listOf, permanentText, untilPhrase, type CapDef } from './caps';
+import { appsOfScope, appsPhrase } from './apps';
 import { phraseFor } from './panel/phrase';
 
 /** 计划中的一步（快捷授权）：范围 + 该步的到期时刻（null = 永久）。 */
@@ -44,6 +45,10 @@ export function confirmMessageFor(def: CapDef, scope: GrantScope, expiresAt: num
       return t('grants.copy.netHosts', { hosts: listOf(scope.hosts).join(sep()), until });
     case 'tool_extra':
       return t('grants.copy.toolExtra', { tools: listOf(scope.tools).join(sep()), until });
+    case 'desktop':
+      // M2-B2a：应用清单进了确认句。**空清单必须说成「不限制」**（appsPhrase 的
+      // describeUnrestricted），不能退化成「什么都不允许」。
+      return t('grants.copy.desktop', { apps: appsPhrase(appsOfScope(scope)), until });
   }
 }
 

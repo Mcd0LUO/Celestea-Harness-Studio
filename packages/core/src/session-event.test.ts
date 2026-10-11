@@ -148,6 +148,63 @@ describe("rejections (the caller treats them as a torn tail)", () => {
   });
 });
 
+describe("M2-B2b · desktop_confirm / desktop_confirm_answer codec", () => {
+  const asked: SessionEvent = {
+    type: "desktop_confirm",
+    id: "q-7",
+    method: "type_text",
+    app: "notepad.exe",
+    title: "Untitled - Notepad",
+    reason: "sensitive_method",
+    timeout_ms: 60_000,
+  };
+  const answered: SessionEvent = { type: "desktop_confirm_answer", id: "q-7", outcome: "approve", elapsed_ms: 1500 };
+
+  it("round-trips both rows through parse and serialize", () => {
+    for (const ev of [asked, answered]) {
+      const line = serializeSessionEvent(ev);
+      const back = parseSessionEvent(line);
+      expect(back.ok, line).toBe(true);
+      if (back.ok) expect(back.event).toEqual(ev);
+    }
+  });
+
+  it("writes tag first, then the fields in declaration order", () => {
+    expect(serializeSessionEvent(asked)).toBe(
+      '{"type":"desktop_confirm","id":"q-7","method":"type_text","app":"notepad.exe","title":"Untitled - Notepad","reason":"sensitive_method","timeout_ms":60000}',
+    );
+    expect(serializeSessionEvent(answered)).toBe(
+      '{"type":"desktop_confirm_answer","id":"q-7","outcome":"approve","elapsed_ms":1500}',
+    );
+  });
+
+  it("omits absent optionals instead of writing null (serde style)", () => {
+    expect(serializeSessionEvent({ type: "desktop_confirm", id: "q-8", method: "click", app: "calc.exe", reason: "app_not_allowlisted" })).toBe(
+      '{"type":"desktop_confirm","id":"q-8","method":"click","app":"calc.exe","reason":"app_not_allowlisted"}',
+    );
+    // A JSON null reads back as ABSENT, never as 0 or "".
+    expect(parseSessionEvent('{"type":"desktop_confirm_answer","id":"q-9","outcome":"deny","elapsed_ms":null}')).toEqual({
+      ok: true,
+      event: { type: "desktop_confirm_answer", id: "q-9", outcome: "deny" },
+    });
+  });
+
+  it("rejects an unknown reason / outcome instead of defaulting them", () => {
+    // These two fields are what an audit reads. A silent default would answer
+    // "why was this stopped" / "what did the human do" with a wrong value.
+    expect(validateSessionEvent({ type: "desktop_confirm", id: "q-1", method: "click", app: "a.exe", reason: "because" }).ok).toBe(false);
+    expect(validateSessionEvent({ type: "desktop_confirm_answer", id: "q-1", outcome: "approved" }).ok).toBe(false);
+    expect(validateSessionEvent({ type: "desktop_confirm_answer", id: "q-1" }).ok).toBe(false);
+  });
+
+  it("requires the asked row's own fields", () => {
+    expect(validateSessionEvent({ type: "desktop_confirm", id: "q-1", reason: "sensitive_method" }).ok).toBe(false);
+  });
+
+  it("rejects a non-numeric elapsed_ms", () => {
+    expect(validateSessionEvent({ type: "desktop_confirm_answer", id: "q-1", outcome: "timeout", elapsed_ms: "soon" }).ok).toBe(false);
+  });
+});
 describe("outcome helpers", () => {
   it("maps the five states to phases and errors", () => {
     expect(DEFAULT_TURN_OUTCOME).toBe("completed");

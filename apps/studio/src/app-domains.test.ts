@@ -196,7 +196,7 @@ describe("session grants endpoints", () => {
     const empty = await getJson(h.app, `/api/sessions/${S1}/grants`);
     expect(empty.status).toBe(200);
     expect(empty.body).toMatchObject({ ok: true, session: "sample-ws/s1", grants: [], unsandboxed_available: false });
-    expect(empty.body["effective"]).toEqual({ network: true, read_roots: [], write_roots: [], net_hosts: [], tool_extra: [], unsandboxed: false }); // W9: preset network; W864: path-limited baseline (no '/')
+    expect(empty.body["effective"]).toEqual({ network: true, read_roots: [], write_roots: [], net_hosts: [], tool_extra: [], unsandboxed: false, desktop: false, apps: {} }); // W9: preset network; W864: path-limited baseline (no '/'); M2: desktop/apps
     expect(empty.body["max_ttl_sec"]).toMatchObject({ network: 3600, write_roots: 86400, unsandboxed: 900 });
 
     const granted = await grant(h, S1, { cap: "write_roots", scope: { roots: [out] }, ttl_sec: 600, note: "batch output", model_says: "please allow" });
@@ -217,7 +217,7 @@ describe("session grants endpoints", () => {
     expect((await getJson(h.app, `/api/sessions/${S1}/grants`, jsonRequest("DELETE", { cap: "write_roots" }))).body).toEqual({
       ok: true,
       revoked: [],
-      effective: { network: true, read_roots: [], write_roots: [], net_hosts: [], tool_extra: [], unsandboxed: false },
+      effective: { network: true, read_roots: [], write_roots: [], net_hosts: [], tool_extra: [], unsandboxed: false, desktop: false, apps: {} },
     });
     expect((await getJson(h.app, `/api/status?session=${S1}`)).body["grants_active"]).toEqual(["network"]); // W9: preset network
     const audits = readFileSync(join(h.root, "grants-audit.jsonl"), "utf8");

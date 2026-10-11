@@ -151,5 +151,10 @@ export function effectiveJson(grants: EffectiveGrants): JsonObject {
     net_hosts: [...grants.netHosts],
     tool_extra: [...grants.toolExtra],
     unsandboxed: grants.unsandboxed,
+    // M2: the desktop capability bit and its application scope. `apps` is `{}` when
+    // no scope was granted, which is exactly "no application restriction" — the UI
+    // must be able to tell that from "the server is old" (the key is always present).
+    desktop: grants.desktop,
+    apps: grants.apps,
   };
 }

@@ -18,6 +18,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { checkDesktopMount } from "@celestea/runtime";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ModelRequest } from "@celestea/core";
@@ -38,6 +39,19 @@ import type { OfflineStep } from "./runtime/offline-llm.js";
 // execution mode folds `agent_swarm`.
 const DEFAULT_EXECUTION_FACE = ["browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "load_skill", "process_control", "remember", "run_code", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status"];
 const DEFAULT_STANDARD_FACE = ["ask_user_question", "browser_act", "browser_open", "compress", "context_status", "decompress", "forget", "http_request", "list_dir", "load_skill", "process_control", "read_file", "read_image", "remember", "run_code", "run_shell", "send_message", "spawn_worker", "stop_worker", "update_tasks", "worker_status", "write_file"];
+/**
+ * M2-B · the thirteen `desktop_*` tools are an **optional face** — `ensureDesktopWiring`
+ * mounts them only when the host is win32 AND a built helper exists (规划 §5). They are
+ * NOT written into the constant above: that one is the UNCONDITIONAL face, and folding
+ * an optional mount into it would make "optional" read as "required" on every other host.
+ * (The EXECUTION face needs no delta at all — the mode folds them, which is exactly the
+ * property the M7 case below asserts.)
+ */
+const DESKTOP_FACE = ["desktop_activate_window", "desktop_click", "desktop_drag", "desktop_get_window", "desktop_get_window_state", "desktop_launch_app", "desktop_list_apps", "desktop_list_windows", "desktop_press_key", "desktop_scroll", "desktop_secondary_action", "desktop_set_value", "desktop_type_text"];
+/** 可选面挂没挂，用 plugins-inventory 的同一真实判据（win32 + helper 产物，静态检查）。 */
+const DESKTOP_MOUNTED = checkDesktopMount().ok;
+/** 本机默认面 = 无条件面 + 已挂载的可选面（见 DESKTOP_FACE 的理由）。 */
+const MOUNTED_STANDARD_FACE = [...DEFAULT_STANDARD_FACE, ...(DESKTOP_MOUNTED ? DESKTOP_FACE : [])].sort();
 const EXECUTION_MARK = "Execution mode — prefer one program over many round trips";
 
 /** W9331: the swarm capability, named once so the case below cannot drift from it. */
@@ -84,18 +98,18 @@ describe("W791 P1 mode tool face (real engine)", () => {
     const h = engine();
     await activate(h, "sample-ws/std");
     await activate(h, "sample-ws/exec");
-    expect(await toolsOf(h, "sample-ws/std")).toEqual(DEFAULT_STANDARD_FACE);
+    expect(await toolsOf(h, "sample-ws/std")).toEqual(MOUNTED_STANDARD_FACE);
     expect(await toolsOf(h, "sample-ws/exec")).toEqual(DEFAULT_EXECUTION_FACE);
     // The COMPOSED INSTANCE — the registry the agent loop really dispatches
     // through — carries the same face. `?session=` is derived from the mode, so
     // this is the independent half of M7: the wiring itself folded.
     const faceOf = (id: string): string[] => h.runtime.sessionContext(id).tools.map((t) => t.name).sort();
-    expect(faceOf("sample-ws/std")).toEqual(DEFAULT_STANDARD_FACE);
+    expect(faceOf("sample-ws/std")).toEqual(MOUNTED_STANDARD_FACE);
     expect(faceOf("sample-ws/exec")).toEqual(DEFAULT_EXECUTION_FACE);
     // A session with no declared mode reads as standard (K8).
     await activate(h, "sample-ws/plain");
-    expect(await toolsOf(h, "sample-ws/plain")).toEqual(DEFAULT_STANDARD_FACE);
-    expect(faceOf("sample-ws/plain")).toEqual(DEFAULT_STANDARD_FACE);
+    expect(await toolsOf(h, "sample-ws/plain")).toEqual(MOUNTED_STANDARD_FACE);
+    expect(faceOf("sample-ws/plain")).toEqual(MOUNTED_STANDARD_FACE);
   });
 
   it("M9: ?session= answers exactly the set the config prompt renders for that session", async () => {
@@ -121,7 +135,9 @@ describe("W791 P1 mode tool face (real engine)", () => {
     // standard face is one name shorter. Asserted as a COUNT here on purpose: this
     // line is what catches a tool appearing or vanishing while the SET assertions
     // elsewhere still line up.
-    expect((await getJson(h.app, "/api/tools?session=sample-ws%2Fplain")).body["tools"]).toHaveLength(22);
+    // M2-B: the frozen count is the UNCONDITIONAL face's length; the mounted optional face
+    // (the thirteen desktop tools) is a delta, so the number is derived, not re-typed.
+    expect((await getJson(h.app, "/api/tools?session=sample-ws%2Fplain")).body["tools"]).toHaveLength(MOUNTED_STANDARD_FACE.length);
 
     const res = await getJson(h.app, "/api/sessions/sample-ws%2Fplain/mode", jsonRequest("POST", { mode: "execution" }));
     expect(res.status).toBe(200);
@@ -133,7 +149,7 @@ describe("W791 P1 mode tool face (real engine)", () => {
     // the other session never changed. A turn in flight is what the 409 guard
     // refuses outright, so no running turn can ever be re-pointed mid-flight.
     expect(await toolsOf(h, "sample-ws/plain")).toEqual(DEFAULT_EXECUTION_FACE);
-    expect(await toolsOf(h, "sample-ws/std")).toEqual(DEFAULT_STANDARD_FACE);
+    expect(await toolsOf(h, "sample-ws/std")).toEqual(MOUNTED_STANDARD_FACE);
 
     // Its prompt follows the mode too (one assembly, two readers: S1/S2).
     await activate(h, "sample-ws/plain");
@@ -144,7 +160,7 @@ describe("W791 P1 mode tool face (real engine)", () => {
     const back = await getJson(h.app, "/api/sessions/sample-ws%2Fplain/mode", jsonRequest("POST", { mode: "standard" }));
     expect(back.body["mode"]).toBe("standard");
     await activate(h, "sample-ws/plain");
-    expect(await toolsOf(h, "sample-ws/plain")).toEqual(DEFAULT_STANDARD_FACE);
+    expect(await toolsOf(h, "sample-ws/plain")).toEqual(MOUNTED_STANDARD_FACE);
   });
 
   it("M10: the switch keeps title/model/prompt and rejects an unknown mode or session", async () => {
@@ -233,7 +249,7 @@ describe("W9331 · the swarm tool is default OFF, and the fold rule is unchanged
     expect(exec).not.toContain(SWARM_TOOL);
     // The whole sets match the frozen defaults, so this is a one-name statement and
     // not a symptom of something bigger having drifted.
-    expect(std).toEqual([...DEFAULT_STANDARD_FACE].sort());
+    expect(std).toEqual([...MOUNTED_STANDARD_FACE].sort());
     expect(exec).toEqual([...DEFAULT_EXECUTION_FACE].sort());
   });
 
@@ -249,7 +265,7 @@ describe("W9331 · the swarm tool is default OFF, and the fold rule is unchanged
     expect(std).toContain(SWARM_TOOL);
     expect(exec).toContain(SWARM_TOOL);
     // Exactly the default faces plus the one tool: the fold removed nothing extra.
-    expect(std).toEqual([...DEFAULT_STANDARD_FACE, SWARM_TOOL].sort());
+    expect(std).toEqual([...MOUNTED_STANDARD_FACE, SWARM_TOOL].sort());
     expect(exec).toEqual([...DEFAULT_EXECUTION_FACE, SWARM_TOOL].sort());
 
     // The prompt renders the SAME set for the FOCUSED session — the single-source

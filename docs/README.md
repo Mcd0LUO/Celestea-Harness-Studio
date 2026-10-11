@@ -18,6 +18,7 @@
 | [`feature/composer-surface.md`](./feature/composer-surface.md) | 设计（**已实现**） | **输入栏与命令面**：补全框分组、发送前放行缝、统一 `/` 解析（@celestea/gesture）、Lexical 富文本迁移（chip 命中确认） | 本文 |
 | [`feature/skill-command.md`](./feature/skill-command.md) | 设计（**已实现**） | **技能显式调用**：`/{技能名}` 直呼、host 侧确定性注入正文、技能清单端点、chip 第一个消费者 | 本文 |
 | [`feature/`](./feature/README.md) | 当前 | **特性文档索引**（分册）：本目录放特性级文档，文件名即主题名 | [`README.md`](./feature/README.md) |
+| [`feature/computer-use/`](./feature/computer-use/README.md) | 已实现 | **Computer Use 桌面操控**（分册）：13 个 desktop_* 工具、分级闸门、观察租约、自编译 Rust helper | [`README.md`](./feature/computer-use/README.md)；`packages/computer-use/` |
 | [`feature/desktop-packaging.md`](./feature/desktop-packaging.md) | 决定（2026-10-04：暂缓） | **桌面端打包**：评估外部 PR #5（已关闭）后暂缓——实测数据、4 条理由、替代方案代价、将来要做的三件前置工作，含未验证部分的诚实声明 | 本文 |
 | [`deployment.md`](./deployment.md) | 当前 | **部署与安全模型**：生产 systemd + nginx、隧道访问、安全模型（含 Windows 差异表） | 本文；登录门见 [`archive/decisions/feature-studio-auth.md`](./archive/decisions/feature-studio-auth.md) |
 | [`configuration.md`](./configuration.md) | 当前 | **配置**：`CELESTEA_HOME` 解析顺序与目录布局、环境变量全表、模型接入、权限档位 | 本文；数据文件 schema 见 [`data-files.md`](./data-files.md) |

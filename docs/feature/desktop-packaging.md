@@ -29,6 +29,13 @@
 
 1. **第二个运行时 = 长期维护承诺。** 全仓 1277 个 `.ts`、1 个 `.sh`、零 `.py`/`.ps1`/`.rs` —— 刻意同质。
    桌面端还会顺手引入 Python（`gen-icons.py`，可选）与 bash（`quit-instances.sh`）。
+   > **2026-10-08 收窄适用范围（maintainer 裁决，回应 PR #6）**：本条约束的是**打包面** —— 产物里多带一个
+   > 运行时（Deno/Chromium）、发行链上多一个二进制，那才是「长期维护承诺 + 供给链盲区」。它**不**适用于
+   > **能力面**：`packages/computer-use/helper`（Rust）是 Windows 桌面自动化在纯 TS 里**没有可达路径**时的
+   > 实现语言（exe 不进 git、不进 npm 产物，由 `node scripts/build-desktop-helper.mjs` 本机自编译）；
+   > `scripts/desktop-inject-input.py`（83 行）是**本机验收工具**，不被任何门禁/CI 引用、不随包发布，
+   > 因此按现状保留（要收敛时改写面很小：一个 `.mjs` + 4 处 spawn + 3 处文档）。
+   > 判据是「它进不进产物、进不进日常门禁」，不是扩展名本身。
 2. **`deno desktop` 是实验形态。** Deno 构建时自己打印 `experimental and subject to change`；
    webview 后端是独立的 `laufey` 0.7.0 二进制；`deno types` 打不出桌面 API 声明（PR 手写了 141 行 `.d.ts`）。
 3. **新表面会落在现有机械门禁之外。** `tsconfig` 的 include、eslint 的 `SOURCE_GLOBS`、depcruise 的目标
