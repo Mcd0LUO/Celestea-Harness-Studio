@@ -102,13 +102,24 @@ function inboxKind(kind: string): { title: string; collapsed: boolean } | undefi
   // 不是用户说的话；渲染成用户气泡会让用户以为是自己输入的。
   // 默认展开：它们是**给人看的一次性事件**（与 receipt/compact 同族，不是每轮背景）。
   if (kind === 'goal') return { title: t('chat.inbox.goal'), collapsed: false };
+  // W9351：人**显式**要求加载的技能正文（`/review …` 触发的注入行）。它与 `skill`
+  // 分成两个 origin 是有意的：技能目录是每轮注入的背景，技能调用是人点了才发生的
+  // 一次性事件（切片 3 的 afterInput 车道），混成一个 origin 会让两条语义互相顶掉。
+  // 默认**展开**，理由与 goal/receipt 同族：它是一次性、给人看的事件；而且**失败也走
+  // 同一个 origin**（`/ghost` 未命中时注入一条可见的失败行）——折起来就等于把「没加载上」
+  // 藏起来，而「假装成功」正是这个设计要防的最坏结果。
+  if (kind === 'skill-invocation') return { title: t('chat.inbox.skillInvocation'), collapsed: false };
+  // D1：人**显式**点名某个 MCP server（`/mcp:<server>`）后注入的工具清单。与
+  // skill-invocation 同族：一次性、人点的、可失败的。默认**展开**且**失败也走同一个
+  // origin** —— 折起来就等于把「没注上」藏起来，而「假装成功」正是这条车道要防的。
+  if (kind === 'mcp-invocation') return { title: t('chat.inbox.mcpInvocation'), collapsed: false };
   return undefined;
 }
 
 /**
  * inbox 条目（W515/W888）：系统注入 / worker 回执 / 技能目录 / 记忆等**非用户**
  * 输入。独立配色 + 左侧色条 + 标题条，与用户气泡一眼可分；长注入默认折叠。
- * `kind` 是 origin（skill/memory/receipt/steering/compact）；缺省走旧的
+ * `kind` 是 origin（skill/memory/receipt/steering/compact/goal/skill-invocation）；缺省走旧的
  * 「回执 · source」形态（W515 兼容）。
  */
 export function renderInboxMessage(

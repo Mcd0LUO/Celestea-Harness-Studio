@@ -21,9 +21,8 @@
 //   这里回答「那么 Enter 该干什么」。判据取 isTouchInput 而**不是** isMobileViewport ——
 //   窄桌面窗口有 Shift 键、平板横屏没有（W2023 已论证）。
 // ============================================================================
-import { interceptKey as interceptCommandKey } from '../commands';
 import { isImeKey } from '../ime'; // W2032：IME 组合判据（唯一真源，W2033 建立）
-import { isTouchInput, onInputCapabilityChange } from '../viewport';
+import { isTouchInput } from '../viewport';
 
 /** 提交车道（与 ui/inputbar.ts 的 SubmitMode 同形；刻意不 import，避免模块环）。 */
 export type EnterLane = 'steer' | 'queue';
@@ -94,63 +93,24 @@ export function enterKeyHint(): 'enter' | 'send' {
   return isTouchInput() ? 'enter' : 'send';
 }
 
-/** 把 hint 写到 DOM 上（能力位翻转后要重写一次）。 */
-export function syncEnterKeyHint(input: HTMLTextAreaElement): void {
-  input.enterKeyHint = enterKeyHint();
-}
-
-/** 在 textarea 的选区处插入 `text`，光标落在插入内容之后（'end'）。 */
-export function insertAtCaret(input: HTMLTextAreaElement, text: string): void {
-  const start = input.selectionStart ?? input.value.length;
-  const end = input.selectionEnd ?? start;
-  if (typeof input.setRangeText === 'function') {
-    // 优先 setRangeText：在光标处替换选区、光标落到插入内容之后，且**不触碰滚动位置**
-    // （实测：整段重设 value 会把 textarea 的 scrollTop 归零 ⇒ 长草稿跳到顶部）。
-    input.setRangeText(text, start, end, 'end');
-    return;
-  }
-  // 老引擎回落：手工拼接 + 手工复位光标（与 'end' 同语义）。
-  const v = input.value;
-  input.value = v.slice(0, start) + text + v.slice(end);
-  const at = start + text.length;
-  try {
-    input.setSelectionRange(at, at);
-  } catch {
-    /* 不可选中：值已插入 */
-  }
-}
-
-/** 装配 Enter 行为时要问的宿主（车道与重绘仍归 ui/inputbar.ts 所有）。 */
-export interface EnterHost {
-  send(text: string, lane: EnterLane): void;
-  /** 当前车道。 */
-  lane(): EnterLane;
-  /** 另一条车道（Ctrl/Cmd+Enter 用）。 */
-  other(): EnterLane;
-  /** 程序化改完输入框内容后的重绘（自增高 + 假光标）。 */
-  afterEdit(): void;
-}
-
 /**
- * 把 Enter 行为绑到输入框上（装配点；判定与插入都在本模块）。
+ * 把 hint 写到 DOM 上（能力位翻转后要重写一次）。
  *
- * 顺带负责软键盘回车键上的字（enterkeyhint）：装配时写一次，能力位翻转时再写一次 ——
- * 它与行为同源，绝不能分家（键上写着「发送」而按下去是换行，比不设更坏）。
+ * §9.3：#input 已从 <textarea> 换成 Lexical 的 editor root（contenteditable div）。
+ *   enterkeyhint 对 contenteditable 同样有效，但它是**属性**而不是 textarea 专属属性 ——
+ *   这里属性与 property 各写一份：软键盘读属性，既有读 `input.enterKeyHint` 的代码读 property。
  */
-export function bindEnterKey(input: HTMLTextAreaElement, host: EnterHost): void {
-  syncEnterKeyHint(input);
-  onInputCapabilityChange(() => syncEnterKeyHint(input));
-  input.addEventListener('keydown', (e) => {
-    if (interceptCommandKey(e)) return; // A3：命令补全框先消费 ↑↓/Enter/Tab/Esc
-    const act = enterAction(e, isTouchInput());
-    if (act === 'native') return; // 不 preventDefault：浏览器默认 = 插入换行
-    e.preventDefault();
-    if (act === 'swallow') return; // W2032：吃掉默认动作，但不发送、不插换行（组合中的 Enter）
-    if (act === 'newline') {
-      insertAtCaret(input, '\n');
-      host.afterEdit();
-      return;
-    }
-    host.send(input.value, act === 'send-other' ? host.other() : host.lane());
-  });
+export function syncEnterKeyHint(input: { setAttribute(n: string, v: string): void } & Partial<{ enterKeyHint: string }>): void {
+  const hint = enterKeyHint();
+  input.setAttribute('enterkeyhint', hint);
+  input.enterKeyHint = hint;
 }
+
+// --------------------------------------------------------------------------------
+// §9.2 迁移附记（**判定一个字没改**，挂载点换了）：
+//   原 bindEnterKey / insertAtCaret 随 textarea 一起退役。
+//   · enterAction 仍是 Enter 的唯一决策点，被 ui/composer/lexical.ts 的 KEY_DOWN_COMMAND
+//     调用（COMMAND_PRIORITY_CRITICAL，保证补全框先消费这次按键）。
+//   · native / newline 都交回编辑器插换行；swallow 吞掉默认动作；
+//     send-current / send-other 才回调 send。IME 守卫（ui/ime.ts）逐字未动。
+// --------------------------------------------------------------------------------

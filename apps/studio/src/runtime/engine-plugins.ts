@@ -66,6 +66,8 @@ import {
   type SandboxSelection,
 } from "@celestea/tools";
 import { workerTools, type WorkerRegistry } from "@celestea/workers";
+import { ENGINE_MCP_PLUGIN } from "../plugin-catalog.js";
+import { assembleMcp, mcpApprovalGuardOf, type McpEngine, type McpEngineInput } from "./engine-mcp.js";
 import { EMPTY_GRANTS, type EffectiveGrants, type EngineGrantAudit } from "./engine-grants.js";
 import { DEFAULT_SESSION_MODE, type SessionMode } from "../store/mode.js";
 
@@ -171,6 +173,19 @@ export interface EnginePluginInput {
    * 名字是 `Plugin.name()` 的原值。缺省/空 = 全 mount。
    */
   disabled?: readonly string[];
+  /**
+   * W-C1b · the MCP client of this generation
+   * (docs/feature/mcp-client.md §6.1/§7.1).
+   *
+   * Omitted = read mcp.json from the resolved CELESTEA_HOME plus the session's
+   * workspace scope (the product behaviour); null = this generation mounts no
+   * MCP at all; an object = an explicit configuration or an injected transport.
+   *
+   * An enabled:false server is not connected and contributes no tools, so a
+   * document with nothing enabled is indistinguishable from no document at all
+   * (§4.1) — see engine-mcp.ts's zero-MCP contract.
+   */
+  mcp?: McpEngineInput | null;
 }
 
 /**
@@ -242,6 +257,12 @@ export interface EngineTools {
    * initial set. The runtime calls `beginTurn()` at every turn start.
    */
   disclosure: DisclosurePolicy;
+  /**
+   * W-C1b: the MCP layer of this generation, or null when nothing is enabled.
+   * The composer calls publish() at every turn boundary (the tools are appended
+   * then, §5.4) and dispose() on shutdown (D7).
+   */
+  mcp: McpEngine | null;
 }
 
 /** The tool set: six builtins + the three worker tools (when a registry exists). */
@@ -282,6 +303,22 @@ export function engineTools(opts: EnginePluginInput): EngineTools {
     ...(opts.emptyTools === true ? [] : (opts.tools ?? [])),
   ];
   if (opts.emptyTools !== true && opts.workers !== null) tools.push(...workerTools(opts.workers));
+  // W-C1b: the MCP layer of this generation. emptyTools switches it off for
+  // the same reason it switches run_code off — a switched-off tool face must
+  // not come back through a side door. With no mcp.json the assembly below is
+  // INERT (no tools, no guard, no status), so the pre-MCP chain stays identical.
+  const mcp =
+    opts.emptyTools === true || opts.mcp === null
+      ? null
+      : assembleMcp({
+          env,
+          workspace: scope?.workspace ?? null,
+          ...(opts.mcp === undefined ? {} : opts.mcp),
+          // An explicitly injected key WINS: the status row is keyed by
+          // generation, and a host that composes without a question table still
+          // needs its sessions distinguishable.
+          sessionKey: opts.mcp?.sessionKey ?? opts.questions?.sessionId ?? null,
+        });
   const assembly = assembleTools({
     tools,
     sandbox,
@@ -291,7 +328,16 @@ export function engineTools(opts: EnginePluginInput): EngineTools {
     // W9226 (P0): `toolDeny` must reach the ASSEMBLY (not only the face below),
     // because the exposed face is bypassed by `run_code` sub-calls. `assembleTools`
     // mounts a guard for it, and a guard covers both the direct and the program path.
-    grants: { readRoots: grants.readRoots, writeRoots: grants.writeRoots, workspaceWritable: grants.workspaceWritable, toolDeny: grants.toolDeny },
+    // W-C1b: pathAccess is the MCP client's declared read/write/self per tool;
+    // it rides the same view and is merged over PATH_ACCESS INSIDE the path
+    // guard (so an undeclared MCP tool still lands on the write floor).
+    grants: {
+      readRoots: grants.readRoots,
+      writeRoots: grants.writeRoots,
+      workspaceWritable: grants.workspaceWritable,
+      toolDeny: grants.toolDeny,
+      ...(mcp === null ? {} : { pathAccess: mcp.pathAccess }),
+    },
     ...(opts.guard === undefined ? {} : { guard: opts.guard }),
     // W1467: the sub-call sink rides the SAME assembly the program dispatches
     // through, so a nested row can never be recorded by a different registry
@@ -300,6 +346,12 @@ export function engineTools(opts: EnginePluginInput): EngineTools {
     // 它是「派发到任何工具的程序入口」，留着它等于把刚关掉的工具面从后门还回去。
     ...(opts.emptyTools === true ? { runCode: false as const } : opts.onRunCodeEvent === undefined ? {} : { runCode: { events: opts.onRunCodeEvent } }),
   });
+  // W-C1b: the approval guard goes on AFTER assembleTools mounted the
+  // production chain, i.e. AFTER PathGuard — deterministic path arbitration
+  // first, then the human (docs/feature/mcp-client.md §7.1). Null when no server
+  // is enabled, so a zero-MCP generation keeps a byte-identical chain.
+  const approval = mcpApprovalGuardOf(mcp, questions);
+  if (approval !== null) assembly.registry.addGuard(approval);
   // W791 (P1, §5.2 #2 — the "关键机关"): the CONTEXT sees the mode's model-visible
   // face while `run_code`'s RegistryHandle stays bound to the INNER registry
   // (`assembleTools` bound it above), so a program's `tools.read_file(...)` is
@@ -333,7 +385,15 @@ export function engineTools(opts: EnginePluginInput): EngineTools {
     mode === "execution" ? assembly.registry.names().filter((name) => !EXECUTION_TOOL_NAMES.includes(name)) : [];
   const blocked = [...liveModeFold(), ...grants.toolDeny];
   const disclosure = new DisclosurePolicy({ universe, initial: opts.disclosure?.initial ?? universe, blocked });
-  const wrapped = mode === "execution" || opts.disclosure !== undefined || grants.toolDeny.length > 0;
+  // W-C1b: an active MCP layer also needs the wrapping face, because the
+  // discovered tools land AFTER this function ran. ExposedRegistry's stable
+  // projection appends an unseen name at the TAIL (§5.4: append, never insert),
+  // while the bare ToolRegistryImpl sorts alphabetically and would splice an
+  // mcp__* name between load_skill and read_file.
+  //
+  // W9346（main）：`hidden` 必须是**现读**的 provider，不能是快照 —— 见下方 hiddenLive。
+  const wrapped =
+    mode === "execution" || opts.disclosure !== undefined || grants.toolDeny.length > 0 || (mcp !== null && mcp.active);
   // 策略的 `hidden()` 只能看见它构造时的 universe，所以晚挂的名字要在这里补上（只补那些
   // 不在 universe 里的：universe 内的名字策略已经自己折叠过了，重复列出没有意义）。
   const hiddenLive = (): readonly string[] => {
@@ -355,7 +415,7 @@ export function engineTools(opts: EnginePluginInput): EngineTools {
       ctx.provide(USER_QUESTION_SERVICE, questions);
     }
   });
-  return { plugin, registry: exposed, sandbox, processes, decision: choice.decision, disclosure };
+  return { plugin, registry: exposed, sandbox, processes, decision: choice.decision, disclosure, mcp };
 }
 
 // --- the provider policy, decided out loud (W516 grants, W741 fail semantics) --
@@ -617,8 +677,33 @@ export function engineLoopPlugin(profile: Profile, name = "studio.engine.agent-l
 export function enginePlugins(input: EnginePluginInput): { plugins: Plugin[]; tools: EngineTools } {
   const tools = engineTools(input);
   const off = new Set(input.disabled ?? []);
-  const plugins = [engineLlmPlugin(input.llm), engineLoopPlugin(input.profile), tools.plugin];
+  const plugins = [engineLlmPlugin(input.llm), engineLoopPlugin(input.profile), tools.plugin, mcpPlugin(tools.mcp)];
   return { plugins: plugins.filter((plugin) => !off.has(plugin.name())), tools };
+}
+
+/**
+ * W-C1b · the MCP generation plugin (`studio.engine.mcp`).
+ *
+ * It is mounted LAST of the three engine rows on purpose, and it is mounted even
+ * when there is no MCP configuration at all: the catalog row is an assembly
+ * FACT (every row must correspond to a real mount, see `plugin-catalog.ts`), and
+ * a row that only appears once a user writes a file would be a row the inventory
+ * test could not pin.
+ *
+ * Its whole job is the GENERATION boundary (§6.1): mount = this generation is
+ * live, so the connection is born here rather than in the assembly's
+ * constructor. That is also what makes the catalog's `hot: true` true for this
+ * row — the next generation really re-reads `mcp.json` and reconnects (§4.3:
+ * configuration is read at REPLACEMENT time, never by a watcher).
+ *
+ * `engineTools()` registers the discovered tools at every turn boundary, not
+ * here: names do not exist until discovery answers, and the face may only grow
+ * at a boundary (`DisclosurePolicy` invariant 3).
+ */
+function mcpPlugin(engine: McpEngine | null): Plugin {
+  return definePlugin(ENGINE_MCP_PLUGIN, () => {
+    void engine?.start();
+  });
 }
 
 /**
