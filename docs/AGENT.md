@@ -176,7 +176,7 @@ check:comment-refs → check:json-dup-keys → test → check:web`。
 ```bash
 # 1) 干净树 + 全量门禁绿
 pnpm check
-# 2) 11 个 manifest 一起升版本（root + 10 个可发布包）
+# 2) 13 个 manifest 一起升版本（root + 12 个可发布包）
 sed -i 's/"version": "2.7.2"/"version": "2.7.3"/' package.json apps/*/package.json packages/*/package.json
 git commit -m 'chore(release): 2.7.3'
 # 3) 先打 tag，再构建 —— 版本号由 git describe --tags 派生
@@ -203,7 +203,7 @@ tag 一推就有自己的 CI 结论；**等它绿了再 `publish`** 才是完整
 
 **为什么先 tag 再 build**：前端版本来自 `git describe --tags`。先 build 后 tag 会让 2.7.1 的包自称 2.7.0 —— `scripts/release-check.mjs` 现在会拦这一条。
 
-**发布门禁（`pnpm run release`）拦什么**：webdist 陈旧 / 产物版本 ≠ 发布版本 / manifest 不可发布 / 11 个版本不一致 / tarball 里出现 `workspace:` 或源码或凭据 / **必需路径缺失**（```celestea/core` 少 `contracts/` 装完起不来；```celestea/studio` 少 `webdist/` 没界面）。
+**发布门禁（`pnpm run release`）拦什么**：webdist 陈旧 / 产物版本 ≠ 发布版本 / manifest 不可发布 / 12 个版本不一致 / tarball 里出现 `workspace:` 或源码或凭据 / **必需路径缺失**（```celestea/core` 少 `contracts/` 装完起不来；```celestea/studio` 少 `webdist/` 没界面）。
 
 **npm CDN 传播延迟是常态**：新版本发布后逐个包可见，可能滞后几分钟。装之前先轮询 `npm view <pkg>@<v> version` 直到全部就绪。
 

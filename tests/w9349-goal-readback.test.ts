@@ -20,6 +20,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { at, doc, flush, reply, resetHarness, type ElLike } from './lib/w795-dom.js';
+// §9.2：输入栏适配缝（installCommands 取不到编辑器根元素就整体 return）。
+import { ensureInput, mountOn } from './lib/composer-dom.js';
 
 interface ViewCtxMod {
   initViewCtx(): unknown;
@@ -107,6 +109,9 @@ async function boot(
   ctxMod.initViewCtx();
   ctxMod.ensurePane('ws/s1', 'session', '甲会话');
   ctxMod.activatePane('ws/s1', 'session', '甲会话');
+  // §9.2：installCommands 先取编辑器根元素，取不到就整体 return —— 目标读回挂在同一个
+  // onPaneChange 上，所以输入栏必须先装好，否则这条断言测的是一个「没装配」的世界。
+  await mountOn(await ensureInput());
   const cmd = (await import(/* @vite-ignore */ at('ui/commands/index.ts'))) as CmdMod;
   cmd.installCommands(); // 同一个 onPaneChange 入口：读回 + 胶囊重画
   const goal = (await import(/* @vite-ignore */ at('ui/commands/goal.ts'))) as GoalMod;
