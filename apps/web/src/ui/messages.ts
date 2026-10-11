@@ -383,19 +383,21 @@ export function appendThinking(ctx: SessionPane, delta: string): void {
       }
     }
   }
-  const target = ctx.assistant?.root ?? ctx.lastTextCol;
-  if (
-    seg !== null &&
-    target &&
-    seg.root.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING
-  ) {
+  // W9396：锚点必须是**列**（.mcol）—— ctx.assistant.root 是助手列**内部**的 .msg，
+  // 拿它当 target 会把思考段的 .mcol 插进助手列里（.mcol > .mcol）。ctx.assistant 非空时
+  // ctx.lastTextCol 就是它那一列（ensureAssistant 同时设两者），故只用它即等价且不嵌套。
+  const target = ctx.lastTextCol;
+  if (seg !== null && target && seg.root.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING) {
     ctx.el.insertBefore(seg.root, target); // 紧贴目标上方
   }
-  // W9333：等待占位是助手那一格的**哨兵** —— 没有正文锚点时，思考段必须排在它**之前**
-  // （占位被接管后就地变成正文，思考段自然落在正文正上方）。否则思考段把占位顶开，
-  // 首个 token 就不能原地接管了（见 pending.ts 的 takePendingCol）。
+  // W9333：等待占位是助手那一格的哨兵 —— 没有正文锚点时，思考段要排在它**之前**。
+  // ★ W9396（实测复现）：哨兵只在**它后面除了本段自己别无他物**时才当锚点 —— takePendingCol
+  // 只在占位是最后一个元素时就地接管；更早的事件（工具卡/信息块）一旦追加到它后面，接管已
+  // 不可能，再按它重排就会把新思考段吊到**所有工具卡之前**（实测 think tool think tool →
+  // think think tool tool），破坏 W895-R 的实时/重放一致。
   const pend = ctx.assistant || ctx.lastTextCol ? null : pendingColOf(ctx);
-  if (pend && seg.root.compareDocumentPosition(pend) & Node.DOCUMENT_POSITION_PRECEDING) {
+  const slotFree = pend !== null && (pend.nextElementSibling === null || pend.nextElementSibling === seg.root);
+  if (slotFree && seg.root.compareDocumentPosition(pend) & Node.DOCUMENT_POSITION_PRECEDING) {
     ctx.el.insertBefore(seg.root, pend);
   }
   if (seg !== null) {

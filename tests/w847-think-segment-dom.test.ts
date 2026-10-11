@@ -294,4 +294,47 @@ describe("W847 · 实时 ↔ 重放一致性（核心验收）", () => {
     expect(replayKinds).toEqual(liveKinds);
     expect(replayKinds).toEqual(["thinking", "tool", "tool", "thinking", "tool", "tool", "assistant"]);
   });
+
+  /**
+   * ★ W9396：上一条用例**漏掉的是真实发送路径** —— 它直接灌 SSE 帧，容器里没有
+   * W9333 的「等待反馈」占位。用户永远先按发送，所以真实容器里**有**那个占位列，
+   * 而它曾经是思考段的重排锚点：占位后面一出现工具卡，占位就不再是最后一个元素，
+   * 但 appendThinking 仍按它重排 ⇒ 每个新思考段都被吊到占位之前，也就是**吊到所有
+   * 工具卡之前**（实测 think tool think tool → think think tool tool）。重放走的是
+   * 行序，于是「实时看着是 A 顺序、刷新后变成 B 顺序」。
+   *
+   * 本用例与上一条**逐字相同的帧序列**，唯一差别是开头多一次 showPending。
+   */
+  it("W9396：占位在场（真实发送路径）时，多步回合的实时顺序仍与重放逐字相同", async () => {
+    const { V, restore } = await boot();
+    const live = V.ensurePane(LIVE, "session", "live");
+    const P = (await import(/* @vite-ignore */ at("ui/messages/pending.ts"))) as {
+      showPending(ctx: unknown, phase: string): void;
+    };
+    P.showPending(live, "delivering"); // 用户按下发送（真实路径的第一步）
+    startTurn();
+    fire("thinking", { delta: "d1" });
+    fire("done", { text: "" });
+    fire("tool", { id: "c1", name: "run_code", args: {} });
+    fire("tool_result", { id: "c1", ok: true, value: "ok" });
+    fire("tool", { id: "c2", name: "run_code", args: {} });
+    fire("tool_result", { id: "c2", ok: true, value: "ok" });
+    fire("thinking", { delta: "d2" });
+    fire("done", { text: "" });
+    fire("tool", { id: "c3", name: "run_code", args: {} });
+    fire("tool_result", { id: "c3", ok: true, value: "ok" });
+    fire("tool", { id: "c4", name: "run_code", args: {} });
+    fire("tool_result", { id: "c4", ok: true, value: "ok" });
+    fire("text", { delta: "最终回答" });
+    fire("done", { text: "最终回答" });
+
+    const replay = V.ensurePane(REPLAY, "session", "replay");
+    await restore.restoreSessionHistory(replay);
+
+    const liveKinds = kindsOf(live.el);
+    expect(liveKinds, "实时顺序 == 事件真实顺序").toEqual([
+      "thinking", "tool", "tool", "thinking", "tool", "tool", "assistant",
+    ]);
+    expect(liveKinds, "实时 == 重放（W895-R）").toEqual(kindsOf(replay.el));
+  });
 });
