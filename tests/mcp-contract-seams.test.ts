@@ -36,6 +36,7 @@ describe("W-C1b MCP tools stay OUT of the frozen contract", () => {
 
   it("the frozen tool count is unchanged by the MCP client (D4)", () => {
     expect(CONTRACT_TOOLS.tools).toHaveLength(FROZEN_COUNTS.tools);
-    expect(FROZEN_COUNTS.tools).toBe(23);
+    // computer-use 把锚点带到 36（13 个 desktop_*）；MCP 的承诺是「一个都不加」，见上一条。
+    expect(FROZEN_COUNTS.tools).toBe(36);
   });
 });

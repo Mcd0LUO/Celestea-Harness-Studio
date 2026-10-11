@@ -103,8 +103,10 @@ describe("D1 · origin 登记 ④⑤⑥：前端分支与 zh/en 双份文案", (
 
 describe("D1 · 没有顺手改冻结数字（§5.2 / §8 的要点之一）", () => {
   it("endpoints / tools / sseEvents 与 contracts 三处仍然一致", async () => {
-    expect(FROZEN_COUNTS.tools, "MCP 工具不进契约").toBe(23);
-    expect(FROZEN_COUNTS.endpoints).toBe(73);
+    // computer-use 把 tools 锚点 23 → 36（13 个 desktop_*）；MCP 自己一个都不加，
+    // 所以这里跟的是**契约的真实值**，不是 MCP 引入的数字。
+    expect(FROZEN_COUNTS.tools, "MCP 工具不进契约").toBe(36);
+    expect(FROZEN_COUNTS.endpoints).toBe(74);
     expect(FROZEN_COUNTS.sseEvents).toBe(10);
     const { loadEndpoints, loadSse, loadTools } = await import("@celestea/core");
     expect(loadEndpoints().endpoints).toHaveLength(FROZEN_COUNTS.endpoints);

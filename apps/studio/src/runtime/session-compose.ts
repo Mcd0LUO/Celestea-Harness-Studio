@@ -14,7 +14,7 @@
 
 import { createUsageTracker, DefaultAgentLoop, withRepetitionPerturbation, type RepetitionDiagnostics } from "@celestea/agent-loop";
 import { type CompressionHost, type Llm, type PendingInjection, type Sandbox, type SessionEvent, type SessionLog, type Tool, type ToolGuard } from "@celestea/core";
-import { createSessionInbox, type SessionInbox, type ShutdownHook } from "@celestea/runtime";
+import { createSessionInbox, type SessionInbox } from "@celestea/runtime";
 import {
   createLedgerLlm,
   createUsageLedger,
@@ -50,7 +50,7 @@ import { join } from "node:path";
 import { CapacityError } from "../runtime-adapter.js";
 import { bindingFor, closeLog, workerSessionPrefix, type CheckpointWiring, type SessionTarget } from "./engine-session.js";
 import { DEFAULT_SESSION_MODE, effectiveMode } from "../store/mode.js";
-import { enginePlugins, type DisclosureOptions, type EngineTools, type QuestionWiring } from "./engine-plugins.js";
+import { enginePlugins, type DisclosureOptions, type QuestionWiring } from "./engine-plugins.js";
 import type { EnginePluginSwitches } from "../plugin-catalog.js";
 import type { PendingQuestion, QuestionRegistry } from "../question-registry.js";
 import { questionAnsweredRow, questionAskedRow } from "../question-rows.js";
@@ -73,10 +73,9 @@ import {
 } from "@celestea/tools";
 import { createImageDowngradeLlm, resolveLlmMode, type ImageDowngradeInfo, type Llm as ProviderLlm } from "@celestea/llm";
 import { withAttachments } from "./attachments-llm.js";
-import { goalNotice, goalTurnContext, mergeAfterInputs, turnContextFor } from "./goal-wiring.js";
-import { skillInvocation } from "./skill-wiring.js";
-// D1: `/mcp:<server>` rides the SAME lane (mcp-client.md §5.6 — one channel).
-import { mcpInvocation } from "./mcp-wiring.js";
+import { goalTurnContext, turnContextFor } from "./goal-wiring.js";
+import { afterInputPlan } from "./after-input-wiring.js";
+import { generationShutdownHooks } from "./generation-hooks.js";
 
 /** W510 resource caps (overridable through the adapter options or the env). */
 export const MAX_LIVE_SESSIONS = 4;
@@ -435,21 +434,10 @@ export class SessionComposer {
       : repeatGuardDisabled(this.opts.env ?? process.env)
         ? null
         : repeatGuardSettingsOf();
-    // W9346 + W884: the goal's two halves, the skill/memory context and the
-    // after-input lane's producers, all rebuilt at every turn start (goal-wiring.ts
-    // and its siblings hold the reasoning — this composer sits exactly on its
-    // 450-line cap). A detached generation has no session directory and no
-    // workspace, so most of them contribute nothing.
-    //
-    // The lane is assembled HERE, after `enginePlugins()`: the MCP producer reads
-    // `engine.tools.mcp`, which does not exist until that call returns (§6.1
-    // connects asynchronously), so building it earlier would need a holder and an
-    // attach step for one line of plumbing.
-    const afterInput = mergeAfterInputs(
-      goalNotice(sessionId, dir), skillInvocation(workspace === null ? null : workspace.path, this.opts.env),
-      // D1: last, so a goal notice and a `/skill:` body are never reordered by it.
-      mcpInvocation(() => engine.tools.mcp?.manifest() ?? []),
-    );
+    // W9346 + W9351 + W-C1b: the after-input lane (goal → skill → mcp). It is
+    // assembled after `enginePlugins()` because the MCP producer reads
+    // `engine.tools.mcp`; the order and its reasoning live in after-input-wiring.ts.
+    const afterInput = afterInputPlan(sessionId, dir, workspace === null ? null : workspace.path, this.opts.env, engine.tools);
     const composed = compose({
       profile,
       plugins: engine.plugins,
@@ -944,21 +932,3 @@ export class SessionComposer {
   }
 }
 
-/**
- * What ONE generation must release when it is torn down.
- *
- * W855 #1: detached `run_shell background:true` children — the composer holds the
- * registry from `engine.tools`, runtime is L2 and may not import @celestea/tools,
- * so the hook is wired HERE, host side.
- * W-C1b (D7): the generation's MCP connections. A hook that never runs would
- * leave a third-party stdio server alive past the session that asked for it.
- * Phase 1: queued memory extraction drains on the same hooks (idle-TTL eviction
- * runs them too, and `disposeRuntime` awaits `runtime.shutdown()`).
- */
-function generationShutdownHooks(tools: EngineTools, extraction: MemoryExtractionScheduler | undefined): ShutdownHook[] {
-  return [
-    () => tools.processes.dispose(),
-    async () => void tools.mcp?.dispose(),
-    ...(extraction === undefined ? [] : [() => extraction.drain()]),
-  ];
-}

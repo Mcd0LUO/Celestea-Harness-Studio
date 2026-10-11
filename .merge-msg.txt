@@ -1,0 +1,23 @@
+Merge main into VG-dev（maintainer 集成：8 处冲突并集 + 保住 W9346 的 liveModeFold）
+
+原作者：Venus-Gan · 上游 PR：https://github.com/Mcd0LUO/Celestea-Harness-Studio/pull/7
+
+**为什么用 merge 而不是 rebase**：PR #7 的 merge base 是 58b4ac7（我合 computer-use 之前），
+GitHub 因此建不出 refs/pull/7/merge ⇒ `pull_request` 的 CI **一次都没跑过**（实测 check-runs total=0）。
+把 main 并进分支即可恢复可合并性、让 CI 起来；而且**不改写原作者的 9 个提交**（作者与提交者原样保留），
+比 rebase 少 8 轮冲突、对署名更干净。
+
+**8 处冲突，全部按并集求和解决**（不是二选一）：
+· contracts/endpoints.json / route-table.snapshot.json / packages/core/src/contracts/index.ts：
+  端点数两边都写到 73（main 的 M2-B2c cancel 与 PR 的 W9350 skills 撞号）⇒ 并集 **74**；
+  title/count/tsApiEndpoints 74、tsMethodPathCombos 78，两段 routeTable / tsOnlyNote 文案接起来。
+· tests/w9348-goal-get.test.ts：toBe(73) → **74**（注释补上 W9350 这一段）。
+· vitest.config.ts：两个 alias 都留（@celestea/mcp + @celestea/computer-use）。
+· docs/feature/README.md：两行都留（skill-command + computer-use）。
+· pnpm-lock.yaml：importers 并集（packages/computer-use 与 packages/core → gesture、packages/gesture: {}）；
+  `pnpm install --lockfile-only` 通过（360 条供给链策略校验、15 个 workspace 项目）。
+· apps/studio/src/runtime/engine-plugins.ts：**两边都要** —— PR 的 MCP 包装条件
+  （... || (mcp !== null && mcp.active)）与 main 的 liveModeFold / hiddenLive 现读折叠修复**同时保留**
+  （PR #6 的作者明确要求「合并时请勿回退」；实测 main 侧 3 处 liveModeFold 引用全在）。
+
+CI：本提交让 PR #7 重新可合并（GitHub 能建出 merge ref）⇒ `pull_request` 工作流开始跑。
