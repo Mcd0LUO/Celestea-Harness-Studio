@@ -73,6 +73,16 @@ export interface McpEngine {
   /** Register the discovered tools + refresh the status. Turn-boundary only. */
   publish(registry: ToolRegistry): void;
   status(): McpCatalogStatus | null;
+  /**
+   * The LIVE per-server tool surface of THIS generation — the manifest the
+   * `/mcp:<server>` host lane arbitrates against (mcp-client.md §5.6).
+   *
+   * It is a PROJECTION of the same `session.bindings()` the registry was fed,
+   * never a second read: a second `loadMcpConfig` here would answer "what is
+   * configured" from a different moment than the tool face, and the two drifting
+   * is exactly the shape the skill lane refuses.
+   */
+  manifest(): readonly McpManifestServer[];
   /** Release every connection. Idempotent; never throws. */
   dispose(): Promise<void>;
 }
@@ -96,6 +106,30 @@ export interface McpEngineInput {
 }
 
 const EMPTY_CONFIG: McpConfigResult = { servers: new Map(), issues: [], sources: [] };
+
+/**
+ * One adapted MCP tool as the `/mcp:` lane sees it: the model-visible name (the
+ * only name the model ever sees) plus the server's OWN name, because that is what
+ * a human types after the second slash (`/mcp:memory/create_entities`).
+ */
+export interface McpManifestTool {
+  /** Model-visible name (`mcp__<server>__<tool>`). */
+  readonly name: string;
+  /** The server's own tool name — what `/mcp:<server>/<tool>` carries. */
+  readonly tool: string;
+  readonly description: string;
+  /** The adapted `inputSchema` as-is (schema passthrough, §5.3). */
+  readonly schema: unknown;
+}
+
+/** One server's row of this generation's manifest, with its live connection state. */
+export interface McpManifestServer {
+  readonly server: string;
+  /** `McpConnectionState` verbatim (`idle` / `connecting` / `ready` / …). */
+  readonly state: string;
+  /** Discovered tools of THIS generation — empty until discovery lands. */
+  readonly tools: readonly McpManifestTool[];
+}
 
 export function assembleMcp(input: McpEngineInput): McpEngine {
   const loaded = loadConfigOf(input);
@@ -178,6 +212,29 @@ export function assembleMcp(input: McpEngineInput): McpEngine {
     return ready;
   }
 
+  function manifest(): McpManifestServer[] {
+    const byServer = new Map<string, McpManifestTool[]>();
+    for (const binding of session.bindings()) {
+      const list = byServer.get(binding.server) ?? [];
+      list.push({
+        name: binding.spec.name,
+        tool: binding.tool,
+        description: binding.spec.description,
+        schema: binding.spec.parameters,
+      });
+      byServer.set(binding.server, list);
+    }
+    // Statuses are the authority for "is it connected"; a server with tools but
+    // no status row cannot happen (both come from the same session), and one
+    // WITHOUT tools must still appear — an empty list is what makes the host say
+    // "this server exposes nothing" instead of "there is no such server".
+    return session.statuses().map((row) => ({
+      server: row.server,
+      state: row.state,
+      tools: byServer.get(row.server) ?? [],
+    }));
+  }
+
   return {
     active: activeCount > 0,
     rules,
@@ -199,6 +256,7 @@ export function assembleMcp(input: McpEngineInput): McpEngine {
       publishStatus();
     },
     status,
+    manifest,
     async dispose(): Promise<void> {
       publishMcpStatus(key, null);
       await session.dispose();

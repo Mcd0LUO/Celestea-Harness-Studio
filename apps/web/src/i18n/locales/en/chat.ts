@@ -121,6 +121,9 @@ export const chat = {
   // W9351: the skill body the human explicitly asked for (origin=skill-invocation).
   // Deliberately not reusing `skill`: the catalog is background, this is a one-off event.
   'chat.inbox.skillInvocation': 'Skill invocation',
+  // D1: the tool listing injected after the human names an MCP server
+  // (origin=mcp-invocation). Not the skill body: this is an EXTERNAL server.
+  'chat.inbox.mcpInvocation': 'MCP invocation',
   'chat.run.signal': 'Terminated by signal ({signal})',
   'chat.run.exitUnknown': 'Exit code unknown',
   'chat.run.exit': 'Exit code {code}{status}',

@@ -1,6 +1,6 @@
 /**
  * `parseSlashGesture` —— 输入行首的 `/` 手势的**唯一**识别与规范化实现
- * （见 `docs/feature/composer-surface.md` §7）。
+ * （见 `docs/feature/composer-surface.md` §7、`docs/feature/mcp-client.md` §5.6）。
  *
  * 形状与纪律：
  *
@@ -12,12 +12,14 @@
  * - **裸 token 的 kind 是语法默认值**：`/review` 与 `/help` 在语法上不可区分（两者的
  *   名字字符集重叠），所以裸 token 一律判为 `command`。调用方若拿着技能清单认出
  *   `review` 是技能，用 `canonicalSlash("skill", name)` 取得规范形态即可——**裁决留在
- *   调用方**，这正是「函数不知道清单」的直接推论。
+ *   调用方**，这正是「函数不知道清单」的直接推论。同理，**裸 `/name` 永不代表 MCP**
+ *   （D9 字符串契约）：MCP 只有 `/mcp:<server>` 一种形态。
  */
 
 import {
   COMMAND_NAME_PATTERN,
   MCP_SERVER_NAME_PATTERN,
+  MCP_TOOL_NAME_PATTERN,
   SKILL_NAME_PATTERN,
   SLASH_PREFIXES,
 } from "./name-patterns.js";
@@ -30,10 +32,16 @@ export interface SlashGesture {
   kind: SlashGestureKind;
   /** 命中的 token 原文（含前导 `/`，不含参数）：`/skill:review`。 */
   raw: string;
-  /** 规范形态：`/skill:<name>` · `/mcp:<server>` · `/<name>`。 */
+  /** 规范形态：`/skill:<name>` · `/mcp:<server>[/<tool>]` · `/<name>`。 */
   canonical: string;
   /** 名字（命令名 / 技能名 / server 名），已过该 kind 的字符集。 */
   name: string;
+  /**
+   * 第二层（MCP 专属）：`/mcp:<server>/<tool>` 里点名的那个工具，**原样**——
+   * server 自己起的那个名字，不是 `mcp__<server>__<tool>` 归一化后的。
+   * 缺省字段 = 这一层没有点名（§5.6「叶子级」的形状）。
+   */
+  readonly tool?: string;
   /** token 之后的剩余文本（原样，仅去掉行首空白）；没有则空串。 */
   rest: string;
   /** token 在原行中的**结束**下标（chip / 高亮层的区间右端）。 */
@@ -64,6 +72,7 @@ function readToken(line: string): string {
  * 解析一行用户输入的 `/` 手势；不是手势（非行首 `/`、只有 `/`、名字不合字符集）时返回 `null`。
  *
  * `/mcp:memory` → `{ kind: "mcp", canonical: "/mcp:memory" }`；
+ * `/mcp:memory/create_entities 记住这条` → `{ kind: "mcp", name: "memory", tool: "create_entities" }`；
  * `/skill:review x` → `{ kind: "skill", name: "review", rest: "x" }`；
  * `/help` → `{ kind: "command" }`；`3/4` 与 `a/b` → `null`。
  *
@@ -80,11 +89,42 @@ export function parseSlashGesture(line: string): SlashGesture | null {
   return finish(kind, token.slice(colon + 1), line);
 }
 
-/** 校验名字 + 组装结果（`raw` 的长度同时就是 `end` 与 `rest` 的切分点）。 */
+/**
+ * 校验名字 + 组装结果。
+ *
+ * **第二层只属于 mcp**：`/mcp:<server>/<tool>`（§5.6 的叶子级）。斜杠在这里被切成
+ * 「server」与「工具」两段分别校验，而不是让 server 的字符集去拒绝整串——两段各过各的
+ * 表，才可能出现「server 名里有斜杠」这件事被真正挡住（server 段仍要过
+ * `MCP_SERVER_NAME_PATTERN`），同时「工具名里有斜杠」也被挡住（更多一层斜杠会落进
+ * `MCP_TOOL_NAME_PATTERN` 而被拒）。
+ */
 function finish(kind: SlashGestureKind, name: string, line: string): SlashGesture | null {
+  if (kind === "mcp") {
+    const slash = name.indexOf("/");
+    if (slash >= 0) {
+      const server = name.slice(0, slash);
+      const tool = name.slice(slash + 1);
+      if (!NAME_PATTERN_BY_KIND.mcp.test(server)) return null;
+      if (!MCP_TOOL_NAME_PATTERN.test(tool)) return null;
+      return build(kind, server, line, tool);
+    }
+  }
   if (!NAME_PATTERN_BY_KIND[kind].test(name)) return null;
-  const raw = rawFor(kind, name);
-  return { kind, raw, canonical: raw, name, rest: restOf(line, raw.length), end: raw.length };
+  return build(kind, name, line, undefined);
+}
+
+/** 组装一个手势对象：`raw` 的长度同时就是 `end` 与 `rest` 的切分点。 */
+function build(kind: SlashGestureKind, name: string, line: string, tool: string | undefined): SlashGesture {
+  const raw = rawFor(kind, name) + (tool === undefined ? "" : "/" + tool);
+  return {
+    kind,
+    raw,
+    canonical: raw,
+    name,
+    ...(tool === undefined ? {} : { tool }),
+    rest: restOf(line, raw.length),
+    end: raw.length,
+  };
 }
 
 /**

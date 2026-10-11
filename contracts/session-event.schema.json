@@ -192,9 +192,10 @@
                 "steering",
                 "compact",
                 "goal",
-                "skill-invocation"
+                "skill-invocation",
+                "mcp-invocation"
               ],
-              "description": "W888: the CLOSED origin whitelist, mirrored byte for byte from SESSION_EVENT_ORIGINS in packages/core/src/types.ts. Omitted when it is 'user' (the default), so a pre-W888 row keeps its exact bytes; an unknown value is a hard error, never a silent fallback to 'user'. W9346 added 'goal': the persistent session goal's resident line and its one-shot change notice. W9351 added 'skill-invocation': a skill body the HUMAN asked for by typing /{name}; deliberately NOT 'skill', because that origin belongs to the per-turn catalog and the resident dedup keys on origin."
+              "description": "W888: the CLOSED origin whitelist, mirrored byte for byte from SESSION_EVENT_ORIGINS in packages/core/src/types.ts. Omitted when it is 'user' (the default), so a pre-W888 row keeps its exact bytes; an unknown value is a hard error, never a silent fallback to 'user'. W9346 added 'goal': the persistent session goal's resident line and its one-shot change notice. W9351 added 'skill-invocation': a skill body the HUMAN asked for by typing /{name}; deliberately NOT 'skill', because that origin belongs to the per-turn catalog and the resident dedup keys on origin. D1 added 'mcp-invocation': the MCP server tool listing the HUMAN asked for by typing /mcp:<server> (mcp-client.md §5.6) — an injection into the message lane, never a narrowing of the tool face."
             }
           },
           "additionalProperties": true

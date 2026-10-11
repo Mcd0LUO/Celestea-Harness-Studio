@@ -29,7 +29,7 @@ import { renderInfoBlock } from '../messages';
 import { listMentions } from './files';
 import { isSkillGesture, refreshSkills, reloadSkills, skillItems, skillNames, skillsCached } from './skills';
 import { listCommands as _listCommands } from './registry';
-import { mcpCached, mcpItems, mcpServerNames, refreshMcpServers, reloadMcpServers } from './mcp';
+import { isMcpGesture, mcpCached, mcpItems, mcpServerNames, refreshMcpServers, reloadMcpServers } from './mcp';
 import { t } from '../../i18n';
 
 export { onGoalChange, goalOf, renderGoalBar, syncGoalOnActivate } from './goal';
@@ -94,6 +94,10 @@ export async function dispatchCommand(line: string, ctx?: SessionPane): Promise<
   const cmd = listCommands().find((c) => c.name === name);
   if (!cmd) {
     if (isSkillGesture(line)) return false;
+    // D1 (mcp-client.md §5.6): `/mcp:<server>` 是第三个命名空间，与技能手势**同构**
+    // —— 前端不消费，放行给 host，由它按本代的 server 清单确定性注入。未命中由 host
+    // 响亮失败（不是这里的「没有这个命令」：那句话说的是命令，说的是错的东西）。
+    if (isMcpGesture(line)) return false;
     renderInfoBlock(pane, t('chat.command.unknown', { name }), 'warn');
     return true;
   }

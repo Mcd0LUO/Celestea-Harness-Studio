@@ -109,6 +109,10 @@ function inboxKind(kind: string): { title: string; collapsed: boolean } | undefi
   // 同一个 origin**（`/ghost` 未命中时注入一条可见的失败行）——折起来就等于把「没加载上」
   // 藏起来，而「假装成功」正是这个设计要防的最坏结果。
   if (kind === 'skill-invocation') return { title: t('chat.inbox.skillInvocation'), collapsed: false };
+  // D1：人**显式**点名某个 MCP server（`/mcp:<server>`）后注入的工具清单。与
+  // skill-invocation 同族：一次性、人点的、可失败的。默认**展开**且**失败也走同一个
+  // origin** —— 折起来就等于把「没注上」藏起来，而「假装成功」正是这条车道要防的。
+  if (kind === 'mcp-invocation') return { title: t('chat.inbox.mcpInvocation'), collapsed: false };
   return undefined;
 }
 

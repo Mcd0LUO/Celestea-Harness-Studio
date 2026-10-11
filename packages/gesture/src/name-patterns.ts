@@ -25,6 +25,16 @@ export const SKILL_NAME_PATTERN = /^[a-z0-9-]+$/;
 export const MCP_SERVER_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
 /**
+ * MCP 工具名（`/mcp:<server>/<tool>` 的第二层）。
+ *
+ * MCP 协议只说工具名是个字符串；这里收成 `[A-Za-z0-9_-]` 1–64 位，理由与
+ * server 名同源：**手势 token 读到第一个空白为止**，所以一切能被静默吞进 token
+ * 的字符（空白、更多斜杠）都必须在这里被拒 —— 一个能拼出手势却拼不出补全项的
+ * 名字，比一个拼不出来的名字更难查。
+ */
+export const MCP_TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
  * 命令名：按 `apps/web/src/ui/commands/registry.ts` 的**现状**归纳——
  * 内置四条都是「小写单词 + 可选连字符」（run / goal / model / compact），
  * 注册表按名字精确匹配、不接受大写与下划线。

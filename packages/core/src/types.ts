@@ -80,6 +80,14 @@ export interface UserMessageEvent {
  * re-appended every turn, which is exactly the cost regression the dedup exists
  * to stop.
  */
+/**
+ * W-D1: `mcp-invocation` joined the set, and it follows `skill-invocation`
+ * exactly: `/mcp:<server>` asks the host to INJECT a server's tool listing
+ * (docs/feature/mcp-client.md §5.6), and an injection must be labelled as one.
+ * It is deliberately NOT `"skill"` and not a shared "mcp" catalog origin — the
+ * resident turn-context dedup keys on origin, so reusing a value would let two
+ * different producers knock each other out of the resident lane.
+ */
 export type SessionEventOrigin =
   | "user"
   | "skill"
@@ -88,7 +96,8 @@ export type SessionEventOrigin =
   | "steering"
   | "compact"
   | "goal"
-  | "skill-invocation";
+  | "skill-invocation"
+  | "mcp-invocation";
 
 export const SESSION_EVENT_ORIGINS: readonly string[] = [
   "user",
@@ -99,6 +108,7 @@ export const SESSION_EVENT_ORIGINS: readonly string[] = [
   "compact",
   "goal",
   "skill-invocation",
+  "mcp-invocation",
 ];
 export interface AssistantMessageEvent {
   type: "assistant_message";

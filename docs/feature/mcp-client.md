@@ -1,6 +1,6 @@
 # MCP 客户端（设计）
 
-> 状态：**设计**（目标设计与验收标准；P0 的代码尚未开始）。
+> 状态：**已实现**（P0 交付：`@celestea/mcp` 工具面与 stdio/Streamable HTTP、每会话一代连接、逐工具审批 guard、状态面与设置页 pane、`/mcp:<server>` 直呼注入；P1 项见 §D8）。
 > 本文是「把 Model Context Protocol 接进本仓」的决策依据与落地口径；
 > 生效的分层规则见 [`ARCHITECTURE.md`](../ARCHITECTURE.md)，配置面见 [`configuration.md`](../configuration.md)，
 > 数据文件 schema 见 [`data-files.md`](../data-files.md)，依赖申报见 [`DEPENDENCY-POLICY.md`](../DEPENDENCY-POLICY.md)。

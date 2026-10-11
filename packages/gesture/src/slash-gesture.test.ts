@@ -37,7 +37,7 @@ describe("parseSlashGesture · 规范形态与 kind", () => {
   });
 
   it("end 恒等于 token 长度（chip 区间右端可由 raw 直接算出）", () => {
-    for (const line of ["/help", "/skill:review x", "/mcp:memory a b"]) {
+    for (const line of ["/help", "/skill:review x", "/mcp:memory a b", "/mcp:memory/search_nodes 找一下"]) {
       const gesture = parseSlashGesture(line)!;
       expect(gesture.end, line).toBe(gesture.raw.length);
       expect(line.slice(0, gesture.end), line).toBe(gesture.raw);
@@ -69,9 +69,54 @@ describe("parseSlashGesture · 只认行首", () => {
       end: 4,
     });
   });
+});
 
-  it("token 内部的 / 不被接受（mcp server 名里不许出现斜杠）", () => {
-    expect(parseSlashGesture("/mcp:a/b")).toBeNull();
+describe("parseSlashGesture · 第二层 /mcp:<server>/<tool>（D1）", () => {
+  /**
+   * 这一组守的是**同一条不变量**换了个形状：server 名里永远不许出现斜杠。
+   * 斜杠一旦被切成第二层，被它挡住的就变成 **server 段与工具段各自**的字符集，
+   * 而不是整串 —— 所以「server 名不许有斜杠」现在由 MCP_SERVER_NAME_PATTERN
+   * 单独挡（下面的变异负控制就钉这一条）。
+   */
+  it("切出 server 与 tool 两段，raw/canonical 仍是用户原样写的那一截", () => {
+    expect(parseSlashGesture("/mcp:memory/search_nodes 找一下")).toEqual({
+      kind: "mcp",
+      raw: "/mcp:memory/search_nodes",
+      canonical: "/mcp:memory/search_nodes",
+      name: "memory",
+      tool: "search_nodes",
+      rest: "找一下",
+      end: 24,
+    });
+  });
+
+  it("没有第二层时 tool 字段整个不存在（调用方用 === undefined 判，别读 falsy）", () => {
+    const one = parseSlashGesture("/mcp:memory")!;
+    expect(one.tool).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(one, "tool")).toBe(false);
+  });
+
+  it("工具名保留大小写与下划线（MCP 工具名大小写敏感）", () => {
+    const gesture = parseSlashGesture("/mcp:memory/Create_Entities");
+    expect(gesture?.name).toBe("memory");
+    expect(gesture?.tool).toBe("Create_Entities");
+  });
+
+  it("server 段与工具段各过各的字符集：任一段不合法就整条 null", () => {
+    for (const line of [
+      "/mcp:-lead/search_nodes",
+      "/mcp:" + "a".repeat(33) + "/search_nodes",
+      "/mcp:memory/",
+      "/mcp:memory/a/b",
+      "/mcp:memory/" + "t".repeat(65),
+    ]) {
+      expect(parseSlashGesture(line), line).toBeNull();
+    }
+  });
+
+  it("第二层只属于 mcp：/skill:<name>/<tool> 不是手势（不另开一个命名空间的一层）", () => {
+    expect(parseSlashGesture("/skill:review/extra")).toBeNull();
+    expect(parseSlashGesture("/run/extra")).toBeNull();
   });
 });
 
@@ -93,25 +138,26 @@ describe("parseSlashGesture · 行首锚点（判的是「行首」，不是「�
    */
   it("首个 token 不是 / 时一律 null，哪怕句中有一模一样的合法命令形态", () => {
     for (const line of [
-      "x/help",              // 无空格的紧贴形态
-      "x /help",             // 有空格：斜杠跟在词后，首 token 是 "x"
-      "run/help",            // 合法命令前缀 + 斜杠
-      "see a/b for details", // 句中分数/路径；"ee" 恰是合法命令名（承载锚点变异）
-      "ask /run this",       // 同上，"sk" 是合法命令名
-      "to /mcp:memory",      // 同上，"o" 是合法命令名
+      "x/help",
+      "x /help",
+      "run/help",
+      "see a/b for details",
+      "ask /run this",
+      "to /mcp:memory",
+      "ask /mcp:memory/nodes",
     ]) {
       expect(parseSlashGesture(line), line).toBeNull();
     }
   });
 
   it("句中出现规范形态（/skill: /mcp:）也不是手势", () => {
-    for (const line of ["foo /skill:review", "foo /mcp:memory", "docs/mcp:memory", "prefix/skill:review"]) {
+    for (const line of ["foo /skill:review", "foo /mcp:memory", "docs/mcp:memory", "prefix/skill:review", "foo /mcp:memory/nodes"]) {
       expect(parseSlashGesture(line), line).toBeNull();
     }
   });
 
   it("行首空白之后的 / 同样不是行首（调用方先 trim，end 才等于原行下标）", () => {
-    for (const line of [" /help", "\t/help", "\n/help"]) {
+    for (const line of [" /help", "\t/help", "\n/help", " /mcp:memory/nodes"]) {
       expect(parseSlashGesture(line), line).toBeNull();
     }
   });
@@ -139,7 +185,7 @@ describe("parseSlashGesture · 字符集按 kind 查表", () => {
   });
 
   it("未知前缀不误吃（裸 token 的字符集不含冒号）", () => {
-    for (const line of ["/foo:bar", "/Skill:review", "/skill:review:2"]) {
+    for (const line of ["/foo:bar", "/Skill:review", "/skill:review:2", "/mcp::memory", "/mcp:memory:2"]) {
       expect(parseSlashGesture(line), line).toBeNull();
     }
   });
@@ -156,6 +202,11 @@ describe("parseSlashGesture · 裸 token 的 kind 是语法默认值", () => {
     const canonical = canonicalSlash("skill", typed.name);
     expect(canonical).toBe("/skill:review");
     expect(parseSlashGesture(canonical!)?.kind).toBe("skill");
+  });
+
+  it("裸 /<name> 永不代表 MCP（D9 字符串契约）：只有 /mcp: 前缀才是 MCP 形态", () => {
+    expect(parseSlashGesture("/memory")?.kind).toBe("command");
+    expect(parseSlashGesture("/memory")?.name).toBe("memory");
   });
 });
 

@@ -15,7 +15,7 @@
 // ★ server 名必须过 `MCP_SERVER_NAME_PATTERN`（gesture 包的唯一定义处）：
 //   合不字符集就拼不出 `/mcp:<server>`，chip 与补全项都无从谈起。
 // ============================================================================
-import { MCP_SERVER_NAME_PATTERN, canonicalSlash } from '@celestea/gesture';
+import { MCP_SERVER_NAME_PATTERN, canonicalSlash, parseSlashGesture } from '@celestea/gesture';
 
 import { api } from '../../api';
 import type { PopupItem } from './popup';
@@ -147,6 +147,23 @@ export function mcpItems(prefix: string): PopupItem[] {
  *   那一份，用户下一次打开补全时前缀就带着 `mcp:`；不剥掉它，server 一条都匹配不上。
  *   不会混淆：server 名过 MCP_SERVER_NAME_PATTERN（无冒号）。
  */
+/**
+ * 这一行是不是「点名某个 MCP server」的手势（放行判定用）。
+ *
+ * ★ 与技能那条**故意不同**：技能读同步缓存裁决（'/{技能名}' 是既有的裸形态，清单不命中
+ *   就不该放行），而 MCP 走 D9 的**字符串契约**——`/mcp:<server>` 是 MCP 的唯一形态，
+ *   且「同一个字符串指什么」**不随装了什么变化**（§5.6）。所以这里是纯语法判定：
+ *   清单里有没有这个 server、连没连上，一律交给 host 裁决并**响亮**回答。
+ *   前端按清单拦一次，只会把「缓存还没到」变成一次假否决。
+ *
+ * ★ 裸 `/name` 永不代表 MCP：parseSlashGesture 把裸 token 判成 command，所以
+ *   `/memory` 在这里必为 false（哪怕清单里正好有个 memory server）。
+ */
+export function isMcpGesture(line: string): boolean {
+  const gesture = parseSlashGesture(line.trim());
+  return gesture !== null && gesture.kind === 'mcp';
+}
+
 function barePrefix(prefix: string): string {
   return prefix.startsWith('mcp:') ? prefix.slice('mcp:'.length) : prefix;
 }

@@ -74,6 +74,8 @@ import { createImageDowngradeLlm, resolveLlmMode, type ImageDowngradeInfo, type 
 import { withAttachments } from "./attachments-llm.js";
 import { goalNotice, goalTurnContext, mergeAfterInputs, turnContextFor } from "./goal-wiring.js";
 import { skillInvocation } from "./skill-wiring.js";
+// D1: `/mcp:<server>` rides the SAME lane (mcp-client.md §5.6 — one channel).
+import { mcpInvocation } from "./mcp-wiring.js";
 
 /** W510 resource caps (overridable through the adapter options or the env). */
 export const MAX_LIVE_SESSIONS = 4;
@@ -357,16 +359,6 @@ export class SessionComposer {
     // system prompt renders (the host's `resolveSession` hook). A session with no
     // resolvable workspace keeps the process env posture — never a failure.
     const workspace = sessionId === null ? null : (this.opts.resolveSession?.(sessionId)?.workspace ?? null);
-    // W9346 + W884: the goal's two halves and the skill/memory context, both
-    // rebuilt at every turn start (goal-wiring.ts holds the reasoning — the
-    // composer sits exactly at its 450-line cap). A detached generation has no
-    // session directory and no workspace, so it contributes nothing.
-    // W9351: the after-input lane is ONE source, so the goal notice and the
-    // `/skill:<name>` body cannot order themselves (skill-wiring.ts holds that half).
-    const afterInput = mergeAfterInputs(
-      goalNotice(sessionId, dir),
-      skillInvocation(workspace === null ? null : workspace.path, this.opts.env),
-    );
     const turnContext = turnContextFor(workspace === null ? null : workspace.path, goalTurnContext(sessionId, dir), this.opts.env);    const reader = this.opts.grants;
     const read = reader?.read(sessionId, dir) ?? { grants: EMPTY_GRANTS, warnings: [] };
     // W728: the ledger must exist before the Llm wrapper (every step books).
@@ -441,6 +433,21 @@ export class SessionComposer {
       : repeatGuardDisabled(this.opts.env ?? process.env)
         ? null
         : repeatGuardSettingsOf();
+    // W9346 + W884: the goal's two halves, the skill/memory context and the
+    // after-input lane's producers, all rebuilt at every turn start (goal-wiring.ts
+    // and its siblings hold the reasoning — this composer sits exactly on its
+    // 450-line cap). A detached generation has no session directory and no
+    // workspace, so most of them contribute nothing.
+    //
+    // The lane is assembled HERE, after `enginePlugins()`: the MCP producer reads
+    // `engine.tools.mcp`, which does not exist until that call returns (§6.1
+    // connects asynchronously), so building it earlier would need a holder and an
+    // attach step for one line of plumbing.
+    const afterInput = mergeAfterInputs(
+      goalNotice(sessionId, dir), skillInvocation(workspace === null ? null : workspace.path, this.opts.env),
+      // D1: last, so a goal notice and a `/skill:` body are never reordered by it.
+      mcpInvocation(() => engine.tools.mcp?.manifest() ?? []),
+    );
     const composed = compose({
       profile,
       plugins: engine.plugins,
