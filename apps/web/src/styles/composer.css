@@ -1,0 +1,48 @@
+/* ============================================================================
+   styles/composer.css — §9.2/#9.3：Lexical 输入栏的**排版与占位符**真源
+   ----------------------------------------------------------------------------
+   为什么单独成文件：与 field-sizing.css 同一条纪律（W1524「各能力各文件、共享 CSS
+   谁都不改」）—— 输入区的自有样式不混进 layout.css / responsive.css。
+
+   ── 为什么「自增高」在这里只剩 max-height + overflow-y ──
+   textarea 时代有两条自增高路径（W2016）：CSS 的 field-sizing: content（Chrome 123+）
+   与 JS 的「auto → 量 scrollHeight → 写 px」（Firefox / WebKit 回落）。
+   §9.3 随 textarea 一起退役了它们**两条**：field-sizing 不支持 div，而 JS 回落意味着
+   每次输入都写一次 style.height（强制同步布局）。Lexical 的 editor root 是普通块盒，
+   内容多高它就多高 ⇒ 只需要「封顶 + 内部滚动」。
+
+   ★ 上限取 **240px**：这是被退役的 JS 回落 Math.min(scrollHeight, 240) 的同一个值。
+     layout.css 的 --composer-text-max-h（336px）是另一条历史口径，textarea 时代被
+     field-sizing.css 的 240px 在支持引擎上盖住了 —— 不把这个数原样搬过来，输入栏
+     的封顶高度就会从 240 悄悄变成 336（用户看得见的变形，且没有任何门禁会红）。
+   ============================================================================ */
+
+#input {
+  /* 上限 + 内部滚动（取代 textarea 的 field-sizing / JS 量高，见文件头）。
+     窄屏的 32dvh 覆盖在 responsive.css 的 2.4 段，那里是**更小**的口径，不冲突。 */
+  max-height: 240px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* 空 div 的 contenteditable 不保留空格 ⇒ 一行尾随空格会被吞掉、换行不换行看不出差别。 */
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  /* 焦点指示由 #inputbar:focus-within 画（layout.css，W9226 F7），编辑器自己不画。 */
+  outline: none;
+  caret-color: var(--c-text-1);
+}
+
+/* Lexical 的段落默认带 UA 的 margin（我们要的是像 textarea 那样逐行紧排）。 */
+#input > p { margin: 0; }
+
+/* ---- 占位符（§9.3：原生 placeholder 体系退役）--------------------------------
+   为什么不是 `:empty::before`：Lexical 的 editor root **永远**至少挂着一个空段落
+   （那是它的根节点模型，删了就无法插入），所以 :empty 恒不匹配 —— 那条 CSS 会看起来
+   "写了但从不生效"，正是最坏的一种退役：没人发现占位符没了。
+   改由适配缝在每次更新时写 data-empty（ui/composer/lexical.ts），占位符文案本身来自
+   ui/inputbar.ts 的 placeholderFor（模式 × 车道 × 设备能力，唯一映射未动）。 */
+#input[data-empty='true']::before {
+  content: attr(data-composer-placeholder);
+  color: var(--c-text-3);
+  pointer-events: none;
+}

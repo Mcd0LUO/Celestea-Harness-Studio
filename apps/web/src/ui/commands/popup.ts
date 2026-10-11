@@ -35,7 +35,7 @@ export interface PopupItem {
 export type PopupProvider = (prefix: string) => PopupItem[] | Promise<PopupItem[]>;
 
 let box: HTMLElement | null = null;
-let input: HTMLTextAreaElement | null = null;
+let input: HTMLElement | null = null;
 let overlay: OverlayHandle | null = null;
 let items: PopupItem[] = [];
 let active = 0;
@@ -245,8 +245,13 @@ function positionBox(): void {
   box.style.bottom = Math.max(8, window.innerHeight - r.top + 6) + 'px';
 }
 
-/** 建出补全框（幂等；index.ts 装配一次）。 */
-export function initCompletion(inputEl: HTMLTextAreaElement, pick: (item: PopupItem) => void): void {
+/**
+ * 建出补全框（幂等；index.ts 装配一次）。
+ *
+ * §9.2：锚元素从 <textarea> 换成 Lexical 的 editor root（contenteditable div）。本模块只
+ * 用它的 getBoundingClientRect 来落位（positionBox），不读它的内容 —— 读写一律走适配缝。
+ */
+export function initCompletion(inputEl: HTMLElement, pick: (item: PopupItem) => void): void {
   if (box) return;
   input = inputEl;
   onPick = pick;

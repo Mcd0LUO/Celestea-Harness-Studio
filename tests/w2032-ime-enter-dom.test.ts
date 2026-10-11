@@ -27,6 +27,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { at, doc, resetHarness } from "./lib/w795-dom.js";
+// §9.2：输入栏 = Lexical editor root。夹具负责「写入 / 读回」两件事的桥（lib/composer-dom.ts）。
+import { type EditorRoot, bridgeInput, loadComposer } from "./lib/composer-dom.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const INDEX_HTML = join(HERE, "..", "apps", "web", "index.html");
@@ -89,18 +91,19 @@ function press(el: InputLike, init: Record<string, unknown>): KeyEventLike {
 const inputEl = (): InputLike => doc.getElementById("input") as unknown as InputLike;
 type Sends = Array<[string, string]>;
 
-/** 装配真实输入栏（走 bindEnterKey），返回 send 记录。 */
+/** 装配真实输入栏（Enter 车道在 Lexical 的 keydown 命令里），返回 send 记录。 */
 async function mount(sends: Sends): Promise<BarMod> {
   const bar = (await import(/* @vite-ignore */ at("ui/inputbar.ts"))) as BarMod;
   bar.initInputBar({ send: (t, m) => sends.push([t, m]), cancel: () => {} });
+  // §9.2：把夹具的 value 桥接上（textarea 时代的读法），既有断言一字不改。
+  bridgeInput(inputEl() as unknown as EditorRoot);
   return bar;
 }
 
-/** 在输入框里放一段文本并把光标放到末尾。 */
-function type(text: string): InputLike {
+/** 在输入栏里放一段文本（适配缝写入，光标落到末尾）。 */
+async function type(text: string): Promise<InputLike> {
   const el = inputEl();
-  el.value = text;
-  el.setSelectionRange(text.length, text.length);
+  (await loadComposer()).setComposerText(text);
   return el;
 }
 
@@ -174,7 +177,7 @@ describe("W2032 · 集成：桌面组合中的 Enter 不发送、内容保留、
     setCapability(false, 0);
     const sends: Sends = [];
     await mount(sends);
-    const el = type("nihaoni hao"); // 组合中的半截文字
+    const el = await type("nihaoni hao"); // 组合中的半截文字
     const e = press(el, { key: "Enter", isComposing: true });
     expect(sends, "★ 组合中不得发送").toEqual([]);
     expect(el.value, "★ 组合文字必须保留在输入框里").toBe("nihaoni hao");
@@ -185,7 +188,7 @@ describe("W2032 · 集成：桌面组合中的 Enter 不发送、内容保留、
     setCapability(false, 0);
     const sends: Sends = [];
     await mount(sends);
-    const el = type("にほんご");
+    const el = await type("にほんご");
     const e = press(el, { key: "Enter", isComposing: false, keyCode: 229 });
     expect(sends).toEqual([]);
     expect(el.value).toBe("にほんご");
@@ -196,7 +199,7 @@ describe("W2032 · 集成：桌面组合中的 Enter 不发送、内容保留、
     setCapability(false, 0);
     const sends: Sends = [];
     await mount(sends);
-    const el = type("ni hao");
+    const el = await type("ni hao");
     press(el, { key: "Enter", isComposing: true });
     expect(el.value, "桌面组合中绝不插换行").toBe("ni hao");
   });
@@ -205,7 +208,7 @@ describe("W2032 · 集成：桌面组合中的 Enter 不发送、内容保留、
     setCapability(true, 5);
     const sends: Sends = [];
     await mount(sends);
-    const el = type("ni hao");
+    const el = await type("ni hao");
     const e = press(el, { key: "Enter", isComposing: true });
     expect(sends, "触摸端组合中同样不发送").toEqual([]);
     expect(e.defaultPrevented, "触摸端让给浏览器（W2028 的结论）").toBe(false);
@@ -218,7 +221,7 @@ describe("W2032 · 集成：非组合路径逐字不变（回归护栏）", () =
     setCapability(false, 0);
     const sends: Sends = [];
     await mount(sends);
-    type("ABC");
+    await type("ABC");
     const e = press(inputEl(), { key: "Enter" });
     expect(sends).toEqual([["ABC", "steer"]]);
     expect(e.defaultPrevented).toBe(true);
@@ -228,7 +231,7 @@ describe("W2032 · 集成：非组合路径逐字不变（回归护栏）", () =
     setCapability(false, 0);
     const sends: Sends = [];
     await mount(sends);
-    type("第一行");
+    await type("第一行");
     const e = press(inputEl(), { key: "Enter", shiftKey: true });
     expect(sends).toEqual([]);
     expect(e.defaultPrevented).toBe(false);
@@ -238,7 +241,7 @@ describe("W2032 · 集成：非组合路径逐字不变（回归护栏）", () =
     setCapability(false, 0);
     const sends: Sends = [];
     await mount(sends);
-    type("排队这句");
+    await type("排队这句");
     press(inputEl(), { key: "Enter", ctrlKey: true });
     press(inputEl(), { key: "Enter", metaKey: true });
     expect(sends).toEqual([["排队这句", "queue"], ["排队这句", "queue"]]);
@@ -248,7 +251,7 @@ describe("W2032 · 集成：非组合路径逐字不变（回归护栏）", () =
     setCapability(true, 5);
     const sends: Sends = [];
     await mount(sends);
-    const el = type("AAA");
+    const el = await type("AAA");
     const e = press(el, { key: "Enter" });
     expect(el.value, "触摸端 Enter = 换行").toBe("AAA\n");
     expect(sends).toEqual([]);
@@ -258,14 +261,22 @@ describe("W2032 · 集成：非组合路径逐字不变（回归护栏）", () =
 
 describe("W2032 · 集成：命令补全框的优先级不被破坏", () => {
   /** 装配补全框：initCompletion 建 DOM，setProvider 给候选，showCompletion 显示。 */
+  /**
+   * 装配补全框**并把键盘拦截口接到编辑器上**。
+   *
+   * §9.2：补全框与 Enter 发送的先后现在是编排层的一个显式决定（
+   * ui/composer 的 setKeyInterceptor，由 installCommands 装），不再是「谁的 DOM 监听器
+   * 先注册」。所以这条用例走真实装配（installCommands），而不是单独调 popup 的引擎。
+   */
   async function bootCompletion(): Promise<{ completionVisible(): boolean }> {
+    const cmd = (await import(/* @vite-ignore */ at("ui/commands/index.ts"))) as unknown as { installCommands(): void };
+    cmd.installCommands();
     const popup = (await import(/* @vite-ignore */ at("ui/commands/popup.ts"))) as unknown as {
       initCompletion(el: unknown, pick: (i: unknown) => void): void;
       setProvider(p: (prefix: string) => unknown[]): void;
       showCompletion(prefix: string): Promise<void>;
       completionVisible(): boolean;
     };
-    popup.initCompletion(doc.getElementById("input"), () => {});
     popup.setProvider(() => [{ label: "/run", desc: "跑命令", value: "/run" }]);
     await popup.showCompletion("ru");
     return popup;
@@ -277,16 +288,16 @@ describe("W2032 · 集成：命令补全框的优先级不被破坏", () => {
     await mount(sends);
     const popup = await bootCompletion();
     expect(popup.completionVisible()).toBe(true);
-    type("/ru");
+    await type("/ru");
     press(inputEl(), { key: "Enter" });
-    expect(sends, "★ 补全框先消费（bindEnterKey 的第一行）").toEqual([]);
+    expect(sends, "★ 补全框先消费（适配缝的键盘拦截口在 Enter 判定之前）").toEqual([]);
   });
 
   it("补全框不可见时同一个 Enter 正常发送（证明上一条不是「永远不发送」）", async () => {
     setCapability(false, 0);
     const sends: Sends = [];
     await mount(sends);
-    type("/ru");
+    await type("/ru");
     press(inputEl(), { key: "Enter" });
     expect(sends).toEqual([["/ru", "steer"]]);
   });

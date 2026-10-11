@@ -7,6 +7,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { at, doc, Ev, flush, reply, resetHarness, type ElLike, WEB } from './lib/w795-dom.js';
+// §9.2：输入栏的写入走适配缝（Lexical）；夹具见 lib/composer-dom.ts。
+import { type EditorRoot, mountOn, type ComposerHandle } from './lib/composer-dom.js';
 
 interface ViewCtxMod {
   initViewCtx(): unknown;
@@ -28,16 +30,15 @@ const popupVisible = (): boolean => (doc.getElementById('cmdPopup') as ElLike | 
 const cmdCss = (): string => readFileSync(join(WEB, 'src', 'styles', 'commands.css'), 'utf8');
 
 function key(el: ElLike, k: string): void {
-  const ev = new Ev('keydown', { bubbles: true });
-  Object.defineProperty(ev, 'key', { value: k });
-  el.dispatchEvent(ev);
+  const KB = (globalThis as unknown as { KeyboardEvent: new (t: string, i?: unknown) => unknown }).KeyboardEvent;
+  el.dispatchEvent(new KB('keydown', { key: k, bubbles: true, cancelable: true }));
 }
 
 describe('H · @提及工作区文件（只传路径）', () => {
   beforeEach(() => { resetHarness(); });
   afterEach(() => { vi.unstubAllGlobals(); doc.body.replaceChildren(); });
 
-  async function boot(): Promise<{ cmd: CommandsMod; input: ElLike; urls: string[]; bodies: string[] }> {
+  async function boot(): Promise<{ cmd: CommandsMod; input: ElLike; composer: ComposerHandle; urls: string[]; bodies: string[] }> {
     const ctxMod = (await import(/* @vite-ignore */ at('ui/viewctx.ts'))) as ViewCtxMod;
     ctxMod.initViewCtx();
     ctxMod.ensurePane('ws/s1', 'session', '甲会话');
@@ -63,9 +64,17 @@ describe('H · @提及工作区文件（只传路径）', () => {
       }
       return reply(200, { ok: true });
     });
+    // §9.2：installCommands 要读编辑器根元素（补全框锚点 + 键盘拦截口），先装输入栏。
+    let input = doc.getElementById('input') as ElLike | null;
+    if (!input) {
+      input = doc.createElement('div') as ElLike;
+      input.id = 'input';
+      doc.body.appendChild(input);
+    }
+    const composer = await mountOn(input as unknown as EditorRoot);
     const cmd = (await import(/* @vite-ignore */ at('ui/commands/index.ts'))) as CommandsMod;
     cmd.installCommands();
-    return { cmd, input: doc.getElementById('input') as ElLike, urls, bodies };
+    return { cmd, input, composer, urls, bodies };
   }
 
   it('workspacePath 由会话 workspace 名解析到绝对路径', async () => {
@@ -74,9 +83,8 @@ describe('H · @提及工作区文件（只传路径）', () => {
   });
 
   it('打 @ 弹出工作区（目录 + 文件，目录项带视觉区分）', async () => {
-    const { input, urls } = await boot();
-    input.value = '@';
-    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    const { urls, composer } = await boot();
+    composer.type('@');
     await flush();
     expect(popupVisible()).toBe(true);
     expect(urls.some((u) => u.includes('/api/fs/list'))).toBe(true);
@@ -89,34 +97,30 @@ describe('H · @提及工作区文件（只传路径）', () => {
   // 为什么钉在**真实路径**上（而不是引擎级单测）：只有走真 listMentions/files.ts，
   // 「哪天有人给 @ 模式也传了 group」才会真的把这条断言打红。
   it('打 @ 不出现任何组头（@ 模式不传 group）', async () => {
-    const { input } = await boot();
-    input.value = '@';
-    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    const { composer } = await boot();
+    composer.type('@');
     await flush();
     expect(rowLabels(), '前置：@ 行照常渲染').toEqual(['src/', 'README.md']);
     expect(doc.querySelectorAll('#cmdPopup .cmd-group').length, '★ @ 模式不得出现任何组头').toBe(0);
   });
 
   it('逐级进入：@src/ 列出该目录内容', async () => {
-    const { input } = await boot();
-    input.value = '@src/';
-    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    const { composer } = await boot();
+    composer.type('@src/');
     await flush();
     expect(rowLabels()).toEqual(['src/ui/', 'src/main.ts']);
   });
 
   it('前缀过滤：@RE 只留 README.md', async () => {
-    const { input } = await boot();
-    input.value = '@RE';
-    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    const { composer } = await boot();
+    composer.type('@RE');
     await flush();
     expect(rowLabels()).toEqual(['README.md']);
   });
 
   it('选中文件：输入框插入 @路径（只传路径，不读内容）', async () => {
-    const { input, bodies } = await boot();
-    input.value = '@RE';
-    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    const { input, bodies, composer } = await boot();
+    composer.type('@RE');
     await flush();
     (doc.querySelector('#cmdPopup .cmd-row') as ElLike).dispatchEvent(new Ev('mousedown', { bubbles: true }));
     await flush();
@@ -135,9 +139,8 @@ describe('H · @提及工作区文件（只传路径）', () => {
   });
 
   it('Esc 关闭补全', async () => {
-    const { input } = await boot();
-    input.value = '@';
-    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    const { input, composer } = await boot();
+    composer.type('@');
     await flush();
     expect(popupVisible()).toBe(true);
     key(input, 'Escape');
@@ -152,11 +155,16 @@ describe('H · @提及工作区文件（只传路径）', () => {
     const store = (await import(/* @vite-ignore */ at('ui/sessiontree/store.ts'))) as WorkspaceStoreMod;
     store.setWsList([]);
     vi.stubGlobal('fetch', async () => reply(200, { ok: true }));
+    let input = doc.getElementById('input') as ElLike | null;
+    if (!input) {
+      input = doc.createElement('div') as ElLike;
+      input.id = 'input';
+      doc.body.appendChild(input);
+    }
+    const composer = await mountOn(input as unknown as EditorRoot);
     const cmd = (await import(/* @vite-ignore */ at('ui/commands/index.ts'))) as CommandsMod;
     cmd.installCommands();
-    const input = doc.getElementById('input') as ElLike;
-    input.value = '@';
-    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    composer.type('@');
     await flush();
     expect(doc.querySelector('.msg.info')?.textContent ?? '', '必须有可读提示').toContain('工作区');
     void pane;

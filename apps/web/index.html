@@ -153,7 +153,13 @@
                  不是可访问名，而且它就是操作说明（Enter 发送 / Shift+Enter 换行）——
                  一旦用户开始打字它就消失，读屏再也听不到这行指引。语义名走 locales
                  （护栏 D：index.html 不得出现中文字面量）。 -->
-            <textarea id="input" rows="2" data-i18n-placeholder="chat.input.placeholderIdle" data-i18n-aria-label="chat.input.ariaLabel" enterkeyhint="send" spellcheck="false"></textarea>
+            <!-- §9.2（E4 直接替换）：#input 已从 <textarea> 换成 **Lexical editor root**
+                 （contenteditable div，由 ui/composer/lexical.ts 挂载）。仍保留
+                 data-i18n-placeholder：i18n 在 JS 起来之前先把它填进 placeholder 属性，
+                 装配时适配缝把这串字接过来当首帧占位 —— §9.3 退役的是**原生渲染体系**
+                 （CSS ::placeholder / .placeholder property 那一套），不是这条 i18n 接线。
+                 role/aria-multiline 先写在这儿：挂载前那一帧与 JS 降级态都要有可访问名。 -->
+            <div id="input" role="textbox" aria-multiline="true" data-i18n-placeholder="chat.input.placeholderIdle" data-i18n-aria-label="chat.input.ariaLabel" enterkeyhint="send" spellcheck="false"></div>
           </div>
           <!-- W1512：发送与终止是**同一个控件的两种状态**（照 DSH）：空闲 = 发送（↑），
                运行中 = 终止（■）。为什么合并：原先终止键挂在 statusline 右端，窄屏下被

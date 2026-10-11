@@ -12,6 +12,16 @@ import {
   type PopupItem,
 } from './popup';
 import { activePane, onPaneChange, type SessionPane } from '../viewctx';
+// §9.2：补全框的读写全部走输入栏适配缝，不再碰编辑器元素（value / selectionStart）。
+import {
+  canonicalText,
+  composerRoot,
+  focusComposer,
+  onComposerChange,
+  replaceComposerRange,
+  setComposerKeyInterceptor,
+  textBeforeCaret,
+} from '../composer';
 import { renderInfoBlock } from '../messages';
 import { listMentions } from './files';
 import { isSkillGesture, refreshSkills, reloadSkills, skillItems, skillsCached } from './skills';
@@ -86,37 +96,26 @@ export async function dispatchCommand(line: string, ctx?: SessionPane): Promise<
   return await cmd.run({ raw: line, args, ctx: pane });
 }
 
-function inputEl(): HTMLTextAreaElement | null {
-  return document.getElementById('input') as HTMLTextAreaElement | null;
-}
-
-/** 把选中的命令写回输入框。 */
+/** 把选中的命令写回输入栏（整体替换；光标落到末尾）。 */
 function applyCommand(item: PopupItem): void {
-  const input = inputEl();
-  if (!input) return;
-  input.value = item.value + (item.value.endsWith(' ') ? '' : ' ');
-  input.dispatchEvent(new Event('input', { bubbles: true }));
+  const next = item.value + (item.value.endsWith(' ') ? '' : ' ');
+  replaceComposerRange(0, Number.MAX_SAFE_INTEGER, next);
   hideCompletion();
-  input.focus();
+  focusComposer();
 }
 
-/** 把选中的文件路径**作为文本**插入输入框（只传路径，不读内容）。 */
+/** 把选中的文件路径**作为文本**插入输入栏（只传路径，不读内容）。 */
 function applyMention(item: PopupItem): void {
-  const input = inputEl();
-  if (!input) return;
-  const caret = input.selectionStart ?? input.value.length;
-  const tok = mentionToken(input.value, caret);
+  const before = textBeforeCaret();
+  const tok = mentionToken(before, before.length);
   if (tok === null) return;
-  const before = input.value.slice(0, tok.start);
-  const after = input.value.slice(caret);
-  input.value = before + '@' + item.value + after;
-  const pos = before.length + 1 + item.value.length;
-  input.setSelectionRange(pos, pos);
-  input.dispatchEvent(new Event('input', { bubbles: true }));
+  const insert = '@' + item.value;
+  // 光标前的 [tok.start, 光标) 整段换掉；光标之后的原文由编辑器保留。
+  replaceComposerRange(tok.start, before.length, insert);
   // 目录：插入后继续列出该目录（逐级进入）；文件：关闭补全。
-  if (item.value.endsWith('/')) void refresh(input.value, pos);
+  if (item.value.endsWith('/')) void refresh(canonicalText(), tok.start + insert.length);
   else hideCompletion();
-  input.focus();
+  focusComposer();
 }
 
 /** 文件提供者：列举 `@` 之后的片段（异步；popup 引擎自带 seq 竞态守卫）。 */
@@ -183,8 +182,12 @@ export function installCommands(): void {
   if (installed) return;
   installed = true;
   registerBuiltinCommands();
-  const input = inputEl();
+  const input = composerRoot();
   if (!input) return;
+  // §9.2：键盘**总**拦截口装在编辑器上（不是挂一个 DOM keydown 监听器）——
+  //   只有这样才能保证「补全框先于 Enter 发送」是编排层的一个显式决定，
+  //   而不是「谁的监听器先注册」这种会随实现漂移的偶然（W9349 的教训）。
+  setComposerKeyInterceptor((e) => completionKey(e));
   onPaneChange((pane) => {
     refreshGoalBar();
     // W9349：会话被激活时读回**已存在**的目标（刷新/切换后胶囊不消失的那一半）。
@@ -200,11 +203,9 @@ export function installCommands(): void {
     if (item.label.startsWith('/')) applyCommand(item);
     else applyMention(item);
   });
-  input.addEventListener('input', () => void refresh(input.value, input.selectionStart ?? input.value.length));
-  input.addEventListener('keydown', (e) => {
-    completionKey(e);
-  });
-  input.addEventListener('blur', () => hideCompletion());
+  // 内容变化由适配缝推上来（不再监听 input 事件 —— §9.2 之后编辑器不发原生 input）。
+  onComposerChange((c) => void refresh(c.text, c.before.length));
+  input.addEventListener('focusout', () => hideCompletion());
 }
 
 /** 供 send 入口快速判断（`!` 也认）。 */

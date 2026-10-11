@@ -14,6 +14,8 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { all, at, doc, Ev, flush, reply, resetHarness, type ElLike } from './lib/w795-dom.js';
+// §9.2：输入栏写入走适配缝（Lexical）。
+import { type EditorRoot, mountOn, type ComposerHandle } from './lib/composer-dom.js';
 
 interface ViewCtxMod {
   initViewCtx(): unknown;
@@ -48,6 +50,8 @@ interface Booted {
   send: SendMod;
   skills: SkillsMod;
   input: ElLike;
+  /** §9.2：输入栏适配缝（写入草稿/读回规范文本都走它）。 */
+  composer: ComposerHandle;
   sent: string[];
   urls: string[];
 }
@@ -95,11 +99,19 @@ async function boot(listings: Listings, paneId = 'ws/s1'): Promise<Booted> {
   ctx.initViewCtx();
   ctx.ensurePane(paneId, 'session', '甲会话');
   ctx.activatePane(paneId, 'session', '甲会话');
+  // §9.2：installCommands 要读编辑器根元素（补全框锚点 + 键盘拦截口），先装输入栏。
+  let input = doc.getElementById('input') as ElLike | null;
+  if (!input) {
+    input = doc.createElement('div') as ElLike;
+    input.id = 'input';
+    doc.body.appendChild(input);
+  }
+  const composer = await mountOn(input as unknown as EditorRoot);
   const cmd = (await import(/* @vite-ignore */ at('ui/commands/index.ts'))) as CmdMod;
   cmd.installCommands();
   const send = (await import(/* @vite-ignore */ at('ui/send.ts'))) as SendMod;
   const skills = (await import(/* @vite-ignore */ at('ui/commands/skills.ts'))) as SkillsMod;
-  return { cmd, send, skills, input: doc.getElementById('input') as ElLike, sent, urls };
+  return { cmd, send, skills, input, composer, sent, urls };
 }
 
 /** 让技能清单**到位**（模拟「会话已激活、清单已拉到」的常态，而不是靠补全那次补拉）。 */
@@ -166,8 +178,8 @@ describe('技能显式调用 · 切片 2：/ 补全框的技能组', () => {
   afterEach(() => { vi.unstubAllGlobals(); doc.body.replaceChildren(); });
 
   async function openSlash(b: Booted, line: string): Promise<void> {
-    b.input.value = line;
-    b.input.dispatchEvent(new Ev('input', { bubbles: true }));
+    // §9.2：编辑器不发原生 input 事件了，写入走适配缝（由它推 onChange ⇒ 补全刷新）。
+    b.composer.type(line);
     await flush();
   }
 

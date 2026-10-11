@@ -40,6 +40,8 @@
 
 import { WATCHDOG_PLUGIN_NAME } from "@celestea/runtime";
 
+import type { McpCatalogStatus } from "./runtime/mcp-status.js";
+
 /** 一层。`"host"` = 启动层注入 token；`"engine"` = 每会话由引擎装配的功能插件。 */
 export type PluginLayer = "host" | "engine";
 
@@ -68,6 +70,21 @@ export interface PluginCatalogRow {
    * 集合时只读这里，所以一行默认开不开只需要改这一处。
    */
   defaultEnabled?: boolean;
+  /**
+   * W-C1b · the MCP status of this row, and ONLY on the MCP row
+   * (docs/feature/mcp-client.md §6.3).
+   *
+   * A FIELD on the existing row, never a new endpoint: the endpoint count is
+   * frozen at 72, and an incremental field is not a new endpoint. Absent
+   * whenever nothing reports MCP, so a host with no `mcp.json` emits the pre-MCP
+   * JSON byte for byte.
+   *
+   * `env` / `headers` are structurally impossible here: the status carries the
+   * server name, the transport, the state, the tool count and the FAILURE KIND
+   * (§7.2), and a failure is an enum a client may branch on — never prose it
+   * would have to parse (§6.3).
+   */
+  mcp?: McpCatalogStatus;
 }
 
 /**
@@ -81,6 +98,7 @@ export interface PluginCatalogRow {
  *   - `studio.engine.llm`            —— `enginePlugins()` -> `engineLlmPlugin()` 的默认名
  *   - `studio.engine.agent-loop`     —— `engineLoopPlugin()` 的默认名
  *   - `studio.engine.tools`          —— `engineTools()` 里 `definePlugin` 的字面名
+ *   - `studio.engine.mcp`            —— W-C1b `mcpPlugin()` 的字面名（每个 session 一代连接）
  *   - `celestea.runtime.workers`     —— `worker-wiring.ts` 的 `DEFAULT_WORKER_PLUGIN`
  *   - `celestea.runtime.swarm`       —— `swarm-wiring.ts` 的 `DEFAULT_SWARM_PLUGIN`
  *   - `celestea.runtime.watchdog`    —— `WATCHDOG_PLUGIN_NAME`
@@ -93,6 +111,8 @@ export interface PluginCatalogRow {
 
 /** 引擎层的名字常量（`enginePluginSwitchesOf` 与 `ENGINE_PLUGIN_NAMES` 用）。 */
 export const ENGINE_TOOLS_PLUGIN = "studio.engine.tools";
+/** W-C1b: the MCP client of each generation (mounts AFTER the tool assembly). */
+export const ENGINE_MCP_PLUGIN = "studio.engine.mcp";
 export const ENGINE_WORKERS_PLUGIN = "celestea.runtime.workers";
 export const ENGINE_SWARM_PLUGIN = "celestea.runtime.swarm";
 /** W9331: the degenerate-repetition guard, mounted by `compose()`. */
@@ -103,6 +123,7 @@ export const ENGINE_PLUGIN_NAMES: readonly string[] = [
   "studio.engine.llm",
   "studio.engine.agent-loop",
   ENGINE_TOOLS_PLUGIN,
+  ENGINE_MCP_PLUGIN,
   ENGINE_WORKERS_PLUGIN,
   ENGINE_SWARM_PLUGIN,
   ENGINE_REPEAT_GUARD_PLUGIN,
@@ -218,6 +239,10 @@ const ENGINE_POLICY: Readonly<Record<string, { disable: PluginDisable; reason?: 
     reason: "compose() throws ComposeError('no AgentLoop') when no plugin provides AGENT_LOOP_SERVICE",
   },
   [ENGINE_TOOLS_PLUGIN]: { disable: "optional" },
+  // W-C1b: MCP 默认**开**。它本身是惰性的——没有启用的 server 就既不注册工具、
+  // 也不挂 guard、状态面也不带这一行——所以默认开不带来任何权限，而默认关会让
+  // 「配了 mcp.json 却什么都没发生」看起来像 bug。关掉它 = 下一代不连任何 server。
+  [ENGINE_MCP_PLUGIN]: { disable: "optional" },
   [ENGINE_WORKERS_PLUGIN]: { disable: "optional" },
   // W9331：swarm **默认关**。它是一个编排能力（批量子代理），不是保护；默认打开
   // 会让每个新会话都带上一个用户从没要求过的委派面。`defaultEnabled: false` 是
@@ -245,7 +270,7 @@ function policyOf(name: string, layer: PluginLayer): { disable: PluginDisable; r
   );
 }
 
-function rowOf(name: string, layer: PluginLayer): PluginCatalogRow {
+function rowOf(name: string, layer: PluginLayer, mcp: McpCatalogStatus | null): PluginCatalogRow {
   const policy = policyOf(name, layer);
   // §3.2：`hot` 描述「是不是按代重新装配」。当前两层都是，所以逐行都是 true——
   // 这正是「不再硬编码为 false」的含义。`hot: false` 留给将来真正不可换的项。
@@ -258,6 +283,9 @@ function rowOf(name: string, layer: PluginLayer): PluginCatalogRow {
     // W9331：只在**明确写 false** 时才带上这个键，所以「默认开」的行在 JSON 里
     // 的形状与 W9322 逐字节相同（`defaultEnabled` 缺省 = true，见类型注释）。
     ...(policy.defaultEnabled === false ? { defaultEnabled: false } : {}),
+    // W-C1b：MCP 状态只挂在 MCP 那一行，且只在**有东西可报**时挂——零 MCP 的主机
+    // 读到的 JSON 与 MCP 之前逐字节相同（这正是「纯增量的字段」的全部含义）。
+    ...(name === ENGINE_MCP_PLUGIN && mcp !== null ? { mcp } : {}),
   };
 }
 
@@ -269,10 +297,10 @@ function rowOf(name: string, layer: PluginLayer): PluginCatalogRow {
  * 所以 host 层的名字永远不会和 `storePlugins`/`hostPlugins` 漂移——这正是 W860 的
  * 反漂移设计，这里原样保留。
  */
-export function pluginCatalog(hostNames: readonly string[]): PluginCatalogRow[] {
+export function pluginCatalog(hostNames: readonly string[], mcp: McpCatalogStatus | null = null): PluginCatalogRow[] {
   return [
-    ...hostNames.map((name) => rowOf(name, "host")),
-    ...ENGINE_PLUGIN_NAMES.map((name) => rowOf(name, "engine")),
+    ...hostNames.map((name) => rowOf(name, "host", null)),
+    ...ENGINE_PLUGIN_NAMES.map((name) => rowOf(name, "engine", mcp)),
   ];
 }
 

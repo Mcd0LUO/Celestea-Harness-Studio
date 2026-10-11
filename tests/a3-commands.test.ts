@@ -6,6 +6,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { at, doc, Ev, flush, reply, resetHarness, type ElLike } from './lib/w795-dom.js';
+// §9.2：输入栏的写入与按键都走适配缝（Lexical）；夹具见 lib/composer-dom.ts。
+import { type EditorRoot, mountOn, type ComposerHandle } from './lib/composer-dom.js';
 
 interface ViewCtxMod {
   initViewCtx(): unknown;
@@ -26,10 +28,10 @@ const popupRows = (): ElLike[] => Array.from(doc.querySelectorAll('#cmdPopup .cm
 const popupHidden = (): boolean => (doc.getElementById('cmdPopup') as ElLike | null)?.classList.contains('hidden') ?? true;
 const popupVisible = (): boolean => !popupHidden();
 
+/** 一次真实键盘事件（Lexical 的按键链从元素上的 keydown 进，故必须带 key）。 */
 function key(el: ElLike, k: string): void {
-  const ev = new Ev('keydown', { bubbles: true });
-  Object.defineProperty(ev, 'key', { value: k });
-  el.dispatchEvent(ev);
+  const KB = (globalThis as unknown as { KeyboardEvent: new (t: string, i?: unknown) => unknown }).KeyboardEvent;
+  el.dispatchEvent(new KB('keydown', { key: k, bubbles: true, cancelable: true }));
 }
 
 interface GoalRequest { url: string; method: string; body: Record<string, unknown> }
@@ -95,6 +97,7 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
     cmd: CmdMod;
     ctx: unknown;
     input: ElLike;
+    composer: ComposerHandle;
     calls: string[];
     goalRequests: Array<{ url: string; method: string; body: Record<string, unknown> }>;
   }> {
@@ -105,16 +108,23 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
     const calls: string[] = [];
     const goalRequests: GoalRequest[] = [];
     vi.stubGlobal('fetch', contractFetch(calls, goalRequests));
+    // §9.2：installCommands 现在要读编辑器根元素（补全框锚点 + 键盘拦截口），
+    //   所以输入栏必须**先**装配好；没有就现造一个（夹具自带 #input 的用原元素）。
+    let input = doc.getElementById('input') as ElLike | null;
+    if (!input) {
+      input = doc.createElement('div') as ElLike;
+      input.id = 'input';
+      doc.body.appendChild(input);
+    }
+    const composer = await mountOn(input as unknown as EditorRoot);
     const cmd = (await import(/* @vite-ignore */ at('ui/commands/index.ts'))) as CmdMod;
     cmd.installCommands();
-    const input = doc.getElementById('input') as ElLike;
-    return { cmd, ctx: pane, input, calls, goalRequests };
+    return { cmd, ctx: pane, input, composer, calls, goalRequests };
   }
 
   it('打 / 弹出补全列表，显示名字 + 一行说明 + 参数提示', async () => {
-    const { input } = await boot();
-    input.value = '/';
-    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    const { composer } = await boot();
+    composer.type('/');
     await flush();
     expect(popupVisible()).toBe(true);
     const names = popupRows().map((r) => r.querySelector('.cmd-name')?.textContent);
@@ -124,17 +134,14 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
   });
 
   it('边打边过滤；↑↓ 改高亮；Enter 选中写回输入框', async () => {
-    const { input } = await boot();
-    input.value = '/go';
-    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    const { input, composer } = await boot();
+    composer.type('/go');
     await flush();
     expect(popupRows().map((r) => r.querySelector('.cmd-name')?.textContent)).toEqual(['/goal']);
-    input.value = '/m';
-    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    composer.type('/m');
     await flush();
     expect(popupRows().map((r) => r.querySelector('.cmd-name')?.textContent)).toEqual(['/model']);
-    input.value = '/';
-    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    composer.type('/');
     await flush();
     key(input, 'ArrowDown');
     const cmd = (await import(/* @vite-ignore */ at('ui/commands/index.ts'))) as CmdMod;
@@ -145,9 +152,8 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
   });
 
   it('Esc 关闭补全框（且只关这一层）', async () => {
-    const { input } = await boot();
-    input.value = '/';
-    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    const { input, composer } = await boot();
+    composer.type('/');
     await flush();
     expect(popupVisible()).toBe(true);
     key(input, 'Escape');
@@ -155,9 +161,8 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
   });
 
   it('点击选中行写回输入框', async () => {
-    const { input } = await boot();
-    input.value = '/com';
-    input.dispatchEvent(new Ev('input', { bubbles: true }));
+    const { input, composer } = await boot();
+    composer.type('/com');
     await flush();
     const row = popupRows()[0] as ElLike;
     row.dispatchEvent(new Ev('mousedown', { bubbles: true }));

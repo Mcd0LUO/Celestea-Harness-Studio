@@ -11,8 +11,14 @@ import { deviceCopy, onInputCapabilityChange } from './viewport'; // W2023：设
 import type { StatusSnapshot } from '../types';
 import type { AssistantView, DedupState, ThinkSeg, ToolCardRef } from './view';
 import { newRenderCadence, type RenderCadence } from './messages/cadence'; // W867：渲染节拍字段族
-// W2016：输入框自增长的能力开关（支持 field-sizing 时写草稿不再量高）。
-import { createAutoGrow, MAX_HEIGHT } from './inputbar/grow';
+// §9.2：草稿改走输入栏适配缝（Lexical 序列化状态 + v 版本；见 ui/composer/draft.ts）。
+import {
+  draftPayload,
+  onComposerChange,
+  persistDraft,
+  restoreDraftPayload,
+  restorePersistedDraft,
+} from './composer';
 
 /** 未解析/无会话 id 时的占位容器（旧后端的单会话行为）。 */
 export const LOCAL_ID = '';
@@ -45,7 +51,12 @@ export interface SessionPane {
   t0: number;
   /** 最近一次阶段文案（切回时恢复状态栏文本） */
   phase: string;
-  /** 输入草稿（切换会话时保存/恢复） */
+  /**
+   * 输入草稿（切换会话时保存/恢复）。
+   *
+   * §9.2/E3：**编码后的载荷**（带 v 版本 + 冻结 node 注册表指纹 + 规范文本明文副本），
+   * 不再是裸文本 —— 空串 = 没有草稿。解码与降级在 ui/composer/draft.ts。
+   */
   draft: string;
   /** A3：持久目标文本（null = 无；服务端回声为准）。 */
   goal: string | null;
@@ -219,22 +230,19 @@ export function dropPane(id: string): boolean {
 
 // ---- 输入草稿 / 滚动位（宿主 DOM 上的一次读写，不持有状态） ----------------------
 
+/**
+ * §9.2：草稿的存/取都走适配缝。
+ *
+ * 取：拿到的是**编码载荷**（不是裸文本）；写：载荷交给解码器照状态恢复，
+ * 读失败 / 版本不匹配 / node 未知一律降级为纯文本（纪律③，宁可丢 chip 不丢字）。
+ * 高度复位移交给编辑器自己（styles/composer.css 的 max-height + overflow-y）。
+ */
 function readInputValue(): string {
-  const input = document.querySelector<HTMLTextAreaElement>('#input');
-  return input ? input.value : '';
+  return draftPayload();
 }
 
-/**
- * 把草稿写回输入框。W2016：高度复位改走 ui/inputbar/grow.ts 的能力开关 ——
- * 支持 `field-sizing: content` 的引擎上它是 no-op（高度由 CSS 给），不支持的引擎上
- * 仍是原来的「auto → 量 scrollHeight → 写 px」。原先这里硬编码的 240 与
- * ui/inputbar.ts 的 MAX_HEIGHT 是同一口径的两份副本，现统一取 MAX_HEIGHT。
- */
 function writeInputValue(v: string): void {
-  const input = document.querySelector<HTMLTextAreaElement>('#input');
-  if (!input) return;
-  input.value = v;
-  createAutoGrow(input, { maxHeight: MAX_HEIGHT })();
+  restoreDraftPayload(v);
 }
 
 /** 是否「贴底」（4px 容差）：贴底者切回后继续跟随最新，否则原样恢复滚动位。 */
@@ -268,6 +276,7 @@ export function activatePane(id: string, kind?: string, title?: string): Session
 
   if (prev) {
     prev.draft = readInputValue();
+    persistDraft(prev.id); // 切走即落本地 ⇒ 刷新后这条草稿也在（E3 的序列化状态）
     prev.scrollTop = prev.el.scrollTop;
     prev.stickBottom = atBottom(prev.el);
     prev.el.hidden = true;
@@ -282,7 +291,10 @@ export function activatePane(id: string, kind?: string, title?: string): Session
   requestAnimationFrame(() => {
     if (active === pane) pane.el.scrollTop = target;
   });
-  writeInputValue(pane.draft);
+  // 恢复：内存里有（本次会话切回来）就用它；没有就退回本地那份（页面刷新后进来）。
+  // 两条路都交给解码器，版本不匹配 / 读失败一律降级纯文本（§9.3 纪律③）。
+  if (pane.draft !== '') writeInputValue(pane.draft);
+  else restorePersistedDraft(pane.id);
 
   // S 镜像：S 表达「当前聚焦容器」的状态（statusline/状态栏/发送路径共用）
   S.turn = pane.turn;
@@ -422,11 +434,12 @@ export function initViewCtx(): SessionPane {
   // W2023：设备输入能力位翻转 ⇒ 重写空态引导（与 inputbar 的占位符同一触发源）。
   onInputCapabilityChange(refreshEmptyHints);
   const pane = activatePane(LOCAL_ID);
-  const input = document.querySelector<HTMLTextAreaElement>('#input');
-  if (input) {
-    input.addEventListener('input', () => {
-      if (active) active.draft = input.value;
-    });
-  }
+  // §9.2：内容变化由适配缝推上来（编辑器不发原生 input 事件了）。草稿实时保存 +
+  //   落本地（刷新后恢复，见 ui/composer/draft.ts 的 localStorage 通道）。
+  onComposerChange(() => {
+    if (!active) return;
+    active.draft = draftPayload();
+    persistDraft(active.id);
+  });
   return pane;
 }

@@ -14,7 +14,7 @@
 
 import { createUsageTracker, DefaultAgentLoop, withRepetitionPerturbation, type RepetitionDiagnostics } from "@celestea/agent-loop";
 import { type CompressionHost, type Llm, type PendingInjection, type Sandbox, type SessionEvent, type SessionLog, type Tool, type ToolGuard } from "@celestea/core";
-import { createSessionInbox, type SessionInbox } from "@celestea/runtime";
+import { createSessionInbox, type SessionInbox, type ShutdownHook } from "@celestea/runtime";
 import {
   createLedgerLlm,
   createUsageLedger,
@@ -50,7 +50,7 @@ import { join } from "node:path";
 import { CapacityError } from "../runtime-adapter.js";
 import { bindingFor, closeLog, workerSessionPrefix, type CheckpointWiring, type SessionTarget } from "./engine-session.js";
 import { DEFAULT_SESSION_MODE, effectiveMode } from "../store/mode.js";
-import { enginePlugins, type DisclosureOptions, type QuestionWiring } from "./engine-plugins.js";
+import { enginePlugins, type DisclosureOptions, type EngineTools, type QuestionWiring } from "./engine-plugins.js";
 import type { EnginePluginSwitches } from "../plugin-catalog.js";
 import type { PendingQuestion, QuestionRegistry } from "../question-registry.js";
 import { questionAnsweredRow, questionAskedRow } from "../question-rows.js";
@@ -445,15 +445,7 @@ export class SessionComposer {
       profile,
       plugins: engine.plugins,
       sessionBinding: this.bindingTo(sessionId, dir),
-      // W855 #1: reap detached `run_shell background:true` children on shutdown.
-      // The composer holds the registry from `engine.tools`; runtime is L2 and
-      // may not import @celestea/tools, so the hook is wired HERE (host side).
-      // Phase 1: drain queued extraction too — idle-TTL eviction runs these
-      // same hooks (disposeRuntime awaits runtime.shutdown()).
-      shutdownHooks: [
-        () => engine.tools.processes.dispose(),
-        ...(extraction === undefined ? [] : [() => extraction.drain()]),
-      ],
+      shutdownHooks: generationShutdownHooks(engine.tools, extraction),
       usage,
       ...(ledger === null ? {} : { ledger }),
       inbox: hooks.inbox ?? createSessionInbox(),
@@ -467,6 +459,11 @@ export class SessionComposer {
       loopFactory: (bindings) => {
         // W806: the turn boundary is the ONLY place the disclosed set may move.
         engine.tools.disclosure.beginTurn();
+        // W-C1b: MCP tools land at the SAME boundary, and never earlier — the
+        // names do not exist until discovery answers (§6.1), and the face may
+        // only grow at a boundary (DisclosurePolicy invariant 3). The exposed
+        // registry appends them at the TAIL (§5.4).
+        engine.tools.mcp?.publish(engine.tools.registry);
         // W9228 (W9225 F-09): the repetition guard's diagnostics sink. Until now
         // NOTHING in production passed `repetitionDiagnostics`, so
         // `CollapseDriver.log()` returned on its first line for every conviction
@@ -917,4 +914,23 @@ export class SessionComposer {
       detail: `session log writeErrorCount=${info.count} (disk and memory diverged)`,
     });
   }
+}
+
+/**
+ * What ONE generation must release when it is torn down.
+ *
+ * W855 #1: detached `run_shell background:true` children — the composer holds the
+ * registry from `engine.tools`, runtime is L2 and may not import @celestea/tools,
+ * so the hook is wired HERE, host side.
+ * W-C1b (D7): the generation's MCP connections. A hook that never runs would
+ * leave a third-party stdio server alive past the session that asked for it.
+ * Phase 1: queued memory extraction drains on the same hooks (idle-TTL eviction
+ * runs them too, and `disposeRuntime` awaits `runtime.shutdown()`).
+ */
+function generationShutdownHooks(tools: EngineTools, extraction: MemoryExtractionScheduler | undefined): ShutdownHook[] {
+  return [
+    () => tools.processes.dispose(),
+    async () => void tools.mcp?.dispose(),
+    ...(extraction === undefined ? [] : [() => extraction.drain()]),
+  ];
 }

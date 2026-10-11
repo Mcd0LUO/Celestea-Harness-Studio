@@ -77,7 +77,7 @@ pnpm audit 是**诊断**，不是门禁。
 ## 7. 当前外部运行时依赖（W0 后）
 
 - apps/studio：hono、@hono/node-server。
-- apps/web（出货）：highlight.js、katex（动态 chunk）、marked。
+- apps/web（出货）：highlight.js、katex（动态 chunk）、marked、**lexical**（见 §7.2）。
 - packages/tools：无外部运行时依赖（W0 移除了头解析第三方库，改仓内 attachments/image-header.ts）。
 - packages/mcp：`@modelcontextprotocol/sdk`（C1a，见 [feature/mcp-client.md](feature/mcp-client.md) D2）。**本仓第一个 L1 包的外部运行时依赖**，理由与边界：
   1. 协议面（initialize / `tools/list` 分页 / `tools/call` / `tools/list_changed` / Streamable HTTP / stdio 子进程）自己重写一遍不现实，且必然漂移；
@@ -100,6 +100,45 @@ pnpm audit 是**诊断**，不是门禁。
   诊断命令 `pnpm test:coverage`，不进 `pnpm check`（§7 的定位说明）。
 - 同批：测试收敛（合并小文件）+ 补 `test:coverage` 脚本 + `.gitignore`/`eslint ignores` 收 `coverage/`。
 - 未动：任何运行时依赖；packages/* 的零依赖取向。
+
+## 7.2 A4a 批次记录（输入栏迁 Lexical）
+
+- 新增出货依赖：`lexical@0.52.0`（apps/web）。**没有**新增 `@lexical/*` 子包：
+  本仓只用核心包就够（createEditor / 段落与文本节点 / PASTE_COMMAND / KEY_DOWN_COMMAND），
+  富文本 React 组件与 headless 都不需要。原 §9.4 设想的 `@lexical/headless`（node 里单测编辑器
+  核心）也**刻意没加**：草稿的编解码（`apps/web/src/ui/composer/draft.ts`）是纯函数、不 import
+  lexical，E3 的三条纪律在 node 里直接钉（`tests/a4a-composer-adapter.test.ts` ① 组），
+  「为了测试而加一个 devDependency」在这里没有对应收益。
+- 性质：纯前端 JS 库（与 marked / highlight.js 同性质），无服务 / 进程 / 端口 / 数据目录。
+- 动机：`docs/feature/composer-surface.md` §9 的形态升级（输入栏富文本化是 chip 的前置）。
+
+**验证协议（§4）执行记录**：
+
+| 项 | 结果 |
+|---|---|
+| 独立 checkout 全量门禁 | 未做（Windows 开发树 + 并行 worker；`pnpm check` 由派工者统一跑，本波只跑受影响范围） |
+| `pnpm outdated -r` 前后对比 | 只动 `lexical`（0.52.0 = 当前 latest）；其余 15 条漂移**逐条未变**（`vite` 8.3.4 / `marked` 18.1.0 / `katex` 0.19.0 / `tsx` 4.23.15 / `eslint` 10.12.0 / `typescript-eslint` 8.71.1 / `dependency-cruiser` 18.5.0 / `@types/node` 26.6.5 / `jsdom` 30.1.2 / `vitest` 5.0.3 / `@vitest/coverage-v8` 5.0.3 / `hono` 4.13.13 / `@hono/node-server` 2.1.4 / `typescript` 7.0.2） |
+| 对照测试（§4 第 3 条） | 既有 IME / 补全 / 发送断言逐条改走适配缝后**仍绿**（`w2028` / `w2032` / `w2036` / `a3` / `h-mention` / `skill-command` / `w866` / `w9349`），迁移不靠「同义反复」过门 |
+
+**bundle 棘轮：按实测数字更新（`bundle-size-baseline.json` 已由主人裁定删除，实数只记在这里）**
+
+测量口径：`node scripts/build-webdist.mjs`（走会重建的入口），主 chunk = `dist/assets/index-*.js`（vite 已报 min 与 gzip）。
+
+| 产物 | 迁移前 | 迁移后 | 差 |
+|---|---|---|---|
+| 主 chunk JS（min） | 670.07 kB | 849.67 kB | **+179.60 kB** |
+| 主 chunk JS（gzip） | 207.21 kB | 264.09 kB | **+56.88 kB** |
+| 主 chunk CSS（min） | 144.77 kB | 143.62 kB | −1.15 kB |
+| 主 chunk CSS（gzip） | 26.18 kB | 25.90 kB | −0.28 kB |
+
+- **归因**：+179.60 kB min / +56.88 kB gzip 全部来自 `lexical` 核心（`createEditor` + 文本/段落节点 +
+  命令派发 + 序列化 + contenteditable 协调）。CSS 的 −1.15 kB 是 §9.3 退役 `caret.css`（假光标
+  镜像层，约 1.5 kB）扣掉新增 `composer.css`（约 0.35 kB）的净值 —— **不是** 优化，是「随 textarea
+  一起退役的东西留下的账」。
+- 设计文档 §9.4 的预算是「+60–90KB min+gz」：**实测 +56.88 kB gzip 在预算内**，min 口径的
+  +179.60 kB 未被预算覆盖（预算是 min+gz 合并口径），按实测记数，不再上调。
+- 若将来 bundle 成为问题，**先看的是 `COMPOSER_NODES` 与用到的命令面**（`lexical` 支持 tree-shaking，
+  但命令表与节点注册是打包期常量），而不是回退编辑器 —— 回退点见 `ui/composer/adapter.ts` 头注。
 
 ## 8. W0 批次记录（2026-09-18）
 

@@ -31,6 +31,8 @@ import {
   type SubmitMode,
 } from './inputbar';
 import { dispatchCommand, isCommandLike } from './commands'; // A3：斜杠命令派发
+// §9.2：草稿与规范文本走输入栏适配缝（textarea 已退役）。
+import { COMPOSER_NODES, canonicalText, encodeDraft } from './composer';
 import { getLegacyOwner, setLegacyOwner } from './legacy-owner';
 import { msgOf, sid } from './session-util';
 import { t as tr } from '../i18n'; // 本文件多处用 t 作消息文本参数，i18n 以 tr 别名避免遮蔽
@@ -318,10 +320,15 @@ async function injectInput(ctx: SessionPane, t: string, mode: SubmitMode): Promi
   }
 }
 
-/** 插话失败时把文本还原回输入框（仅当用户没在输入框里新打字）。 */
+/**
+ * 插话失败时把文本还原回输入框（仅当用户没在输入框里新打字）。
+ *
+ * §9.2：判空与写回都走适配缝（编辑器发不出原生 input，也不再有 input.value）。
+ * ctx.draft 存的是**编码载荷**（草稿编解码见 ui/composer/draft.ts）—— 只有字时
+ * state 留 null，解码器照样能把 text 还原出来（纪律③：宁可丢 chip，不丢字）。
+ */
 function restoreDraft(ctx: SessionPane, text: string): void {
-  ctx.draft = text;
+  ctx.draft = encodeDraft(text, null, COMPOSER_NODES);
   if (!isActivePane(ctx)) return;
-  const input = document.querySelector<HTMLTextAreaElement>('#input');
-  if (input && input.value.trim() === '') setInputValue(text);
+  if (canonicalText().trim() === '') setInputValue(text);
 }
