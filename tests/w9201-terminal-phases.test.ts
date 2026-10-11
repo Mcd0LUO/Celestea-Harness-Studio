@@ -119,4 +119,29 @@ describe('W9201 · ② 每个终态都真的收尾（走真实 onStatus）', () 
       expect(pane.streaming, phase + ' 不是终态，不得收尾').toBe(true);
     }
   });
+
+  /**
+   * ★ W9397：终态还要收掉**仍在运行**的工具卡。
+   *
+   * 掐断 / 中断的轮次不会给在飞的调用补结果，而 live 侧原先只有 applyToolResult 会摘掉
+   * `.running`（重放路径另有「有调用无结果」的兜底）⇒ 卡片一直转圈到刷新为止。
+   */
+  it('W9397：终态 ⇒ 仍在运行的卡被收成「无结果」（与重放同文案，不留下永远转圈的卡）', async () => {
+    const { chat, pane } = await boot();
+    startTurn(chat, pane);
+    const T = (await import(/* @vite-ignore */ at('ui/toolcards.ts'))) as unknown as {
+      pushToolCard(ctx: unknown, p: Record<string, unknown>): unknown;
+    };
+    T.pushToolCard(pane, { id: 'c1', name: 'run_code', args: {} });
+    const card = (pane.el as ElLike).querySelector('.toolcard') as ElLike;
+    expect(card.classList.contains('running'), '前提：结果还没回来').toBe(true);
+    chat.onStatus(pane, { phase: 'cancelled', turn: 1, statusline: {} });
+    expect(card.classList.contains('running'), '终态后不得再转圈').toBe(false);
+    expect(card.classList.contains('ok'), '收成终态而不是失败态').toBe(true);
+    // 结果正文与重放路径**同一真源**（shell.restore.noResult）—— W895-R 的实时/重放一致：
+    // 重放侧对「有调用无结果」的卡走的是同一个 setToolResult + 同一句文案。
+    // （状态 pill 的文案由 setToolResult 统一写死，两条路径因此天然同字，不在这里复述。）
+    const i18n = (await import(/* @vite-ignore */ at('i18n/index.ts'))) as { t(k: string): string };
+    expect((card.querySelector('.tool-out') as ElLike).textContent).toBe(i18n.t('shell.restore.noResult'));
+  });
 });

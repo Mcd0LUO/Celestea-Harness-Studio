@@ -14,6 +14,7 @@ import { el } from '../utils/dom';
 import { appendOmittedNote, clampForRender, TOOL_RESULT_RENDER_LIMIT } from './messages/oversize';
 import { attachmentViewsOf, refsOfValue, renderAttachmentGrid } from './attachments';
 import { autoscroll } from './messages';
+import { keepPendingLast } from './messages/pending'; // W9397：占位哨兵跟着流末尾走
 import type { SessionPane } from './viewctx';
 import type { ToolCardRef } from './view';
 import type { ToolPayload, ToolResultPayload } from '../types';
@@ -392,7 +393,7 @@ export function pushToolCard(ctx: SessionPane, p: ToolPayload, into?: HTMLElemen
     ...(sub === undefined ? {} : { sub }),
   });
   mountToolCard(ref, parentId, ctx.ops, into ?? ctx.el);
-  if (!into) autoscroll(ctx);
+  if (!into) { keepPendingLast(ctx); autoscroll(ctx); } // W9397：卡片排在等待占位之前
   ctx.ops.set(String(p.id), ref);
   return ref.col;
 }
@@ -438,4 +439,9 @@ export function applyToolResult(ctx: SessionPane, p: ToolResultPayload): void {
   setToolResult(rec, p.error ? String(p.error) : toJsonText(p.value), failed || p.decision === 'deny');
   rec.label.textContent = label;
   autoscroll(ctx);
+}
+
+/** W9397：把仍在运行的卡收成「无结果」终态（live 轮次终态与重放收尾同一实现、同一文案）。 */
+export function settleRunningCards(refs: Iterable<ToolCardRef>): void {
+  for (const ref of refs) if (ref.card.classList.contains('running')) setToolResult(ref, t('shell.restore.noResult'), false);
 }

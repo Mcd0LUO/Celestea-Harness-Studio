@@ -25,6 +25,7 @@ import { CLIENT_PLUGINS_CHANGED } from '../../plugins/store';
 import { isClientPluginOn } from '../../plugins/apply';
 import { runEnhancers } from '../enhance';
 import { autoscroll } from '../messages/scroll';
+import { keepPendingLast } from '../messages/pending'; // W9397：占位哨兵跟着流末尾走
 import { onBusyChange, paneOf, type SessionPane } from '../viewctx';
 import { clearTurnEditsCards, createTurnEditsColumn, refreshTurnEditsCards, turnEditsStateOf } from './card';
 import { editsOf, shouldShowCard, TURN_EDITS_ID, type TurnCallFact } from './model';
@@ -85,6 +86,7 @@ export function settleTurnEdits(ctx: SessionPane): void {
   if (!isClientPluginOn(TURN_EDITS_ID)) return;
   const { rows, hidden } = editsOf([...led.calls.values()]);
   ctx.el.appendChild(createTurnEditsColumn(rows, hidden));
+  keepPendingLast(ctx); // W9397：卡片排在等待占位之前
   runEnhancers(ctx.el); // 卡片由显示组件本体（增强遍）画
   autoscroll(ctx); // 非强制：用户翻上去看历史时不被拉回来
 }

@@ -7,6 +7,7 @@
 import { el, fmtNow } from '../../utils/dom';
 import type { SessionPane } from '../viewctx';
 import { autoscroll, hideEmptyHint } from './scroll';
+import { keepPendingLast } from './pending'; // W9397：占位哨兵跟着流末尾走
 import { t } from '../../i18n';
 
 // ---- 信息块（context/status 类事件：注入、lagged、error 提示等） ------------------
@@ -37,6 +38,7 @@ export function renderInfoBlock(
   msg.appendChild(bubble);
   col.appendChild(msg);
   ctx.el.appendChild(col);
+  keepPendingLast(ctx); // W9397：信息块排在等待占位之前
   autoscroll(ctx, true);
   return msg;
 }
@@ -66,7 +68,10 @@ export function renderInterjectNote(
   note.appendChild(msg);
   const anchor = after ?? null;
   if (anchor) anchor.after(note);
-  else ctx.el.appendChild(note);
+  else {
+    ctx.el.appendChild(note);
+    keepPendingLast(ctx); // W9397：注记排在等待占位之前
+  }
   if (anchor) {
     if (anchor.nextSibling === note) autoscroll(ctx, true);
   } else {

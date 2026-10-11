@@ -10,6 +10,7 @@ import type { SessionPane } from '../viewctx';
 import type { QuoteRef } from '../quote/model';
 import { railAdd, railSync } from '../rail';
 import { autoscroll, hideEmptyHint } from './scroll';
+import { keepPendingLast } from './pending'; // W9397：占位哨兵跟着流末尾走
 import { renderAttachmentGrid, type AttachmentView } from '../attachments';
 import { t } from '../../i18n';
 
@@ -75,6 +76,7 @@ export function addUserMessage(
   target.appendChild(col);
   railAdd(ctx, col, kind === 'user' ? 'user' : 'interject');
   if (target === ctx.el) {
+    keepPendingLast(ctx); // W9397：用户/插话气泡排在等待占位之前
     railSync(ctx);
     autoscroll(ctx, true);
   }
@@ -150,6 +152,7 @@ export function renderInboxMessage(
   col.appendChild(msg);
   target.appendChild(col);
   if (target === ctx.el) {
+    keepPendingLast(ctx); // W9397：inbox 条目排在等待占位之前
     railSync(ctx);
     autoscroll(ctx, true);
   }

@@ -46,7 +46,9 @@ interface MsgMod {
   ensureAssistant(ctx: unknown): { root: ElLike };
   appendThinking(ctx: unknown, delta: string): void;
   renderInfoBlock(ctx: unknown, text: string, cls?: string): unknown;
+  addUserMessage(ctx: unknown, text: string, opts?: unknown): unknown;
 }
+interface ToolMod { pushToolCard(ctx: unknown, p: Record<string, unknown>): ElLike }
 interface MoLike { observe(t: unknown, o: unknown): void; disconnect(): void }
 interface RecLike { addedNodes: ArrayLike<ElLike>; removedNodes: ArrayLike<ElLike> }
 
@@ -126,6 +128,25 @@ function ariaHiddenOnPath(node: ElLike | null, stop: ElLike | null): boolean {
     cur = cur.parentElement;
   }
   return false;
+}
+
+/** 一列的**消息种类**（读列里消息节点自己的类）。 */
+function kindOfCol(c: ElLike): string {
+  if (c.querySelector('.msg.think-seg') !== null) return 'thinking';
+  if (c.querySelector('.msg.tool') !== null) return 'tool';
+  if (c.querySelector('.msg.info') !== null) return 'info';
+  if (c.querySelector('.msg.user.steering') !== null) return 'steering';
+  if (c.querySelector('.msg.user') !== null) return 'user';
+  if (c.querySelector('.msg.assistant.pend') !== null) return 'pend';
+  return '?';
+}
+
+/** 容器里所有**列**（.mcol）的消息种类，按文档序（空态提示等非列节点不计）。 */
+function colKinds(pane: PaneLike): string[] {
+  const host = pane.el as unknown as El2;
+  return Array.from(host.children)
+    .filter((c) => String((c as ElLike).className || '').indexOf('mcol') !== -1)
+    .map((c) => kindOfCol(c as ElLike));
 }
 
 /** 一条 mutation 记录是否动了「列」（.mcol）——「不插入再删除」的判据。 */
@@ -264,21 +285,56 @@ describe('W9333 ④ 就地替换（同一节点 / 同一位置 / 不插入再删
     );
   });
 
-  it('占位被更早的事件顶开时：正文落到末尾（事件顺序优先于原位）', async () => {
+  /**
+   * ★ W9397 改了这条用例的**规格**（不是放宽断言）：占位现在是「跟着流末尾走」的哨兵，
+   * 而不是「被顶开就作废」。
+   *
+   * 改动前：更早的事件追加到占位后面 ⇒ 占位滞留在流中间，正文放弃原位、新建列追加到末尾。
+   * 用户看到一行「思考中… 12s」卡在流中间直到本轮结束（多步回合必然发生），而且 W9333
+   * 的「就地接管、不跳版」在真实发送路径下**根本没生效过**。
+   * 现在：事件照旧按时间顺序追加，哨兵自己留在末尾 ⇒ 正文仍在那个事件**之后**（原断言
+   * 的后果一字不改），而且**仍是就地接管**（更强：同一节点、不插入再删除）。
+   */
+  it('W9397：更早的事件到达时哨兵跟着流末尾走 —— 正文仍在该事件之后，且仍是就地接管', async () => {
     const { P, pane } = await boot();
     await press('你好');
     const M = (await import(/* @vite-ignore */ at('ui/messages.ts'))) as unknown as MsgMod;
-    M.renderInfoBlock(pane, '一条更早到达的提示', 'warn'); // 不认占位锚点 ⇒ 追加在末尾
+    M.renderInfoBlock(pane, '一条更早到达的提示', 'warn');
     const col = P.pendingColOf(pane) as ElLike;
-    expect(colOf(col).nextElementSibling, '占位已被顶开').not.toBeNull();
-    const a = M.ensureAssistant(pane);
-    expect(a.root.parentElement, '不在原位（原位已不是正文该在的地方）').not.toBe(col);
-    expect(doc.querySelector('.pend'), '占位仍被收掉').toBeNull();
     const host = pane.el as unknown as El2;
     const info = doc.querySelector('.msg.info') as ElLike;
+    expect(colOf(col).nextElementSibling, '哨兵不滞留在中间：仍在末尾').toBeNull();
+    expect(Array.prototype.indexOf.call(host.children, col), '且已排到信息块之后').toBeGreaterThan(
+      Array.prototype.indexOf.call(host.children, info),
+    );
+    const a = M.ensureAssistant(pane);
+    expect(a.root.parentElement, '仍在原位接管（同一节点）').toBe(col);
+    expect(doc.querySelector('.pend'), '占位仍被收掉').toBeNull();
     expect(Array.prototype.indexOf.call(host.children, a.root.parentElement as ElLike)).toBeGreaterThan(
       Array.prototype.indexOf.call(host.children, info),
     );
+  });
+
+  /**
+   * ★ W9397：哨兵不滞留在中间 —— 任何「更早的事件」追加之后，占位都还在容器末尾，
+   * 且顺序仍是事件真实顺序（哨兵自己往后走，**不**把别的块搬到它前面）。
+   */
+  it('W9397：思考 / 工具卡 / 信息块 / 插话追加之后，占位都还在末尾且顺序不变', async () => {
+    const { P, pane } = await boot();
+    await press('你好');
+    const M = (await import(/* @vite-ignore */ at('ui/messages.ts'))) as unknown as MsgMod;
+    const T = (await import(/* @vite-ignore */ at('ui/toolcards.ts'))) as unknown as ToolMod;
+    const tail = (): ElLike | null => colOf(P.pendingColOf(pane)).nextElementSibling;
+    M.appendThinking(pane, '先看下目录');
+    expect(tail(), '思考段之后').toBeNull();
+    T.pushToolCard(pane, { id: 'c1', name: 'run_code', args: {} });
+    expect(tail(), '工具卡之后').toBeNull();
+    M.renderInfoBlock(pane, '一条提示', 'warn');
+    expect(tail(), '信息块之后').toBeNull();
+    M.addUserMessage(pane, '插话', { kind: 'steering' });
+    expect(tail(), '插话之后').toBeNull();
+    // 首位是按下发送当帧落地的乐观用户气泡（dispatchSend 画的）。
+    expect(colKinds(pane), '顺序 = 事件真实顺序').toEqual(['user', 'thinking', 'tool', 'info', 'steering', 'pend']);
   });
 });
 

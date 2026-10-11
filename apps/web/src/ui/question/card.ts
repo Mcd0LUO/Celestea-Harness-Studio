@@ -18,6 +18,7 @@ import { el, fmtNow } from '../../utils/dom';
 import type { QuestionItem } from '../../types';
 import { allPanes, LOCAL_ID, onBusyChange, paneOf, type SessionPane } from '../viewctx';
 import { autoscroll, hideEmptyHint } from '../messages/scroll';
+import { keepPendingLast } from '../messages/pending'; // W9397：占位哨兵跟着流末尾走
 import { buildQuestionBlock, type PickHost } from './controls';
 import {
   answerItemsOf,
@@ -309,6 +310,7 @@ function buildCard(ctx: SessionPane, info: CardInfo): CardHandle {
 function mount(ctx: SessionPane, h: CardHandle): CardHandle {
   hideEmptyHint(ctx);
   ctx.el.appendChild(h.root);
+  keepPendingLast(ctx); // W9397：提问卡排在等待占位之前
   registryOf(ctx).set(h.id, h);
   live.add(h);
   if (ticker === null) ticker = window.setInterval(tickAll, 1000);

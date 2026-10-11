@@ -182,6 +182,27 @@ export function pendingColOf(ctx: SessionPane): HTMLElement | null {
 }
 
 /**
+ * W9397：把占位**保持在容器末尾**（= 助手那一格）—— 任何更早的事件追加到它后面之后调用。
+ *
+ * 为什么需要：占位是「助手正文将要出现的位置」的哨兵，而 [takePendingCol] 只在它**是最后
+ * 一个元素**时才就地接管。改动前只有 appendThinking 认这个哨兵（把思考段搬到它之前），
+ * 其余追加路径（工具卡 / 信息块 / 插话 / 提问卡 / 命令气泡 / turn-edits 卡）会把占位顶到
+ * 流的中间：用户看到一行「思考中… 12s」卡在思考与第一张工具卡之间直到本轮结束，而且
+ * 就地接管也随之失效（正文改成新建列追加到末尾）。
+ *
+ * 现在反过来 —— **哨兵自己跟着流末尾走**：追加路径各自追加完叫一次本函数。
+ * 只搬自己那一个节点（同父 appendChild，不重建、不插入再删除）；已经不在容器里
+ * （例如恢复路径的 replaceChildren 整体重建把它摘了）就什么都不做 —— 那是别人的终态。
+ */
+export function keepPendingLast(ctx: SessionPane): void {
+  const col = live.get(ctx)?.col;
+  if (col === undefined || col === ctx.el.lastElementChild) return;
+  // 同父移动；被整体重建（恢复路径的 replaceChildren）摘掉的哨兵也就此挂回末尾 ——
+  // 只要它还在 live 里，本轮就还在等，哨兵就不该消失。
+  ctx.el.appendChild(col);
+}
+
+/**
  * 推进阶段（`accepted` / `reasoning` 到达时调用）。没有占位 ⇒ 什么都不做
  * （见 [reducePhase]：不凭空造占位）。阶段**没变**时一个字符都不改 ——
  * role=status 只播报阶段变化，重复写同一句话会让读屏反复念。

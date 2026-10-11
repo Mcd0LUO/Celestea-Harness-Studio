@@ -37,7 +37,7 @@ import {
 } from './messages/think-budget';
 import { resetMessages } from './messages/assistant';
 // W9333：等待占位的列 = 助手那一格 ⇒ 思考段的重排锚点也要认它（见 appendThinking 的 target）。
-import { pendingColOf } from './messages/pending';
+import { keepPendingLast } from './messages/pending';
 import { t } from '../i18n';
 import { iconSvg } from './icons'; // W9324：折叠 chevron 的几何真源在 ui/icons.ts
 // W1512：预算账本住在 ./messages/think-budget.ts，但公开面仍留在 messages.ts
@@ -390,16 +390,12 @@ export function appendThinking(ctx: SessionPane, delta: string): void {
   if (seg !== null && target && seg.root.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING) {
     ctx.el.insertBefore(seg.root, target); // 紧贴目标上方
   }
-  // W9333：等待占位是助手那一格的哨兵 —— 没有正文锚点时，思考段要排在它**之前**。
-  // ★ W9396（实测复现）：哨兵只在**它后面除了本段自己别无他物**时才当锚点 —— takePendingCol
-  // 只在占位是最后一个元素时就地接管；更早的事件（工具卡/信息块）一旦追加到它后面，接管已
-  // 不可能，再按它重排就会把新思考段吊到**所有工具卡之前**（实测 think tool think tool →
-  // think think tool tool），破坏 W895-R 的实时/重放一致。
-  const pend = ctx.assistant || ctx.lastTextCol ? null : pendingColOf(ctx);
-  const slotFree = pend !== null && (pend.nextElementSibling === null || pend.nextElementSibling === seg.root);
-  if (slotFree && seg.root.compareDocumentPosition(pend) & Node.DOCUMENT_POSITION_PRECEDING) {
-    ctx.el.insertBefore(seg.root, pend);
-  }
+  // W9333/W9397：等待占位是助手那一格的哨兵 —— 思考段要排在它**之前**，而哨兵自己
+  // **始终留在末尾**（见 pending.ts 的 keepPendingLast：所有追加路径追加完都叫它）。
+  // 改动前是反过来的（把思考段搬到哨兵之前）：工具卡一旦先追加到哨兵后面，哨兵就不再是
+  // 「助手那一格」，再按它重排会把每个新思考段吊到**所有工具卡之前**（实测 think tool
+  // think tool → think think tool tool），破坏 W895-R 的实时/重放一致。
+  keepPendingLast(ctx);
   if (seg !== null) {
     // W1505：`ctx.thinkSeg` 的类型是较窄的 view.ThinkSeg（只有 root/head/body/text），
     // 而 retainThinking 需要 ThinkSegDom 的 dropped/note —— 从登记表按 root 反查

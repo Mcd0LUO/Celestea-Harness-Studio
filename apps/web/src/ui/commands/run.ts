@@ -12,6 +12,7 @@ import { api, ApiError, userErrorText } from '../../api';
 import type { SessionPane } from '../viewctx';
 import { autoscroll } from '../messages';
 import { railSync } from '../rail';
+import { keepPendingLast } from '../messages/pending'; // W9397：占位哨兵跟着流末尾走
 import { t } from '../../i18n';
 
 /** 默认超时（毫秒）：P0 固定，命令不传就按它。 */
@@ -54,6 +55,7 @@ function commandBubble(ctx: SessionPane, command: string): HTMLElement {
   msg.appendChild(bubble);
   col.appendChild(msg);
   ctx.el.appendChild(col);
+  keepPendingLast(ctx); // W9397：命令气泡/输出块排在等待占位之前
   railSync(ctx);
   return col;
 }
@@ -66,6 +68,7 @@ function notice(ctx: SessionPane, text: string): void {
   msg.appendChild(bubble);
   col.appendChild(msg);
   ctx.el.appendChild(col);
+  keepPendingLast(ctx); // W9397：命令气泡/输出块排在等待占位之前
   railSync(ctx);
 }
 
@@ -79,6 +82,7 @@ function outputBlock(ctx: SessionPane, command: string): { root: HTMLElement; fi
   msg.appendChild(bubble);
   col.appendChild(msg);
   ctx.el.appendChild(col);
+  keepPendingLast(ctx); // W9397：命令气泡/输出块排在等待占位之前
   railSync(ctx);
   return {
     root: col,

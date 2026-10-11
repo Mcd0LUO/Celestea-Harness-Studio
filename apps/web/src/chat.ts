@@ -33,7 +33,7 @@ import {
   renderInboxMessage,
   renderInfoBlock,
 } from './ui/messages';
-import { applyToolResult, pushToolCard, resetTurnStep } from './ui/toolcards';
+import { applyToolResult, pushToolCard, resetTurnStep, settleRunningCards } from './ui/toolcards';
 // W784：模型向用户提问（提问卡片 + 断线重连的未决列表重建）接线
 import { msgOf, sid } from './ui/session-util';
 import {
@@ -148,6 +148,7 @@ function syncChrome(pane: SessionPane): void {
 function finalizeTurn(ctx: SessionPane, phase: string): void {
   endTurn(ctx); // 思考段归属随轮次结束清除（跨轮不跨移）
   clearPending(ctx); // W9333：轮次结束 ⇒ 收掉等待占位（无正文的 cancelled/error/空 completed 也不留）
+  settleRunningCards(ctx.ops.values()); // W9397：终态 ⇒ 仍在运行的卡收成「无结果」（与重放同源）
   const wasStreaming = ctx.streaming;
   setPaneStreaming(ctx, false);
   ctx.turn = null;
