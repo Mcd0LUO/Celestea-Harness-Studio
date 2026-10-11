@@ -235,6 +235,8 @@
           <button class="settings-nav-item" type="button" data-page="plugins" data-i18n="shell.settings.tab.plugins"></button>
           <!-- W9103：使用统计（文案走 i18n；本格由 ui/usage/panel.ts 挂载） -->
           <button class="settings-nav-item" type="button" data-page="usage" data-i18n="usage.nav.title"></button>
+          <!-- W-C2：MCP 只读状态面（数据来自 GET /api/plugins 的 mcp 字段；本格由 ui/mcp/ 挂载） -->
+          <button class="settings-nav-item" type="button" data-page="mcp" data-i18n="settings.mcp.tab"></button>
         </nav>
         <div class="settings-content">
           <section class="settings-pane" data-pane="general">
@@ -305,6 +307,14 @@
               <span class="settings-sec-note" data-i18n="usage.nav.note"></span>
             </header>
             <div class="settings-pane-body" id="settingsUsage"></div>
+          </section>
+          <!-- W-C2：MCP 只读状态面（**没有编辑 UI**：配置在 mcp.json，docs §12 U11 明确不做管理面） -->
+          <section class="settings-pane" data-pane="mcp">
+            <header class="settings-pane-head">
+              <h4 data-i18n="settings.mcp.paneTitle"></h4>
+              <span class="settings-sec-note" data-i18n="settings.mcp.paneNote"></span>
+            </header>
+            <div class="settings-pane-body" id="settingsMcp"></div>
           </section>
         </div>
       </div>

@@ -46,3 +46,35 @@
   color: var(--c-text-3);
   pointer-events: none;
 }
+
+/* ---- chip（composer-surface §8）---------------------------------------------------
+   ★ 为什么是**深色底块**而不是蓝色药丸：DSH 的蓝是它家主题色；本仓是 mono 主题
+     （--c-accent = #1a1a1a、--c-text-1 = #111，差 3%，肉眼不可辨）——
+     §1.4 已把「靠颜色区分」这条路的代价写在文档里，这里不再重犯。
+   ★ 为什么 E1 要显式 contenteditable=false：chip 是 decorator 节点，Lexical 的选区
+     模型已经把它当原子（光标停在两侧），这一行补的是**浏览器原生编辑**那一侧
+     （没有它，某些引擎仍会把 contenteditable 的子节点当可编辑文本处理）。
+   ★ 失配降级（E5）：.composer-chip-stale 去掉底块与内边距、退回正文颜色 ——
+     **看起来就是普通文本**，但 DOM 里仍是 chip 节点、文本投影一字不变（§8）。 */
+#input .composer-chip {
+  display: inline-block;
+  /* 刻度一律取 tokens.css 的既有变量（W8 圆角 / W12 间距），**不写 fallback**：
+     一个 var(--x, 4px) 形式的 fallback 等于把刻度复制一份到组件里 —— 哪天刻度改了，
+     chip 会静默留在旧值上，且没有任何门禁会红。 */
+  padding: 0 var(--sp-composer-gap);
+  border-radius: var(--r-sm);
+  background: var(--c-text-1);
+  color: var(--c-surface);
+  font-family: inherit;
+  white-space: pre;
+  user-select: none;
+}
+
+/* 失配（技能被删 / server 下线）：视觉上不再是 chip（E5）。 */
+#input .composer-chip-stale {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+}
+

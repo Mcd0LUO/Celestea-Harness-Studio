@@ -59,11 +59,11 @@ export function skillNames(): readonly string[] {
  * 会话切换：失效并重拉。**真的清空**（不是留着旧清单等新结果）——
  * 旧会话的技能对新会话一律不算数，留着等于给别的会话开了后门。
  */
-export function reloadSkills(session: string): void {
+export function reloadSkills(session: string): Promise<void> {
   cache = null;
   seq += 1;
   inflight = '';
-  void refreshSkills(session);
+  return refreshSkills(session);
 }
 
 /** 拉一次清单并填缓存（失败**不写**缓存：下一次补全打开会再拉，而不是把「拉不到」记成「没有技能」）。 */
@@ -107,12 +107,25 @@ export function isSkillGesture(line: string): boolean {
 }
 
 /**
+ * 补全前缀里的**命名空间前缀**（`skill:rev` ⇒ `rev`）。
+ *
+ * ★ 为什么必须有这一步（skill-command §1.5 的连带后果）：规范形态 `/skill:<name>` 是
+ *   「选中即写回」的那一份，于是**下一次打开补全时前缀就带着 `skill:`**——不剥掉它，
+ *   技能组一条都匹配不上（`skill:review` 以 `skill:review` 开头，但名字是 `review`），
+ *   补全框会在用户刚选中的东西上立刻空掉。
+ *   不会与「名字里本来就有冒号」混淆：技能名过 SKILL_NAME_PATTERN（无冒号）。
+ */
+function barePrefix(prefix: string): string {
+  return prefix.startsWith('skill:') ? prefix.slice('skill:'.length) : prefix;
+}
+
+/**
  * 技能候选（技能组）。按名字前缀过滤，**显示与写回都用规范形态** `/skill:<name>`：
  * 用户一眼就知道自己选的是技能命名空间（skill-command.md §1.5），且没有空格，
  * 补全引擎的补全条件 `无空白` 仍然成立。
  */
 export function skillItems(prefix: string): PopupItem[] {
-  const p = prefix.toLowerCase();
+  const p = barePrefix(prefix).toLowerCase();
   const out: PopupItem[] = [];
   for (const s of cachedSkills()) {
     if (!s.name.toLowerCase().startsWith(p)) continue;

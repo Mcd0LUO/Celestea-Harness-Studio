@@ -9,13 +9,16 @@
 //   · 消费期有 4 个模块，它们不该各自判断「编辑器装好了没有」，更不该在未装配时抛。
 //   门面把「未装配」这件事收敛成**一次**判定（下面每个 no-op 分支都是它）。
 // ============================================================================
-import type { ComposerAdapter, ComposerChange, DraftRestore } from './adapter';
+import type { ChipInsert, ComposerAdapter, ComposerChange, DraftRestore } from './adapter';
 import { createLexicalComposer, type LexicalComposerOptions } from './lexical';
 import { readStoredDraft, writeStoredDraft } from './draft';
+import type { ChipKind } from './chip';
 
 export type { ComposerAdapter, ComposerChange, DraftRestore } from './adapter';
 export { COMPOSER_NODES } from './lexical';
 export { DRAFT_VERSION, decodeDraft, encodeDraft, nodeFingerprint } from './draft';
+export { CHIP_NODE_TYPE, chipText, type ChipKind } from './chip';
+export type { ChipInsert } from './adapter';
 
 let adapter: ComposerAdapter | null = null;
 
@@ -51,6 +54,19 @@ export function setComposerText(text: string): void {
 
 export function replaceComposerRange(start: number, end: number, text: string): void {
   adapter?.replaceRange(start, end, text);
+}
+
+/**
+ * 把 [start,end) 插成 **chip**（§8）。返回 false = 没插成 / 未装配，
+ * 调用方**必须**退回 `replaceComposerRange` 的纯文本路径。
+ */
+export function insertComposerChip(request: ChipInsert): boolean {
+  return adapter ? adapter.insertChip(request) : false;
+}
+
+/** E5：按清单重判每个 chip 的失配状态（显示降级，投影不变）。 */
+export function refreshComposerChips(resolve: (kind: ChipKind, name: string) => boolean): boolean {
+  return adapter ? adapter.refreshChips(resolve) : false;
 }
 
 export function clearComposer(): void {

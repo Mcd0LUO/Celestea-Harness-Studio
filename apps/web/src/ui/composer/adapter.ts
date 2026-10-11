@@ -17,6 +17,7 @@
 // ★ 为什么 **getCanonicalText()** 而不是 getValue()：发送与草稿落盘都必须走**规范文本**
 //   （A4b 的 chip 投影文本）。命名把它钉在这里，前端不得另写一份投影。
 // ============================================================================
+import type { ChipKind } from './chip';
 
 /** 一次内容变化的载荷：规范文本 + 光标前文本（补全引擎 refresh 直接用它）。 */
 export interface ComposerChange {
@@ -28,6 +29,22 @@ export interface ComposerChange {
 
 /** 草稿恢复的结果：state = 按序列化状态恢复成功；text = 降级为纯文本；empty = 无草稿。 */
 export type DraftRestore = 'state' | 'text' | 'empty';
+
+/**
+ * 往输入栏里插一个 chip 的请求（composer-surface §8 的插入侧）。
+ *
+ * `trailing` 是 chip 之后补的**纯文本**：命令/技能选中后要留一个空格让用户接着打参数
+ * （既有行为，W3 之前由 applyCommand 拼在字符串末尾）；@文件 mention 不补。
+ */
+export interface ChipInsert {
+  readonly kind: ChipKind;
+  readonly name: string;
+  /** 被替换掉的规范文本区间（补全框选中的那一段：`/review …` 或 `@RE`）。 */
+  readonly start: number;
+  readonly end: number;
+  /** chip 之后补的纯文本（通常是一个空格；空串 = 紧贴下一个节点）。 */
+  readonly trailing: string;
+}
 
 /** 输入栏适配接口（唯一真源；**唯一**允许直接碰编辑器 DOM 的地方是它的实现）。 */
 export interface ComposerAdapter {
@@ -43,6 +60,17 @@ export interface ComposerAdapter {
   setText(text: string): void;
   /** 按偏移替换 [start, end)，光标落到插入内容之后（@文件补全的逐级进入用它）。 */
   replaceRange(start: number, end: number, text: string): void;
+  /**
+   * 把 [start, end) 换成一个 **chip 节点**（§8；插入源 = 补全框选中 / @文件 / /mcp:）。
+   * 返回 false = 没插成（名字拼不出规范形态）—— 调用方**必须**退回 `replaceRange` 的
+   * 纯文本路径：宁可是普通文本，也不能让用户已经打的字凭空消失。
+   */
+  insertChip(request: ChipInsert): boolean;
+  /**
+   * 按调用方的清单裁决刷新 chip 的**失配状态**（E5：技能被删 / server 下线 ⇒ 显示降级
+   * 为普通文本样式，发送仍按纯文本走原解析管线）。返回「有没有 chip 的状态变了」。
+   */
+  refreshChips(resolve: (kind: ChipKind, name: string) => boolean): boolean;
   /** 清空（发送成功后 / 命令消费后）。 */
   clear(): void;
   focus(): void;

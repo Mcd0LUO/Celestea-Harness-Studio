@@ -98,6 +98,10 @@ export const chat = {
   // 补全框的分组头（composer-surface §1）：命令组在前、技能组在后。
   'chat.command.group': '命令',
   'chat.skill.group': '技能',
+  // /mcp: 的第三组（composer-surface §7 的三种 kind）。
+  'chat.mcp.group': 'MCP',
+  'chat.mcp.ready': '{n} 个工具',
+  'chat.mcp.state': '状态：{state}',
   'chat.mention.dir': '目录',
   'chat.mention.file': '文件',
   'chat.mention.noWorkspace': '当前工作区还不明确，无法列出文件',

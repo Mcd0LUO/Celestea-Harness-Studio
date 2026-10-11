@@ -17,14 +17,19 @@ import {
   canonicalText,
   composerRoot,
   focusComposer,
+  insertComposerChip,
   onComposerChange,
+  refreshComposerChips,
   replaceComposerRange,
   setComposerKeyInterceptor,
   textBeforeCaret,
 } from '../composer';
+import type { ChipKind } from '../composer/chip';
 import { renderInfoBlock } from '../messages';
 import { listMentions } from './files';
-import { isSkillGesture, refreshSkills, reloadSkills, skillItems, skillsCached } from './skills';
+import { isSkillGesture, refreshSkills, reloadSkills, skillItems, skillNames, skillsCached } from './skills';
+import { listCommands as _listCommands } from './registry';
+import { mcpCached, mcpItems, mcpServerNames, refreshMcpServers, reloadMcpServers } from './mcp';
 import { t } from '../../i18n';
 
 export { onGoalChange, goalOf, renderGoalBar, syncGoalOnActivate } from './goal';
@@ -96,26 +101,85 @@ export async function dispatchCommand(line: string, ctx?: SessionPane): Promise<
   return await cmd.run({ raw: line, args, ctx: pane });
 }
 
-/** 把选中的命令写回输入栏（整体替换；光标落到末尾）。 */
-function applyCommand(item: PopupItem): void {
+/**
+ * 把选中的**命令/技能/MCP server**插成一个 chip（composer-surface §8）。
+ *
+ * ★ 为什么是 chip 而不是纯文本（§8 的原话）：chip 的文本投影**就是规范形态**，
+ *   所以「用户看见的药丸」与「发送出去的字符串」是同一份投影 —— host 侧一行不改。
+ *   选中即改写规范形态（skill-command §1.5 D4）在这里第一次有了视觉体现。
+ *
+ * ★ 尾随空格保持既有行为：选中命令后留一个空格便于继续打参数（W3 之前由
+ *   applyCommand 拼在字符串末尾，现在它跟在 chip **后面**，仍然是一个普通文本节点）。
+ *
+ * ★ fallback：chip 插不进去（名字拼不出规范形态）时**退回纯文本**，
+ *   宁可是普通文本，也不能让用户已经打的字凭空消失。
+ */
+function applyGesture(item: PopupItem): void {
   const next = item.value + (item.value.endsWith(' ') ? '' : ' ');
-  replaceComposerRange(0, Number.MAX_SAFE_INTEGER, next);
+  const kind = gestureKindOf(item);
+  const inserted =
+    kind !== null &&
+    insertComposerChip({ kind, name: nameOf(item, kind), start: 0, end: canonicalText().length, trailing: ' ' });
+  if (!inserted) replaceComposerRange(0, Number.MAX_SAFE_INTEGER, next);
   hideCompletion();
   focusComposer();
 }
 
-/** 把选中的文件路径**作为文本**插入输入栏（只传路径，不读内容）。 */
+/** 这一项属于 `/` 面的哪种 kind（按**规范形态前缀**判，不猜 label）。 */
+function gestureKindOf(item: PopupItem): ChipKind | null {
+  const v = item.value;
+  if (v.startsWith('/skill:')) return 'skill';
+  if (v.startsWith('/mcp:')) return 'mcp';
+  if (v.startsWith('/')) return 'command';
+  return null;
+}
+
+/** chip 的名字：规范形态**去掉前缀**（`/skill:review` ⇒ `review`），
+ *  与 @celestea/gesture 的 canonicalSlash 严格互逆 —— 拼不回去就说明哪边错了，
+ *  此时返回原串，由 insertChip 的返回值把整条路退回纯文本。 */
+function nameOf(item: PopupItem, kind: ChipKind): string {
+  const v = item.value;
+  if (kind === 'skill') return v.slice('/skill:'.length);
+  if (kind === 'mcp') return v.slice('/mcp:'.length);
+  return v.slice(1);
+}
+
+/** 把选中的文件路径插成 **@文件 chip**（只传路径，不读内容 —— 见 files.ts 的用户裁决）。 */
 function applyMention(item: PopupItem): void {
   const before = textBeforeCaret();
   const tok = mentionToken(before, before.length);
   if (tok === null) return;
-  const insert = '@' + item.value;
   // 光标前的 [tok.start, 光标) 整段换掉；光标之后的原文由编辑器保留。
-  replaceComposerRange(tok.start, before.length, insert);
+  // 目录不插 chip：`@src/` 还要继续列下一级（逐级进入），chip 化会把候选吃掉。
+  const inserted =
+    item.value.endsWith('/')
+      ? false
+      : insertComposerChip({ kind: 'mention', name: item.value, start: tok.start, end: before.length, trailing: '' });
+  if (!inserted) replaceComposerRange(tok.start, before.length, '@' + item.value);
   // 目录：插入后继续列出该目录（逐级进入）；文件：关闭补全。
-  if (item.value.endsWith('/')) void refresh(canonicalText(), tok.start + insert.length);
+  if (item.value.endsWith('/')) void refresh(canonicalText(), tok.start + item.value.length + 1);
   else hideCompletion();
   focusComposer();
+}
+
+/**
+ * E5（失配降级）：按**同步缓存**里的三份清单重判每个 chip。
+ *
+ * 判定必须读清单而不是「chip 自己记得的样子」—— 技能被删 / server 下线之后，
+ * chip 该显示成普通文本样式（§8），而它的**文本投影一字不变**，发送仍按纯文本
+ * 走原解析管线。缓存未到一律按「失配」处理：宁可不显示成 chip，也不显示一个
+ * 用户根本没选过的样子。
+ */
+function syncChipStates(): void {
+  const commands = new Set(_listCommands().map((c) => c.name));
+  const skills = new Set(skillNames());
+  const servers = new Set(mcpServerNames());
+  refreshComposerChips((kind, name) => {
+    if (kind === 'command') return commands.has(name);
+    if (kind === 'skill') return skills.has(name);
+    if (kind === 'mcp') return servers.has(name);
+    return true; // @文件：没有清单可比对（工作区随时在变），不因此降级
+  });
 }
 
 /** 文件提供者：列举 `@` 之后的片段（异步；popup 引擎自带 seq 竞态守卫）。 */
@@ -153,8 +217,14 @@ async function commandProvider(prefix: string): Promise<PopupItem[]> {
   const pane = activePane();
   // 只在**缓存为空**时补拉；refreshSkills 自带「同会话在飞不重复打」的去重，
   // 所以连着敲 /sk… 也不会每键一发。失效重拉是 onPaneChange 那条路（reloadSkills）。
-  if (pane !== null && !skillsCached()) void refreshSkills(pane.id);
-  return [...commandItems(prefix), ...skillItems(prefix)];
+  // ★ 两份清单都是**异步**到的，所以补拉之后必须**跟着重判一次 chip**（E5）：
+  //   清单一到就该把「失配」的 chip 恢复成 chip。忘了这一跟，用户看到的是一个
+  //   永远降级态的药丸（本仓熟悉的失效形状：生效了但看不见 / 反过来）。
+  if (pane !== null && !skillsCached()) void refreshSkills(pane.id).then(syncChipStates, () => {});
+  // MCP 清单同一条纪律（mcp.ts 的缓存是进程级的，不按会话分键）。
+  if (!mcpCached()) void refreshMcpServers().then(syncChipStates, () => {});
+  // 三组顺序 = 命令 / 技能 / MCP（§1.3 的分组头靠它渲染；组头不进 items）。
+  return [...commandItems(prefix), ...skillItems(prefix), ...mcpItems(prefix)];
 }
 
 /** 按当前输入行与光标刷新补全框（'/' 命令 / '@' 文件）。 */
@@ -195,14 +265,19 @@ export function installCommands(): void {
     syncGoalOnActivate(pane);
     // 技能清单时效：会话切换 = 换了一份工作区 ⇒ 旧清单作废、失效重拉。
     // 这是补全首次打开那条补拉之外的**主路径**：切完会话清单通常已经就绪。
-    reloadSkills(pane.id);
+    void reloadSkills(pane.id).then(syncChipStates, () => {});
+    // MCP 清单是进程级的（插件行不属于某个会话），但会话切换仍是最可靠的刷新时机：
+    // 新一代会话的连接状态此刻才开始发布。E5 的失配重判跟着清单一起走。
+    void reloadMcpServers().then(syncChipStates, () => {});
+    syncChipStates();
   });
   onGoalChange(() => refreshGoalBar());
   setProvider(null);
   initCompletion(input, (item) => {
-    if (item.label.startsWith('/')) applyCommand(item);
+    if (item.label.startsWith('/')) applyGesture(item);
     else applyMention(item);
   });
+  syncChipStates();
   // 内容变化由适配缝推上来（不再监听 input 事件 —— §9.2 之后编辑器不发原生 input）。
   onComposerChange((c) => void refresh(c.text, c.before.length));
   input.addEventListener('focusout', () => hideCompletion());

@@ -95,6 +95,10 @@ export const chat = {
   // Completion group headers (composer-surface §1): the command group comes first, the skill group after it.
   'chat.command.group': 'Commands',
   'chat.skill.group': 'Skills',
+  // The third `/` group (the three kinds of composer-surface §7).
+  'chat.mcp.group': 'MCP',
+  'chat.mcp.ready': '{n} tools',
+  'chat.mcp.state': 'State: {state}',
   'chat.mention.dir': 'Directory',
   'chat.mention.file': 'File',
   'chat.mention.noWorkspace': 'The current workspace is not clear yet, so files cannot be listed',

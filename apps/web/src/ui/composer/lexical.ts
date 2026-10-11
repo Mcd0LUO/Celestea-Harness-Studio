@@ -31,8 +31,17 @@ import {
   type LexicalEditor,
 } from 'lexical';
 import { enterAction } from '../inputbar/newline';
+import { isImeKey } from '../ime'; // W2036：组合中的按键不属于编辑器（W2033 的回归面）
 import { decodeDraft, encodeDraft } from './draft';
-import type { ComposerAdapter, ComposerChange, DraftRestore } from './adapter';
+import {
+  $backspaceChip,
+  $insertChip,
+  $placeCaretAt,
+  $readBeforeCaret,
+  $refreshChipStates,
+} from './tree';
+import { CHIP_NODE_TYPE, ComposerChipNode, type ChipKind } from './chip';
+import type { ChipInsert, ComposerAdapter, ComposerChange, DraftRestore } from './adapter';
 
 /**
  * **冻结的 node 注册表**（纪律②）：草稿载荷里带它的指纹，改它 = 契约变更。
@@ -45,6 +54,10 @@ export const COMPOSER_NODES: readonly string[] = Object.freeze([
   'paragraph',
   'text',
   'linebreak',
+  // ★ A4b：chip 进了这张表 ⇒ **指纹变了** ⇒ A4b 之前的草稿一律按纪律③降级纯文本。
+  //   这不是意外，是纪律②在起作用：新增 node 类型 = 契约变更（见 chip.ts 的 E3 说明）。
+  //   旧草稿不会静默消失 —— 载荷里那份规范文本明文副本仍然把它原样读回来。
+  CHIP_NODE_TYPE,
 ]);
 
 /** 装配时宿主要回答的问题（装配层仍然持有所有业务语义，编辑器只负责文本与键）。 */
@@ -115,41 +128,8 @@ function writePlainText(editor: LexicalEditor, text: string): void {
   );
 }
 
-/** 可选中的节点（TextNode 才有 select；段落级偏移回落到末尾）。 */
-interface Selectable { select(anchorOffset: number, focusOffset: number): void }
-
-/** 段落的第一子节点（只有 ElementNode 有 getFirstChild）。 */
-interface HasFirstChild { getFirstChild(): unknown }
-
-/** 把光标放到**全文偏移** offset 处（跨段落；量不到就落到末尾，绝不抛）。 */
-function placeCaretAt(editor: LexicalEditor, offset: number): void {
-  editor.update(
-    () => {
-      const root = $getRoot();
-      let left = Math.max(0, offset);
-      for (const child of root.getChildren()) {
-        const len = child.getTextContent().length;
-        if (left <= len) {
-          const first = (child as unknown as HasFirstChild).getFirstChild() as Selectable | null;
-          if (first && typeof first.select === 'function') first.select(left, left);
-          return;
-        }
-        left -= len + 1; // 段落之间的那个换行
-      }
-      root.selectEnd();
-    },
-    { discrete: true },
-  );
-}
-
-/** 光标前的文本（补全引擎的判定输入）。量不到（无选区）⇒ 全文。 */
-function readBeforeCaret(): string {
-  const sel = $getSelection();
-  if (!$isRangeSelection(sel)) return readCanonical($getRoot() as unknown as TextContainer);
-  const anchor = sel.anchor;
-  if (anchor.type !== 'text') return readCanonical($getRoot() as unknown as TextContainer);
-  return anchor.getNode().getTextContent().slice(0, anchor.offset);
-}
+// 光标前的文本与落点都搬到了 ./tree.ts（A4b）：段落里出现 chip 之后，「光标前文本」
+// 必须按整段累计，只读 anchor 所在的那个文本节点会把 chip 前面的字整段丢掉。
 
 /**
  * 挂载一个 Lexical 输入栏（**直接替换** textarea，E4 不留双实现）。
@@ -159,6 +139,10 @@ function readBeforeCaret(): string {
 export function createLexicalComposer(o: LexicalComposerOptions): ComposerAdapter {
   const editor: LexicalEditor = createEditor({
     namespace: 'celestea-composer',
+    // ★ chip 必须在这里**注册**：草稿的反序列化（parseEditorState）按 node 类型名
+    //   找实现；没注册的类会在恢复时报错，然后被纪律③接住降级纯文本（那是对的兜底，
+    //   但意味着每份带 chip 的草稿都恢复不成 —— 所以它是注册，不是可选）。
+    nodes: [ComposerChipNode],
     onError: () => {
       // 编辑器异常**不许**打断输入栏本身（与 W1525「假光标是装饰」的纪律同源）：
       // 吞掉并继续，用户的字还在 DOM 里。
@@ -185,7 +169,7 @@ export function createLexicalComposer(o: LexicalComposerOptions): ComposerAdapte
   }
 
   function getTextBeforeCaret(): string {
-    return read(() => readBeforeCaret());
+    return read(() => $readBeforeCaret());
   }
 
   // ---- 草稿（E3 三纪律的执行点：编解码在 ./draft.ts，这里只做「照状态恢复」） -------
@@ -220,6 +204,23 @@ export function createLexicalComposer(o: LexicalComposerOptions): ComposerAdapte
     KEY_DOWN_COMMAND,
     (event: KeyboardEvent) => {
       if (interceptor && interceptor(event)) return true; // 补全框先消费这次按键
+      // ★ Backspace 的 chip 原子删除走**这一条**路（E2），不走 KEY_BACKSPACE_COMMAND：
+      //   那条命令由 Lexical 内部的快捷键表派发，而本仓不依赖 @lexical/rich-text，
+      //   派发链不在这条路径上 ⇒ 挂在它上面等于挂在一个不会响的钩子上（实测：按了没反应）。
+      //   位置在补全框之后、Enter 判定之前：补全框开着时按键归它，其余按键归这里。
+      if (event.key === 'Backspace' && !isImeKey(event)) {
+        let ate = false;
+        editor.update(
+          () => {
+            ate = $backspaceChip();
+          },
+          { discrete: true },
+        );
+        if (ate) {
+          event.preventDefault();
+          return true;
+        }
+      }
       const act = enterAction(event, o.isTouch());
       if (act === 'native') return false; // Shift+Enter / 触摸组合中：让编辑器插换行
       // ★ Lexical 的 onKeyDown **不看** KEY_DOWN_COMMAND 的返回值（它只是 dispatch，
@@ -315,16 +316,23 @@ export function createLexicalComposer(o: LexicalComposerOptions): ComposerAdapte
     getTextBeforeCaret,
     setText: (text: string) => {
       writePlainText(editor, text);
-      placeCaretAt(editor, text.length);
+      $placeCaretAt(editor, text.length);
     },
+    // ⚠ 这条是**纯文本**路径：整体重写会把已插入的 chip 拍平成文本。
+    //   补全框选中命令/技能、@文件 mention、/mcp: 三条插入路径走下面的 insertChip，
+    //   只有 fallback（名字拼不出规范形态 / 区间跨段落）才退回到这里。
     replaceRange: (start: number, end: number, text: string) => {
       const full = getCanonicalText();
       const lo = Math.max(0, Math.min(start, end));
       const hi = Math.min(full.length, Math.max(start, end));
       const next = full.slice(0, lo) + text + full.slice(hi);
       writePlainText(editor, next);
-      placeCaretAt(editor, lo + text.length);
+      $placeCaretAt(editor, lo + text.length);
     },
+    insertChip: (request: ChipInsert) =>
+      $insertChip(editor, request.start, request.end, request.kind, request.name, request.trailing),
+    refreshChips: (resolve: (kind: ChipKind, name: string) => boolean) =>
+      $refreshChipStates(editor, resolve),
     clear: () => writePlainText(editor, ''),
     focus: () => root.focus(),
     getDraftPayload,
