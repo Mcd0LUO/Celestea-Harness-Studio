@@ -119,5 +119,8 @@ docs/AGENT.local.md
 # 那是纯缓存，绝不该入库。这条兜底正是为那种手滑准备的（本机实测过：
 # `tsc --noEmit -p tsconfig.json --incremental` 确实在根上生成了它）。
 *.tsbuildinfo
+# pnpm 内容寻址缓存（本机配置让它落进仓库根时）。纯缓存、可由 pnpm 重建，
+# 与 node_modules/ 同一类 —— 不得入库（一次 git add -A 就会拖进公开仓）。
+/.pnpm-store/
 # 探针里未展开的 Windows 环境变量会造出字面名目录；不得入库（公开仓）
 %SystemDrive%/
