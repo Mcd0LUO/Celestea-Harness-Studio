@@ -42,7 +42,7 @@
  */
 
 import { outcomeErrorParts } from "@celestea/core";
-import type { AskUserQuestionAnswerItem, ImageRef, SkillListing, SseEventName, Statusline, TurnOutcome } from "@celestea/core";
+import type { AskUserQuestionAnswerItem, ImageRef, SseEventName, Statusline, TurnOutcome } from "@celestea/core";
 import type { Watchdog, WorkerRegistry } from "@celestea/workers";
 import {
   autowakeEnabled,
@@ -59,7 +59,6 @@ import {
   type SessionRuntime,
 } from "@celestea/runtime";
 import { costBlockView, usageLedgerView } from "./ledger-view.js";
-import { skillListingOf } from "./goal-wiring.js";
 import { swarmRosterOf, withSwarmRoster } from "./swarm-view.js";
 import { join } from "node:path";
 import { CapacityError, toolSpecView, type PendingQuestionView, type QuestionAnswerOutcome } from "../runtime-adapter.js";
@@ -151,12 +150,6 @@ export interface RealRuntimeAdapter extends RuntimeAdapter {
   sessionLogPath(): string | null;
   /** Set the engine system prompt used by the next composed generation. */
   primeSystemPrompt(prompt: string): void;
-  /**
-   * W9350: this engine ALWAYS answers the skill listing (the seam itself is
-   * optional on [RuntimeAdapter] for adapters that own no workspace resolution,
-   * but the real one has one — the same one the prompt and the catalog row use).
-   */
-  sessionSkills(session: string | null): SkillListing;
   /** The last terminal turn state over every session (diagnostics / tests). */
   lastTurnOutcome(): TurnOutcome | null;
   /**
@@ -425,26 +418,6 @@ class RealEngine implements RealRuntimeAdapter {
     const mode = session === null ? DEFAULT_SESSION_MODE : effectiveMode(this.opts.sessionMode?.(session) ?? null);
     // W857: the deny is read through the composer's own reader, same session dir.
     return faceForMode(specs, mode, this.opts.grants?.read(session, session === null ? null : (this.opts.resolveSession?.(session)?.dir ?? null)).grants.toolDeny ?? []).map(toolSpecView);
-  }
-
-  /**
-   * W9350: `GET /api/sessions/{id}/skills` — the SAME read the turn catalog does.
-   *
-   * It resolves the workspace through the composer's own `resolveSession` hook
-   * (the one the system prompt and [turnContextFor] use, so the endpoint and the
-   * model cannot be pointed at different workspaces) and hands the pair
-   * (path, env) to `skillListingOf`, the shared reader. Nothing here re-derives
-   * a path: an adapter that picked its own `readLayers` input is precisely the
-   * drift this is written against.
-   *
-   * Reads LIVE on every call (no cache): skills are re-read at the start of every
-   * turn, so a per-session snapshot would be the only stale answer available.
-   * `null` session = the detached generation, which has no workspace and
-   * therefore no skills — the empty listing, not an error.
-   */
-  sessionSkills(session: string | null): SkillListing {
-    const workspace = session === null ? null : (this.opts.resolveSession?.(session)?.workspace ?? null);
-    return skillListingOf(workspace === null ? null : workspace.path, this.env);
   }
 
   /**

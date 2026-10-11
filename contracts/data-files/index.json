@@ -85,13 +85,6 @@
       "schema": "fallbacks.schema.json",
       "version": "sidecar v1 (`version: 1` is the sidecar's own field, not a data-file format version)",
       "mode": "read-only (never written by the engine)"
-    },
-    {
-      "file": "<CELESTEA_HOME>/mcp.json",
-      "schema": "mcp.schema.json",
-      "version": "none",
-      "mode": "0644",
-      "note": "MCP client server registry (docs/feature/mcp-client.md). TWO scopes, one schema: this global file plus the optional workspace overlay `<CELESTEA_HOME>/workspaces/<ws>/mcp.json`; merging is WHOLE-SERVER REPLACEMENT by server name, never field-level. env/headers carry `$VAR` REFERENCES only, so the file holds no credential and is deliberately NOT `secret: true` — providers.json stays the only secret-bearing data file."
     }
   ],
   "durability": {
@@ -105,8 +98,7 @@
     "pricing.json": "read-only snapshot (never written by the engine); missing/unparsable -> empty table (every model unpriced)",
     "usage-ledger.jsonl": "append-only, one writeSync per record on an O_APPEND fd (no fsync); rotated at 16 MiB to `<path>.1` (replaced), read() reads the current file only (W785 §3.3 P1 ④)",
     "checkpoint.json": "tmp-<pid> + rename, mode 0600, no fsync (observation only: a lost sidecar reads as 'no checkpoint', which is fail-safe)",
-    "fallbacks.json": "read-only sidecar config (never written by the engine); missing/unparsable -> chain assembled from the composed profile + the problem reported in /api/status.fallback.problems",
-    "mcp.json": "read-only for the engine (never written by it): missing -> empty server set, malformed -> HARD error (the unreadable file is never replaced by an empty set). Read at GENERATION time only (session reassembly / service restart), not on a watcher."
+    "fallbacks.json": "read-only sidecar config (never written by the engine); missing/unparsable -> chain assembled from the composed profile + the problem reported in /api/status.fallback.problems"
   },
   "roundTripRequirement": "Every file needs a read -> write -> re-read round-trip test; both implementations must agree byte-for-byte on the written form.",
   "attachments": {

@@ -28,8 +28,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { at, doc, flush, resetHarness, type ElLike } from "./lib/w795-dom.js";
-// §9.2：输入栏 = Lexical editor root。写入/读回走夹具桥（lib/composer-dom.ts）。
-import { type EditorRoot, bridgeInput, ensureInput, loadComposer, mountOn } from "./lib/composer-dom.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const INDEX_HTML = join(HERE, "..", "apps", "web", "index.html");
@@ -68,16 +66,17 @@ const IME_FORMS: Array<[string, Record<string, unknown>]> = [
   ["keyCode=229", { isComposing: false, keyCode: 229 }],
 ];
 
-/** 把输入栏置成一段文本（适配缝写入 ⇒ 由它推 onChange ⇒ 补全刷新）。 */
-async function type(value: string): Promise<InputLike> {
+/** 把输入框置成 value 并把光标放末尾（不派发 input ⇒ 不触发 refresh）。 */
+function type(value: string): InputLike {
   const el = inputEl();
-  (await loadComposer()).setComposerText(value);
+  el.value = value;
+  el.setSelectionRange(value.length, value.length);
   return el;
 }
 
-/** 打 "/" 让真提供者刷出补全框（与用户操作同路径：写入输入栏）。 */
+/** 打 "/" 让真提供者刷出补全框（与用户操作同路径：value + input 事件）。 */
 async function slash(): Promise<void> {
-  await type("/");
+  type("/").dispatchEvent(new Ev("input", { bubbles: true }));
   await flush();
 }
 
@@ -111,10 +110,6 @@ function engineKey(popup: PopupMod, k: string, init: Record<string, unknown> = {
 /** 装配**真调用方**：installCommands 自注册 keydown（它直接调 completionKey，不走 interceptKey）。 */
 async function bootInstalled(): Promise<void> {
   vi.stubGlobal("fetch", async () => ({ ok: true, status: 200, json: async () => ({}) }));
-  // §9.2：installCommands 先取编辑器根元素（键盘拦截口就装在这里），取不到就整体 return。
-  const root = await ensureInput();
-  await mountOn(root);
-  await bridgeInput(root);
   const cmd = (await import(/* @vite-ignore */ at("ui/commands/index.ts"))) as unknown as { installCommands(): void };
   cmd.installCommands();
   inputEl().focus();
@@ -222,12 +217,7 @@ describe("W2036 · 装配层：主输入框打 / 后的组合按键", () => {
       const e = press("Enter", init);
       expect(el.value, "★ 输入框值必须还是 /（不许被写成 /run 加空格）").toBe("/");
       expect(popupVisible(), "★ 补全框必须仍在").toBe(true);
-      // ★ defaultPrevented 现在是 **true**，而且这正是要钉住的新事实：§9.2 之后
-      //   Enter 车道在适配缝里（installCommands 之前它只挂过补全框，所以这里读到 false）。
-      //   桌面 IME 的组合中 Enter 由 W2032 的 swallow 吃掉默认动作 —— 真机实测组合中不拦
-      //   会插一个换行且留在输入框里（同源断言见 tests/w2032-ime-enter-dom.test.ts）。
-      //   「不归补全框」由上面两条（值没变 / 框还在）证明，不靠这个标志。
-      expect(e.defaultPrevented, "桌面组合中的 Enter 必须吃掉默认动作（W2032 swallow）").toBe(true);
+      expect(e.defaultPrevented, "组合中的 Enter 不归补全框").toBe(false);
     });
   }
 
@@ -272,7 +262,6 @@ describe("W2036 · 顺序层：守卫必须在引擎里（两个调用方都经�
       initInputBar(h: { send(t: string, m: string): void; cancel(): void }): void;
     };
     bar.initInputBar({ send: (t, m) => sends.push([t, m]), cancel: () => {} });
-    await bridgeInput(inputEl() as unknown as EditorRoot);
     await bootInstalled(); // 真顺序：main.ts 里 installCommands() 在 initInputBar() 之后
     await slash();
     press("Enter", { isComposing: true });
@@ -418,3 +407,4 @@ describe("W2036 · 提示卡：组合中的 Esc 不许撤卡", () => {
     expect(h.cardText(), "非组合 Esc 仍撤卡").toBeNull();
   });
 });
+

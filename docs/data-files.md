@@ -39,8 +39,6 @@
 | `cli-main.jsonl.<n>` | 会话目录内（`n` = 1,2,…） | — | 普通 | 引擎**轮转**（写入前 size ≥ 16 MiB） | 引擎回放 / messages（**跨段**读取） |
 | `session.json` | 会话目录内（可选） | — | 普通 | `POST /api/sessions` | activate / compact / prompts 装配 |
 | `cli-main.jsonl.precompact` | 会话目录内 | — | 普通 | `rewriteAtomic`（`packages/runtime/src/compact/rewrite.ts`） | 人工回滚 |
-| `<CELESTEA_HOME>/mcp.json` | 数据根（全局层） | — | 普通，**不含密钥**（只有 `$VAR` 引用） | 人（引擎只读） | 会话换代时装配 MCP 客户端 |
-| `<CELESTEA_HOME>/workspaces/<ws>/mcp.json` | 每个工作区容器 | — | 普通，**不含密钥** | 人（引擎只读） | 同上（整条目覆盖全局层同名 server） |
 
 **会话日志的轮转（W1503）**：`cli-main.jsonl` 达到 16 MiB 时，**下一次写入前**把它整体改名成
 `cli-main.jsonl.1`（再满则是 `.2`，**代际递增、从不覆盖旧段** —— 会话日志是模型可见历史的
@@ -336,7 +334,6 @@ turn-2 .. turn-(K+1): 最近 K=4 个完整轮，内容原样，仅 turn_start/tu
 | `cli-main.jsonl`（引擎写入） | 引擎 `PersistentSessionLog`（`packages/session/src/log/persistent.ts`）负责 | 引擎决定 | Studio 不直接写 |
 | `cli-main.jsonl`（compact 重写） | 先备份 → tmp + fsync → rename（`rewriteAtomic`，`packages/runtime/src/compact/rewrite.ts`） | **有** | 失败删 tmp |
 | `session.json` | 直接写入（**非原子**） | 无 | 内容极小，仅创建时写 |
-| `mcp.json` | **引擎从不写**（只读配置） | 无 | 文件不存在 = 空集合；JSON 损坏 = **硬失败**，绝不回写空集合覆盖 |
 
 ---
 
@@ -367,57 +364,3 @@ api_key_env = "CELESTEA_API_KEY"
 | `CELESTEA_AUTOWAKE` | `0/off/false/no` 关闭 autowake |
 | `STUDIO_BIND` | HTTP 绑定地址（默认 `127.0.0.1:3777`） |
 | `CELESTEA_TOOL_ROOTS` | **引擎**工具读根白名单；Studio 的 `/api/fs/browse` **不读**它 |
-| （无专用变量） | `mcp.json` 不进环境变量覆盖面：路径由 `<CELESTEA_HOME>/mcp.json` 与 `<CELESTEA_HOME>/workspaces/<ws>/mcp.json` 两层固定推导（P0 不提供 override 变量） |
-
----
-
-## 8. `mcp.json`（MCP 客户端的 server 登记表）
-
-> 设计依据与分期见 [`feature/mcp-client.md`](./feature/mcp-client.md)；字段真源是 [`../contracts/data-files/mcp.schema.json`](../contracts/data-files/mcp.schema.json)，现役实现是 `packages/mcp/src/config.ts`（解析）与 `packages/mcp/src/config-validate.ts`（单条校验）。
-
-### 8.1 两个作用域，一个 schema
-
-- 全局：`<CELESTEA_HOME>/mcp.json`；工作区：`<CELESTEA_HOME>/workspaces/<ws>/mcp.json`（可选）。
-- **合并按 server 名整体覆盖**：工作区的同名条目**整体替换**全局条目，**不做字段级 merge** —— 字段级 merge 会让「我以为我在这里关掉了它」变成真事故。
-- 工作区那条自己非法时（交叉字段 / 名字越界 / `$VAR` 缺失 / command 不存在）**不会退回全局条目**：被替换就是被替换，坏掉的覆盖不复活旧配置。
-- 文件不存在 = 空集合；**JSON 损坏 = 硬失败**（提示指向文件路径），引擎绝不把自己的空集合写回去覆盖它。
-- 同一文件内重名 server = 启动即错（`JSON.parse` 会静默保留最后一个，所以重复键由 `packages/mcp/src/json-keys.ts` 扫原文检出）。
-
-### 8.2 形状
-
-```jsonc
-{
-  "servers": {
-    "memory": {                       // ^[a-z0-9][a-z0-9_-]{0,31}$
-      "transport": "stdio",           // P0 只有 stdio / http（Streamable HTTP）
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"],
-      "env": { "MEMORY_DIR": "~/.celestea/memory" },   // 字面量原样传给子进程
-      "enabled": true,                // 默认 true；关掉的 server 不连、不进模型面
-      "approval": "ask",              // 默认 ask（每次调用要人点头）| never（显式无人值守出口）
-      "timeout_ms": 20000             // 单次调用与 discovery 各自的上限
-    },
-    "remote": {
-      "transport": "http",
-      "url": "https://mcp.example.com/mcp",
-      "headers": { "Authorization": "Bearer $EXAMPLE_TOKEN" },   // 只有引用，没有明文
-      "enabled": false
-    }
-  }
-}
-```
-
-- `command`/`args`/`env`/`cwd` 只在 `stdio` 下合法，`url`/`headers` 只在 `http` 下合法：**交叉出现是配置错误**，不是忽略（schema 的 `allOf` 两条分支钉死）。
-- 其余字段（`tool_allow` / `tool_deny`、`path_access`、`reconnect`、`tool_approval`）的语义与默认值同样写在 schema 的 `default` 里；`packages/mcp/src/types.ts` 只是它的运行时镜像，`packages/mcp/src/schema-parity.test.ts` 对拍两者。
-
-### 8.3 凭据：只走引用式
-
-- `env` / `headers` 的值里的 `$VAR` / `${VAR}` 从**进程环境**解析；**引用缺失就响亮失败**（该 server 被跳过并写明缺哪个变量名），绝不静默拿空串去连。
-- 因此 `mcp.json` 保持 **0644**，`contracts/data-files/index.json` 里**不标** `secret` —— 「`providers.json` 是唯一含密钥的数据文件」那条不变量原样成立。
-- 状态面与日志只出现 server 名与工具名，**不回显** `env` / `headers`；序列化写回时用的是**原始条目**（引用仍在，解析后的值只在内存里）。
-- P0 **只实现环境变量引用**：`$VAR` / `${VAR}`。设计稿里另提的 key-file 形态**未实现**，写成那个形状的值会被判为「不支持的引用形态」并响亮失败（不会当成字面量悄悄发出去）。
-
-### 8.4 工具侧的后果
-
-- 模型可见名固定为 `mcp__<server>__<tool>`；这些工具是**动态工具**，不进 `contracts/tools.json`，也不动 `FROZEN_COUNTS.tools`。
-- 参数 schema **直接采用** server 的 `inputSchema`（不翻译一层）；不支持的关键字（外部 `$ref`、`allOf` 等）该工具**不注册**并在状态面记一行原因。

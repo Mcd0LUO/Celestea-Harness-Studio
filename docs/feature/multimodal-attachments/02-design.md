@@ -163,8 +163,8 @@ export type Content = TextContent | ToolCallContent | ImageContent;   // ← 唯
 
 | 文件:行 | 现状 | 必须怎么改 |
 | --- | --- | --- |
-| `session/src/messages.ts:80-172` | `sessionEventToMessage`：`user_message`→`{role:"user",content:ev.text}`（`:85-97`）；`tool_result`→`tool_value`（`:115-123`） | `user_message` 带上 `attachments`（Studio 投影）；tool_result 的 value 原样带（已自动保留） |
-| `session/src/messages.ts:175-182` | `projectMessages` 逐事件 | 无需改，但 golden 会变（附件字段出现） |
+| `session/src/messages.ts:21-78` | `sessionEventToMessage`：`user_message`→`{role:"user",content:ev.text}`（`:26-27`）；`tool_result`→`tool_value`（`:43-53`） | `user_message` 带上 `attachments`（Studio 投影）；tool_result 的 value 原样带（已自动保留） |
+| `session/src/messages.ts:81-88` | `projectMessages` 逐事件 | 无需改，但 golden 会变（附件字段出现） |
 | `session/src/log/derive.ts:13-19` | 纯 re-export | **无需改**（算法在 core） |
 | `session/src/jsonl.ts:54-79` | `parseSessionJsonl` 走 `parseSessionEvent` | 无需改（继承 core 的校验改动） |
 | `session/src/log/file.ts:70-105` | `replayFile` 最长有效前缀 | 无需改；但「带附件行被误判非法」会把日志从该行起截断 → 依赖 C 的正确性 |

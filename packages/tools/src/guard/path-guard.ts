@@ -226,23 +226,6 @@ export interface PathGuardGrants {
   workspaceWritable?: boolean;
   /** W9110: the whole host is readable + writable (a capability, not a root). */
   allPaths?: boolean;
-  /**
-   * W-C1b: EXTRA per-tool access declarations, merged OVER [PATH_ACCESS] at
-   * mount time (see [accessMapWith]).
-   *
-   * Why it travels on the GRANTS view and not on a new option: the grants object
-   * is already the one per-session declaration carrier that reaches
-   * `mountProductionGuards` through `assembleTools`, so the MCP client's
-   * `mcp.json` `path_access` reaches the guard with no new assembly parameter
-   * and no change to the assembly's public surface.
-   *
-   * The keys are model-visible tool names, and an MCP tool name can never be a
-   * contract tool name (the `mcp__` namespace is reserved, docs §5.1), so the
-   * merge can only ever ADD declarations for names the built-in table does not
-   * describe — it can never quietly rewrite what `read_file` or `run_shell`
-   * is allowed to touch.
-   */
-  pathAccess?: ReadonlyMap<string, PathAccess>;
 }
 
 /** Canonical writable workspace + canonical read/write roots (workspace first). */
@@ -520,79 +503,6 @@ export function mountProductionGuards(
   scope: SessionFsScope | null = null,
 ): boolean {
   if (!envFlag(envString(env, ENV_TOOL_GUARD), true)) return false;
-  registry.addGuard(PathGuard.fromEnv(env, grants, accessMapWith(grants.pathAccess), scope));
+  registry.addGuard(PathGuard.fromEnv(env, grants, PATH_ACCESS, scope));
   return true;
-}
-
-
-/**
- * The built-in declarations plus whatever the session declared for tools the
- * built-in table does not know (W-C1b: the MCP client's `path_access`).
- *
- * ## Why the merge is LIVE and not a snapshot
- *
- * The guard chain is mounted while the session generation is being composed,
- * but the declarations arrive with the tool list — and the MCP tool list only
- * exists after an ASYNCHRONOUS discovery. A `new Map([...PATH_ACCESS, ...extra])`
- * taken at mount time would therefore snapshot an empty `extra` and every MCP
- * tool would silently keep the `write` floor: safe, but it would make a
- * configured `path_access: read` a lie (§7.1's whole point). So the merged view
- * reads `extra` on every lookup and the caller fills it when discovery lands.
- *
- * An absent or EMPTY extra map still returns [PATH_ACCESS] ITSELF, not a view —
- * so a generation with no MCP configuration keeps byte-identical behaviour.
- */
-export function accessMapWith(extra?: ReadonlyMap<string, PathAccess>): ReadonlyMap<string, PathAccess> {
-  // The ONLY question is whether a declaration view was handed in at all. Its
-  // SIZE is deliberately not consulted: an MCP generation mounts this chain
-  // before discovery has named a single tool, so a live-but-empty view must
-  // stay live — returning the frozen table for it would snapshot the floor in
-  // and make every later declaration invisible.
-  if (extra === undefined) return PATH_ACCESS;
-  return new MergedPathAccess(extra);
-}
-
-/** A read-only union of the built-in table and the session's declarations. */
-class MergedPathAccess implements ReadonlyMap<string, PathAccess> {
-  constructor(private readonly extra: ReadonlyMap<string, PathAccess>) {}
-
-  get(name: string): PathAccess | undefined {
-    return this.extra.get(name) ?? PATH_ACCESS.get(name);
-  }
-
-  has(name: string): boolean {
-    return this.extra.has(name) || PATH_ACCESS.has(name);
-  }
-
-  get size(): number {
-    return this.union().size;
-  }
-
-  // The return types are INFERRED on purpose: ReadonlyMap is declared over
-  // MapIterator, so annotating them as IterableIterator (the wider type) is not
-  // assignable under the current lib.
-  entries() {
-    return this.union().entries();
-  }
-
-  keys() {
-    return this.union().keys();
-  }
-
-  values() {
-    return this.union().values();
-  }
-
-  forEach(callbackfn: (value: PathAccess, key: string, map: ReadonlyMap<string, PathAccess>) => void, thisArg?: unknown): void {
-    this.union().forEach((value, key) => callbackfn.call(thisArg, value, key, this));
-  }
-
-  [Symbol.iterator]() {
-    return this.union().entries();
-  }
-
-  /** Materialised for the iterating members (diagnostics / assertions only). */
-  private union(): Map<string, PathAccess> {
-    return new Map<string, PathAccess>([...PATH_ACCESS, ...this.extra]);
-  }
 }

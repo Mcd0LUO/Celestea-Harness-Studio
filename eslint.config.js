@@ -48,20 +48,9 @@ const SOURCE_GLOBS = ["packages/*/src/**/*.ts", "apps/studio/src/**/*.ts", "apps
 const TEST_GLOBS = ["**/*.test.ts", "**/*.test-util.ts", "**/*.spec.ts"];
 
 /** 第 1 层：只允许依赖 core。 */
-const TIER1 = ["session", "llm", "tools", "agent-loop", "workers", "swarm", "mcp"];
+const TIER1 = ["session", "llm", "tools", "agent-loop", "workers", "swarm"];
 /** 第 2 层：装配层，允许依赖 core + 第 1 层。 */
 const TIER2 = ["runtime"];
-/**
- * core 级**共享叶子包**：零 `@celestea/*` 依赖、零 Node API 的纯函数包。
- *
- * 为什么与 core 同层而不是塞进 core：`packages/core` 顶层 import `node:fs` / `node:path`
- * （celestea-sources.ts / skills.ts 等），而 apps/web 是 Vite 打包的纯前端、不过 runtime，
- * 一旦依赖 core 就打包即炸。`/` 手势解析必须与前端共用同一份字符集（§7），于是下沉到这里。
- *
- * **它在禁用组之外 = core 与各 TIER1 包允许依赖它**（deny-list 语义：不在组里即放行）。
- * 反过来它自己必须是叶子——见下方 `arch/shared-leaf-is-leaf`。
- */
-const SHARED_LEAVES = ["gesture"];
 
 const lines = (max) => ["error", { max, skipBlankLines: true, skipComments: true }];
 const linesPerFunction = (max) => ["error", { max, skipBlankLines: true, skipComments: true, IIFEs: true }];
@@ -108,29 +97,16 @@ const ALL_TIER_PACKAGES = TIER1.concat(TIER2);
 const MSG_CORE_LEAF = "packages/core 是零依赖叶子层：不得依赖任何其他 @celestea 包（ARCHITECTURE.md §1）。";
 const MSG_NO_APPS = "反向依赖被禁止：packages/* 不得依赖 apps/studio（ARCHITECTURE.md §1）。";
 const MSG_TIER1 = "第 1 层包只允许依赖 @celestea/core；横向能力走 core 的 seam，或在评审中显式登记依赖矩阵（ARCHITECTURE.md §1）。";
-/** 共享叶子包（gesture）必须零依赖：它是要被前端打包的。 */
-const MSG_SHARED_LEAF =
-  "共享叶子包必须保持零 @celestea 依赖：apps/web 打包它，一旦反向依赖 core 就会把 node:fs 拖进浏览器产物（ARCHITECTURE.md §1）。";
 
 /**
  * 组装某类文件的完整 no-restricted-imports 模式表。
  * 注意：ESLint 的规则配置是「整体覆盖」而非「按模式合并」，
  * 因此每个 files 块都必须自带完整的模式清单，不能依赖前一个块。
  */
-function boundaryPatterns({ coreLeaf = false, noApps = false, tier1 = false, sharedLeaf = false } = {}) {
+function boundaryPatterns({ coreLeaf = false, noApps = false, tier1 = false } = {}) {
   const patterns = [];
   if (coreLeaf) {
     patterns.push({ group: ALL_TIER_PACKAGES.concat("studio").map((p) => `@celestea/${p}`), message: MSG_CORE_LEAF });
-  }
-  if (sharedLeaf) {
-    // 共享叶子包连共享叶子包本身也不能引（它只有自己一个出口），
-    // 更不能引 core —— core 带 node:fs。
-    // ⚠️ "core" 必须**显式**列进禁止组：ALL_TIER_PACKAGES = TIER1 + TIER2，
-    // 不含 L0 的 core，漏掉它会让「gesture 引 core」整条边悄悄放行（变异实测过）。
-    patterns.push({
-      group: ALL_TIER_PACKAGES.concat("core", "studio", ...SHARED_LEAVES).map((p) => `@celestea/${p}`),
-      message: MSG_SHARED_LEAF,
-    });
   }
   if (noApps) {
     patterns.push({ group: ["@celestea/studio"], message: MSG_NO_APPS });
@@ -376,16 +352,6 @@ export default tseslint.config(
     ignores: TEST_GLOBS,
     rules: {
       "no-restricted-imports": ["error", { patterns: boundaryPatterns({ noApps: true, coreLeaf: true }) }],
-    },
-  },
-  {
-    // 共享叶子包（SHARED_LEAVES，当前只有 gesture）必须保持叶子：它存在的全部理由
-    // 就是「前端能打包」——一旦它 import core，node:fs 就跟着进了浏览器产物。
-    name: "arch/shared-leaf-is-leaf",
-    files: SHARED_LEAVES.flatMap((p) => [`packages/${p}/src/**/*.ts`]),
-    ignores: TEST_GLOBS,
-    rules: {
-      "no-restricted-imports": ["error", { patterns: boundaryPatterns({ noApps: true, sharedLeaf: true }) }],
     },
   },
   ...exceptionOverrides,

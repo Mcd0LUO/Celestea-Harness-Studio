@@ -26,8 +26,6 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { at, doc, resetHarness } from './lib/w795-dom.js';
-// §9.2：输入栏 = Lexical editor root。写入/读回走夹具桥（lib/composer-dom.ts）。
-import { type EditorRoot, bridgeInput, loadComposer } from './lib/composer-dom.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const INDEX_HTML = join(HERE, '..', 'apps', 'web', 'index.html');
@@ -105,15 +103,14 @@ async function boot(locale: string): Promise<BarMod> {
 async function mount(locale: string, sends: Sends): Promise<BarMod> {
   const bar = await boot(locale);
   bar.initInputBar({ send: (t, m) => sends.push([t, m]), cancel: () => {} });
-  // §9.2：接上夹具的 value 桥（textarea 时代的读法），既有断言一字不改。
-  await bridgeInput(inputEl() as unknown as EditorRoot);
   return bar;
 }
 
-/** 在输入栏里放一段文本（适配缝写入，光标落到末尾）。 */
-async function type(text: string): Promise<InputLike> {
+/** 在输入框里放一段文本并把光标放到末尾。 */
+function type(text: string): InputLike {
   const el = inputEl();
-  (await loadComposer()).setComposerText(text);
+  el.value = text;
+  el.setSelectionRange(text.length, text.length);
   return el;
 }
 
@@ -140,7 +137,7 @@ describe('W2028 · 触摸端 Enter 换行', () => {
     setCapability(true, 5);
     const sends: Sends = [];
     await mount('zh', sends);
-    const el = await type('AAA');
+    const el = type('AAA');
     const e = press(el, { key: 'Enter', shiftKey: false });
     expect(JSON.stringify(el.value), '触摸端 Enter 必须插入换行').toBe(JSON.stringify('AAA\n'));
     expect(el.selectionStart, '光标落在换行之后').toBe(4);
@@ -152,7 +149,7 @@ describe('W2028 · 触摸端 Enter 换行', () => {
     setCapability(true, 5);
     const sends: Sends = [];
     await mount('zh', sends);
-    const el = await type('AAA');
+    const el = type('AAA');
     const e = press(el, { key: 'Enter', shiftKey: true });
     expect(sends, 'Shift+Enter 不发送').toEqual([]);
     expect(e.defaultPrevented, '保留浏览器默认 = 由浏览器插入换行').toBe(false);
@@ -162,11 +159,11 @@ describe('W2028 · 触摸端 Enter 换行', () => {
     setCapability(true, 5);
     const sends: Sends = [];
     const bar = await mount('zh', sends);
-    await type('AAA');
+    type('AAA');
     press(inputEl(), { key: 'Enter', ctrlKey: true });
     expect(sends, 'Ctrl+Enter 走另一条车道（默认 steer ⇒ queue）').toEqual([['AAA', 'queue']]);
     bar.setSubmitMode('queue');
-    await type('BBB');
+    type('BBB');
     press(inputEl(), { key: 'Enter', ctrlKey: true });
     expect(sends[1], '再切回 steer').toEqual(['BBB', 'steer']);
   });
@@ -175,7 +172,7 @@ describe('W2028 · 触摸端 Enter 换行', () => {
     setCapability(true, 5);
     const sends: Sends = [];
     await mount('zh', sends);
-    const el = await type('AAA');
+    const el = type('AAA');
     press(el, { key: 'Enter', shiftKey: false });
     expect(JSON.stringify(el.value)).toBe(JSON.stringify('AAA\n'));
     sendBtn().click();
@@ -186,7 +183,7 @@ describe('W2028 · 触摸端 Enter 换行', () => {
     setCapability(true, 5);
     const sends: Sends = [];
     await mount('zh', sends);
-    const el = await type('ni');
+    const el = type('ni');
     const e = press(el, { key: 'Enter', isComposing: true });
     // 真机实测（Chromium + Input.imeSetComposition）：组合中按 Enter 浏览器自己会插入
     // 一个换行 ⇒ 这里再插一个，用户每确认一次候选词就多一个空行。
@@ -205,7 +202,7 @@ describe('W2028 · 触摸端 Enter 换行', () => {
     setCapability(false, 0);
     const sends: Sends = [];
     await mount('zh', sends);
-    const el = await type('ni');
+    const el = type('ni');
     const e = press(el, { key: 'Enter', isComposing: true });
     expect(sends, 'W2032：桌面组合中的 Enter 不得发送').toEqual([]);
     expect(JSON.stringify(el.value), '组合文字保留在输入框里').toBe(JSON.stringify('ni'));
@@ -266,7 +263,7 @@ describe('W2028 · 桌面端逐字不变', () => {
     setCapability(false, 0);
     const sends: Sends = [];
     await mount('zh', sends);
-    const el = await type('AAA');
+    const el = type('AAA');
     const e = press(el, { key: 'Enter', shiftKey: false });
     expect(sends).toEqual([['AAA', 'steer']]);
     expect(e.defaultPrevented, '发送路径必须吃掉默认行为').toBe(true);
@@ -277,7 +274,7 @@ describe('W2028 · 桌面端逐字不变', () => {
     setCapability(false, 0);
     const sends: Sends = [];
     await mount('zh', sends);
-    const el = await type('AAA');
+    const el = type('AAA');
     const e = press(el, { key: 'Enter', shiftKey: true });
     expect(sends).toEqual([]);
     expect(e.defaultPrevented).toBe(false);
@@ -287,14 +284,14 @@ describe('W2028 · 桌面端逐字不变', () => {
     setCapability(false, 0);
     const sends: Sends = [];
     const bar = await mount('zh', sends);
-    await type('AAA');
+    type('AAA');
     press(inputEl(), { key: 'Enter', ctrlKey: true });
     press(inputEl(), { key: 'Enter', metaKey: true });
     // 改动前的语义：Ctrl/Cmd+Enter **只**把这一条投到另一条车道，不切换当前车道
     // （两次都发到 queue，因为当前车道始终是 steer）。
     expect(sends).toEqual([['AAA', 'queue'], ['AAA', 'queue']]);
     bar.setSubmitMode('queue');
-    await type('BBB');
+    type('BBB');
     press(inputEl(), { key: 'Enter', metaKey: true });
     expect(sends[2], '当前车道是 queue ⇒ 另一条是 steer').toEqual(['BBB', 'steer']);
   });
@@ -328,13 +325,13 @@ describe('W2028 · 能力位翻转与分流真源', () => {
     expect(inputEl().enterKeyHint).toBe('send');
     setCapability(true, 5); // DevTools 打开设备仿真 / 二合一拔掉鼠标
     expect(inputEl().enterKeyHint, 'hint 必须与行为一起翻').toBe('enter');
-    const el = await type('AAA');
+    const el = type('AAA');
     press(el, { key: 'Enter', shiftKey: false });
     expect(JSON.stringify(el.value), '翻转后 Enter 插入换行').toBe(JSON.stringify('AAA\n'));
     expect(sends, '翻转后 Enter 不再发送').toEqual([]);
     setCapability(false, 0); // 翻回桌面
     expect(inputEl().enterKeyHint).toBe('send');
-    const el2 = await type('BBB');
+    const el2 = type('BBB');
     press(el2, { key: 'Enter', shiftKey: false });
     expect(sends, '翻回桌面后 Enter 恢复发送').toEqual([['BBB', 'steer']]);
   });

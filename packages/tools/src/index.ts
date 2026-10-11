@@ -23,7 +23,6 @@
  *   env.ts               env readers (string / int / on-off flag)
  *   guard/paths.ts       canonicalization: traversal + symlink containment      (guard.rs)
  *   guard/path-guard.ts  PathGuard: CELESTEA_TOOL_ROOTS whitelist, fail-closed  (guard.rs)
- *   guard/approval.ts    McpApprovalGuard: the MCP approval (ask/never) on the same chain
  *   fs/file-io.ts        capped reads, binary rejection, capped listings
  *   tools/read-file.ts   read_file                                              (builtin.rs)
  *   tools/write-file.ts  write_file                                             (builtin.rs)
@@ -97,23 +96,8 @@ export {
 export { isToolFailure, ToolFailure } from "./tool-failure.js";
 export { fnTool } from "./fn-tool.js";
 
-// W-C1b: the MCP APPROVAL guard (docs/feature/mcp-client.md §7.1) — one more
-// consumer of the EXISTING user-question channel, not a second permission plane.
-export {
-  APPROVAL_DENIED_CODE,
-  APPROVAL_LABEL_ALWAYS,
-  APPROVAL_LABEL_ALLOW_ONCE,
-  APPROVAL_LABEL_DENY,
-  APPROVAL_UNDECIDED_CODE,
-  McpApprovalGuard,
-  MCP_TOOL_PREFIX,
-  type ApprovalGuardOptions,
-  type McpApprovalPolicy,
-  type McpApprovalRule,
-} from "./guard/approval.js";
 // --- guard: path whitelist ----------------------------------------------------
 export {
-  accessMapWith,
   ALL_PATHS_ROOT,
   ENV_TOOL_GUARD,
   ENV_TOOL_ROOTS,

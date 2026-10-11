@@ -21,15 +21,12 @@
  *   repetition-cut.ts W1510 what happens to a convicted attempt  (new)
  *   repetition-run.ts W1510 the wrap-up round trip              (new)
  *   perturbation.ts  W1510 the re-issue route perturbation seam  (new)
- *   after-input.ts   W9351 the after-input lane's contract (AfterInputRow /
- *                    AfterInputPlan / AfterInputSource) + its containment
  *   plugin.ts        AGENT_LOOP_SERVICE registration            (runtime/src/compose.rs)
  *   sse.ts           LoopEvent -> SSE frame mapping             (studio/src/main.rs:667)
  *
  * Public API = this file. Everything else is an internal module.
  */
 
-export * from "./after-input.js";
 export * from "./loop.js";
 export * from "./cancel.js";
 export * from "./context-trim.js";

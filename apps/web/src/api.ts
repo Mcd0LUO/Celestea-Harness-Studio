@@ -47,7 +47,6 @@ import type { ExecReq, ExecResp } from './types/exec'; // A3：用户直发命�
 import type { FsListResp } from './types/fs-list'; // H：@提及的文件列举
 import type { FsReadResp } from './types/fs-read'; // F2 P1：工作区文件内容
 import type { GoalReq, GoalResp } from './types/goal'; // A3：持久目标
-import type { SkillsResp } from './types/skill'; // W9350：技能清单（/{技能名} 显式调用）
 // W859/W9322：服务端插件清单类型（两层清单 + 枚举逐项容错，见 ./types/plugin）
 import type { PluginsResp } from './types/plugin';
 // W858：权限族类型整族在 ./types/permission（types.ts 有模块体积棘轮，本轮不追加行数；
@@ -342,14 +341,6 @@ export const api = {
    */
   getGoal: (id: string) =>
     requestJson<GoalResp>('/api/sessions/' + encodeURIComponent(id) + '/goal'),
-  /**
-   * W9350：GET /api/sessions/{id}/skills —— **该会话**能加载的技能清单
-   *   （技能显式调用切片 2 的唯一取数口）。200 的空 skills 列表是合法答案
-   *   （没有技能 / 会话没有工作区），不是错误；404 = 会话不存在或该部署没有这个端点
-   *   ⇒ ApiError，调用方按「清单未到」处理（不伪造清单、不假装成功）。
-   */
-  sessionSkills: (id: string) =>
-    requestJson<SkillsResp>('/api/sessions/' + encodeURIComponent(id) + '/skills'),
   /** 目录浏览（W237）：GET /api/fs/browse?path=（只显示目录）。 */
   fsBrowse: (path?: string) =>
     requestJson<FsBrowseResp>('/api/fs/browse' + (path ? '?path=' + encodeURIComponent(path) : '')),

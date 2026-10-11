@@ -6,21 +6,15 @@
  *   - 本文件       = 仓级依赖图：分层方向、同层横向依赖、循环、深层导入、不可解析
  *
  * 分层（详见 docs/ARCHITECTURE.md §1）：
- *   L0 core（零依赖）+ SHARED_LEAVES（core 级共享叶子：零依赖、零 Node API）
- *   L1 session / llm / tools / agent-loop / workers / swarm / mcp → 许依赖 core + 共享叶子
- *   L2 runtime（装配层）                              → 许依赖 core + 共享叶子 + L1
+ *   L0 core（零依赖）
+ *   L1 session / llm / tools / agent-loop / workers   → 只许依赖 core
+ *   L2 runtime（装配层）                              → 许依赖 core + L1
  *   L3 apps/studio                                    → 许依赖任意 packages
  *   scripts/ 与 tests/ 是工具链，不受分层约束
- *
- * SHARED_LEAVES 为什么与 core 同层、而不是并进 core：core 顶层 import node:fs，
- * 而 apps/web（Vite 打包的纯前端）要消费 gesture —— 依赖 core 会把 node:fs 拖进浏览器产物。
- * 它们不出现在 tier1-no-peer-deps-* 与 core-is-leaf 的禁止组里，即「core 与 L1 可以依赖它」。
  */
-const TIER1 = ["session", "llm", "tools", "agent-loop", "workers", "swarm", "mcp"];
+const TIER1 = ["session", "llm", "tools", "agent-loop", "workers", "swarm"];
 const TIER2 = ["runtime"];
-/** core 级共享叶子包（零依赖、零 Node API）：不在 tier1-no-peer-deps-* 与 core-is-leaf 的禁止组里。 */
-const SHARED_LEAVES = ["gesture"];
-const PACKAGES = ["core", ...SHARED_LEAVES, ...TIER1, ...TIER2];
+const PACKAGES = ["core", ...TIER1, ...TIER2];
 const pkgPath = (names) => `^packages/(${names.join("|")})/`;
 const ALL_PKG_RE = pkgPath(PACKAGES);
 
@@ -36,19 +30,10 @@ module.exports = {
     {
       name: "core-is-leaf",
       severity: "error",
-      comment: "packages/core 是零依赖叶子层：不得依赖任何其他 packages（SHARED_LEAVES 与 core 同层，不在禁止组里）。",
+      comment: "packages/core 是零依赖叶子层：不得依赖任何其他 packages（ARCHITECTURE.md §1）。",
       from: { path: "^packages/core/src" },
-      to: { path: ALL_PKG_RE, pathNot: "^packages/(core|" + SHARED_LEAVES.join("|") + ")/" },
+      to: { path: ALL_PKG_RE, pathNot: "^packages/core/" },
     },
-    ...SHARED_LEAVES.map((p) => ({
-      name: p + "-is-leaf",
-      severity: "error",
-      comment:
-        "packages/" + p + " 是 core 级共享叶子：不得依赖任何其他 packages —— apps/web 要打包它，" +
-        "一旦它引 core，node:fs 就跟着进了浏览器产物（ARCHITECTURE.md §1）。",
-      from: { path: "^packages/" + p + "/src" },
-      to: { path: ALL_PKG_RE, pathNot: "^packages/" + p + "/" },
-    })),
     {
       name: "no-packages-to-apps",
       severity: "error",

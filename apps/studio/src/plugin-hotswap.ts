@@ -28,7 +28,6 @@
  */
 
 import { dirname } from "node:path";
-import { mcpCatalogStatus, type McpCatalogStatus } from "./runtime/mcp-status.js";
 import type { RuntimeAdapter } from "./runtime-adapter.js";
 import { SerialQueue } from "./serial-queue.js";
 import {
@@ -120,11 +119,6 @@ export interface PluginSwitchOptions {
   hostNames: () => readonly string[];
   /** 秒级时间戳来源（测试注入固定值）。 */
   now: () => number;
-  /**
-   * W-C1b: the LIVE MCP status the MCP row carries. A provider, not a value,
-   * because connection state moves while the catalog does not.
-   */
-  mcp?: () => McpCatalogStatus | null;
 }
 
 /**
@@ -197,16 +191,10 @@ export class PluginSwitch {
     return this.effectiveOf(this.current, this.currentEnabled);
   }
 
-  /**
-   * 清单 + 当前启用状态（`GET` 的 body 来源）。`enabled` 是**合成后的真值**。
-   *
-   * W-C1b：MCP 状态也在这里读一次，所以「清单 + 状态面」始终来自同一次构造
-   * （`pluginCatalog(hostNames, mcp?())`）——两个读者不会拿到两次快照。
-   */
+  /** 清单 + 当前启用状态（`GET` 的 body 来源）。`enabled` 是**合成后的真值**。 */
   rows(): PluginRow[] {
     const off = new Set(this.effectiveDisabled());
-    const mcp = (this.opts.mcp ?? mcpCatalogStatus)();
-    return pluginCatalog(this.opts.hostNames(), mcp).map((row) => ({ ...row, enabled: !off.has(row.name) }));
+    return pluginCatalog(this.opts.hostNames()).map((row) => ({ ...row, enabled: !off.has(row.name) }));
   }
 
   /** 某一层的行。 */

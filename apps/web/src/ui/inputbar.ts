@@ -34,24 +34,15 @@ import {
 // W867（追加）：展示夹的落位 / 尺寸 / 渲染接线整段在 ./attach-tray.ts，本文件只调用。
 import { createAttachTray, refreshAttachmentTray } from './attach-tray';
 import { initQuoteTray } from './quote/tray'; // F1：选段提及的待发引用 chip 收纳区
+import { mountCaretMirror, type CaretMirror } from './inputbar/caret-mirror'; // W1525 VSCode 风格光标
+// W2016：输入框自增长的能力开关（field-sizing 支持时 autoGrow 是 no-op）。
+import { createAutoGrow, MAX_HEIGHT, type GrowFn } from './inputbar/grow';
 import { t } from '../i18n';
 import { iconSvg } from './icons'; // W9324：回形针的几何真源在 ui/icons.ts
-import { deviceCopy, isTouchInput, onInputCapabilityChange } from './viewport'; // W2023：设备能力分流（唯一真源）
+import { deviceCopy, onInputCapabilityChange } from './viewport'; // W2023：设备能力分流（唯一真源）
 import { paintModeButton, paintSendButton } from './inputbar/button-labels';
 // W2028：Enter 行为（触摸=换行 / 桌面=发送）+ enterkeyhint，唯一判定在 ./inputbar/newline.ts。
-//   §9.2 迁移之后：**判定逐字保留**在 newline.ts（enterAction），挂载点搬进 Lexical 的
-//   keydown 命令（ui/composer/lexical.ts）；本文件只留 enterkeyhint 的 DOM 写入。
-import { syncEnterKeyHint } from './inputbar/newline';
-// §9.2：输入栏的**全部**读写（取文本/置文本/草稿/焦点/placeholder/键盘拦截）走适配缝，
-//   本文件不再直接操作编辑器内容（composer-surface.md §9.2）。
-import {
-  canonicalText,
-  clearComposer,
-  mountComposer,
-  setComposerPlaceholder,
-  setComposerReadOnly,
-  setComposerText,
-} from './composer';
+import { bindEnterKey } from './inputbar/newline';
 export { refreshAttachmentTray }; // 既有调用方（chat.ts / send.ts / 测试）不变
 
 /**
@@ -69,10 +60,15 @@ export interface InputBarHandlers {
 
 export type InputMode = 'idle' | 'interject' | 'worker';
 
-// §9.3（W2016 退役）：textarea 的 field-sizing 自增高路径整体退役 —— field-sizing
-// 不支持 div，Lexical 的 editor root 改用 max-height + overflow-y（styles/composer.css
-// 是唯一真源）。退役后**输入路径上不再有任何样式读写**，也不再需要量高回调。
-let inputEl: HTMLElement | null = null;
+// W2016：MAX_HEIGHT（自增长上限）搬去 ./inputbar/grow.ts —— 它现在同时是 JS 回落与
+// CSS `max-height` 的口径（styles/field-sizing.css），真源只能有一个。
+/**
+ * 模块级量高回调：initInputBar 装配它。支持 `field-sizing: content` 的引擎上它是
+ * **no-op**（高度由 CSS 给）；不支持的引擎上它是原来的量高实现。
+ * clearInput / setInputValue 也走它 —— 这样「支持与否」只有一处判定，不会出现
+ * 「输入时不自量、程序化改值时又量」的分叉。
+ */
+let autoGrow: GrowFn = () => {};
 
 /**
  * 占位符（函数：语言切换后必须跟着变；W846 只说明输入行为，不重复状态词）。
@@ -100,6 +96,7 @@ function placeholderWorker(): string {
 }
 
 let bar: HTMLElement | null = null;
+let inputEl: HTMLTextAreaElement | null = null;
 let sendBtn: HTMLButtonElement | null = null;
 // W1512：#btnSend 是**发送/终止两态**的同一控件（照 DSH）。终止不再是 statusline 上
 // 的独立 #slStop —— 那个位置在窄屏会被挤出视口（用户报障），且与 statusline 抢宽度。
@@ -111,6 +108,9 @@ let busy = false;
 let submitMode: SubmitMode = 'steer';
 /** 当前输入栏模式（文案/按钮重绘用）。 */
 let inputMode: InputMode = 'idle';
+/** W1525 假光标（镜像层）。null = 未挂载 / 挂载失败 ⇒ 原生插入符（回落）。 */
+let caret: CaretMirror | null = null;
+
 export function getSubmitMode(): SubmitMode {
   return submitMode;
 }
@@ -138,16 +138,16 @@ function placeholderFor(mode: InputMode): string {
   return placeholderIdle();
 }
 
-/** 按当前模式重写占位符（装配时与能力位变化后都走这里）。§9.3：原生 placeholder 体系退役。 */
+/** 按当前模式重写占位符（装配时与能力位变化后都走这里）。 */
 function paintPlaceholder(): void {
-  setComposerPlaceholder(placeholderFor(inputMode));
+  if (inputEl) inputEl.placeholder = placeholderFor(inputMode);
 }
 
 /** 车道相关 UI 重绘（切换按钮 / 占位符 / 发送按钮文案）——只改文案与 class。 */
 function renderSubmitUi(): void {
   if (modeBtn) paintModeButton(modeBtn, submitMode);
   if (inputEl && inputMode === 'interject') {
-    setComposerPlaceholder(submitMode === 'steer' ? placeholderSteer() : placeholderQueue());
+    inputEl.placeholder = submitMode === 'steer' ? placeholderSteer() : placeholderQueue();
   }
   // W1512：发送/终止是同一控件的两态，渲染统一走 paintSendButton（W866 的
   // 「按钮不禁用」语义包含在里面）。
@@ -155,25 +155,17 @@ function renderSubmitUi(): void {
 }
 
 export function initInputBar(h: InputBarHandlers): void {
-  const input = need<HTMLElement>('#input');
+  const input = need<HTMLTextAreaElement>('#input');
   inputEl = input;
   bar = need<HTMLElement>('#inputbar');
   sendBtn = need<HTMLButtonElement>('#btnSend');
   modeBtn = document.getElementById('btnMode') as HTMLButtonElement | null;
 
-  // §9.2（E4 直接替换）：装 Lexical 输入栏。它是编辑器的**唯一**装配点；
-  //   Enter 车道（newline.ts 的 enterAction）、粘贴（纯文本 + 附件分道）、键盘总拦截口
-  //   都在实现里，本文件只提供业务语义（车道 / 设备能力 / 附件车道）。
-  mountComposer({
-    mount: input,
-    send: h.send,
-    lane: () => submitMode,
-    otherLane: () => (submitMode === 'steer' ? 'queue' : 'steer'),
-    isTouch: isTouchInput,
-    onFiles: (files) => acceptFiles(files),
-  });
-  // W2028：软键盘回车键上的字与 Enter 行为同源（判定在 newline.ts，能力位在 viewport.ts）。
-  syncEnterKeyHint(input);
+  // W2016：支持 `field-sizing: content` 的引擎上，这里拿到的是 **no-op** —— 高度全交给
+  // CSS（styles/field-sizing.css），输入事件不再写 style.height、也不再读 scrollHeight
+  // （省掉每次输入的强制同步布局）。不支持的引擎（Firefox / WebKit）拿到的是原样的
+  // 量高实现。为什么这里必须探测而不能直接删 JS，见 ./inputbar/grow.ts 头注。
+  autoGrow = createAutoGrow(input, { maxHeight: MAX_HEIGHT });
 
   // W1512：一个按钮，两个动作。运行中点 = 终止（沿用 #slStop 的单点语义与
   // 「点一次即禁用、防重复取消」的纪律）；空闲点 = 发送。共用 chat.ts requestCancel。
@@ -183,10 +175,30 @@ export function initInputBar(h: InputBarHandlers): void {
       h.cancel();
       return;
     }
-    // 规范文本（chip 投影后）——与 Enter 车道读的是**同一个**真源（§9.2）。
-    h.send(canonicalText(), submitMode);
+    h.send(input.value, submitMode);
   });
   modeBtn?.addEventListener('click', () => toggleSubmitMode());
+  // W2028：Enter 的判定/插入在 ./inputbar/newline.ts（触摸=换行、桌面=发送）。
+  // 这里只把「车道」与「重绘」交给它 —— 插入换行是程序化改值，必须自己补一次
+  // 自增高 + 假光标同步（原生输入走的是下面的 input 事件）。
+  bindEnterKey(input, {
+    send: h.send,
+    lane: () => submitMode,
+    other: () => (submitMode === 'steer' ? 'queue' : 'steer'),
+    afterEdit: () => {
+      autoGrow();
+      caret?.sync();
+    },
+  });
+  // 传闭包而不是 autoGrow 本身：装配后 autoGrow 才被赋值（上面那行）。
+  input.addEventListener('input', () => autoGrow());
+  // W1525：假光标挂 .input-box（它已是 position:relative）。注册在 autoGrow 之后 ——
+  // 高度先定，镜像层的裁剪区才对。光标是装饰：任何异常都不许影响输入栏本身。
+  try {
+    caret = mountCaretMirror(input, bar.querySelector<HTMLElement>('.input-box'));
+  } catch {
+    caret = null;
+  }
   initAttachmentEntries(input, bar);
   // W2023：**装配时就要按设备能力写一次**。index.html 的 data-i18n-placeholder 只是
   // JS 起来之前那一帧的兜底，而它只能填一个 key（桌面版）—— 不在这里重写，触摸设备
@@ -196,27 +208,32 @@ export function initInputBar(h: InputBarHandlers): void {
   // 只重画文案，不动 DOM、不动模式（铁律 4/5）。W2028：enterkeyhint 的同步在
   // ./inputbar/newline.ts 里（它与 Enter 行为同源，不在这里再写一遍）。
   onInputCapabilityChange(() => {
-    paintPlaceholder();
-    // W2028：enterkeyhint 与 Enter 行为同源（判定在 newline.ts，能力位在 viewport.ts）——
-    // 能力位翻转时两样都要重算。
-    if (inputEl) syncEnterKeyHint(inputEl);
+    if (inputEl) inputEl.placeholder = placeholderFor(inputMode);
   });
   renderSubmitUi();
+  window.setTimeout(() => autoGrow(), 0);
+  window.setTimeout(() => caret?.sync(), 0);
 }
 
-/** 发送成功后清空输入框（§9.2：走适配缝，编辑器负责把内容与选区一起复位）。 */
+/** 发送成功后清空输入框并复位高度。 */
 export function clearInput(): void {
-  clearComposer();
+  const input = inputEl ?? need<HTMLTextAreaElement>('#input');
+  input.value = '';
+  autoGrow(); // W2016：支持 field-sizing 时是 no-op；不支持时量高（原样行为）
+  caret?.sync(); // W1525：程序化改值不发 input 事件，显式重绘假光标
 }
 
-/** 当前输入框的**规范文本**（切换会话时保存草稿用）。 */
+/** 当前输入框内容（切换会话时保存草稿用）。 */
 export function inputValue(): string {
-  return canonicalText();
+  return inputEl ? inputEl.value : '';
 }
 
 /** 写回输入框内容（切换会话恢复草稿 / 插话失败还原）。 */
 export function setInputValue(v: string): void {
-  setComposerText(v);
+  const input = inputEl ?? need<HTMLTextAreaElement>('#input');
+  input.value = v;
+  autoGrow(); // W2016：同上（支持 field-sizing 时是 no-op）
+  caret?.sync(); // W1525：同上（恢复草稿 / 插话失败还原）
 }
 
 /**
@@ -241,9 +258,8 @@ export function setInputMode(mode: InputMode): void {
   }
   if (modeBtn) modeBtn.classList.toggle('hidden', mode !== 'interject');
   if (input) {
-    paintPlaceholder(); // W2023：唯一映射（见 placeholderFor）
-    // W866：#inputbar 上不再有 .readonly —— 任何会话（含 worker）都可输入。
-    setComposerReadOnly(false);
+    input.placeholder = placeholderFor(mode); // W2023：唯一映射（见 placeholderFor）
+    input.readOnly = false; // 三种模式都可打字（草稿保活）
   }
   renderSubmitUi();
 }
@@ -310,9 +326,35 @@ function acceptFiles(files: ArrayLike<File>): void {
   else if (rejected > 0) noteAttachment(t('chat.input.rejectedCount', { n: rejected }));
 }
 
-// W869：剪贴板附件的**逐文件判定**原本在 clipboardFiles 里；§9.2 迁移后粘贴入口由
-//   Lexical 的 paste 命令统一接管（ui/composer/lexical.ts），文件逐项判定仍走
-//   acceptFiles —— 能力位拦截与提示文案一个字没改，只是换了挂载点。
+/** 入口是否收下这个文件：文本文件不看能力位；图片仍要图像能力位可用（W805）。 */
+function entryAllows(file: { name: string; type: string }): boolean {
+  if (!isAttachmentCandidate(file)) return false;
+  return file.type.indexOf('image/') !== 0 || imageEntryDisabledReason() === '';
+}
+
+/** 剪贴板里的附件文件（W869：图片或文本文件；MIME 缺失时看扩展名，最终以读出内容为准）。 */
+function clipboardFiles(e: Event): File[] {
+  const cd = (e as unknown as { clipboardData?: DataTransfer | null }).clipboardData;
+  if (!cd) return [];
+  const out: File[] = [];
+  const items = cd.items;
+  if (items) {
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it && it.kind === 'file' && entryAllows({ name: '', type: it.type })) {
+        const f = it.getAsFile();
+        if (f) out.push(f);
+      }
+    }
+  }
+  if (out.length === 0 && cd.files) {
+    for (let i = 0; i < cd.files.length; i++) {
+      const f = cd.files[i];
+      if (f && entryAllows(f)) out.push(f);
+    }
+  }
+  return out;
+}
 
 function dragHasFiles(e: DragEvent): boolean {
   const dt = e.dataTransfer;
@@ -328,7 +370,7 @@ function acceptFileDialog(): void {
   fileInput?.click();
 }
 
-function initAttachmentEntries(input: HTMLElement, host: HTMLElement): void {
+function initAttachmentEntries(input: HTMLTextAreaElement, host: HTMLElement): void {
   noteEl = el('div', 'attach-note hidden');
   const box = host.querySelector<HTMLElement>('.input-box');
   const side = host.querySelector<HTMLElement>('.input-side');
@@ -370,10 +412,11 @@ function initAttachmentEntries(input: HTMLElement, host: HTMLElement): void {
   host.insertBefore(noteEl, host.firstChild);
   host.appendChild(fileInput);
 
-  // §9.2：粘贴**不在这里**挂了 —— Lexical 的 paste 命令是唯一入口：它强制纯文本，
-  // 并把剪贴板里的文件交给 mountComposer 的 onFiles（同一个 acceptFiles）。
-  // 少挂一条 ⇒ 少一条静默失效的入口（附件三入口之一）。
-  void input;
+  // 粘贴：有附件文件（图片 / 文本）就收；**不** preventDefault —— 同一次粘贴里的文字照常落进输入框。
+  input.addEventListener('paste', (e) => {
+    const files = clipboardFiles(e);
+    if (files.length > 0) acceptFiles(files);
+  });
 
   document.addEventListener('dragover', (e) => {
     // W869：拖拽入口不再按图像能力位整体关闭（文本文件照收）；逐文件校验在 addFiles。

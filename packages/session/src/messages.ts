@@ -28,15 +28,6 @@ const ORIGIN_LABEL: Record<Exclude<SessionEventOrigin, "user">, string> = {
   // matches the shipped i18n key the frontend already renders for `goal`
   // (apps/web/src/i18n/locales/*/chat.ts `chat.inbox.goal`).
   goal: "目标",
-  // W9351: a skill body the human explicitly asked for (`/review …`). It must
-  // read as an INJECTION rather than as the user's own words — but it is not the
-  // catalog either, hence its own label instead of a reuse of `skill`.
-  "skill-invocation": "技能调用",
-  // D1: the MCP server listing the human asked for with `/mcp:<server>`. Same
-  // family as the skill invocation and the same reason for its own value: it is
-  // an injection the human triggered, so it must read as one and not as a
-  // catalog row the model happens to see.
-  "mcp-invocation": "MCP 调用",
 };
 
 /** The label of a non-user origin ('user' never reaches here). */

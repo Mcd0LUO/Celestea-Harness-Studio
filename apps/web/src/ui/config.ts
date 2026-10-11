@@ -6,7 +6,7 @@
 // ============================================================================
 import { api, ApiError } from '../api';
 import { loadConfigCached, revalidateConfig } from '../statusline/cfg-cache'; // W778：首屏走配置缓存
-import { $, el, need } from '../utils/dom';
+import { el, need } from '../utils/dom';
 import { closeOverlaysAbove, popOverlay, pushOverlay, type OverlayHandle } from '../utils/overlays';
 import { firstFocusable, isolateBackground, type BackgroundHandle } from '../utils/modal-bg'; // F2-01：aria-modal 的背景隔离
 import type { ConfigInfo, ConfigPatch } from '../types';
@@ -16,7 +16,6 @@ import { initProvidersSection, loadProviders } from './providers';
 import { initPromptsSection, loadPrompts } from './prompts';
 import { loadPermissionsSection } from './permissions';
 import { loadPluginsSection } from './plugins'; // W859 设置页「插件」（客户端热开关 + 宿主只读）
-import { loadMcpSection } from './mcp'; // W-C2 设置页「MCP」（只读状态面，无编辑 UI）
 import { installI18nSettings, mountGeneralPane } from '../i18n/settings'; // i18n：通用偏好 pane
 import { mountUsagePane } from './usage/panel'; // W9103：使用统计 pane
 import { t } from '../i18n';
@@ -266,26 +265,17 @@ export async function loadConfig(opts: { refresh?: boolean } = {}): Promise<void
 
 // ---- 左导航 + 右内容 -----------------------------------------------------------
 
-const PANES = ['general', 'config', 'tools', 'archive', 'providers', 'prompts', 'permissions', 'plugins', 'usage', 'mcp'] as const;
+const PANES = ['general', 'config', 'tools', 'archive', 'providers', 'prompts', 'permissions', 'plugins', 'usage'] as const;
 type PaneName = (typeof PANES)[number];
 
 let currentPane: PaneName = 'config';
 
-/**
- * W-C2：这两个查找**刻意不抛错**（原实现走 `need`）。
- *
- * 抛错是有价值的，但它的**不变量写在别处**：`index.html` 必须为 PANES 的每一项
- * 各注册一个 nav 项与一个 pane。11 个共用的 jsdom 夹具各自写死了九格骨架，让
- * `initSettingsPage()` 为一个它们根本没建的 pane 抛错，等于用夹具的过时换实现
- * 的正确 —— 那条不变量改由 `tests/w-c2-mcp-static.test.ts` 机械核对（读 index.html
- * 真源，逐名比对），比运行时抛错更早暴露、也不会波及无关用例。
- */
-function paneEl(name: PaneName): HTMLElement | null {
-  return $<HTMLElement>('.settings-pane[data-pane="' + name + '"]');
+function paneEl(name: PaneName): HTMLElement {
+  return need<HTMLElement>('.settings-pane[data-pane="' + name + '"]');
 }
 
-function navEl(name: PaneName): HTMLElement | null {
-  return $<HTMLElement>('.settings-nav-item[data-page="' + name + '"]');
+function navEl(name: PaneName): HTMLElement {
+  return need<HTMLElement>('.settings-nav-item[data-page="' + name + '"]');
 }
 
 const paneLoaded: Partial<Record<PaneName, boolean>> = {};
@@ -315,9 +305,6 @@ function loadPane(name: PaneName): void {
   } else if (name === 'usage') {
     // W9103：「使用统计」（摘要条 + 热力图 + 趋势图；数据来自已有的用量账本聚合）
     mountUsagePane();
-  } else if (name === 'mcp') {
-    // W-C2：「MCP」只读状态面（首次进入时取一次；切回零重建由 showPane 保证）
-    void loadMcpSection();
   } else {
     // W859：「插件」（客户端插件热开关 + 服务端插件清单；W9327 起可关的行带开关）
     void loadPluginsSection();
@@ -326,8 +313,8 @@ function loadPane(name: PaneName): void {
 
 function showPane(name: PaneName): void {
   currentPane = name;
-  for (const n of PANES) paneEl(n)?.classList.toggle('active', n === name);
-  for (const n of PANES) navEl(n)?.classList.toggle('active', n === name);
+  for (const n of PANES) paneEl(n).classList.toggle('active', n === name);
+  for (const n of PANES) navEl(n).classList.toggle('active', n === name);
   // 第 11 轮：切页只切 class（无重建）；内容首次加载后缓存，切回零闪烁
   if (!paneLoaded[name]) {
     paneLoaded[name] = true;
@@ -417,7 +404,7 @@ export function initSettingsPage(): void {
   need<HTMLElement>('#btnSettingsClose').addEventListener('click', closeSettings);
   need<HTMLElement>('#btnSettingsReload').addEventListener('click', reloadCurrentPane);
   for (const n of PANES) {
-    navEl(n)?.addEventListener('click', () => showPane(n));
+    navEl(n).addEventListener('click', () => showPane(n));
   }
   // Esc 关闭统一由 utils/overlays 层级栈处理（任务 3：唯一 document Esc 监听）
   installI18nSettings(); // i18n：静态 data-i18n 文案 + 语言切换重画

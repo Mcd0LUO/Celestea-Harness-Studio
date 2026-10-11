@@ -1,0 +1,45 @@
+/* ============================================================================
+   styles/field-sizing.css — W2016：输入框自增长交给 CSS（#input 的 field-sizing）
+   ----------------------------------------------------------------------------
+   为什么单独成文件：layout.css / responsive.css 是**共享**样式真源（W1524 起「各能力
+   各文件、共享 CSS 谁都不改」），本能力自带一条 @supports 守卫 + 一条窄屏覆盖，
+   整体落在这里，避免与正在改输入区的其他 worker 撞同一段。
+
+   ── ★★ 为什么这里**必须**加 @supports 守卫（与 interpolate-size 恰好相反）──
+   本仓对这条规则的明文论证在 provider-edit.css 顶部（W2010 写的，先读它）：
+     · interpolate-size 给的是**增强**（要不要补间）：不支持的引擎整条声明被忽略，
+       `max-height: max-content` 本身就是安全降级 ⇒ **绝不能守卫**（FF 155 /
+       WebKit 26.6 下加守卫会让 max-height 停在基态 0px、内容永久不可见）。
+     · field-sizing 给的是**能力**（textarea 自增长）：不支持的引擎**静默忽略**，
+       textarea 保持 CSS 里的高度、**内容被裁** ⇒ 必须守卫，且必须留 JS 回落。
+   一句话：**增强 ⇒ 别守卫（CSS 自己就是回落）；能力 ⇒ 要守卫（否则没有回落可用）。**
+   ⇒ 本文件与 ui/inputbar/grow.ts 必须**成对**存在：
+     只有 CSS 没有 grow.ts ⇒ FF/WebKit 不再自增长（丢字级）；
+     只有 grow.ts 没有本文件 ⇒ Chrome 把量高省了却没人给高度。
+   机械门禁：tests/w2016-field-sizing.test.ts（守卫必须包住声明、必须有 max-height、
+   grow.ts 必须按 CSS.supports 判定后才绑定）；三引擎真机数字见
+   results/W2016-field-sizing.md。
+
+   ── 为什么落点是 `#input` 而不是包一层的 .input-box ──
+   field-sizing 作用于**表单控件自己**（textarea），包一层父元素不会让它长高；
+   而 .input-box 是 flex 容器、textarea 有 flex:1 1 auto —— textarea 一长高，
+   .input-box 与 #inputbar 跟着长（row 方向不受影响，W847 宽度不变量不破）。
+
+   ── 与 JS 回落的口径必须一致 ──
+   旧 JS 写的是 `Math.min(scrollHeight, 240) + 'px'` ⇒ 自增长上限 240px；
+   这里的 max-height 取**同一个值**（layout.css 的 --composer-text-max-h 是 336px，
+   是另一条历史口径，不能拿来当 240 用）。窄屏（≤640px）JS 侧**没有**对应特例，
+   旧量高在窄屏下同样封顶 240px ⇒ 本文件不另设覆盖（设了反而与回落态分叉）。
+   ============================================================================ */
+
+/* 支持 field-sizing 的引擎（Chrome/Edge 123+）：高度完全由内容决定 ——
+   首帧就正确（不像旧 JS 要等一次 setTimeout 量高），输入过程中零样式读写。
+   不支持的引擎（Firefox / WebKit）整块不匹配 ⇒ 高度仍由 JS 回落写 style.height，
+   行为与改动前逐像素一致（真机实测见报告）。 */
+@supports (field-sizing: content) {
+  #input {
+    field-sizing: content;
+    /* 长到上限就不再长（出现内部滚动）—— 与 JS 回落的 Math.min(scrollHeight, 240) 同口径。 */
+    max-height: 240px;
+  }
+}

@@ -13,9 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build": "tsc -p tsconfig.build.json && node ../../scripts/build-contracts.mjs"
   },
-  "dependencies": {
-    "@celestea/gesture": "workspace:*"
-  },
+  "dependencies": {},
   "license": "MIT",
   "files": [
     "dist",

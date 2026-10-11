@@ -30,14 +30,15 @@ import './styles/tooltree.css'; // W1467 run_code 子调用缩进树
 import './styles/responsive.css'; // W765 响应式层（断点：mobile ≤640 / tablet ≤1024）
 // W1524 前端优化四波：各自独立的 CSS 文件，**共享 CSS 文件谁都不改**（见各文件头注释）。
 import './styles/streaming.css'; // W-A 流式渲染
+import './styles/caret.css'; // W-B 光标
 import './styles/codeblock.css'; // W-C 代码块
 // W1529 七项前端任务：同样「各能力各文件」，共享 CSS 谁都不改。
 import './styles/taskpanel.css'; // 任务面板（todo list）
 import './styles/provider-edit.css'; // 提供商模型输入输出类型
 import './styles/theme-claude.css'; // Claude Code 风格色卡
 import './styles/usage.css'; // W9103 设置页「使用统计」（摘要条 / 热力图 / 趋势图）
-// §9.2/#9.3：Lexical 输入栏的排版与占位符（取代已退役的 caret.css / field-sizing.css）。
-import './styles/composer.css';
+// W2016：输入框自增长（#input 的 field-sizing 守卫；不支持时由 ui/inputbar/grow.ts 回落）。
+import './styles/field-sizing.css';
 import './styles/pending.css'; // W9333 会话内「等待反馈」占位（脉冲星芒 / 阶段标签 / 用时）
 import './styles/turn-edits.css'; // W9334「本轮编辑」卡片（显示组件 display.turnEdits）
 import './styles/jump.css'; // W9336「回到底部」浮标（会话流右下角圆形按钮 + 新消息数）
@@ -46,7 +47,6 @@ import { api } from './api';
 import { connectSse, initChat } from './chat';
 import { setStatus } from './ui/statusbar';
 import { initViewCtx } from './ui/viewctx'; // W514 每会话视图容器
-import { focusComposer } from './ui/composer'; // §9.2 输入栏适配缝（聚焦走这里）
 import { initSessionBar } from './ui/sessionbar'; // W514 聚焦会话条
 import { initSettingsPage } from './ui/config';
 import { initSessionsPanel } from './ui/sessions';
@@ -152,9 +152,7 @@ function init(): void {
     if (!document.hidden) flushVisible();
   });
 
-  // §9.2：聚焦走适配缝（#input 现在是 Lexical 的 editor root，不再是 textarea）。
-  need<HTMLElement>('#input');
-  focusComposer();
+  need<HTMLTextAreaElement>('#input').focus();
 }
 
 // type=module 脚本为 deferred 执行 → DOM 已就绪

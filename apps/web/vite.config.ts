@@ -1,5 +1,3 @@
-import { fileURLToPath } from 'node:url';
-
 import { defineConfig, type Plugin } from 'vite';
 import { computeVersion } from '../../scripts/version.mjs';
 
@@ -56,28 +54,9 @@ function buildMetaPlugin(): Plugin {
   };
 }
 
-/**
- * `@celestea/gesture` 打到**源码**（packages/gesture/src/index.ts），不走包入口的 dist。
- *
- * 为什么必须这样：`check:web` → `scripts/build-webdist.mjs` 只跑 `pnpm --dir apps/web
- * run build`，它**不会先构建 packages/**。走 dist 的话，前端打进浏览器包的就是上一次
- * `pnpm -r build` 的产物 —— 本机 dist 常年存在，这个洞只会在别人的干净机器/CI 上现形
- * （正是 AGENT.md §8「本机能跑 ≠ 干净机器能跑」那条）。gesture 是零依赖纯函数叶子包，
- * 让 Vite 直接编译源码没有任何代价。
- *
- * ★ **两侧成对**：`apps/web/tsconfig.json` 的 `paths` 指同一个文件，`typecheck:web`
- * 才能 typecheck 到同一份源码。少任何一侧都会出现「构建过了但类型没查」或反之。
- */
-const CELESTEA_ALIASES = {
-  '@celestea/gesture': fileURLToPath(
-    new URL('../../packages/gesture/src/index.ts', import.meta.url),
-  ),
-};
-
 export default defineConfig({
   plugins: [buildMetaPlugin()],
   base: '/',
-  resolve: { alias: CELESTEA_ALIASES },
   build: {
     outDir: 'dist',
     assetsDir: 'assets',

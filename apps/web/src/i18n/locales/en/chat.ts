@@ -92,13 +92,6 @@ export const chat = {
   'chat.command.model.busy': 'The turn has not finished; the switch will be retried automatically',
   'chat.command.compact.desc': 'Compact the current session\'s context to free up space',
   'chat.command.unknown': 'Unknown command: /{name} (type / to see all commands)',
-  // Completion group headers (composer-surface §1): the command group comes first, the skill group after it.
-  'chat.command.group': 'Commands',
-  'chat.skill.group': 'Skills',
-  // The third `/` group (the three kinds of composer-surface §7).
-  'chat.mcp.group': 'MCP',
-  'chat.mcp.ready': '{n} tools',
-  'chat.mcp.state': 'State: {state}',
   'chat.mention.dir': 'Directory',
   'chat.mention.file': 'File',
   'chat.mention.noWorkspace': 'The current workspace is not clear yet, so files cannot be listed',
@@ -118,12 +111,6 @@ export const chat = {
   'chat.goal.resume': 'Resume goal: {text}',
   'chat.goal.delete': 'Delete goal',
   'chat.inbox.goal': 'Goal',
-  // W9351: the skill body the human explicitly asked for (origin=skill-invocation).
-  // Deliberately not reusing `skill`: the catalog is background, this is a one-off event.
-  'chat.inbox.skillInvocation': 'Skill invocation',
-  // D1: the tool listing injected after the human names an MCP server
-  // (origin=mcp-invocation). Not the skill body: this is an EXTERNAL server.
-  'chat.inbox.mcpInvocation': 'MCP invocation',
   'chat.run.signal': 'Terminated by signal ({signal})',
   'chat.run.exitUnknown': 'Exit code unknown',
   'chat.run.exit': 'Exit code {code}{status}',

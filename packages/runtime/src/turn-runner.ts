@@ -32,7 +32,7 @@ import {
   type SessionLog,
   type TurnOutcome,
 } from "@celestea/core";
-import type { AfterInputSource } from "@celestea/agent-loop";
+import type { AfterInputRow } from "@celestea/agent-loop";
 import { selectTurnContextRows } from "./turn-context-dedup.js";
 import { ComposeError, RuntimeReleasedError, TurnBusyError } from "./errors.js";
 import type { FrameMapper, LoopEventSink, TurnFrame } from "./frames.js";
@@ -88,18 +88,12 @@ export interface LoopBindings {
    */
   contextUsage?: () => ContextUsageFacts | null;
   /**
-   * W9346: the rows the loop appends RIGHT AFTER the turn's user input. The loop
-   * owns the position because the input row is written there and nowhere else;
-   * the runner only carries the source down. Absent = a loop with no
-   * after-input lane at all.
-   *
-   * W9351: the source is an [AfterInputSource] — it answers with a PLAN (the user
-   * row to write plus the rows after it), because a producer may consume a leading
-   * token of the input (the `/review` gesture). Same pure-by-contract rule: the
-   * runner peeks it, then the loop calls it, and two disagreeing readings would
-   * produce a turn that contradicts its own suppression decision.
+   * W9346: the one-shot row the loop appends RIGHT AFTER the turn's user input
+   * (the session goal's change notice). The loop owns the position because the
+   * input row is written there and nowhere else; the runner only carries the
+   * source down. Absent = a loop with no notice channel at all.
    */
-  afterInput?: AfterInputSource;
+  afterInput?: () => AfterInputRow | null | undefined;
 }
 
 /** Builds the per-turn `AgentLoop`; the host injects its concrete loop here. */
@@ -174,7 +168,7 @@ export interface TurnRunnerDeps {
    * the real `delivered` acknowledgement). The peek is side-effect free by
    * contract: a source that mutated on a peek would deliver the notice twice.
    */
-  afterInput?: AfterInputSource;
+  afterInput?: () => AfterInputRow | null | undefined;
 }
 
 export class TurnRunner {
@@ -263,7 +257,7 @@ export class TurnRunner {
     // be said twice in one turn. The row itself is appended by the loop after the
     // input, and the host clears its slot only once that append happened, so a
     // turn that dies earlier leaves the notice for the next one.
-    const noticeComing = this.peekAfterInput(input);
+    const noticeComing = this.peekAfterInput();
     // W884: the skill catalog is standing context, so it lands BEFORE the
     // receipts (which are addressed messages and belong nearest the input).
     this.injectTurnContext(log, noticeComing);
@@ -375,21 +369,16 @@ export class TurnRunner {
   }
 
   /**
-   * W9346: is a GOAL change notice waiting for this turn? A throwing source
-   * answers "no" (a broken notice channel must not stop the turn the human asked
-   * for); it is the same containment the loop applies when it asks again.
-   *
-   * W9351: the question is narrowed to the `goal` ORIGIN, not "is there any
-   * after-input row". The lane now carries more than one producer, and only the
-   * goal notice announces a change the resident `[目标] …` row would say again.
-   * A skill body injected by `/review` is a different fact, so it must not
-   * silence the standing goal line.
+   * W9346: is a change notice waiting for this turn? A throwing source answers
+   * "no" (a broken notice channel must not stop the turn the human asked for);
+   * it is the same containment the loop applies when it asks again.
    */
-  private peekAfterInput(input: string | null): boolean {
+  private peekAfterInput(): boolean {
     const afterInput = this.deps.afterInput;
     if (afterInput === undefined) return false;
     try {
-      return afterInput(input).rows.some((row) => row.origin === "goal" && row.text !== "");
+      const row = afterInput();
+      return row !== null && row !== undefined && row.text !== "";
     } catch (e) {
       process.stderr.write(`[celestea-runtime] afterInput source failed: ${String(e)}\n`);
       return false;

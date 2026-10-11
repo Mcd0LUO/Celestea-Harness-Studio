@@ -151,9 +151,6 @@ describe("W9322 GET /api/plugins · engine layer", () => {
       "studio.engine.llm",
       "studio.engine.agent-loop",
       "studio.engine.tools",
-      // W-C1b: the MCP row sits right after the tool assembly — the tools it
-      // discovers must land in THAT registry, so it mounts after it.
-      "studio.engine.mcp",
       "celestea.runtime.workers",
       "celestea.runtime.swarm",
       "celestea.runtime.repeat-guard",
@@ -172,7 +169,6 @@ describe("W9322 GET /api/plugins · engine layer", () => {
     const byName = new Map(rows.map((row) => [row.name, row]));
     for (const name of [
       "studio.engine.tools",
-      "studio.engine.mcp",
       "celestea.runtime.workers",
       "celestea.runtime.swarm",
       "celestea.runtime.repeat-guard",

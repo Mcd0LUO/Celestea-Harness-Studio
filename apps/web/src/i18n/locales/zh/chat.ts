@@ -95,13 +95,6 @@ export const chat = {
   'chat.command.model.busy': '本轮还没结束，稍后会自动重试切换',
   'chat.command.compact.desc': '压缩当前会话的上下文，腾出空间',
   'chat.command.unknown': '没有这个命令：/{name}（输入 / 查看全部命令）',
-  // 补全框的分组头（composer-surface §1）：命令组在前、技能组在后。
-  'chat.command.group': '命令',
-  'chat.skill.group': '技能',
-  // /mcp: 的第三组（composer-surface §7 的三种 kind）。
-  'chat.mcp.group': 'MCP',
-  'chat.mcp.ready': '{n} 个工具',
-  'chat.mcp.state': '状态：{state}',
   'chat.mention.dir': '目录',
   'chat.mention.file': '文件',
   'chat.mention.noWorkspace': '当前工作区还不明确，无法列出文件',
@@ -121,12 +114,6 @@ export const chat = {
   'chat.goal.resume': '恢复目标：{text}',
   'chat.goal.delete': '删除目标',
   'chat.inbox.goal': '目标',
-  // W9351：显式加载的技能正文（origin=skill-invocation）。与上面 skill 的「技能目录」
-  // 是两件事，名字也不共用 —— 目录是每轮的背景，调用是人点的一次性事件。
-  'chat.inbox.skillInvocation': '技能调用',
-  // D1：显式点名 MCP server 后注入的工具清单（origin=mcp-invocation）。与上面的
-  // 技能调用是两件事：这里注入的是**外部 server 的工具清单**，不是本仓技能正文。
-  'chat.inbox.mcpInvocation': 'MCP 调用',
   'chat.run.signal': '被信号终止（{signal}）',
   'chat.run.exitUnknown': '退出码未知',
   'chat.run.exit': '退出码 {code}{status}',

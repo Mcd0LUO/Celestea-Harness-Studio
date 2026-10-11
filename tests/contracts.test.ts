@@ -286,11 +286,8 @@ describe("contracts/data-files", () => {
   // W787 (E §2.2.1/§2.3 P0): 12 -> 13 — the STUDIO's own worker table
   // (`<data dir>/worker-registry.tsv`) is a data file of its own, sharing the
   // `registry-tsv.schema.json` format with the DSH-side `/tmp` one.
-  // C1a (MCP P0): 13 -> 14 — `mcp.json` (the MCP client server registry,
-  // `mcp.schema.json`). It is NOT `secret: true`: env/headers carry $VAR
-  // REFERENCES only, so providers.json stays the only secret-bearing file.
-  it("freezes 14 data-file schemas and forbids a version field", () => {
-    expect(idx.files).toHaveLength(14);
+  it("freezes 13 data-file schemas and forbids a version field", () => {
+    expect(idx.files).toHaveLength(13);
     expect(idx.freezeRule).toContain("NO format changes");
     for (const f of idx.files) expect(f.schema.endsWith(".schema.json")).toBe(true);
   });
@@ -521,9 +518,8 @@ describe("W729 session modes (P0 contract delta)", () => {
     expect(schema.properties["title"]?.type).toBe("string");
     expect(schema.additionalProperties).toBe(true);
     // W785: 11 -> 12 (`fallbacks.json`, the model-fallback sidecar);
-    // W787: 12 -> 13 (the studio's own worker table, §2.2.1);
-    // C1a: 13 -> 14 (`mcp.json`, the MCP client server registry).
-    expect(loadDataFilesIndex().files).toHaveLength(14);
+    // W787: 12 -> 13 (the studio's own worker table, §2.2.1).
+    expect(loadDataFilesIndex().files).toHaveLength(13);
   });
 
   it("M14: one mode semantics — no host preset token in the Studio tree", () => {

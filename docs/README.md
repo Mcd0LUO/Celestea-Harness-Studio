@@ -14,9 +14,6 @@
 | [`pitfalls.md`](./pitfalls.md) | 当前 | **踩坑档案（已清零）**：2026-10-04 主人裁定整篇无用，21 条全删、正文见 git 历史；新坑先问能否变成一条断言（`AGENT.md` §9） | 本文 |
 | [`feature/multimodal-attachments/`](./feature/multimodal-attachments/README.md) | 设计（已实现 P0） | **多模态附件**设计（分册）：图片/文本附件的三入口、能力位探测、降级提示、objectURL 生命周期 | [`README.md`](./feature/multimodal-attachments/README.md)；`apps/web/src/ui/attachments.ts` |
 | [`feature/display-components.md`](./feature/display-components.md) | 设计（**P0 已实现**，W895） | **可选显示组件**：把「渲染后增强」与「markdown 扩展」变成可注册的缝，显示能力做成可开关组件（构建期装配，不做运行时下载） | 本文；缝的现有先例见 `apps/web/src/ui/hint/registry.ts` 的取舍注释 |
-| [`feature/mcp-client.md`](./feature/mcp-client.md) | 设计（**P0 已实现**） | **MCP 客户端**：只做客户端、协议走官方 SDK、动态工具不进冻结契约、每会话一代连接 | 本文 |
-| [`feature/composer-surface.md`](./feature/composer-surface.md) | 设计（**已实现**） | **输入栏与命令面**：补全框分组、发送前放行缝、统一 `/` 解析（@celestea/gesture）、Lexical 富文本迁移（chip 命中确认） | 本文 |
-| [`feature/skill-command.md`](./feature/skill-command.md) | 设计（**已实现**） | **技能显式调用**：`/{技能名}` 直呼、host 侧确定性注入正文、技能清单端点、chip 第一个消费者 | 本文 |
 | [`feature/`](./feature/README.md) | 当前 | **特性文档索引**（分册）：本目录放特性级文档，文件名即主题名 | [`README.md`](./feature/README.md) |
 | [`feature/computer-use/`](./feature/computer-use/README.md) | 已实现 | **Computer Use 桌面操控**（分册）：13 个 desktop_* 工具、分级闸门、观察租约、自编译 Rust helper | [`README.md`](./feature/computer-use/README.md)；`packages/computer-use/` |
 | [`feature/desktop-packaging.md`](./feature/desktop-packaging.md) | 决定（2026-10-04：暂缓） | **桌面端打包**：评估外部 PR #5（已关闭）后暂缓——实测数据、4 条理由、替代方案代价、将来要做的三件前置工作，含未验证部分的诚实声明 | 本文 |
@@ -31,7 +28,7 @@
 另有子目录不逐篇登记：[`archive/`](./archive/)（**历史文档**：调研、迁移留痕、退役文档；每篇顶部有 `📦 历史文档` 横幅）。
 本机文件 `docs/AGENT.local.md`（由 `AGENT.local.md.example` 复制而来）**不入库、不需登记**：那里放机器相关的事实。
 契约类真源不在 `docs/`，而在
-[`../contracts/`](../contracts/)（`endpoints.json` 74 端点、`sse-events.json`、`tools.json`、`data-files/`）——
+[`../contracts/`](../contracts/)（`endpoints.json` 73 端点、`sse-events.json`、`tools.json`、`data-files/`）——
 端点数只有**一个真源**（`endpoints.json` 的 `endpoints[]`，其 `count` 是它的校验镜像）；
 本文件与根 `README.md` 里的引用由 `tests/readme-claims.test.ts` 机械核对，改契约忘改这里会红。
 退役后端的归档 HTTP 契约已于 W881 清理出公开仓，相关端点的 `docRef` 现指向

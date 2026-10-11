@@ -37,18 +37,8 @@ const ROOT = process.cwd();
 /** 计数口径里的两个根（与架构师命令逐字一致）。 */
 const ROOTS = ["packages", "apps/studio/src"];
 
-/**
- * 唯一允许出现裸 race 的文件：**统一原语自身**。
- *
- * C1a 把它从 `packages/tools/src/sandbox/async.ts` 搬到了 `packages/core/src/deadline.ts`：
- * MCP 客户端（`packages/mcp`，同为 L1）也需要有界的传输回收，而 **L1 ↔ L1 禁止互相 import**
- *（ARCHITECTURE.md §1.3 D2），所以 §1.4 的第 1 个出口「把契约提到 core」是唯一合法去处 ——
- * 一个纯函数、零依赖的实现本来就该住在 L0。`sandbox/async.ts` 保留同名同行为的对外门面并委托下去。
- *
- * ⚠️ 换的是**地址**，不是**口径**：EXPECTED_LINES / EXPECTED_FILES 一字未动（仍是 1 / 1），
- * 所以「多写一处裸 race 就会红」这条牙一点没松。
- */
-const ALLOWED_FILE = "packages/core/src/deadline.ts";
+/** 唯一允许出现裸 race 的文件：统一原语自身。 */
+const ALLOWED_FILE = "packages/tools/src/sandbox/async.ts";
 
 /** 目标行数（字面量，防回流的目标值）。 */
 const EXPECTED_LINES = 1;
@@ -106,11 +96,11 @@ function raceHits(): RaceHit[] {
 describe("W2014 · 超时原语计数棘轮（6 → 1 文件 / 8 → 1 行）", () => {
   it("① 裸 Promise.race 只剩 ONE 行，且在统一原语里", () => {
     const hits = raceHits();
+    expect(
+      hits.map((h) => h.file + ":" + h.line),
+      "裸 race 必须收敛到统一原语内部那一行；任何新写的裸 race 都会在这里现形",
+    ).toEqual([ALLOWED_FILE + ":88"]);
     expect(hits.length, "行数必须是字面量 " + EXPECTED_LINES).toBe(EXPECTED_LINES);
-    // 只钉「哪个文件 + 恰好一行」，**不钉行号**：原语文件里的注释或实现挪一行不该
-    // 让门禁变红（行号是纯噪声，文档锚点才需要它）。文件 + 行数才是这里要守的口径。
-    expect([...new Set(hits.map((h) => h.file))], "裸 race 必须收敛到统一原语内部那一行").toEqual([ALLOWED_FILE]);
-    expect(hits[0]?.text, "那唯一一行必须真的调用了 race").toContain("Promise.race");
   });
 
   it("② 含裸 race 的**文件**只剩 ONE 个（架构师口径的 6 → 1）", () => {

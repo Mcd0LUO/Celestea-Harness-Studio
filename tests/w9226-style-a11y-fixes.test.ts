@@ -208,8 +208,7 @@ describe('W9226 · F7 composer 聚焦可见指示', () => {
     // 故本修复必须只写在 :focus-within 上；这里再跨文件兜一道，防后来人加回来。
     expect(decls(layout(), '#inputbar').get('box-shadow')).toBeUndefined();
     const offenders: string[] = [];
-    // §9.3 退役了 styles/caret.css（W1525 假光标随 textarea 一起退役），故不再扫描它。
-    for (const f of ['layout.css', 'base.css', 'views.css', 'composer.css', 'responsive.css', 'attachments.css']) {
+    for (const f of ['layout.css', 'base.css', 'views.css', 'caret.css', 'responsive.css', 'attachments.css']) {
       const text = stripComments(cssText(f));
       for (const m of text.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
         const sel = (m[1] ?? '').trim().replace(/\s+/g, ' ');

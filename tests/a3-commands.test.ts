@@ -6,8 +6,6 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { at, doc, Ev, flush, reply, resetHarness, type ElLike } from './lib/w795-dom.js';
-// §9.2：输入栏的写入与按键都走适配缝（Lexical）；夹具见 lib/composer-dom.ts。
-import { type EditorRoot, mountOn, type ComposerHandle } from './lib/composer-dom.js';
 
 interface ViewCtxMod {
   initViewCtx(): unknown;
@@ -28,10 +26,10 @@ const popupRows = (): ElLike[] => Array.from(doc.querySelectorAll('#cmdPopup .cm
 const popupHidden = (): boolean => (doc.getElementById('cmdPopup') as ElLike | null)?.classList.contains('hidden') ?? true;
 const popupVisible = (): boolean => !popupHidden();
 
-/** 一次真实键盘事件（Lexical 的按键链从元素上的 keydown 进，故必须带 key）。 */
 function key(el: ElLike, k: string): void {
-  const KB = (globalThis as unknown as { KeyboardEvent: new (t: string, i?: unknown) => unknown }).KeyboardEvent;
-  el.dispatchEvent(new KB('keydown', { key: k, bubbles: true, cancelable: true }));
+  const ev = new Ev('keydown', { bubbles: true });
+  Object.defineProperty(ev, 'key', { value: k });
+  el.dispatchEvent(ev);
 }
 
 interface GoalRequest { url: string; method: string; body: Record<string, unknown> }
@@ -97,7 +95,6 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
     cmd: CmdMod;
     ctx: unknown;
     input: ElLike;
-    composer: ComposerHandle;
     calls: string[];
     goalRequests: Array<{ url: string; method: string; body: Record<string, unknown> }>;
   }> {
@@ -108,23 +105,16 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
     const calls: string[] = [];
     const goalRequests: GoalRequest[] = [];
     vi.stubGlobal('fetch', contractFetch(calls, goalRequests));
-    // §9.2：installCommands 现在要读编辑器根元素（补全框锚点 + 键盘拦截口），
-    //   所以输入栏必须**先**装配好；没有就现造一个（夹具自带 #input 的用原元素）。
-    let input = doc.getElementById('input') as ElLike | null;
-    if (!input) {
-      input = doc.createElement('div') as ElLike;
-      input.id = 'input';
-      doc.body.appendChild(input);
-    }
-    const composer = await mountOn(input as unknown as EditorRoot);
     const cmd = (await import(/* @vite-ignore */ at('ui/commands/index.ts'))) as CmdMod;
     cmd.installCommands();
-    return { cmd, ctx: pane, input, composer, calls, goalRequests };
+    const input = doc.getElementById('input') as ElLike;
+    return { cmd, ctx: pane, input, calls, goalRequests };
   }
 
   it('打 / 弹出补全列表，显示名字 + 一行说明 + 参数提示', async () => {
-    const { composer } = await boot();
-    composer.type('/');
+    const { input } = await boot();
+    input.value = '/';
+    input.dispatchEvent(new Ev('input', { bubbles: true }));
     await flush();
     expect(popupVisible()).toBe(true);
     const names = popupRows().map((r) => r.querySelector('.cmd-name')?.textContent);
@@ -134,14 +124,17 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
   });
 
   it('边打边过滤；↑↓ 改高亮；Enter 选中写回输入框', async () => {
-    const { input, composer } = await boot();
-    composer.type('/go');
+    const { input } = await boot();
+    input.value = '/go';
+    input.dispatchEvent(new Ev('input', { bubbles: true }));
     await flush();
     expect(popupRows().map((r) => r.querySelector('.cmd-name')?.textContent)).toEqual(['/goal']);
-    composer.type('/m');
+    input.value = '/m';
+    input.dispatchEvent(new Ev('input', { bubbles: true }));
     await flush();
     expect(popupRows().map((r) => r.querySelector('.cmd-name')?.textContent)).toEqual(['/model']);
-    composer.type('/');
+    input.value = '/';
+    input.dispatchEvent(new Ev('input', { bubbles: true }));
     await flush();
     key(input, 'ArrowDown');
     const cmd = (await import(/* @vite-ignore */ at('ui/commands/index.ts'))) as CmdMod;
@@ -152,8 +145,9 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
   });
 
   it('Esc 关闭补全框（且只关这一层）', async () => {
-    const { input, composer } = await boot();
-    composer.type('/');
+    const { input } = await boot();
+    input.value = '/';
+    input.dispatchEvent(new Ev('input', { bubbles: true }));
     await flush();
     expect(popupVisible()).toBe(true);
     key(input, 'Escape');
@@ -161,8 +155,9 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
   });
 
   it('点击选中行写回输入框', async () => {
-    const { input, composer } = await boot();
-    composer.type('/com');
+    const { input } = await boot();
+    input.value = '/com';
+    input.dispatchEvent(new Ev('input', { bubbles: true }));
     await flush();
     const row = popupRows()[0] as ElLike;
     row.dispatchEvent(new Ev('mousedown', { bubbles: true }));
@@ -242,82 +237,5 @@ describe('A3 · 斜杠命令补全框 + 派发', () => {
     expect(consumed).toBe(true);
     expect(calls.some((u) => u.includes('/api/turn'))).toBe(false);
     expect(doc.querySelector('.msg.info')?.textContent ?? '').toContain('没有这个命令');
-  });
-});
-
-/**
- * 「发送前变换缝」（设计 docs/feature/composer-surface.md §2）：dispatchCommand 的
- * Promise<boolean> 从此**参与发送决策** —— 返回 false（放行）时这一行走完整正常
- * 发送路径，不再被命令分支的无条件 return 吞掉。
- *
- * 主场景只有一个：**放行的命令，那一行真的到达 host**。判据全落在后果上
- * （发了没有 / 发的什么 / 屏幕上看得见什么），不钉「怎么发的」。
- *
- * 两条临时命令（`eat` 只消费 / `reheat` 放行）走**真实注册缝**登记：被测的是
- * dispatchSend 拿到返回值之后的分派决策，不该靠改内置命令表来制造场景。
- */
-describe('A3 · 发送前变换缝（放行 / 只消费 的分派决策）', () => {
-  interface RegistryMod {
-    registerCommand(cmd: { name: string; desc: string; args: string; run(): boolean | Promise<boolean> }): void;
-  }
-  interface Sent { input: string }
-
-  beforeEach(() => { resetHarness(); });
-  afterEach(() => { vi.unstubAllGlobals(); doc.body.replaceChildren(); });
-
-  /** 装会话 + 两条临时命令，并记录每一次 POST /api/turn 真正带出去的文本与命令被调用的名字。 */
-  async function boot(): Promise<{ sent: Sent[]; ran: string[]; send: SendMod }> {
-    const ctxMod = (await import(/* @vite-ignore */ at('ui/viewctx.ts'))) as ViewCtxMod;
-    ctxMod.initViewCtx();
-    ctxMod.ensurePane('ws/s1', 'session', '甲会话');
-    ctxMod.activatePane('ws/s1', 'session', '甲会话');
-    const sent: Sent[] = [];
-    vi.stubGlobal('fetch', async (url: unknown, init?: { body?: unknown }) => {
-      if (String(url).includes('/api/turn')) {
-        let input = '';
-        try {
-          input = String((JSON.parse(String(init?.body ?? '{}')) as { input?: unknown }).input ?? '');
-        } catch {
-          input = '<body 解析失败>';
-        }
-        sent.push({ input });
-        return reply(200, { ok: true, turn: 1 });
-      }
-      return reply(200, { ok: true });
-    });
-    const ran: string[] = [];
-    const reg = (await import(/* @vite-ignore */ at('ui/commands/registry.ts'))) as RegistryMod;
-    reg.registerCommand({ name: 'eat', desc: '只消费这一行', args: '', run: () => { ran.push('eat'); return true; } });
-    reg.registerCommand({ name: 'reheat', desc: '放行这一行', args: '', run: () => { ran.push('reheat'); return false; } });
-    const send = (await import(/* @vite-ignore */ at('ui/send.ts'))) as SendMod;
-    return { sent, ran, send };
-  }
-
-  it('放行（run 返回 false）的命令走完整正常发送路径：原样到达 host，且只发一次', async () => {
-    const { sent, ran, send } = await boot();
-    send.dispatchSend('/reheat 放行我');
-    await flush(12);
-    expect(ran, '命令本身必须真的跑了（否则这条断言会空转）').toEqual(['reheat']);
-    expect(sent, '放行必须真的发出去，不能被命令分支无声吞掉').toHaveLength(1);
-    // 发出去的是**闭包捕获的原值**：此刻输入框早已被 clearInput() 清空，
-    // 回读输入框只会拿到空串。
-    expect(sent[0]?.input).toBe('/reheat 放行我');
-    expect(doc.querySelector('.msg.user .content')?.textContent).toBe('/reheat 放行我');
-  });
-
-  it('只消费（run 返回 true）的命令不发 /api/turn', async () => {
-    const { sent, ran, send } = await boot();
-    send.dispatchSend('/eat 别发我');
-    await flush(12);
-    expect(ran).toEqual(['eat']);
-    expect(sent, '已消费的命令不许再走一遍正常发送').toHaveLength(0);
-  });
-
-  it('非命令行照旧同步走正常发送路径（分派改造不牵连普通发送）', async () => {
-    const { sent, ran, send } = await boot();
-    send.dispatchSend('普通一句话');
-    await flush(12);
-    expect(ran, '普通文本不经过任何命令').toEqual([]);
-    expect(sent.map((s) => s.input)).toEqual(['普通一句话']);
   });
 });
