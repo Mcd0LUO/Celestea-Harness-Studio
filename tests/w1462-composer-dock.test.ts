@@ -115,10 +115,14 @@ describe('W1462 ① · 低频状态信息住在胶囊之外（贴底平铺）', 
     expect(dockSrc, '不得把查找限定回 #statusline').not.toContain("querySelector('#statusline #'");
     // 降对比必须打到实际宿主（#statusbar）：宿主写在 dock.ts，statusline.ts 调用它
     expect(dockSrc, 'stale 降对比打到贴底信息行的实际宿主').toContain("getElementById('statusbar')");
-    // 两个方向都要接线：只查 'this.dock.setStale(' 会被复位那一处满足，删除置位调用也照样绿
-    // （变异负控制实测踩到）⇒ 逐条钉死。
-    expect(slSrc, 'statusline.ts 必须在失败分支置位降对比').toContain('this.dock.setStale(true)');
-    expect(slSrc, 'statusline.ts 必须在成功分支复位降对比').toContain('this.dock.setStale(false)');
+    // 两个方向都要接线：只查前缀会被复位那一处满足，删除置位调用也照样绿（变异负控制实测踩到）
+    // ⇒ 逐条钉死。W-reac：statusline 侧收口为私有 setStale(on)（唯一写入点），调用点随之
+    // 变为 this.setStale(…)；规格未变（两方向都接线 + 打到两个宿主），只是形态变了。
+    expect(slSrc, 'statusline.ts 必须在失败分支置位降对比').toContain('this.setStale(true)');
+    expect(slSrc, 'statusline.ts 必须在成功分支复位降对比').toContain('this.setStale(false)');
+    // 收口方法本身必须同时打到两个宿主（胶囊 class + dock），否则「唯一写入点」名不副实。
+    expect(slSrc, 'setStale 必须写胶囊宿主的降对比').toContain("this.el.classList.toggle('sl-stale'");
+    expect(slSrc, 'setStale 必须调用 dock 打到贴底信息行宿主').toContain('this.dock.setStale(');
   });
 
   it('CSS 真源：信息行灰、小、无背景无描边无分隔线（"不显眼"）', () => {
