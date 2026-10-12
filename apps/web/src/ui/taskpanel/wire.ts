@@ -27,11 +27,13 @@ import { SseClient } from '../../sse';
 import { adoptLocalIfUnbound, allPanes, onPaneChange, paneOf, type SessionPane } from '../viewctx';
 import { onLocaleChange } from '../../i18n';
 import { buildPanel, hidePanel, relabelPanel, renderPanel, setCollapsed, type TaskPanelRef } from './panel';
-import { dropTasks, onTasksChange, pruneTasks, setTasks, tasksOf } from './store';
+import { dropTasks, effectTasks, pruneTasks, setTasks, tasksOf } from './store';
 import { readTasks } from './model';
 
 /** 容器 → 面板句柄（一个会话一块，切会话零重建）。 */
 const panels = new Map<SessionPane, TaskPanelRef>();
+/** 容器 → 该容器的清单订阅注销器（W-reac：signal 按容器订阅，作废时回收）。 */
+const panelDisposers = new Map<SessionPane, () => void>();
 /** 折叠偏好（本次会话内记忆；默认展开 —— 用户要看的就是清单）。 */
 let collapsedDefault = false;
 let installed = false;
@@ -59,9 +61,18 @@ export function mountTaskPanel(pane: SessionPane): TaskPanelRef {
   ref.head.addEventListener('click', () => setCollapsed(ref, !ref.collapsed));
   place(pane, ref);
   panels.set(pane, ref);
-  const snap = tasksOf(pane);
-  if (snap === null) hidePanel(ref);
-  else renderPanel(ref, snap);
+  // W-reac：订阅**该容器**（signal 按容器精确订阅）。首次回调即完成初画 ——
+  // 原先手工的「读一次 tasksOf 再决定 hide/render」被它取代，且天然覆盖
+  // 「挂载前已有清单」与「挂载后才到清单」两种情况。
+  panelDisposers.set(
+    pane,
+    effectTasks(pane, (snap) => {
+      // 历史恢复的 replaceChildren 可能把面板换掉 → 每次都先归位再更新内容。
+      place(pane, ref);
+      if (snap === null) hidePanel(ref);
+      else renderPanel(ref, snap);
+    })
+  );
   return ref;
 }
 
@@ -75,8 +86,10 @@ export function panelMounted(pane: SessionPane): boolean {
   return panels.has(pane);
 }
 
-/** 会话被丢弃时把面板一并作废（容器已 remove，这里只清状态）。 */
+/** 会话被丢弃时把面板一并作废（容器已 remove，这里只清状态与订阅）。 */
 export function dropTaskPanel(pane: SessionPane): void {
+  panelDisposers.get(pane)?.();
+  panelDisposers.delete(pane);
   panels.delete(pane);
   dropTasks(pane);
 }
@@ -169,18 +182,13 @@ function onToolResultFrame(p: ToolResultPayload): void {
   noteTaskResult(pane, name, p.value);
 }
 
-/** 装配（幂等）：store 订阅 + 容器订阅 + SSE 订阅 + 已有容器补挂。 */
+/** 装配（幂等）：容器订阅 + SSE 订阅 + 已有容器补挂（每容器的清单订阅在 mountTaskPanel 里建立）。 */
 export function installTaskPanel(): void {
   if (installed) return;
   installed = true;
-  onTasksChange((pane, snap) => {
-    const ref = panels.get(pane);
-    if (ref === undefined) return;
-    // 历史恢复的 replaceChildren 可能把面板换掉了 → 先归位，再更新内容。
-    place(pane, ref);
-    if (snap === null) hidePanel(ref);
-    else renderPanel(ref, snap);
-  });
+  // W-reac：原先此处订阅**全局** onTasksChange（任何容器变化都醒来，再自己判断
+  // 「这条是不是我的」）。现在改为在 mountTaskPanel 里**按容器**订阅 ——
+  // 无效唤醒消失，且订阅与面板句柄同生命周期（drop 时一起回收）。
   onPaneChange((pane) => {
     pruneTasks();
     mountTaskPanel(pane);
@@ -243,6 +251,8 @@ export function setTasksCollapsed(collapsed: boolean): void {
 
 /** 测试用：丢弃模块级句柄（不动 DOM）。 */
 export function resetTaskPanelWiring(): void {
+  for (const dispose of panelDisposers.values()) dispose();
+  panelDisposers.clear();
   panels.clear();
   nameById.clear();
   histCallIds.clear();
