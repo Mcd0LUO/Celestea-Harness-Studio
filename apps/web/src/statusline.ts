@@ -357,17 +357,15 @@ export class Statusline implements PickerHost, ModeHost {
       const s = await api.status(asked === '' ? undefined : asked);
       if (asked !== this.session) return; // 竞态：期间已切换会话，丢弃本次结果
       this.staleMsg = '';
-      this.el.classList.remove('sl-stale');
-      this.dock.setStale(false); // W1462：贴底信息行上的降对比同步复位
+      this.setStale(false);
       this.snapshot = { ...this.snapshot, ...s };
       this.cache.set(this.session, this.snapshot);
       this.render();
     } catch (err) {
       // /api/status 未上线或后端不可达：保持占位符，不打断聊天
-      this.el.classList.add('sl-stale');
       // W1462：tok/s / 缓存 / 步数已移出 #statusline（住贴底信息行 #statusbar）——
-      // 降对比必须同时打到它们的**实际宿主**上，否则这三项在 stale 态看起来「是活的」。
-      this.dock.setStale(true);
+      // 降对比必须同时打到**两个宿主**，收口在 setStale（唯一写入点）。
+      this.setStale(true);
       this.staleMsg = t('statusline.statusUnavailable');
       this.renderHint();
       this.el.title = userErrorText(err, t('statusline.statusUnavailable'));
@@ -397,6 +395,16 @@ export class Statusline implements PickerHost, ModeHost {
 
     // W514：后端 busy 字段（多会话状态显示）——只切 class，不改布局
     this.el.classList.toggle('sl-live', s.busy === true);
+  }
+
+  /**
+   * W1462：stale 的**唯一写入点** —— 同时打到两个宿主（胶囊 #statusline 与贴底
+   * 信息行 #statusbar）。两者分属两个文件，此前在成功/失败两处各手写一遍，
+   * 漏一处就是「这三项在 stale 态看起来是活的」。收口后新增宿主只改这一处。
+   */
+  private setStale(on: boolean): void {
+    this.el.classList.toggle('sl-stale', on);
+    this.dock.setStale(on);
   }
 }
 
